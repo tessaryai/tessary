@@ -23,8 +23,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const me = await authApi.me();
       setUser(me);
     } catch (e) {
-      // 401 → not signed in; any other error we still treat as "no user" so the
-      // route guard redirects to WorkOS (/auth/login) rather than spinning forever.
       if (e instanceof ApiError && e.status !== 401) {
         // eslint-disable-next-line no-console
         console.warn("auth/me failed:", e.message);

@@ -1,23 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The answers a groundedness finding cites, and one of them at a time as the model was sent it.
- *
- * <h2>The list, then the answer</h2>
- * The left column is the evidence: each flagged answer with its score and its highest-scoring sentence,
- * newest first. Selecting one draws the question, the answer with every flagged sentence marked, and the
- * documents the answer was checked against. A mark is a flag, not proof: about a third of the sentences the
- * model marks are supported after all, so the documents sit right under the answer for the reader to check.
- *
- * <h2>Marks come from the offsets</h2>
- * The model returns each sentence's start and end in the exact string it scored, and the answer here is
- * that string. So a mark is a slice at those offsets and nothing else: re-splitting the text into sentences
- * here could disagree with the model's own split and mark a sentence it never flagged.
- *
- * <h2>Not FlaggedList</h2>
- * The paging, the filter and the frame are the same as the flagged list, and the pane is not:
- * that one reads the row's traces, this one draws the flagged-answer payload the finding carries, which
- * is what was scored rather than what the trace page would show.
- */
+// Marks are slices at the model's own offsets into the exact string it scored; re-splitting sentences
+// here could mark one it never flagged. About a third of marked sentences are supported after all,
+// so the documents sit under the answer.
 import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileText } from "lucide-react";
@@ -30,16 +14,13 @@ import { dateTime } from "./groundedness";
 import { useListPaging } from "./useListPaging";
 import { useSkeletonFlag } from "./useSkeletonFlag";
 
-/** Answers read per page past the first. */
 const PAGE_SIZE = 50;
 
-/** The list and the answer side by side, at a fixed height so the page never moves as they load. */
 const FRAME = "grid rounded-card border border-border overflow-hidden bg-surface";
 const FRAME_STYLE = { gridTemplateColumns: "320px minmax(0, 1fr)", height: 720 };
 
 const SECTION_LABEL = "font-mono text-label uppercase text-subtle";
 
-/** One RCA cause's share of the answers: the report that found it and its 0-based position there. */
 export type AnswerFilter = { rcaReport: string; index: number };
 
 function answersQuery(api: ProjectApi, findingId: string, filter: AnswerFilter | undefined) {
@@ -53,7 +34,6 @@ function answersQuery(api: ProjectApi, findingId: string, filter: AnswerFilter |
   });
 }
 
-/** The highest-scoring flagged sentence's text, cut from the answer at its offsets. */
 function strongestSentence(row: FlaggedAnswer): string | null {
   if (!row.answer || row.flaggedSentences.length === 0) return null;
   const top = row.flaggedSentences.reduce((a, b) => (b.score > a.score ? b : a));
@@ -70,14 +50,10 @@ export function FlaggedAnswers({
   readAhead = [],
 }: {
   findingId: string;
-  /** The page the finding came with: its first answers and where the next page starts. */
   first: { rows: FlaggedAnswer[]; nextCursor: string | null };
-  /** How many flagged traces the list covers: the finding's, or the filtered cause's. */
   traces: number;
   basePath: string;
-  /** Narrows the list to one cause; read from the server, since its answers may be past the first page. */
   filter?: AnswerFilter;
-  /** The other filters the reader can switch to, whose first pages are read ahead. */
   readAhead?: AnswerFilter[];
 }) {
   const { api } = useTenant();
@@ -103,7 +79,6 @@ export function FlaggedAnswers({
   const pickedId = picked?.filterKey === filterKey ? picked.spanId : null;
   const selected = answers.find((a) => a.spanId === pickedId) ?? answers[0];
 
-  // Read the next page when the end of the list scrolls into view.
   const { isFetchingNextPage, fetchNextPage } = pages;
   const { list, end, hasNextPage } = useListPaging(filterKey, pages);
 
@@ -177,7 +152,6 @@ export function FlaggedAnswers({
   );
 }
 
-/** The frame the answers will fill, drawn while a cause's first page loads. */
 function AnswersSkeleton() {
   return (
     <div className={FRAME} style={FRAME_STYLE} role="status" aria-label="Loading answers">
@@ -214,9 +188,8 @@ function AnswersSkeleton() {
 }
 
 /**
- * The answer with each flagged sentence marked, sliced at the model's own offsets. Offsets are UTF-16
- * code units into this exact string. A range that runs past the end is cut at the end, and one that
- * overlaps the mark before it is left unmarked rather than drawn twice.
+ * Offsets are UTF-16 code units. A range past the end is cut; one overlapping the previous mark is
+ * left unmarked.
  */
 export function MarkedAnswer({ answer, sentences }: { answer: string; sentences: FlaggedAnswer["flaggedSentences"] }) {
   const parts: React.ReactNode[] = [];
@@ -251,7 +224,6 @@ export function MarkedAnswer({ answer, sentences }: { answer: string; sentences:
   );
 }
 
-/** One flagged answer: the question, the answer with its marks, and what it was checked against. */
 function Answer({ row, basePath }: { row: FlaggedAnswer; basePath: string }) {
   const answerLabel = useId();
   const marked = row.flaggedSentences.length;
@@ -329,7 +301,6 @@ function Answer({ row, basePath }: { row: FlaggedAnswer; basePath: string }) {
                     </div>
                   </div>
                 ) : (
-                  // Nothing was retrieved, so the model checked the answer against the prompt itself.
                   <div className="flex flex-col gap-1.5">
                     <div className={SECTION_LABEL}>Prompt</div>
                     <p className="m-0 rounded-control border border-border py-2.5 px-3 text-small text-fg-secondary whitespace-pre-wrap wrap-anywhere">

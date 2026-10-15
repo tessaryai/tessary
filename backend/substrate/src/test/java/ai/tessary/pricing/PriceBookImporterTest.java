@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.config.PricingProperties;
 import ai.tessary.testsupport.LogCapture;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,7 +36,7 @@ class PriceBookImporterTest {
     private PriceBookImporter importer() {
         return new PriceBookImporter(
                 books,
-                new PricingProperties(),
+                Props.of(PricingProperties.class),
                 new ObjectMapper(),
                 new StaticListableBeanFactory().getBeanProvider(BuildProperties.class));
     }

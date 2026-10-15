@@ -17,26 +17,19 @@ import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.OrganizationRepository;
 import ai.tessary.tenant.PrincipalRepository;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.AuthEnforcedContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 /**
  * The sign-up policy end to end through the real {@link PasswordAuthProvider}: an owner
@@ -44,58 +37,24 @@ import org.springframework.web.context.WebApplicationContext;
  * a listed domain is admitted, and existing members keep signing in. The policy is instance-wide
  * (the install's first organization's), so the methods run in order on one shared database.
  */
-@SpringBootTest
+@AuthEnforcedContext
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-// Own context on purpose: it holds the instance-wide signup policy at `invite`/`domain` across ordered methods, which
-// would refuse every other class's signup while it is held.
-@TestPropertySource(properties = "test.context-group=signup-policy")
-class SignupPolicyIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.auth.cookie-password", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        r.add("workos.api-key", () -> "");
-        r.add("workos.client-id", () -> "");
-        r.add("tessary.auth.disabled", () -> "false");
-    }
+record SignupPolicyIntegrationTest(
+        MockMvc mvc,
+        PrincipalRepository users,
+        OrganizationRepository orgs,
+        OrgMembershipRepository memberships,
+        ProjectRepository projects,
+        AuditLogRepository audits,
+        JdbcClient jdbc) {
 
     private static final String OWNER = "owner-1226@example.com";
     private static final String PASSWORD = "a-good-password";
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    @Autowired
-    PrincipalRepository users;
-
-    @Autowired
-    OrganizationRepository orgs;
-
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Autowired
-    ProjectRepository projects;
-
-    @Autowired
-    AuditLogRepository audits;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private MockMvc mvc;
-
-    @BeforeEach
-    void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private String credentials(String email) throws Exception {
-        return mapper.writeValueAsString(Map.of("email", email, "password", PASSWORD));
+        return MAPPER.writeValueAsString(Map.of("email", email, "password", PASSWORD));
     }
 
     private MockHttpServletResponse signup(String email) throws Exception {
@@ -137,7 +96,7 @@ class SignupPolicyIntegrationTest {
                         .cookie(owner)
                         .header("X-Requested-With", "XMLHttpRequest")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("mode", mode, "domains", domains))))
+                        .content(MAPPER.writeValueAsString(Map.of("mode", mode, "domains", domains))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value(mode));
     }
@@ -147,7 +106,7 @@ class SignupPolicyIntegrationTest {
                         .cookie(owner)
                         .header("X-Requested-With", "XMLHttpRequest")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("email", email, "role", "member"))))
+                        .content(MAPPER.writeValueAsString(Map.of("email", email, "role", "member"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("invited"));
     }

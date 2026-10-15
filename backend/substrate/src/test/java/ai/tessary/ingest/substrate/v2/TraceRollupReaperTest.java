@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.config.SubstrateProperties;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.testsupport.LogCapture;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import java.util.List;
@@ -37,8 +38,7 @@ class TraceRollupReaperTest {
     final LogCapture log = LogCapture.of(TraceRollupReaper.class);
 
     private TraceRollupReaper reaper() {
-        SubstrateProperties props = new SubstrateProperties();
-        props.setRollupStaleAfterMs(60_000);
+        SubstrateProperties props = Props.of(SubstrateProperties.class, "rollup-stale-after-ms", 60_000);
         return new TraceRollupReaper(traces, new TraceRollupMetrics(), props);
     }
 

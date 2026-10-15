@@ -11,37 +11,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The substrate read surface for the metric-drift sweep: the raw facts a measure is computed from,
- * for one page of traces, and nothing else.
- *
- * <p>Duration, cost, and token usage are typed columns on {@code span}/{@code trace}, NULL when a
- * producer reported nothing and a real value (including 0) when it did, so presence never needs
- * reading out of raw key spellings. The rollup columns ({@code trace.total_cost}, and a tool span's
- * {@code latency_ms}) are returned beside the leaf facts rather than instead of them, since a NULL
- * rollup means "not yet rolled up," distinct from zero.
- *
- * <p>The trace's call site is never re-derived here: the rollup worker copies it onto {@code
- * trace.call_site_id} (the root span's, else the earliest tagged span's), and this and {@link
- * ai.tessary.classifier.substrate.BehaviorSubstrateRepository} both read that one column, so the
- * two classifiers can't disagree about which bucket a trace belongs to.
- *
- * <p>Every read is keyed on a batch of trace ids: one round trip per sweep page, never one per trace.
+ * A NULL rollup means "not yet rolled up", distinct from zero, so rollup columns come back beside the leaf facts. The
+ * call site is read from {@code trace.call_site_id}, never re-derived, so this and
+ * {@link ai.tessary.classifier.substrate.BehaviorSubstrateRepository} can't disagree about a trace's bucket.
  */
 @Repository
 public class MetricSourceRepository {
 
     /**
-     * The span kinds whose own duration is measured as {@code tool_duration}.
-     *
-     * <p>Container kinds ({@code agent}, {@code workflow}) are excluded: their duration tracks the
-     * root's almost exactly, so including them would suppress every turn-duration shift they
-     * enclose, including the case turn duration exists to catch.
-     *
-     * <p>{@code llm} is excluded too: the tool bucket key carries no call site, so an {@code llm}
-     * bucket would pool every LLM call in the project into one distribution that moves whenever the
-     * model or route mix moves. LLM time is watched at turn grain instead, scoped to a call site.
-     *
-     * <p>What's left is the dispatchable set: what the agent chose to call out to.
+     * Container kinds are excluded because their duration tracks the root's and would mask turn-duration shifts.
+     * {@code llm} is excluded because the tool bucket key has no call site, so it would pool every LLM call in the
+     * project.
      */
     private static final List<String> MEASURED_KINDS = List.of("tool", "mcp", "retrieval", "embedding", "reranker");
 
@@ -52,28 +32,9 @@ public class MetricSourceRepository {
     }
 
     /**
-     * Per-trace duration and cost facts for one page: the rollup columns, plus everything a
-     * derivation from the root span needs.
-     *
-     * <p>Duration comes from the root span's own interval, never a min/max envelope over the trace:
-     * async children can outlive their parent and inflate an envelope's p95, while the root span
-     * encloses its children the way Jaeger, Tempo, and Datadog report trace duration. {@code
-     * trace.latency_ms} is such an envelope, which is why it is not read here.
-     *
-     * <p>The root LATERAL takes the earliest-starting parentless span, matching {@code
-     * VitalsRepository}'s {@code DISTINCT ON} so the two surfaces never report different durations
-     * for the same turn. It does not filter on {@code ended_at IS NOT NULL}: an unterminated root is
-     * a counted category, flagged by {@code root_unterminated}, not a row to drop.
-     *
-     * <p>{@code parent_span_id} is the producer's own statement, stored verbatim and never repaired,
-     * so a null parent means exactly one thing: this span is the root.
-     *
-     * <p>{@code prior_turns} is the trace's rank within its conversation by event order, on the pinned {@code
-     * COALESCE(session_id, id)} grain. A single-shot producer's trace is its own conversation and reports 0.
-     *
-     * <p>Exactly one row per trace in the page: the join to {@code span} is a LEFT LATERAL, so a
-     * trace whose spans haven't landed yet is still accounted for rather than vanishing from the
-     * page.
+     * Duration is the root span's own interval, never an envelope (so not {@code trace.latency_ms}): async children can
+     * outlive their parent. The root pick matches {@code VitalsRepository}'s {@code DISTINCT ON}. An unterminated root
+     * is flagged, not dropped. LEFT LATERAL keeps one row per trace even before its spans land.
      */
     public List<TurnFacts> turnFacts(String projectId, List<String> traceIds) {
         return jdbc.sql("""
@@ -132,19 +93,8 @@ public class MetricSourceRepository {
     }
 
     /**
-     * Every priced leaf of the given traces: generation cost and the token buckets it sums over.
-     *
-     * <p>Scoped to {@code kind = 'llm'} deliberately: an {@code agent} span carries the cumulative
-     * usage of its whole subtree, so summing across kinds would roughly double every figure. The
-     * schema already refuses to store typed usage on container kinds for that reason; this filter is
-     * a belt-and-braces restatement in case a future kind reports its own consumption.
-     *
-     * <p>Root spans carry no model, so cost is never read off the root even though the bucket is the
-     * root's entry-point call site; the trace id is what joins an llm span's cost back to its
-     * turn's bucket.
-     *
-     * <p>Each token bucket comes back null when the producer reported nothing for it, and a value
-     * (including 0) when it did, so "reported zero" and "reports nothing" stay distinguishable.
+     * Scoped to {@code kind = 'llm'}: an {@code agent} span carries its subtree's cumulative usage, so summing across
+     * kinds would roughly double every figure. A null bucket means "reported nothing", distinct from 0.
      */
     public List<LeafUsage> leafUsage(String projectId, List<String> traceIds) {
         return jdbc.sql("""
@@ -178,17 +128,9 @@ public class MetricSourceRepository {
     }
 
     /**
-     * Every dispatchable span of the given traces, with its own interval: the {@code tool_duration}
-     * subjects. See {@link #MEASURED_KINDS} for which kinds qualify.
-     *
-     * <p>The tool bucket key is an {@link ai.tessary.classifier.substrate.ActionSymbol} of the tool's
-     * name, never the span's: normalized {@code tool_call.name}, then the raw {@code gen_ai.tool.name}
-     * attribute, then the span name. The
-     * LATERAL keeps it one row per span, since {@code tool_call} can hold duplicate rows for a
-     * re-ingested span.
-     *
-     * <p>Spans whose {@code ended_at} is null come back too, flagged rather than filtered: a tool
-     * that increasingly hangs must not read as a shrinking sample of fast calls.
+     * The bucket key is the tool's name, never the span's. The LATERAL keeps one row per span, since {@code tool_call}
+     * can hold duplicates for a re-ingested span. Unended spans are flagged, not filtered: a tool that increasingly
+     * hangs must not read as a shrinking sample of fast calls.
      */
     public List<ToolSpanFacts> toolSpanFacts(String projectId, List<String> traceIds) {
         return jdbc.sql("""
@@ -235,22 +177,8 @@ public class MetricSourceRepository {
     }
 
     /**
-     * One trace's duration and cost facts, column and derivation side by side.
-     *
-     * @param rollupTotalCost {@code trace.total_cost}, or null when the trace has not rolled up yet
-     * @param unpricedSpans how many of the trace's spans carried usage the price book could not price.
-     *     Null when the trace has not rolled up; a positive value means {@code rollupTotalCost} is a sum
-     *     with a hole in it and must not be read as the turn's cost
-     * @param hasRoot whether any parentless span of this trace has landed at all
-     * @param rootUnterminated the root span exists but never ended: the turn did not complete
-     * @param rootMillis the root span's own {@code ended_at - started_at} in ms, or null when either
-     *     endpoint is missing
-     * @param userMsgChars characters in the root span's own stored input, or null when the producer
-     *     shipped none or the payload has aged out. Null is "unknown", never "empty"; see
-     *     {@link MetricWorkload#add}.
-     * @param priorTurns how many turns of this conversation started before this one, ranked on event
-     *     time over the pinned conversation grain. Never null: a trace that belongs to no thread and no
-     *     session is its own conversation and honestly reports 0.
+     * @param unpricedSpans a positive value means {@code rollupTotalCost} has a hole in it and must not be read as the
+     * turn's cost @param userMsgChars null is "unknown", never "empty"
      */
     public record TurnFacts(
             String traceId,
@@ -263,19 +191,9 @@ public class MetricSourceRepository {
             @Nullable Long priorTurns) {}
 
     /**
-     * One generation's reported usage, joined back to its turn by {@code traceId}.
-     *
-     * <p>Every token bucket is nullable and the null is load-bearing: it means the producer reported no
-     * such count, which is a different sentence from reporting zero. A measure that cannot tell those
-     * apart reads a cache-read count falling to zero, the prompt-prefix regression this program
-     * exists to catch, as "this provider does not report cache reads".
-     *
-     * @param model the producer's raw model string, kept for logging and for the cache-write gate
-     * @param totalCost the generated per-span total, priced at write time against the book in force
-     *     then. Null exactly when {@code costSource} is {@code unpriced}: never zero, which would
-     *     launder "we hold no rate" into "it was free".
-     * @param costSource {@code provided} | {@code inferred} | {@code unpriced}, written explicitly at
-     *     ingest because it is the only correct way to interpret a null cost
+     * A null token bucket means "not reported", distinct from zero: conflating them would read a cache-read count
+     * falling to zero, the regression this exists to catch, as "provider does not report cache reads".
+     * {@code totalCost} is null exactly when {@code costSource} is {@code unpriced}, never zero.
      */
     public record LeafUsage(
             String traceId,
@@ -287,18 +205,12 @@ public class MetricSourceRepository {
             @Nullable BigDecimal totalCost,
             String costSource) {
 
-        /** True when we hold no rate for this generation, so its dollars are unknown rather than zero. */
         public boolean unpriced() {
             return "unpriced".equals(costSource) || totalCost == null;
         }
     }
 
-    /**
-     * One dispatchable span's duration facts.
-     *
-     * @param eventAt the span's own start as an ISO-8601 instant: the clock windows are cut on, never
-     *     the cursor's
-     */
+    /** @param eventAt the span's own start: the clock windows are cut on, never the cursor's */
     public record ToolSpanFacts(
             String traceId,
             String observationId,
@@ -310,13 +222,10 @@ public class MetricSourceRepository {
             String eventAt) {}
 
     /**
-     * {@code event_at} as an ISO-8601 instant, read through {@link ai.tessary.storage.Timestamps}
-     * rather than {@code getString}: on a {@code timestamptz} the latter renders the driver's own form
-     * ({@code 2026-07-28 18:46:37.416851+05:30}: space separator, JVM-zone offset) that
-     * {@code Instant.parse} rejects outright, and getting it wrong is silent.
+     * Read through {@link ai.tessary.storage.Timestamps}: {@code getString} on a timestamptz renders the driver's own
+     * form, which {@code Instant.parse} rejects.
      */
     private static String eventAt(ResultSet rs) throws SQLException {
-        // span.started_at is NOT NULL.
         return Objects.requireNonNull(ai.tessary.storage.Timestamps.iso(rs, "event_at"));
     }
 

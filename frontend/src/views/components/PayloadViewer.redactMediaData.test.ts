@@ -78,10 +78,7 @@ describe("redactMediaData", () => {
     const elided = "<document data elided, 1.0 KB>";
 
     expect(redactMediaData({ type: "file", url: dataUri, file_url: dataUri, name: "a.pdf" })).toEqual({
-      type: "file",
-      url: elided,
-      file_url: elided,
-      name: "a.pdf",
+      type: "file", url: elided, file_url: elided, name: "a.pdf",
     });
     expect(redactMediaData({ type: "input_file", file_data: dataUri })).toEqual({ type: "input_file", file_data: elided });
     const linked = { type: "input_file", file_url: "https://cdn.example/a.pdf" };

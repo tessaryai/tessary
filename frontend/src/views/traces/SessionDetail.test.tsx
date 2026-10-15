@@ -14,18 +14,9 @@ import { currentParams, pending, renderRoute } from "../../test/render";
 import { SessionDetail } from "./SessionDetail";
 import { SessionRail } from "./SessionRail";
 import { TraceRail } from "./TraceRail";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getSession: vi.fn(),
-  getSessionSpans: vi.fn(),
-  getTrace: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const j = (v: unknown) => JSON.stringify(v);
 const TRACE_A = traceItem({ id: "tr-a", name: "first-turn", started_at: "2026-09-25T10:00:00Z", ended_at: "2026-09-25T10:00:02Z", latency_ms: 2_000, total_tokens: 1_500, total_cost: 0.004 });
@@ -33,18 +24,9 @@ const TRACE_B = traceItem({ id: "tr-b", name: null, started_at: "2026-09-25T10:0
 
 function session(over: Partial<SessionDetailView> = {}): SessionDetailView {
   return {
-    id: "sess-1",
-    started_at: "2026-09-25T10:00:00Z",
-    last_activity_at: "2026-09-25T10:01:05Z",
-    trace_count: 2,
-    span_count: 3,
-    total_tokens: 2_500,
-    total_cost: 1.504,
-    unpriced_spans: 2,
-    unsettled_traces: 1,
-    traces_truncated: false,
-    error_count: 0,
-    user_id: null,
+    id: "sess-1", started_at: "2026-09-25T10:00:00Z", last_activity_at: "2026-09-25T10:01:05Z", trace_count: 2,
+    span_count: 3, total_tokens: 2_500, total_cost: 1.504, unpriced_spans: 2, unsettled_traces: 1,
+    traces_truncated: false, error_count: 0, user_id: null,
     traces: [TRACE_A, TRACE_B],
     ...over,
   } as SessionDetailView;
@@ -161,17 +143,15 @@ describe("SessionDetail", () => {
   });
 });
 
-describe("SessionDetail JSON", () => {
-  it("shows the session and its spans as the API sent them, every string in full once expanded", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    renderSession("?view=json");
+it("SessionDetail JSON: shows the session and its spans as the API sent them, every string in full once expanded", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  renderSession("?view=json");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Expand all" }));
-    expect(screen.getByText(j([{ role: "user", content: "second question" }]))).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ session: session(), spans: spans() }, null, 2));
-  });
+  fireEvent.click(await screen.findByRole("button", { name: "Expand all" }));
+  expect(screen.getByText(j([{ role: "user", content: "second question" }]))).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+  expect(writeText).toHaveBeenCalledWith(JSON.stringify({ session: session(), spans: spans() }, null, 2));
 });
 
 describe("TraceRail", () => {
@@ -270,16 +250,14 @@ describe("SessionRail", () => {
   });
 });
 
-describe("detections", () => {
-  it("marks the turn a classifier flagged, in its own trace only", async () => {
-    api.getSession.mockResolvedValue(
-      session({ detections: [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-b", span_id: "b-llm" }] }),
-    );
-    renderSession();
+it("detections: marks the turn a classifier flagged, in its own trace only", async () => {
+  api.getSession.mockResolvedValue(
+    session({ detections: [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-b", span_id: "b-llm" }] }),
+  );
+  renderSession();
 
-    const second = await screen.findByText("second question");
-    const marker = screen.getByText("Frustration");
-    expect(screen.getAllByText("Frustration")).toHaveLength(1);
-    expect(second.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
+  const second = await screen.findByText("second question");
+  const marker = screen.getByText("Frustration");
+  expect(screen.getAllByText("Frustration")).toHaveLength(1);
+  expect(second.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

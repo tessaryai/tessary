@@ -27,6 +27,7 @@ import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.testsupport.LoopbackHttpStub;
+import ai.tessary.testsupport.Props;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -53,10 +54,8 @@ class E2bRcaSandboxTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static RcaProperties props() {
-        RcaProperties p = new RcaProperties();
-        p.getAgentic().setLauncherUrl("http://launcher");
-        p.getAgentic().setLauncherApiKey("k");
-        return p;
+        return Props.of(
+                RcaProperties.class, "agentic.launcher-url", "http://launcher", "agentic.launcher-api-key", "k");
     }
 
     /** A project with no RCA lane pinned falls back to the observer's model. */
@@ -372,7 +371,7 @@ class E2bRcaSandboxTest {
 
     @Test
     void unconfiguredLauncherFailsClosed() {
-        RcaProperties bare = new RcaProperties(); // launcherUrl unset
+        RcaProperties bare = Props.of(RcaProperties.class); // launcherUrl unset
         E2bRcaSandbox sandbox = sandbox(bare);
 
         TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
@@ -426,7 +425,14 @@ class E2bRcaSandboxTest {
             LlmUsageAccountant usage,
             Launcher launcher) {
         return new E2bRcaSandbox(
-                props(), new ObserverProperties(), settings, resolver, usage, RATES, OpenTelemetry.noop(), MAPPER) {
+                props(),
+                Props.of(ObserverProperties.class),
+                settings,
+                resolver,
+                usage,
+                RATES,
+                OpenTelemetry.noop(),
+                MAPPER) {
             @Override
             String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
                 try {
@@ -458,8 +464,7 @@ class E2bRcaSandboxTest {
     }
 
     private static ModelsDevRates bundledRates() {
-        ModelsDevProperties p = new ModelsDevProperties();
-        p.setUrl("");
+        ModelsDevProperties p = Props.of(ModelsDevProperties.class, "url", "");
         return new ModelsDevRates(new ObjectMapper(), p);
     }
 
@@ -470,7 +475,7 @@ class E2bRcaSandboxTest {
     private static E2bRcaSandbox sandbox(RcaProperties p, LlmUsageAccountant usage) {
         return new E2bRcaSandbox(
                 p,
-                new ObserverProperties(),
+                Props.of(ObserverProperties.class),
                 noLaneSetting(),
                 credentials(),
                 usage,
@@ -480,9 +485,7 @@ class E2bRcaSandboxTest {
     }
 
     private static RcaProperties launcherAt(String url) {
-        RcaProperties p = props();
-        p.getAgentic().setLauncherUrl(url);
-        return p;
+        return Props.of(RcaProperties.class, "agentic.launcher-url", url, "agentic.launcher-api-key", "k");
     }
 
     private static void verifyBooked(LlmUsageAccountant usage, long in, long out, @Nullable BigDecimal cost) {

@@ -11,7 +11,6 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -22,16 +21,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * directly.
  */
 @SpringBootTest
-class ContextLoadsTest {
-
-    @Autowired
-    SourceService sourceService;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record ContextLoadsTest(SourceService sourceService, TenantService tenants, JdbcClient jdbc) {
 
     @Test
     void migrationApplied_andRoundTrip() {

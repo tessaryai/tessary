@@ -8,7 +8,6 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** DB access for {@code pii_redaction_rule}, scoped by {@code project_id}. */
 @Repository
 public class RedactionRuleRepository {
 
@@ -18,7 +17,7 @@ public class RedactionRuleRepository {
         this.jdbc = jdbc;
     }
 
-    /** All rules for a project, ordered for deterministic application (sort_order, then created_at). */
+    /** Ordered for deterministic application. */
     public List<RedactionRuleRow> findByProject(String projectId) {
         return jdbc.sql(
                         "SELECT * FROM pii_redaction_rule WHERE project_id = :pid ORDER BY sort_order ASC, created_at ASC")
@@ -27,7 +26,7 @@ public class RedactionRuleRepository {
                 .list();
     }
 
-    /** Only the enabled rules for a project, in application order — the set the write-path guard uses. */
+    /** The set the write-path guard uses. */
     public List<RedactionRuleRow> findEnabledByProject(String projectId) {
         return jdbc.sql("SELECT * FROM pii_redaction_rule WHERE project_id = :pid AND enabled = TRUE "
                         + "ORDER BY sort_order ASC, created_at ASC")
@@ -79,7 +78,7 @@ public class RedactionRuleRepository {
                 > 0;
     }
 
-    /** Toggle a single rule's enabled flag — the only mutation permitted on a built-in rule. */
+    /** The only mutation permitted on a built-in rule. */
     public boolean setEnabled(String projectId, String id, boolean enabled, String updatedAt) {
         return jdbc.sql("UPDATE pii_redaction_rule SET enabled = :enabled, updated_at = :uat "
                                 + "WHERE id = :id AND project_id = :pid")

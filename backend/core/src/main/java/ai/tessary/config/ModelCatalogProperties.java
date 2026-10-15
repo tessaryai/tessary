@@ -3,44 +3,17 @@ package ai.tessary.config;
 
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Tuning for the live per-provider model catalog fetch, bound from
- * {@code tessary.model-catalog.*}. Each provider's model list is fetched from that provider's own
- * API, cached by {@code (provider, region)}, and refreshed on this TTL — see {@code
- * ModelCatalogFetchService}, the sole reader.
- *
- * <p>The two numbers below trade off in opposite directions: a longer refresh interval means fewer
- * outbound calls to every configured vendor's API (this runs behind both the settings page and,
- * cache-only, the hot judge-call path), while a shorter fetch timeout means a slow or hanging vendor
- * degrades the picker faster rather than blocking a settings-page load for its full network timeout.
- * Defaults are conservative rather than tuned against production traffic, since there is none yet —
- * revisit once the fetch pattern is observable.
+ * Tuning for the live per-provider model fetch ({@code tessary.model-catalog.*}), cached by {@code (provider, region)};
+ * read only by {@code ModelCatalogFetchService}. Defaults are conservative, not tuned against production traffic.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.model-catalog")
-public class ModelCatalogProperties {
+public record ModelCatalogProperties(
 
-    /** How long a fetched (provider, region) entry is served before the next read triggers a refetch. */
-    private Duration refreshInterval = Duration.ofMinutes(15);
+        /** TTL before the next read refetches. */
+        @DefaultValue("15m") Duration refreshInterval,
 
-    /** Per-call ceiling on a single provider's models-endpoint request. */
-    private Duration fetchTimeout = Duration.ofSeconds(5);
-
-    public Duration getRefreshInterval() {
-        return refreshInterval;
-    }
-
-    public void setRefreshInterval(Duration refreshInterval) {
-        this.refreshInterval = refreshInterval;
-    }
-
-    public Duration getFetchTimeout() {
-        return fetchTimeout;
-    }
-
-    public void setFetchTimeout(Duration fetchTimeout) {
-        this.fetchTimeout = fetchTimeout;
-    }
-}
+        /** A short timeout lets a hanging vendor degrade the picker instead of blocking a settings-page load. */
+        @DefaultValue("5s") Duration fetchTimeout) {}

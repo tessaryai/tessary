@@ -25,34 +25,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 @SpringBootTest
-class GitIntegrationServiceTest {
-
-    @Autowired
-    GitIntegrationService service;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    GitIntegrationRepository repo;
-
-    @Autowired
-    SecretBox secretBox;
-
-    @Autowired
-    ObjectMapper mapper;
-
-    @Autowired
-    TenantPathResolver resolver;
-
-    @Autowired
-    OrgMembershipRepository memberships;
+record GitIntegrationServiceTest(
+        GitIntegrationService service,
+        TenantService tenants,
+        GitIntegrationRepository repo,
+        SecretBox secretBox,
+        ObjectMapper mapper,
+        TenantPathResolver resolver,
+        OrgMembershipRepository memberships) {
 
     /** A service whose one provider answers however this test needs it to. */
     private GitIntegrationService withProvider(GitProviderClient client) {

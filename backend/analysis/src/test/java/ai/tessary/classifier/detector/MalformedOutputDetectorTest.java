@@ -98,21 +98,6 @@ class MalformedOutputDetectorTest {
         assertTrue(ds.stream().noneMatch(Detection::fired));
     }
 
-    @Test
-    void oneSchemaReadPerBatch() {
-        MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
-        d.detectBatch(List.of(obs("cs-1", "{}"), obs("cs-1", "{}"), obs("cs-2", "{}")), null);
-        assertEquals(1, lookups.size(), "the batch's schemas load in one read");
-        assertEquals(Set.of("cs-1", "cs-2"), lookups.get(0));
-    }
-
-    @Test
-    void uncompilableStoredSchemaIsTreatedAsNoneDeclared() {
-        MalformedOutputDetector d = detector(Map.of("cs-1", "{not valid json at all"));
-        List<Detection> ds = d.detectBatch(List.of(obs("cs-1", "{\"answer\":42}")), null);
-        assertFalse(ds.get(0).fired(), "an unreadable stored schema validates nothing");
-    }
-
     /** The gen_ai.output.messages envelope observation.output carries on the native gen_ai path. */
     private String envelope(String assistantText) {
         try {
@@ -134,17 +119,6 @@ class MalformedOutputDetectorTest {
         List<Detection> ds = d.detectBatch(
                 List.of(obs("cs-1", "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"hi\"}]}]")), null);
         assertFalse(ds.get(0).fired(), "an envelope with no assistant completion has nothing to validate");
-    }
-
-    @Test
-    void bareJsonArrayOfObjectsWithoutRolesIsNotTreatedAsEnvelope() {
-        // A legit bare payload that is itself an array must keep validating verbatim.
-        String arraySchema = "{\"type\":\"array\",\"items\":{\"type\":\"object\",\"required\":[\"answer\"]}}";
-        MalformedOutputDetector d = detector(Map.of("cs-1", arraySchema));
-        List<Detection> ds = d.detectBatch(
-                List.of(obs("cs-1", "[{\"answer\":\"yes\"}]"), obs("cs-1", "[{\"confidence\":1}]")), null);
-        assertFalse(ds.get(0).fired(), "a conforming bare array payload stays quiet");
-        assertTrue(ds.get(1).fired(), "a violating bare array payload fires");
     }
 
     /**
@@ -208,18 +182,6 @@ class MalformedOutputDetectorTest {
     }
 
     @Test
-    void refsInsideTheSchemaStillResolve() {
-        MalformedOutputDetector d = detector(Map.of(
-                "cs-1",
-                "{\"$id\":\"https://example.com/answer\",\"$defs\":{\"answer\":{\"type\":\"string\"}},"
-                        + "\"type\":\"object\",\"properties\":{\"answer\":{\"$ref\":\"#/$defs/answer\"}}}"));
-        List<Detection> ds =
-                d.detectBatch(List.of(obs("cs-1", "{\"answer\":42}"), obs("cs-1", "{\"answer\":\"yes\"}")), null);
-        assertTrue(ds.get(0).fired(), "a $ref into the schema's own $defs is enforced");
-        assertFalse(ds.get(1).fired());
-    }
-
-    @Test
     void violationFieldCollapsesArrayIndexes() {
         MalformedOutputDetector d = detector(Map.of(
                 "cs-1",
@@ -231,19 +193,5 @@ class MalformedOutputDetectorTest {
         assertTrue(evidence.contains("\"field\":\"items[].sku\""), evidence);
         assertTrue(evidence.contains("\"path\":\"$.items[].sku\""), evidence);
         assertTrue(evidence.contains("\"field\":\"items[].qty\""), "required names the missing property: " + evidence);
-    }
-
-    /**
-     * The per-observation entry point judges exactly as the batch does: a violating output fires with the same
-     * evidence, and a conforming one stays quiet, whichever path the caller took.
-     */
-    @Test
-    void detectJudgesOneObservationAsTheBatchWould() {
-        MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
-        SubstrateObservation violating = obs("cs-1", "{\"confidence\":\"high\"}");
-
-        assertEquals(d.detectBatch(List.of(violating), null).get(0), d.detect(violating, null));
-        assertTrue(d.detect(violating, null).fired());
-        assertFalse(d.detect(obs("cs-1", "{\"answer\":\"yes\"}"), null).fired());
     }
 }

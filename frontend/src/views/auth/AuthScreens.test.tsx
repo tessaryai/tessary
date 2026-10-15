@@ -10,18 +10,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { Login } from "./Login";
 import { Signup } from "./Signup";
+import { auth } from "../../test/api";
 
-const { auth, session } = vi.hoisted(() => ({
-  auth: {
-    mode: vi.fn(),
-    login: vi.fn(),
-    signup: vi.fn(),
-    loginUrl: vi.fn((returnTo?: string) => `/auth/login${returnTo ? `?returnTo=${returnTo}` : ""}`),
-  },
-  session: { isAuthenticated: false, refetch: vi.fn() },
-}));
+const session = vi.hoisted(() => ({ isAuthenticated: false, refetch: vi.fn() }));
 
-vi.mock("../../api/client", () => ({ auth }));
+vi.mock("../../api/client", () => import("../../test/api"));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => session }));
 
 const FORM_MODE = { redirectFlow: false, firstRun: false, signupPolicy: "open" };
@@ -32,6 +25,7 @@ beforeEach(() => {
   auth.mode.mockResolvedValue(FORM_MODE);
   auth.login.mockResolvedValue({});
   auth.signup.mockResolvedValue({});
+  auth.loginUrl.mockImplementation((returnTo?: string) => `/auth/login${returnTo ? `?returnTo=${returnTo}` : ""}`);
 });
 
 const fill = (label: string, value: string) =>

@@ -8,9 +8,7 @@ import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
@@ -18,9 +16,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -30,40 +26,16 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * one trace per turn; {@code trace.thread_id} is only a column.
  */
 @SpringBootTest
-class ConversationThreadAssemblerIntegrationTest {
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    SubstrateReadRepository substrate;
-
-    @Autowired
-    ConversationThreadAssembler assembler;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record ConversationThreadAssemblerIntegrationTest(
+        SubstrateV2Fixtures fx,
+        SessionRepository sessions,
+        SpanRepository spans,
+        SubstrateReadRepository substrate,
+        ConversationThreadAssembler assembler,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     private static final String CHAT = "cs-chat";
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
-    }
 
     @Test
     void assemblesTheWholeSessionThreadExcludingSystem() {

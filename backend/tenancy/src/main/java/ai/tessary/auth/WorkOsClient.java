@@ -16,32 +16,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Thin REST client over the WorkOS user-management API, and one of two {@link AuthProvider}
- * implementations — the BYO-credentials one. We don't pull the official Java SDK because (a) its versioning lags
- * Python/Node and (b) we only need three endpoints. Everything else hangs off the sealed cookie we
- * issue ourselves.
- *
- * <p>No longer a {@code @Component}: it is wired exclusively via {@link AuthProviderConfig}'s
- * single branching {@code @Bean} method, which picks this class when {@link
- * WorkOsProperties#isEnabled()} is true and {@link PasswordAuthProvider} otherwise — not
- * {@code @ConditionalOnMissingBean}, since that shape only works with exactly one candidate bean
- * and this method has to choose between two. See {@link AuthProviderConfig}'s class Javadoc for
- * why.
- *
- * <p>Endpoints used:</p>
- * <ul>
- *   <li>{@code GET /user_management/authorize?...} — returns the AuthKit redirect URL</li>
- *   <li>{@code POST /user_management/authenticate} (grant_type=authorization_code)</li>
- *   <li>{@code POST /user_management/authenticate} (grant_type=refresh_token)</li>
- *   <li>{@code POST /user_management/invitations} — sends an invitation email</li>
- *   <li>{@code POST /user_management/invitations/{id}/revoke} — revokes a pending invitation</li>
- *   <li>{@code GET /user_management/sessions/logout?...} — the browser is sent here to end the
- *       AuthKit session</li>
- * </ul>
- *
- * <p>The {@code /authenticate} endpoint authenticates by carrying the API key as
- * {@code client_secret} in the body; the plain REST endpoints (invitations) use a
- * {@code Authorization: Bearer <api_key>} header instead.</p>
+ * Thin REST client over WorkOS user management, the BYO {@link AuthProvider}; the SDK is skipped because it lags and
+ * only a few endpoints are needed. Wired only by {@link AuthProviderConfig}. {@code /authenticate} takes the API key as
+ * {@code client_secret} in the body; the invitation endpoints take it as a bearer header.
  */
 public class WorkOsClient implements AuthProvider {
 
@@ -59,14 +36,13 @@ public class WorkOsClient implements AuthProvider {
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build());
     }
 
-    /** The transport is a parameter so a test can answer for WorkOS without the network. */
+    /** The transport is a parameter so a test can answer without the network. */
     WorkOsClient(WorkOsProperties props, ObjectMapper mapper, HttpClient http) {
         this.props = props;
         this.mapper = mapper;
         this.http = http;
     }
 
-    /** Build the AuthKit authorisation URL the browser is redirected to. */
     @Override
     public String authorizationUrl(String state) {
         String qs = "response_type=code"
@@ -83,7 +59,6 @@ public class WorkOsClient implements AuthProvider {
         return BASE + "/user_management/sessions/logout?session_id=" + enc(sessionId) + "&return_to=" + enc(returnTo);
     }
 
-    /** Exchange an authorization code for tokens + user. */
     @Override
     public AuthResult authenticateWithCode(String code) {
         JsonNode body = post(
@@ -100,7 +75,6 @@ public class WorkOsClient implements AuthProvider {
         return AuthResult.from(body);
     }
 
-    /** Use a refresh token to mint a fresh session. */
     @Override
     public AuthResult refresh(String refreshToken, @Nullable String organizationId) {
         var payload = new java.util.LinkedHashMap<String, Object>();
@@ -114,10 +88,8 @@ public class WorkOsClient implements AuthProvider {
     }
 
     /**
-     * Send a WorkOS invitation email. We deliberately omit {@code organization_id}
-     * and {@code role_slug}: the invitation only gets the recipient to sign up — the
-     * local {@code org_invitation} table is what actually grants org membership and
-     * carries the role, consumed on the invitee's first login.
+     * Omits {@code organization_id} and {@code role_slug}: the local {@code org_invitation} table grants membership and
+     * role.
      */
     @Override
     public Invitation createInvitation(String email) {
@@ -125,18 +97,16 @@ public class WorkOsClient implements AuthProvider {
         return new Invitation(body.path("id").asText(null));
     }
 
-    /** Revoke a previously-sent invitation. Best-effort; surfaces failure to the caller. */
+    /** Best-effort; surfaces failure to the caller. */
     @Override
     public void revokeInvitation(String workosInvitationId) {
         postBearer("/user_management/invitations/" + enc(workosInvitationId) + "/revoke", Map.of());
     }
 
-    /** POST to {@code /authenticate}, which carries the API key as {@code client_secret} in the body. */
     private JsonNode post(String path, Map<String, Object> body) {
         return send(path, body, false);
     }
 
-    /** POST to a plain REST endpoint, which takes the API key as a bearer header instead. */
     private JsonNode postBearer(String path, Map<String, Object> body) {
         return send(path, body, true);
     }
@@ -153,9 +123,8 @@ public class WorkOsClient implements AuthProvider {
             HttpResponse<String> res = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
             int s = res.statusCode();
             if (s / 100 != 2) {
-                // WARN egresses to Loki and the exception message surfaces to the client; keep both
-                // categorical (path + status). The upstream body can carry WorkOS account/user detail —
-                // keep it local at DEBUG only.
+                // WARN egresses to Loki and the message reaches the client; the upstream body can carry WorkOS user
+                // detail, so it stays at DEBUG.
                 log.warn("WorkOS {} -> {}", path, s);
                 log.debug("WorkOS {} -> {} body={}", path, s, truncate(res.body(), 200));
                 throw new AuthException("workos " + path + " returned " + s);

@@ -24,9 +24,7 @@ export function renderRoute(
   ui: ReactElement,
   { route = "/", path = "*", parent }: { route?: string; path?: string; parent?: string } = {},
 ) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const utils = render(
     <MemoryRouter initialEntries={[route]}>
       <QueryClientProvider client={queryClient}>

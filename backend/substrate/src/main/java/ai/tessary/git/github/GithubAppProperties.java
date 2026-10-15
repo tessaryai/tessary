@@ -8,19 +8,13 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "tessary.git.github")
 public class GithubAppProperties {
 
-    /** Default GitHub REST API host (github.com SaaS); GHES installs override per-integration. */
+    /** GHES installs override per integration. */
     public static final String DEFAULT_API_HOST = "api.github.com";
 
     /**
-     * The five credential fields as one immutable snapshot, held behind a single {@code volatile}
-     * reference so a swap is both visible and atomic across all five values at once. Spring's binder
-     * calls the individual setters below one property at a time at startup (single-threaded, before
-     * any reader exists, so that is safe); the runtime live-update path in {@link
-     * GithubAppConfigService} instead calls {@link #applyAll} once with all five values, so a
-     * concurrent unsynchronized reader (e.g. {@code GithubTokenService.authHeader()} or {@code
-     * SignalResolver.isConfigured()}, neither of which coordinates with the writer) always observes
-     * either the fully-old or the fully-new set of values — never a mix, and never a stale value
-     * pinned forever by a missing happens-before edge.
+     * Behind one {@code volatile} reference so a live update via {@link #applyAll} swaps all five fields atomically for
+     * unsynchronized readers such as {@code GithubTokenService.authHeader()}. The individual setters are only called by
+     * Spring's binder at startup, before any reader exists.
      */
     private record Snapshot(String appId, String privateKeyPem, String appSlug, String clientId, String clientSecret) {
         static final Snapshot EMPTY = new Snapshot("", "", "", "", "");
@@ -55,7 +49,7 @@ public class GithubAppProperties {
         snapshot = new Snapshot(s.appId(), s.privateKeyPem(), s.appSlug(), s.clientId(), clientSecret);
     }
 
-    /** True when OAuth client credentials are present (required to verify the installer's identity). */
+    /** OAuth client credentials are required to verify the installer's identity. */
     public boolean hasOAuth() {
         Snapshot s = snapshot;
         return s.clientId() != null
@@ -90,12 +84,7 @@ public class GithubAppProperties {
                 && !s.privateKeyPem().isBlank();
     }
 
-    /**
-     * Atomically replace all five fields in one visible swap — used by {@link GithubAppConfigService}
-     * on the live-update path (manifest wizard capture, and boot-time load from a stored DB row) so
-     * a concurrent reader can never observe a torn mix of old and new field values. See {@link
-     * Snapshot}'s note for why this differs from the individual setters above.
-     */
+    /** Atomic swap of all five fields; see {@link Snapshot}. */
     void applyAll(String appId, String privateKeyPem, String appSlug, String clientId, String clientSecret) {
         this.snapshot = new Snapshot(appId, privateKeyPem, appSlug, clientId, clientSecret);
     }

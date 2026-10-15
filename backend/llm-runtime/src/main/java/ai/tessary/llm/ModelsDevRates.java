@@ -29,39 +29,27 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 /**
- * The per-model rates a sandbox run is billed at: models.dev's, the catalog OpenCode itself prices
- * from. The launcher writes them into the model it declares to OpenCode, and the run reports the cost
- * OpenCode computes with them, so the price book never prices a sandbox run.
- *
- * <p><b>Live first, bundled always.</b> The live file is fetched at most once per {@link
- * ModelsDevProperties#getRefreshInterval()}, and a failed fetch is not retried for {@link #RETRY_AFTER},
- * so a models.dev outage costs one run one {@link ModelsDevProperties#getFetchTimeout()} rather than
- * every run. Until a fetch succeeds, and for any model the live file lacks, the answer comes from the
- * copy bundled in the jar ({@link #BUNDLED_RESOURCE}), which {@code scripts/refresh-models-dev.sh}
- * keeps current. Only one run fetches at a time; the others read what is already in hand.
+ * Sandbox runs are billed at models.dev's rates, which OpenCode prices from, so the price book never prices them. The
+ * live file is fetched at most once per {@link ModelsDevProperties#getRefreshInterval()} and a failure backs off for
+ * {@link #RETRY_AFTER}; until then, and for models it lacks, the bundled copy ({@link #BUNDLED_RESOURCE}) answers.
  */
 @Component
 public class ModelsDevRates {
 
     private static final Logger log = LoggerFactory.getLogger(ModelsDevRates.class);
 
-    /** The vendored models.dev file, refreshed by {@code scripts/refresh-models-dev.sh}. */
+    /** Refreshed by {@code scripts/refresh-models-dev.sh}. */
     public static final String BUNDLED_RESOURCE = "models-dev/api.json";
 
-    /** How long a failed fetch keeps every run on the copy already in hand before the next attempt. */
     static final Duration RETRY_AFTER = Duration.ofMinutes(5);
 
-    /**
-     * One model's rates in USD per million tokens, as models.dev states them. A null bucket is one
-     * models.dev gives no rate for, which OpenCode then bills at zero.
-     */
+    /** USD per million tokens. A null bucket is billed at zero by OpenCode. */
     public record ModelCost(
             @Nullable BigDecimal input,
             @Nullable BigDecimal output,
             @Nullable BigDecimal cacheRead,
             @Nullable BigDecimal cacheWrite) {
 
-        /** The {@code cost} block of an OpenCode model declaration. */
         public ObjectNode toOpencodeCost(ObjectMapper mapper) {
             ObjectNode cost = mapper.createObjectNode();
             if (input != null) cost.put("input", input);
@@ -87,7 +75,7 @@ public class ModelsDevRates {
     public ModelsDevRates(ObjectMapper mapper, ModelsDevProperties props) {
         this(
                 HttpClient.newBuilder()
-                        .connectTimeout(props.getFetchTimeout())
+                        .connectTimeout(props.fetchTimeout())
                         .followRedirects(HttpClient.Redirect.NORMAL)
                         .build(),
                 mapper,
@@ -109,11 +97,7 @@ public class ModelsDevRates {
         this.bundled = Map.copyOf(bundled);
     }
 
-    /**
-     * The rates for {@code modelsDevId} ({@code <provider>/<model>}, see {@link ModelCatalog#modelsDevId}),
-     * or empty when neither the live file nor the bundled copy prices it. Empty means the run is
-     * unpriced; it never means free.
-     */
+    /** Empty means unpriced, never free. */
     public Optional<ModelCost> cost(@Nullable String modelsDevId) {
         if (modelsDevId == null || modelsDevId.isBlank()) return Optional.empty();
         Rates current = current();
@@ -121,15 +105,12 @@ public class ModelsDevRates {
         return Optional.ofNullable(found != null ? found : bundled.get(modelsDevId));
     }
 
-    /** The bundled copy only, never a fetch: what CI checks every sandbox model against. */
+    /** Never fetches: what CI checks every sandbox model against. */
     public Optional<ModelCost> bundledCost(String modelsDevId) {
         return Optional.ofNullable(bundled.get(modelsDevId));
     }
 
-    /**
-     * Put the rates for {@code modelsDevId} on a launcher request as {@code model_cost}, or leave the
-     * field off when there are none, which the launcher reads as "declare the model with no rates".
-     */
+    /** Leaves the field off when there are no rates, which the launcher reads as "declare the model with no rates". */
     public void putModelCost(ObjectNode launcherBody, @Nullable String modelsDevId) {
         cost(modelsDevId).ifPresent(c -> launcherBody.set("model_cost", c.toOpencodeCost(mapper)));
     }
@@ -137,9 +118,9 @@ public class ModelsDevRates {
     private @Nullable Rates current() {
         Rates held = live;
         Instant now = clock.instant();
-        boolean fresh = held != null
-                && held.fetchedAt().plus(props.getRefreshInterval()).isAfter(now);
-        if (fresh || props.getUrl().isBlank() || now.isBefore(nextAttempt) || !fetching.tryLock()) return held;
+        boolean fresh =
+                held != null && held.fetchedAt().plus(props.refreshInterval()).isAfter(now);
+        if (fresh || props.url().isBlank() || now.isBefore(nextAttempt) || !fetching.tryLock()) return held;
         try {
             Rates fetched = fetch(now);
             if (fetched != null) live = fetched;
@@ -153,8 +134,8 @@ public class ModelsDevRates {
     private @Nullable Rates fetch(Instant now) {
         Instant start = clock.instant();
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(props.getUrl()))
-                    .timeout(props.getFetchTimeout())
+            HttpRequest req = HttpRequest.newBuilder(URI.create(props.url()))
+                    .timeout(props.fetchTimeout())
                     .GET()
                     .build();
             HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
@@ -175,7 +156,7 @@ public class ModelsDevRates {
                     .log();
             return new Rates(byId, now);
         } catch (IOException | RuntimeException e) {
-            // A malformed tessary.models-dev.url throws from URI.create: it must cost the live file, never the run.
+            // A malformed URL must cost the live file, never the run.
             warnUnreachable(start, e.getClass().getSimpleName());
             return null;
         } catch (InterruptedException e) {
@@ -206,10 +187,7 @@ public class ModelsDevRates {
         }
     }
 
-    /**
-     * models.dev's file, flattened to {@code <provider>/<model>} → rates. A model with neither an input
-     * nor an output rate is left out, so it reads as unpriced rather than as free.
-     */
+    /** A model with neither input nor output rate is left out, so it reads as unpriced rather than free. */
     static Map<String, ModelCost> parse(ObjectMapper mapper, byte[] json) throws IOException {
         JsonNode root = mapper.readTree(json);
         Map<String, ModelCost> byId = new HashMap<>();
@@ -229,7 +207,7 @@ public class ModelsDevRates {
         return byId;
     }
 
-    /** Read from the number's own text, so 0.1 stays 0.1 rather than its binary approximation. */
+    /** From the number's own text, so 0.1 stays 0.1. */
     private static @Nullable BigDecimal rate(JsonNode n) {
         return n.isNumber() ? new BigDecimal(n.asText()) : null;
     }

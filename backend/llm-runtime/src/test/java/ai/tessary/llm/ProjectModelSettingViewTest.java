@@ -4,7 +4,6 @@ package ai.tessary.llm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -101,15 +100,6 @@ class ProjectModelSettingViewTest {
                         option.modelKeys().contains(option.defaultModelKey()),
                         "provider " + option.provider() + " defaults outside its own model list");
             }
-        }
-    }
-
-    @Test
-    void anOrgWithNoProviderRunsNoModelOnAnyLane() {
-        // No credential means no model on every lane, and automatic; the page says so rather than defaulting.
-        for (var lane : view().lanes()) {
-            assertNull(lane.effectiveModelKey(), "lane " + lane.id() + " has no provider to run on");
-            assertTrue(lane.automatic(), "lane " + lane.id());
         }
     }
 

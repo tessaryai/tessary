@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Drives otlp-load.js up a ladder of offered rates against the running reference stack and records,
-# per step: the generator's own status-code counts, the rows that actually reached Postgres, the
-# heartbeat's queue depth, and container CPU/memory.
-#
-#   bash ramp.sh <label> <duration-per-step-seconds> <rate> [rate...]
+# Drives otlp-load.js up a ladder of rates, recording status counts, rows reaching Postgres, queue depth
+# and container CPU/memory per step.
+# bash ramp.sh <label> <duration-per-step-seconds> <rate> [rate...]
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(cd ../.. && pwd)"
@@ -44,8 +42,7 @@ for RATE in "$@"; do
     --label "$LABEL-$RATE" --out "$OUTDIR/load-$RATE.jsonl" > "$OUTDIR/summary-$RATE.json"
   wait "$stats_pid" 2>/dev/null || true
 
-  # Let the queue drain before counting rows, so the number is what the run delivered rather than
-  # where the queue happened to be when the generator stopped.
+  # Let the queue drain, so the count is what the run delivered.
   sleep 20
   after="$(spans_now)"
   written=$((after - before))

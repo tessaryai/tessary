@@ -32,17 +32,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Everything around one agent run that a caller should not have to repeat: resolve the lane's
- * model and the org's credential for it, mint the run's MCP key and revoke it afterwards, find the
- * project's repository when it has one, and hand all of it to the configured
- * {@link AgentRunSandbox}. The caller brings the prompts, the files, the answer's schema and the
- * subject the spend is booked against, and gets the agent's answer back.
- *
- * <p>The MCP key is issued to the project org's owner (earliest membership first), the way the
- * triage engine issues its own, and revoked in a {@code finally}: it must not outlive the sandbox.
- * The credential is released the same way. The repository is optional and read at run time: a
- * project with no integration, or one that cannot mint a clone token right now, runs without
- * {@code ./repo/} rather than not at all.
+ * The ceremony around one agent run: resolve model and credential, mint the run's MCP key, find the repository, call
+ * the {@link AgentRunSandbox}. The key is issued to the org's owner and revoked in a {@code finally}, as is the
+ * credential. A missing or unmintable repository runs without {@code ./repo/} rather than failing.
  */
 @Service
 public class AgentRunService {
@@ -88,7 +80,7 @@ public class AgentRunService {
     /** Fail at boot when {@code tessary.agentrun.sandbox} names no registered driver. */
     @PostConstruct
     void validateSandboxConfig() {
-        String key = props.getSandbox();
+        String key = props.sandbox();
         if (!sandboxes.containsKey(key)) {
             throw new IllegalStateException("tessary.agentrun.sandbox='" + key
                     + "' is not a registered sandbox (known: " + sandboxes.keySet() + ")");
@@ -96,15 +88,8 @@ public class AgentRunService {
     }
 
     /**
-     * Run the agent once for {@code projectId} on {@code lane}.
-     *
-     * @param systemPrompt the agent's system prompt
-     * @param prompt the task
-     * @param files relative path to content, reachable by the agent as {@code ./dossier/<path>}
-     * @param jsonSchema schema the final answer must satisfy, or null for a prose answer
-     * @param subject what the spend is for: the ledger row's subject, and the run's key name
-     * @throws TessaryException {@code AgentRunError.*} for every way the run can fail, and
-     *     {@code ModelConfigError.MISSING_CREDENTIALS} when the org holds no key for the lane's provider
+     * @param files reachable as {@code ./dossier/<path>} @param subject the ledger row's subject and the run's key name
+     * @throws TessaryException {@code AgentRunError.*}, or {@code ModelConfigError.MISSING_CREDENTIALS}
      */
     public AgentRunSandbox.Result run(
             String projectId,
@@ -116,7 +101,7 @@ public class AgentRunService {
             LlmUsageAccountant.Subject subject) {
         String mcpUrl = platformMcpUrl();
         AgentModels.Choice choice = models.resolve(projectId, lane);
-        // Resolved before the key is minted: an org with no credential fails closed with nothing to revoke.
+        // Before the key is minted, so a missing credential leaves nothing to revoke.
         AgenticCredentialResolver.Credential credential = credentials.resolve(projectId, choice.provider());
         try {
             return runWithCredential(
@@ -145,7 +130,7 @@ public class AgentRunService {
         ApiKeyService.Issued issued = apiKeys.issue(projectId, principal, keyName, KeyScope.ADMIN);
         try {
             Optional<Clone> clone = clone(projectId);
-            AgentRunSandbox sandbox = Objects.requireNonNull(sandboxes.get(props.getSandbox()));
+            AgentRunSandbox sandbox = Objects.requireNonNull(sandboxes.get(props.sandbox()));
             return sandbox.run(new AgentRunSandbox.Request(
                     projectId,
                     lane.wire(),
@@ -161,8 +146,8 @@ public class AgentRunService {
                     credential,
                     mcpUrl,
                     issued.plaintext(),
-                    props.getTimeoutMs(),
-                    props.getMaxTurns(),
+                    props.timeoutMs(),
+                    props.maxTurns(),
                     subject));
         } finally {
             revokeQuietly(issued.token().id(), projectId, lane, subject);
@@ -170,14 +155,12 @@ public class AgentRunService {
     }
 
     /**
-     * The platform's MCP endpoint an agent reads the traces through: this lane's own origin, else
-     * RCA's, the same public origin every agent lane calls back on, with {@code /mcp} appended.
-     *
-     * @throws TessaryException {@code AgentRunError.LAUNCHER_MISCONFIGURED} when both origins are unset
+     * This lane's origin, else RCA's, plus {@code /mcp}. @throws TessaryException
+     * {@code AgentRunError.LAUNCHER_MISCONFIGURED} when both are unset
      */
     public String platformMcpUrl() {
-        String own = props.getMcpBaseUrl();
-        String rca = rcaProps.getAgentic().getMcpBaseUrl();
+        String own = props.mcpBaseUrl();
+        String rca = rcaProps.agentic().mcpBaseUrl();
         String origin = own != null && !own.isBlank() ? own : rca == null ? "" : rca;
         if (origin.isBlank()) {
             throw new TessaryException(
@@ -188,7 +171,6 @@ public class AgentRunService {
         return origin.replaceAll("/+$", "") + "/mcp";
     }
 
-    /** The repo to hand the sandbox: an authenticated clone URL and the commit to check out. */
     private record Clone(String url, String headSha) {}
 
     private Optional<Clone> clone(String projectId) {
@@ -217,7 +199,7 @@ public class AgentRunService {
                 .orElse(null);
     }
 
-    /** Revocation must never mask the run's own outcome: log and move on. The audit row survives either way. */
+    /** Revocation must never mask the run's own outcome. */
     private void revokeQuietly(String tokenId, String projectId, ModelLane lane, LlmUsageAccountant.Subject subject) {
         try {
             apiKeys.revoke(tokenId);

@@ -8,71 +8,28 @@
  * failed run that reads as an empty one, and a cause's "Show" that filters nothing.
  */
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
-  CaseDetail,
-  ClassifierDetail,
-  FlaggedAnswer,
-  FrustratedConversation,
-  FrustrationDetail,
-  RcaReport,
+  CaseDetail, ClassifierDetail, FlaggedAnswer, FrustratedConversation, FrustrationDetail, RcaReport,
 } from "../../api/types";
 import { ApiError } from "../../api/types";
 import type { CapabilitiesView, Me } from "../../api/types-auth";
 import { AuthProvider } from "../../auth/AuthContext";
-import { ToastProvider } from "../../ui";
+import { renderRoute } from "../../test/render";
 import { CasePage } from "./CasePage";
 import { stamp } from "../classifiers/shared";
 import {
-  CURRENT_GROUNDEDNESS_REPORT,
-  FLAGGED_ANSWER,
-  GROUNDEDNESS_CASE_DETAIL,
-  GROUNDEDNESS_DETAIL,
-  GROUNDEDNESS_REPORT,
+  CURRENT_GROUNDEDNESS_REPORT, FLAGGED_ANSWER, GROUNDEDNESS_CASE_DETAIL, GROUNDEDNESS_DETAIL, GROUNDEDNESS_REPORT,
 } from "../../test/groundednessFixtures";
+import { api, auth } from "../../test/api";
 
 const OWNER: Me = {
-  id: "user-1",
-  email: "owner@example.com",
-  orgs: [{ id: "org-1", slug: "acme", name: "Acme", role: "owner" }],
+  id: "user-1", email: "owner@example.com", orgs: [{ id: "org-1", slug: "acme", name: "Acme", role: "owner" }],
   platform_staff: false,
 };
 
-const { me, getCapabilities } = vi.hoisted(() => ({
-  me: vi.fn<() => Promise<Me>>(),
-  getCapabilities: vi.fn<() => Promise<CapabilitiesView>>(),
-}));
-
-vi.mock("../../api/client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../api/client")>();
-  return { ...actual, auth: { ...actual.auth, me, getCapabilities } };
-});
-
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getCase: vi.fn(),
-  getRcaReport: vi.fn(),
-  getFlaggedAnswers: vi.fn(),
-  getFrustratedSessions: vi.fn(),
-  getBehaviorFindingEvidence: vi.fn(),
-  getGitIntegration: vi.fn(),
-  getTrace: vi.fn(),
-  closeCase: vi.fn(),
-  absorbCase: vi.fn(),
-  runCaseRca: vi.fn(),
-  rerunRca: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-    useProjectApi: () => api,
-  };
-});
+vi.mock("../../api/client", () => import("../../test/api"));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 // ---- fixtures -------------------------------------------------------------------------------
 
@@ -81,69 +38,41 @@ const BASE = GROUNDEDNESS_CASE_DETAIL;
 /** A case whose classifier draws no figure and ranks no causes: the answer-and-working layout. */
 function plainCase(over: Partial<CaseDetail> = {}, caseOver: Partial<CaseDetail["case"]> = {}): CaseDetail {
   return {
-    ...BASE,
-    groundedness: null,
-    rca: null,
-    rca_report_id: null,
-    ...over,
+    ...BASE, groundedness: null, rca: null, rca_report_id: null, ...over,
     case: { ...BASE.case, detector: "loop", rca_verdict: null, ...caseOver },
   };
 }
 
 const ANSWER_REPORT: RcaReport = {
-  ...GROUNDEDNESS_REPORT,
-  report_kind: "attribution",
-  verdict: "model_change",
+  ...GROUNDEDNESS_REPORT, report_kind: "attribution", verdict: "model_change",
   summary: "The call site got slower because the serving model changed and inputs grew.",
   causes: [
     {
-      title: "The serving model changed under the call site",
-      confidence: "high",
-      change: null,
-      type: null,
+      title: "The serving model changed under the call site", confidence: "high", change: null, type: null,
       what_changed: "A new model version started serving this call site.",
       how_it_caused_this: "The new model takes longer on the same inputs.",
-      next_step: "A real regression. Pin the previous model.",
-      attribution: null,
+      next_step: "A real regression. Pin the previous model.", attribution: null,
       evidence_trace_ids: ["trace-0123456789"],
       evidence_session_ids: [],
       affected_count: 12,
     },
     {
-      title: "Customers started pasting whole order histories",
-      confidence: "high",
-      change: null,
-      type: null,
-      what_changed: "Inputs grew to include order histories.",
-      how_it_caused_this: "Longer inputs take longer to read.",
-      next_step: "Expected traffic. Nothing to fix.",
-      attribution: null,
-      evidence_trace_ids: [],
-      evidence_session_ids: [],
-      affected_count: 4,
+      title: "Customers started pasting whole order histories", confidence: "high", change: null, type: null,
+      what_changed: "Inputs grew to include order histories.", how_it_caused_this: "Longer inputs take longer to read.",
+      next_step: "Expected traffic. Nothing to fix.", attribution: null, evidence_trace_ids: [],
+      evidence_session_ids: [], affected_count: 4,
     },
     {
-      title: "Traffic moved to longer inputs",
-      confidence: "low",
-      change: null,
-      type: null,
-      what_changed: "Inputs grew.",
-      how_it_caused_this: "Maybe slower.",
-      next_step: "Compare input lengths on both sides.",
-      attribution: null,
-      evidence_trace_ids: [],
-      evidence_session_ids: [],
-      affected_count: 0,
+      title: "Traffic moved to longer inputs", confidence: "low", change: null, type: null,
+      what_changed: "Inputs grew.", how_it_caused_this: "Maybe slower.",
+      next_step: "Compare input lengths on both sides.", attribution: null, evidence_trace_ids: [],
+      evidence_session_ids: [], affected_count: 0,
     },
   ],
   ruled_out: [
     {
-      check: "model_swap",
-      question: "Did the serving model change?",
-      assessment: "explains",
-      detail: "Model id changed.",
-      measurement: null,
-      passed: false,
+      check: "model_swap", question: "Did the serving model change?", assessment: "explains",
+      detail: "Model id changed.", measurement: null, passed: false,
     },
     { check: "input_length", question: null, assessment: "contributing", detail: "Longer inputs.", measurement: null, passed: false },
     { check: "grader_drift", question: null, assessment: "ruled_out", detail: "Grader unchanged.", measurement: null, passed: true },
@@ -158,23 +87,14 @@ const conversation = (id: string, message: string): FrustratedConversation =>
     traceId: id,
     sessionId: `sess-${id}`,
     conversationId: `conv-${id}`,
-    callSiteId: "support-agent",
-    contextTraceIds: [],
-    flaggedAt: "2026-09-23T14:00:00Z",
-    score: 0.9,
-    message,
+    callSiteId: "support-agent", contextTraceIds: [], flaggedAt: "2026-09-23T14:00:00Z", score: 0.9, message,
     cleared: false,
   }) as FrustratedConversation;
 
 const FRUSTRATION: FrustrationDetail = {
-  rate: { ...GROUNDEDNESS_DETAIL.rate, failuresCur: 40 },
-  arlTarget: 50000,
-  baselineFrustrated: 10,
+  rate: { ...GROUNDEDNESS_DETAIL.rate, failuresCur: 40 }, arlTarget: 50000, baselineFrustrated: 10,
   conversations: [conversation("f-all", "This is the third time I asked.")],
-  conversationsNextCursor: null,
-  jevThreshold: 0.5,
-  minDecisionInterval: 3600,
-  scorerVersion: "v1",
+  conversationsNextCursor: null, jevThreshold: 0.5, minDecisionInterval: 3600, scorerVersion: "v1",
 } as FrustrationDetail;
 
 const FRUSTRATION_REPORT: RcaReport = {
@@ -193,12 +113,7 @@ const FRUSTRATION_REPORT: RcaReport = {
 };
 
 const frustrationCase = (over: Partial<CaseDetail> = {}): CaseDetail => ({
-  ...BASE,
-  groundedness: null,
-  frustration: FRUSTRATION,
-  rca: FRUSTRATION_REPORT,
-  rca_report_id: "rca-f",
-  ...over,
+  ...BASE, groundedness: null, frustration: FRUSTRATION, rca: FRUSTRATION_REPORT, rca_report_id: "rca-f", ...over,
   case: { ...BASE.case, detector: "frustration", title: "Users on support-agent grew frustrated" },
 });
 
@@ -207,28 +122,11 @@ const WINDOW_CLOSED = "2026-10-09T15:52:33Z";
 const CASE_OPENED = "2026-10-09T16:07:10Z";
 
 const SHIFT = {
-  bucketKey: "support-agent",
-  bucketKind: "call_site",
-  nCur: 500,
-  nRef: 1200,
-  sinceVersionId: null,
-  windowClosedAt: WINDOW_CLOSED,
-  windowKind: null,
-  windowOpenedAt: WINDOW_OPENED,
-  w1Log: 0.4,
-  control: null,
-  direction: "up",
-  explains: [],
-  floor: 0,
-  measure: "duration",
-  quantiles: [
-    { key: "p50", then: 1000, now: 2500 },
-    { key: "p95", then: 4000, now: 9000 },
-  ],
-  ratio: 2.5,
-  reference: "previous",
-  tokens: [],
-  workload: [],
+  bucketKey: "support-agent", bucketKind: "call_site", nCur: 500, nRef: 1200, sinceVersionId: null,
+  windowClosedAt: WINDOW_CLOSED, windowKind: null, windowOpenedAt: WINDOW_OPENED, w1Log: 0.4, control: null,
+  direction: "up", explains: [], floor: 0, measure: "duration",
+  quantiles: [{ key: "p50", then: 1000, now: 2500 }, { key: "p95", then: 4000, now: 9000 }],
+  ratio: 2.5, reference: "previous", tokens: [], workload: [],
 } as unknown as NonNullable<CaseDetail["metric"]>;
 
 /** A drift case as the server writes it: onset is the sample that closed the window, last seen is the wall clock. */
@@ -241,8 +139,8 @@ const driftCase = (metric: Partial<NonNullable<CaseDetail["metric"]>> = {}): Cas
 // ---- harness --------------------------------------------------------------------------------
 
 beforeEach(() => {
-  me.mockResolvedValue(OWNER);
-  getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: true } as CapabilitiesView["capabilities"] });
+  auth.me.mockResolvedValue(OWNER);
+  auth.getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: true } as CapabilitiesView["capabilities"] });
   api.getCase.mockResolvedValue(BASE);
   api.getGitIntegration.mockResolvedValue({ provider: "github" });
   api.getFlaggedAnswers.mockResolvedValue({ rows: [], total: 0, nextCursor: null });
@@ -253,22 +151,13 @@ beforeEach(() => {
     f.mockResolvedValue({});
 });
 
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <ToastProvider>
-        <AuthProvider>
-          <MemoryRouter initialEntries={["/orgs/acme/projects/default/cases/case-1"]}>
-            <Routes>
-              <Route path="/orgs/:orgSlug/projects/:projectSlug/cases/:caseId" element={<CasePage />} />
-            </Routes>
-          </MemoryRouter>
-        </AuthProvider>
-      </ToastProvider>
-    </QueryClientProvider>,
+const renderPage = () =>
+  renderRoute(
+    <AuthProvider>
+      <CasePage />
+    </AuthProvider>,
+    { route: "/orgs/acme/projects/default/cases/case-1", path: "/orgs/:orgSlug/projects/:projectSlug/cases/:caseId" },
   );
-}
 
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 const heading = (name: string) => screen.findByRole("heading", { level: 1, name });
@@ -291,16 +180,19 @@ describe("closing a case", () => {
     expect(api.getCase).toHaveBeenCalledTimes(2);
   });
 
-  it("cancels a close without sending it", async () => {
+  it.each([
+    ["Close", api.closeCase],
+    ["Absorb", api.absorbCase],
+  ])("dismisses the %s dialog on Cancel without sending it", async (verb, send) => {
     renderPage();
     await heading(BASE.case.title);
 
-    fireEvent.click(button("Close"));
+    fireEvent.click(button(verb));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await settle();
-    expect(api.closeCase).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("absorbs the case after the confirmation, and says why an absorb was refused", async () => {
@@ -320,18 +212,6 @@ describe("closing a case", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("dismisses the absorb dialog on Cancel without absorbing", async () => {
-    renderPage();
-    await heading(BASE.case.title);
-
-    fireEvent.click(button("Absorb"));
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    await settle();
-    expect(api.absorbCase).not.toHaveBeenCalled();
-  });
-
   it("offers Close alone where a case cannot be absorbed", async () => {
     api.getCase.mockResolvedValue(plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1", absorb_available: false }));
     renderPage();
@@ -346,11 +226,8 @@ describe("closing a case", () => {
       ...BASE,
       case: {
         ...BASE.case,
-        state: "resolved",
-        resolved_at: "2026-09-23T15:00:00Z",
-        resolved_by: "dana@example.com",
-        resolution_reason: "prompt fixed",
-        disposition: "fixed",
+        state: "resolved", resolved_at: "2026-09-23T15:00:00Z", resolved_by: "dana@example.com",
+        resolution_reason: "prompt fixed", disposition: "fixed",
       },
     });
     renderPage();
@@ -370,43 +247,29 @@ describe("closing a case", () => {
   });
 });
 
-describe("the meta line", () => {
-  it("names the classifier as the classifiers page does, and no call site for the unattributed sentinel", async () => {
-    api.getCase.mockResolvedValue(plainCase({}, { detector: "tool_error", call_site_id: "__unattributed__" }));
-    renderPage();
-    await heading(BASE.case.title);
+it("the meta line: names the classifier as the classifiers page does, and no call site for the unattributed sentinel", async () => {
+  api.getCase.mockResolvedValue(plainCase({}, { detector: "tool_error", call_site_id: "__unattributed__" }));
+  renderPage();
+  await heading(BASE.case.title);
 
-    expect(screen.getByText("Tool error")).toBeTruthy();
-    expect(screen.queryByText("__unattributed__")).toBeNull();
-  });
+  expect(screen.getByText("Tool error")).toBeTruthy();
+  expect(screen.queryByText("__unattributed__")).toBeNull();
 });
 
 describe("a metric-drift case's window", () => {
   // Bug: the header read the case's onset (the sample that closed the window) and its wall-clock last
   // seen, so a five-hour window showed as fifteen minutes on two different clocks.
-  it("spans the window the drift was measured over", async () => {
-    api.getCase.mockResolvedValue(driftCase());
+  // A half-known window must not pair the window's open with the case's wall-clock last seen.
+  it.each([
+    ["spans the window the drift was measured over", {}, [WINDOW_OPENED, WINDOW_CLOSED]],
+    ["falls back to the case's own times when the finding carries no window", { windowOpenedAt: null, windowClosedAt: null }, [WINDOW_CLOSED, CASE_OPENED]],
+    ["takes both ends from the case when only one end of the window is known", { windowClosedAt: null }, [WINDOW_CLOSED, CASE_OPENED]],
+  ])("%s", async (_case, metric, [from, to]) => {
+    api.getCase.mockResolvedValue(driftCase(metric));
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.getByText(`${stamp(WINDOW_OPENED)} → ${stamp(WINDOW_CLOSED)}`)).toBeTruthy();
-  });
-
-  it("falls back to the case's own times when the finding carries no window", async () => {
-    api.getCase.mockResolvedValue(driftCase({ windowOpenedAt: null, windowClosedAt: null }));
-    renderPage();
-    await heading(BASE.case.title);
-
-    expect(screen.getByText(`${stamp(WINDOW_CLOSED)} → ${stamp(CASE_OPENED)}`)).toBeTruthy();
-  });
-
-  // Bug: a half-known window paired the window's open with the case's wall-clock last seen.
-  it("takes both ends from the case when only one end of the window is known", async () => {
-    api.getCase.mockResolvedValue(driftCase({ windowClosedAt: null }));
-    renderPage();
-    await heading(BASE.case.title);
-
-    expect(screen.getByText(`${stamp(WINDOW_CLOSED)} → ${stamp(CASE_OPENED)}`)).toBeTruthy();
+    expect(screen.getByText(`${stamp(from)} → ${stamp(to)}`)).toBeTruthy();
   });
 });
 
@@ -557,9 +420,7 @@ describe("the answer and the working behind it", () => {
 
   /** Catches the summary repeated under the headline, where it competed with the Why block. */
   it("does not repeat the summary under the headline", async () => {
-    api.getCase.mockResolvedValue(
-      plainCase({}, { rca_verdict: "inconclusive", cause: "a model rollout" }),
-    );
+    api.getCase.mockResolvedValue(plainCase({}, { rca_verdict: "inconclusive", cause: "a model rollout" }));
     renderPage();
     await heading(BASE.case.title);
 
@@ -635,26 +496,24 @@ function escape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-describe("the activity", () => {
-  it("stays collapsed until asked, then lists each event and who did it", async () => {
-    api.getCase.mockResolvedValue({
-      ...BASE,
-      events: [
-        { id: "e1", kind: "opened", summary: "Case opened", actor: null, created_at: "2026-09-23T13:52:00Z" },
-        { id: "e2", kind: "muted", summary: "Muted", actor: "dana@example.com", created_at: "2026-09-23T14:00:00Z" },
-      ],
-    });
-    renderPage();
-    const toggle = await screen.findByRole("button", { name: "Activity (2) +" });
-    expect(screen.queryByText("Case opened")).toBeNull();
-
-    fireEvent.click(toggle);
-
-    expect(screen.getByText("Case opened").parentElement!.textContent).toContain("Tessary");
-    expect(screen.getByText("dana@example.com")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Activity (2) −" }));
-    expect(screen.queryByText("Case opened")).toBeNull();
+it("the activity: stays collapsed until asked, then lists each event and who did it", async () => {
+  api.getCase.mockResolvedValue({
+    ...BASE,
+    events: [
+      { id: "e1", kind: "opened", summary: "Case opened", actor: null, created_at: "2026-09-23T13:52:00Z" },
+      { id: "e2", kind: "muted", summary: "Muted", actor: "dana@example.com", created_at: "2026-09-23T14:00:00Z" },
+    ],
   });
+  renderPage();
+  const toggle = await screen.findByRole("button", { name: "Activity (2) +" });
+  expect(screen.queryByText("Case opened")).toBeNull();
+
+  fireEvent.click(toggle);
+
+  expect(screen.getByText("Case opened").parentElement!.textContent).toContain("Tessary");
+  expect(screen.getByText("dana@example.com")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Activity (2) −" }));
+  expect(screen.queryByText("Case opened")).toBeNull();
 });
 
 describe("a frustration case", () => {
@@ -720,18 +579,11 @@ describe("a case with a classifier detail", () => {
   const ONSET = "2026-09-22T07:30:00Z";
   const DETAIL: ClassifierDetail = {
     rate: { ...GROUNDEDNESS_DETAIL.rate, onsetAt: ONSET },
-    baselineFlagged: 21,
-    flagLabel: "Yes",
-    flagThreshold: 0.8,
-    arlTarget: 50000,
-    minDecisionInterval: null,
+    baselineFlagged: 21, flagLabel: "Yes", flagThreshold: 0.8, arlTarget: 50000, minDecisionInterval: null,
     learningUntil: null,
     words: {
-      unitOne: "item",
-      unitMany: "items",
-      figureNote: "Share of items the check flagged",
-      referenceLabel: "is the reference",
-      referenceDetail: "Set from the first 1,000 items.",
+      unitOne: "item", unitMany: "items", figureNote: "Share of items the check flagged",
+      referenceLabel: "is the reference", referenceDetail: "Set from the first 1,000 items.",
       thresholdLine: "An item counts when its score is 0.80 or higher.",
     },
   };
@@ -745,12 +597,7 @@ describe("a case with a classifier detail", () => {
     ],
   };
   const classifierCase = (over: Partial<CaseDetail> = {}): CaseDetail => ({
-    ...BASE,
-    groundedness: null,
-    classifier_detail: DETAIL,
-    rca: null,
-    rca_report_id: null,
-    ...over,
+    ...BASE, groundedness: null, classifier_detail: DETAIL, rca: null, rca_report_id: null, ...over,
     case: { ...BASE.case, detector: "item_check", title: "Flagged items on support-agent rose", rca_verdict: null },
   });
 
@@ -800,14 +647,12 @@ describe("a case with a classifier detail", () => {
   });
 });
 
-describe("a case that cannot be read", () => {
-  it("says the case was not found, with the error", async () => {
-    api.getCase.mockRejectedValue(new ApiError(404, { code: "CASE.NOT_FOUND", message: "no such case" }));
-    renderPage();
+it("a case that cannot be read: says the case was not found, with the error", async () => {
+  api.getCase.mockRejectedValue(new ApiError(404, { code: "CASE.NOT_FOUND", message: "no such case" }));
+  renderPage();
 
-    expect(await heading("Case not found")).toBeTruthy();
-    expect(screen.getByText("CASE.NOT_FOUND")).toBeTruthy();
-  });
+  expect(await heading("Case not found")).toBeTruthy();
+  expect(screen.getByText("CASE.NOT_FOUND")).toBeTruthy();
 });
 
 describe("CasePage, groundedness", () => {
@@ -903,12 +748,12 @@ describe("CasePage, groundedness", () => {
   });
 
   it("hides the RCA controls when the organization does not have RCA", async () => {
-    getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: false } as CapabilitiesView["capabilities"] });
+    auth.getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: false } as CapabilitiesView["capabilities"] });
     renderPage();
 
     // The finished report still reads: only running it again is withheld.
     await screen.findByText(TITLE_1);
-    await settled(getCapabilities);
+    await settled(auth.getCapabilities);
     expect(screen.queryByRole("button", { name: "Re-run RCA" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Connect repository" })).toBeNull();
   });

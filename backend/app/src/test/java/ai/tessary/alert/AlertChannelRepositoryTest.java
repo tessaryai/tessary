@@ -9,7 +9,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -18,13 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * project's channel by id.
  */
 @SpringBootTest
-class AlertChannelRepositoryTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    AlertChannelRepository channels;
+record AlertChannelRepositoryTest(TenantService tenants, AlertChannelRepository channels) {
 
     @Test
     void everyColumnRoundTripsAndWritesStayInTheirProject() {

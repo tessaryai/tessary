@@ -13,26 +13,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The project-purge work queue on the unified {@code job} table: one {@code kind='project_delete'} row
- * per project the delete endpoint has accepted, {@code dedupe_key} = the project id. Claim / reclaim /
- * dead-letter is the shared kind-scoped {@link LeasedJobSql}, the same machinery the classifier queues
- * run on.
- *
- * <h2>Why these rows carry a NULL project_id</h2>
- *
- * <p>{@code job.project_id} is {@code ON DELETE CASCADE} to {@code project}. Every other kind wants that:
- * a project's queued work should vanish with the project. This kind is the exception, because its whole
- * job is to make the project vanish — a delete job that named its own project in that column would be
- * cascaded away by its own final statement, and the worker would come back from the purge to find no row
- * left to mark done. The id lives in {@code payload.project_id} and in {@code dedupe_key}, neither of
- * which any foreign key touches.
- *
- * <h2>Why the dedupe unique is scoped to unfinished statuses</h2>
- *
- * <p>{@code ux_job_project_delete} covers {@code pending} and {@code claimed} only. Double-clicking Delete
- * is therefore a no-op, while a purge that dead-letters can still be re-enqueued by
- * {@link #enqueueMissing} — an all-status unique would let one failed attempt block every future one
- * for a project that is already marked and can never be un-marked.
+ * These rows carry a NULL {@code project_id}: that column cascades from {@code project}, so a delete job naming its
+ * project would be cascaded away by its own final statement. The id lives in the payload and {@code dedupe_key}.
+ * {@code ux_job_project_delete} covers only unfinished statuses, so a dead-lettered purge can be re-enqueued.
  */
 @Repository
 public class ProjectDeleteJobRepository {
@@ -45,7 +28,7 @@ public class ProjectDeleteJobRepository {
         this.jdbc = jdbc;
     }
 
-    /** Enqueue the purge of one project. A second enqueue while one is still live is a no-op. */
+    /** A second enqueue while one is still live is a no-op. */
     public int enqueue(String projectId, String now) {
         return jdbc.sql("""
                 INSERT INTO job (id, project_id, kind, status, attempts, dedupe_key, payload, created_at, updated_at)
@@ -61,24 +44,9 @@ public class ProjectDeleteJobRepository {
     }
 
     /**
-     * Re-enqueue every project marked {@code deleting_at} that has no live job — the recovery read.
-     * Returns how many were revived.
-     *
-     * <p>Marking and enqueuing are two statements, so a backend that dies between them leaves a project
-     * nobody is purging and a user watching a row that will never disappear. This closes that window, and
-     * it is also how a dead-lettered purge gets picked back up. Idempotent by the same partial unique the
-     * endpoint's enqueue relies on, so N backends running this heartbeat converge on one job per project.
-     *
-     * <p>Each revival goes through {@link #enqueue}, one row at a time, rather than a single bulk
-     * {@code INSERT ... SELECT} — deliberately, because {@code job.id} is the primary key and a bulk
-     * statement needs one id expression shared by every row it inserts. A stable id derived from the
-     * project id (the previous approach) reused the SAME id across every dead-letter cycle for that
-     * project: a purge that dead-letters once and is revived, then dead-letters again, hits its own old
-     * {@code job_pkey} on the next revival — and because the bulk statement covers every orphaned project
-     * in one INSERT, that single unique-violation aborts the whole statement and silently blocks recovery
-     * for every other stuck project too. {@code dedupe_key}, not {@code id}, is the real dedupe mechanism
-     * (the partial unique index above), so the id only ever needs to be fresh — {@link Ids#ulid()}, the
-     * same generator {@link #enqueue} already uses.
+     * Closes the window where a backend dies between marking and enqueuing, and revives dead-lettered purges. One row
+     * at a time with a fresh id: a derived id collided with its own old {@code job_pkey} after repeated dead-letters,
+     * and in a bulk insert that blocked recovery for every stuck project.
      */
     public int enqueueMissing(String now) {
         List<String> orphaned = jdbc.sql("""
@@ -97,7 +65,6 @@ public class ProjectDeleteJobRepository {
         return revived;
     }
 
-    /** Claim up to {@code batch} due jobs under a fresh lease ({@code FOR UPDATE SKIP LOCKED}). */
     public List<ProjectDeleteJobRow> claimBatch(String leaseOwner, int batch, long leaseSeconds, int maxAttempts) {
         Instant now = Instant.now();
         return jdbc.sql(LeasedJobSql.claimBatchOfKind("job", COLS, "created_at"))
@@ -112,12 +79,8 @@ public class ProjectDeleteJobRepository {
     }
 
     /**
-     * Dead-letter jobs whose lease expired at/over the attempt cap. Returns the ids of the projects those
-     * jobs were purging, so the caller can surface the failure rather than leaving the project stuck
-     * showing "deleting" forever — see {@link ai.tessary.retention.ProjectPurgeWorker#tick}.
-     *
-     * <p>Written as a bespoke query rather than {@link LeasedJobSql#failExhaustedOfKind} because that
-     * shared helper has no {@code RETURNING} — every other queue it serves only needs the row count.
+     * Returns project ids so the caller can surface the failure. Bespoke because
+     * {@link LeasedJobSql#failExhaustedOfKind} has no RETURNING.
      */
     public List<String> failExhausted(int maxAttempts) {
         return jdbc.sql(String.format(Locale.ROOT, """
@@ -142,13 +105,7 @@ public class ProjectDeleteJobRepository {
                 .update();
     }
 
-    /**
-     * Return one job to {@code pending} with its error recorded, or park it {@code failed} once
-     * {@code attempts} has reached the cap.
-     *
-     * <p>A purge is resumable by construction — every batch commits, and every statement is scoped to the
-     * project id — so retrying one that failed halfway costs only the batches it has not done yet.
-     */
+    /** A purge is resumable (every batch commits), so a retry costs only the remaining batches. */
     public void markRetryable(String id, String error, int attempts, int maxAttempts) {
         String status = attempts >= maxAttempts ? "failed" : "pending";
         jdbc.sql("""
@@ -164,13 +121,8 @@ public class ProjectDeleteJobRepository {
     }
 
     /**
-     * Hand a still-unfinished purge back to the queue so the next tick continues it.
-     *
-     * <p>Distinct from {@link #markRetryable} because this is not a failure: the worker stopped on its
-     * per-tick batch cap, having committed real progress, and the batches it did are durable. Attempts
-     * resets to zero for exactly that reason — a project large enough to need more ticks than the attempt
-     * cap would otherwise dead-letter itself for being big, which is the one thing this whole change
-     * exists to stop happening.
+     * Not a failure: the per-tick cap stopped it with durable progress. Attempts reset, or a large project would
+     * dead-letter itself for being big.
      */
     public void releaseForContinuation(String id) {
         jdbc.sql("""

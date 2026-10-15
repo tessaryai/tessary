@@ -20,15 +20,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * JdbcClient repository for the v2 {@code span} table (substrate-model.md §3, §6.2).
- *
- * <p>One write shape: the last-write-wins upsert. A span is exported when it ends, but partial versions
- * do arrive, a streaming span flushed early, a redelivered batch, a producer that emits twice, and a
- * completed version must be able to replace a partial one. Versioning is by {@code event_ts}.
- *
- * <p>Reads are through the primary-key prefix {@code (project_id, trace_id)}, which is also the physical
- * clustering, so "this trace's spans" is one indexed, sequential read.
- *
+ * The {@code span} table (substrate-model.md §3, §6.2): last-write-wins upserts versioned by {@code event_ts}, and
+ * reads through the clustered {@code (project_id, trace_id)} key prefix.
  */
 @Repository
 public class SpanRepository {
@@ -45,7 +38,6 @@ public class SpanRepository {
 
     private final NamedParameterJdbcTemplate named;
 
-    /** The resolver passes' client, carrying {@code resolver-statement-timeout-seconds}. */
     private final JdbcClient resolverJdbc;
 
     public SpanRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named, SubstrateProperties props) {
@@ -53,7 +45,7 @@ public class SpanRepository {
         this.named = named;
         JdbcTemplate timed = new JdbcTemplate();
         timed.setDataSource(named.getJdbcTemplate().getDataSource());
-        timed.setQueryTimeout(props.getResolverStatementTimeoutSeconds());
+        timed.setQueryTimeout(props.resolverStatementTimeoutSeconds());
         this.resolverJdbc = JdbcClient.create(timed);
     }
 
@@ -160,39 +152,11 @@ public class SpanRepository {
     }
 
     /**
-     * Last-write-wins upsert against the natural key (§6.2), one JDBC batch for a whole batch of spans.
-     *
-     * <p><b>The SET list is every producer-sourced column, including {@code parent_span_id}.</b> It
-     * deliberately excludes {@code path}, {@code correlation_state} and {@code path_state}, everything the
-     * platform derived rather than received, and {@code created_at}, and it cannot touch {@code depth},
-     * {@code total_tokens} or {@code total_cost}, which are generated. A newer version replaces what the
-     * producer said; it never discards what we resolved, which would send an already-resolved span back
-     * into the fixpoint's work queue on every replay. The one derived write this method makes is on OTHER
-     * rows, the arrivals' retired children, below.
-     *
-     * <p><b>The guard is {@code >=}, not {@code >}.</b> Second-granularity SDK clocks make equal timestamps
-     * common, so ties go to the latest arrival; a replay rewriting identical content is then a no-op in
-     * effect rather than a rejected write. A strictly-greater guard would drop the completed version of
-     * every span whose partial shared its timestamp.
-     *
-     * <p><b>Backward clock steps on the producer can still discard a final version.</b> That is an accepted
-     * bounded risk, and the span-lateness histogram measures it as a negative-lateness tail rather than
-     * leaving it invisible.
-     *
-     * <p>The caller must re-arm the trace timer on both paths, insert and conflict, because a version
-     * replacement changes token counts and so must un-settle the trace exactly like a new span. And the
-     * write must share its transaction with that re-arm (§6.1).
-     *
-     * <p><b>An arrival takes back the orphans it is the parent of.</b> A batch exporter ships a span when
-     * it ends, so a parent that outlives its children by more than the settle window, a 30-second agent
-     * turn or a queue consumer, arrives after the trace settled and {@link #markOrphanPaths} retired them.
-     * The resolver only ever claims {@code pending} rows, so without this step the parent would stand in
-     * the trace with no children under it, forever. The arrived span's retired descendants, to any depth,
-     * go back to {@code pending} here, in the same transaction as the write; the parent gets its path on
-     * the next pass and the fixpoint resolves the subtree level by level. Only descendants of this batch's
-     * spans, and only under an arrival that is not itself retired: a sibling orphan whose own parent is
-     * still missing stays retired, and a redelivered orphan does not send its children round the retire
-     * loop again, so the queue remains drainable (§6.4).
+     * Last-write-wins upsert. The SET list excludes everything the platform derived ({@code path}, the state columns),
+     * so a replay never sends a resolved span back to work. The guard is {@code >=}: second-granularity clocks make
+     * ties common, and the completed version must win. The caller must re-arm the trace in the same transaction. An
+     * arrival also reclaims its retired orphan descendants, since a parent outliving the settle window arrives after
+     * they were retired.
      */
     public void upsertAll(List<SpanRow> rows) {
         int[] applied = named.batchUpdate(
@@ -203,19 +167,12 @@ public class SpanRepository {
         }
     }
 
-    /**
-     * Arrivals per reclaim statement: three bind parameters each, well inside the driver's ceiling, and a
-     * bounded number of distinct statement texts for the parse caches. The OTLP receiver caps a push at
-     * 2,000 spans, so the common batch is one statement.
-     */
+    /** The OTLP receiver caps a push at 2,000 spans, so the common batch is one statement. */
     private static final int RECLAIM_CHUNK = 1000;
 
     /**
-     * Put the retired ({@code orphan}) descendants of the given spans back into the resolver's queue. The
-     * walk is per trace and follows {@code parent_span_id} downward through orphans only, so a resolved
-     * subtree is never touched and a cycle cannot recurse ({@code UNION} de-duplicates). Each probe is a
-     * lookup in {@code ix_span_orphan_parent}, the partial index over orphan rows, so a batch with nothing
-     * to reclaim, the common case, costs one near-empty index read per arrival.
+     * Walks down through orphans only, so resolved subtrees are untouched; each probe hits the partial index
+     * {@code ix_span_orphan_parent}.
      */
     private void reclaimOrphansUnder(List<SpanRow> rows) {
         StringBuilder values = new StringBuilder();
@@ -254,25 +211,15 @@ public class SpanRepository {
                 params);
     }
 
-    // ----- resolver work queues (substrate-model.md §6.3, §6.4) ------------------------------------
-
     /**
-     * A span id rendered as one {@code ltree} label.
-     *
-     * <p>OTel span ids are hex, so for every span this table is designed around it is the identity
-     * function. It exists because an ltree label accepts only {@code [A-Za-z0-9_]}, and a single
-     * non-conforming producer id would otherwise raise on every pass of the fixpoint, forever, a
-     * permanently wedged resolver rather than one bad row. Deterministic, so a subtree prefix built the
-     * same way still matches (§9).
+     * An ltree label accepts only {@code [A-Za-z0-9_]}; one non-conforming producer id would otherwise wedge the
+     * resolver forever. Deterministic, so subtree prefixes still match.
      */
     private static final String SPAN_ID_LABEL = "text2ltree(regexp_replace(s.id, '[^A-Za-z0-9_]', '_', 'g'))";
 
     /**
-     * Give the batch's producer-declared roots the ancestry they already have: their own id, one level
-     * deep. <b>Root is {@code parent_span_id IS NULL}</b>, the producer's statement, and never "the
-     * parent has not arrived", which is what a null {@code path} means instead.
-     *
-     * @return the number of spans resolved.
+     * Root is {@code parent_span_id IS NULL}, never "the parent has not arrived", which is what a null {@code path}
+     * means.
      */
     public int resolveRootPaths(int limit) {
         return resolverJdbc
@@ -288,22 +235,9 @@ public class SpanRepository {
     }
 
     /**
-     * One pass of the ancestry fixpoint: extend a resolved parent's path with the child's own id.
-     *
-     * <p>Each pass resolves exactly one level, and a batch exporter flushes a span when it ends, so
-     * chains arrive deepest-first and a chain of depth <i>n</i> converges in at most <i>n</i> passes. The
-     * partial index {@code ix_span_unresolved_path} is what keeps each pass a small indexed scan instead of
-     * a table scan over everything already resolved.
-     *
-     * <p><b>Selection is join-driven: a claimed row is always resolvable.</b> The parent-is-resolved
-     * {@code EXISTS} lives in the {@code due} CTE, not only in the outer join, so the {@code LIMIT} spends
-     * its budget on rows that will actually be updated. With the condition in the outer join alone, an
-     * unordered {@code LIMIT} kept re-claiming the same first entries of the partial index, all of them
-     * children whose parent sat further down it. The {@code UPDATE} matched none of them, and rows
-     * deeper in the index were never reached. That is permanent head-of-line blocking, not a slow pass: the
-     * pending count freezes while the resolver keeps ticking.
-     *
-     * @return the number of spans resolved this pass; zero means the fixpoint has converged.
+     * One level per pass; zero means converged. The parent-is-resolved {@code EXISTS} is in the {@code due} CTE so the
+     * {@code LIMIT} only claims resolvable rows; in the outer join alone it re-claimed the same unresolvable head of
+     * the index forever.
      */
     public int resolveChildPaths(int limit) {
         return resolverJdbc
@@ -324,30 +258,9 @@ public class SpanRepository {
     }
 
     /**
-     * Retire spans whose ancestry can never resolve: the trace has settled and there is no non-orphan
-     * parent row for them to hang off, either the producer never shipped the parent, or the parent is
-     * itself an orphan.
-     *
-     * <p><b>This is what keeps the fixpoint drainable</b> (implementation plan §2.6). Without a terminal
-     * state, every permanently-unresolvable span stays in {@code ix_span_unresolved_path} forever; once the
-     * permanent residents outnumber the pass limit, genuine work is never selected again. That is a
-     * correctness failure, not a slow query.
-     *
-     * <p>A parent that exists but is still {@code pending} deliberately blocks the marking: the fixpoint
-     * has not finished with it yet, and orphaning its children early would strand a subtree that was about
-     * to resolve.
-     *
-     * <p><b>A trace an ingest batch is writing is skipped this pass.</b> The batch holds the trace row
-     * {@code FOR UPDATE} from before its span write until it commits, and its write takes back the
-     * orphans under the spans it carries ({@link #upsertAll}). Retiring a span off a snapshot taken before
-     * that commit, and committing after the batch's reclaim had already looked and found nothing to
-     * reclaim, would strand the span as an orphan beside a parent that is now present. Sharing the trace
-     * row, and skipping one that is locked, closes that window: either this pass goes first and the batch's
-     * reclaim then sees the orphan, or the batch goes first and the next pass sees the parent. {@code SKIP
-     * LOCKED} never waits, so the resolver cannot deadlock with ingest, whose own lock order it does not
-     * follow.
-     *
-     * @return the number of spans marked orphan.
+     * Retire spans whose trace has settled with no non-orphan parent row: without a terminal state the permanent
+     * residents crowd genuine work out of the index. A pending parent blocks it. A trace an ingest batch holds is
+     * skipped ({@code SKIP LOCKED}), or a span could be retired beside a parent that just arrived.
      */
     public int markOrphanPaths(int limit) {
         return resolverJdbc.sql("""
@@ -371,14 +284,8 @@ public class SpanRepository {
     }
 
     /**
-     * Copy the correlation handles down from the trace row onto spans that arrived without them (§6.3).
-     *
-     * <p>This is the FALLBACK path, not the primary one. Our SDK puts session, user and trace name in
-     * OpenTelemetry Baggage so every span self-describes and no server-side join is needed; this exists for
-     * third-party OTel producers that do not propagate, and the partial index {@code ix_span_uncorrelated}
-     * is what keeps it cheap.
-     *
-     * @return the number of spans correlated.
+     * The FALLBACK for third-party producers that do not propagate Baggage; {@code ix_span_uncorrelated} keeps it
+     * cheap.
      */
     public int backfillCorrelation(int limit) {
         return resolverJdbc.sql("""
@@ -401,19 +308,9 @@ public class SpanRepository {
     }
 
     /**
-     * Copy a session that {@link TraceV2Repository#fillCorrelation} just gave these traces onto their
-     * session-less spans, inside the ingest transaction that filled it (§6.3).
-     *
-     * <p>Not left to {@link #backfillCorrelation}: a child of a trace that settled before its root arrived
-     * is already {@code correlation_state = 'none'}, which that pass never reads again, and flipping it back
-     * to {@code pending} races {@link #markCorrelationNone}, whose unlocked read of the trace can still see
-     * it anonymous and retire the span a second time. Writing the span row itself makes both statements
-     * contend on that row, so whichever runs second sees the session.
-     *
-     * <p>Locks in {@code (trace_id, id)} order like every other span lock the batch takes. The resolver
-     * passes lock without an order, the same exposure {@link #upsertAll} already has with them.
-     *
-     * @return the number of spans given their trace's session.
+     * Inside the ingest transaction, not left to {@link #backfillCorrelation}: a child of an early-settled trace is
+     * already {@code correlation_state = 'none'}, and flipping it back would race {@link #markCorrelationNone}. Writing
+     * the span row makes both contend on it.
      */
     public int adoptTraceSession(String projectId, Collection<String> traceIds) {
         if (traceIds.isEmpty()) return 0;
@@ -441,15 +338,8 @@ public class SpanRepository {
     }
 
     /**
-     * Retire spans there will never be a session to copy: the trace has settled carrying a null
-     * {@code session_id}, which is what anonymous traffic looks like and is a legitimate permanent state.
-     *
-     * <p>The counterpart of {@link #markOrphanPaths}, and load-bearing for the same reason: anonymous
-     * traffic is a large, permanent population, and without a terminal state it would sit in
-     * {@code ix_span_uncorrelated} being re-read on every tick until it crowded out every span that
-     * actually had a session waiting for it.
-     *
-     * @return the number of spans marked as having no correlation to inherit.
+     * Anonymous traffic is permanent and large; without a terminal state it would crowd every real candidate out of
+     * {@code ix_span_uncorrelated}.
      */
     public int markCorrelationNone(int limit) {
         return resolverJdbc.sql("""
@@ -467,14 +357,12 @@ public class SpanRepository {
                         """).param("limit", limit).update();
     }
 
-    /** Spans still awaiting ancestry, the depth of {@code ix_span_unresolved_path}, for the heartbeat. */
     public int pendingPathCount() {
         return jdbc.sql("SELECT count(*) FROM span WHERE path IS NULL AND path_state = 'pending'")
                 .query(Integer.class)
                 .single();
     }
 
-    /** Spans still awaiting correlation, the depth of {@code ix_span_uncorrelated}, for the heartbeat. */
     public int pendingCorrelationCount() {
         return jdbc.sql("SELECT count(*) FROM span WHERE session_id IS NULL AND correlation_state = 'pending'")
                 .query(Integer.class)
@@ -482,12 +370,7 @@ public class SpanRepository {
     }
 
     /**
-     * A trace's spans, in ancestry-then-time order. Reads the primary-key prefix, which is also the
-     * physical clustering, so this is the read the rollup recompute and the trace view both make.
-     *
-     * <p>Ordered by {@code (started_at, id)} rather than by arrival: {@code created_at} records when we
-     * received a span, and a batch exporter flushes on END, so arrival order is close to reverse causal
-     * order. Event time is the order the work actually happened in.
+     * Ordered by event time, not arrival: a batch exporter flushes on END, so arrival is close to reverse causal order.
      */
     public List<SpanRow> listByTrace(String projectId, String traceId) {
         return jdbc.sql("SELECT " + COLS + " FROM span WHERE project_id = :pid AND trace_id = :tid"
@@ -498,16 +381,7 @@ public class SpanRepository {
                 .list();
     }
 
-    /**
-     * The same read, bounded, for a caller that renders at most N spans and must not pay for a trace that
-     * has far more.
-     *
-     * <p>The unbounded overload above is right for the rollup recompute, which genuinely needs every span.
-     * It is wrong for a display read: a long agent loop emits a span per tool call, so a trace can reach
-     * six figures, and materializing all of them to serialize the first two hundred is heap spent to be
-     * thrown away. Ask for {@code cap + 1} and the extra row still answers "was there more?" without a
-     * second query, exactly as the keyset pages do.
-     */
+    /** For display reads: a trace can reach six figures. Ask for {@code cap + 1} to learn whether there was more. */
     public List<SpanRow> listByTrace(String projectId, String traceId, int limit) {
         return jdbc.sql("SELECT " + COLS + " FROM span WHERE project_id = :pid AND trace_id = :tid"
                         + " ORDER BY started_at ASC, id ASC LIMIT :limit")
@@ -518,15 +392,7 @@ public class SpanRepository {
                 .list();
     }
 
-    /**
-     * The spans of every trace in {@code traceIds}, in one ancestry-then-time-ordered read, the batched
-     * sibling of {@link #listByTrace(String, String, int)} for a session's traces rather than one trace's.
-     * Filters {@code trace_id = ANY(:ids)}, which reads the same {@code (project_id, trace_id, id)}
-     * primary-key clustering the single-trace read does, just for a set instead of one id, no new index.
-     *
-     * <p>Bounded the same way: ask for {@code cap + 1} and the extra row answers "was there more?" without a
-     * second query.
-     */
+    /** Bounded like {@link #listByTrace(String, String, int)}. */
     public List<SpanRow> listByTraceIds(String projectId, Collection<String> traceIds, int limit) {
         if (traceIds.isEmpty()) {
             return List.of();
@@ -541,14 +407,8 @@ public class SpanRepository {
     }
 
     /**
-     * The spans named by {@code keys}, in one query, the hydration read behind a page of spans that some
-     * other index chose (a keyword search page). A row per key would be fifty round trips for
-     * a fifty-row page.
-     *
-     * <p><b>The result is unordered and may be shorter than {@code keys}.</b> SQL has no inherent order over
-     * an id set, and the ordering that matters here, recency for a keyset page, is the caller's, so the
-     * caller re-applies it. Short is a race, not an error: a span can be removed by the retention sweep
-     * between the index read and this one, and dropping it is right.
+     * Unordered and possibly short: SQL has no order over an id set, and a span retention removed between the reads is
+     * dropped.
      */
     public List<SpanRow> listByKeys(String projectId, List<SpanKey> keys) {
         if (keys.isEmpty()) {
@@ -560,7 +420,7 @@ public class SpanRepository {
         return SpanKey.bind(spec, keys).query((rs, n) -> map(rs)).list();
     }
 
-    /** One span by its full identity. There is no lookup by bare id: the trace is part of the key. */
+    /** There is no lookup by bare id: the trace is part of the key. */
     public Optional<SpanRow> findById(String projectId, String traceId, String id) {
         return jdbc.sql("SELECT " + COLS + " FROM span" + " WHERE project_id = :pid AND trace_id = :tid AND id = :id")
                 .param("pid", projectId)

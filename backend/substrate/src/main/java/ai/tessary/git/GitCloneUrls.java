@@ -4,11 +4,8 @@ package ai.tessary.git;
 import java.util.Optional;
 
 /**
- * Builds an authenticated clone URL with a short-lived installation token embedded
- * ({@code https://x-access-token:TOKEN@host/owner/repo.git}). Shared by the observer
- * (drift analysis) and synth (code grounding) so neither reaches into the other's
- * package. Returns empty when a token can't be minted (integration not authorized).
- * The token is short-lived — the URL must never be logged.
+ * Builds a clone URL with a short-lived installation token embedded. Empty when no token can be minted. The URL must
+ * never be logged.
  */
 public final class GitCloneUrls {
 

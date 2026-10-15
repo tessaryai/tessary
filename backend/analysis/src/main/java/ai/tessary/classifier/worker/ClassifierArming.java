@@ -34,69 +34,39 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The per-span classifiers' own arming: N detections in window W open or refresh a FINDING, with the
- * spans that fired as its evidence.
- *
- * <p>This is where the threshold {@code alert_rule} rows went. That rule was the alerting subsystem's
- * door into classifier detections — it counted a window and paged someone, and a second consumer
- * (the deleted {@code ClassifierSignalSource}) read the same decision to open a case. Neither door
- * exists now. The number a human chose survives as {@code config_json.arming} (migration {@code 0089}
- * translated every enabled rule onto its classifier), and the classifier acts on it directly, inside
- * its own sweep, one transaction with the detection writes.
- *
- * <p><b>Why a finding rather than an alert.</b> A finding is the thing the rest of the platform can
- * act on: a case opens from it, evidence hangs off it, a human rules on it once and the ruling sticks.
- * A threshold breach that only sent a message had none of that, which is why the same window firing on
- * every heartbeat was a notification problem rather than a state a human could close.
- *
- * <p><b>A classifier with no arming config never files anything.</b> A user-authored classifier ships
- * unarmed: inventing a bar for someone else's classifier would open cases about a line they never drew.
- * A built-in may ship armed, because the platform authored both the detector and the bar.
- *
- * <p><b>Two shapes.</b> By default a classifier holds one finding, keyed on the classifier, counted over
- * every event-time window this sweep's firings touched, oldest first — never only the window {@code now}
- * falls in, or a backfill would never file. A classifier in {@link #FACET_KEYS} instead holds one finding
- * per call site and per facet of what it detected, counted the same way; see {@link #evaluateFaceted}.
+ * N detections in window W open or refresh a finding, in the same transaction as the detection writes. A classifier
+ * with no arming config never files: inventing a bar for a user-authored classifier would open cases about a line its
+ * owner never drew. Every event-time window a sweep touched is counted, not only the current one, or a backfill would
+ * never file.
  */
 @Component
 public class ClassifierArming {
 
     private static final Logger log = LoggerFactory.getLogger(ClassifierArming.class);
 
-    /** The config member 0089 writes and this reads. */
     private static final String ARMING = "arming";
 
     private static final int DEFAULT_WINDOW_SECONDS = 86_400;
 
     /**
-     * How many empty windows count as a recovery. A classifier that breaches its bar in consecutive
-     * windows is one spell and keeps one finding; two whole windows with no refresh is the classifier
-     * having stopped, so the next breach starts a new spell and moves the onset — which is what lets a
-     * case a human resolved reopen when the behaviour comes back, rather than on the next tick.
+     * Two whole windows with no refresh end a spell, so the next breach moves the onset and can reopen a case a human
+     * resolved.
      */
     private static final int QUIET_WINDOWS = 2;
 
     /**
-     * The classifiers whose arming is faceted, each mapped to the evidence member its facet is read from.
-     *
-     * <p>A leaked credential is a statement about one place and one kind of secret. Filed against the whole
-     * classifier, an AWS key leaking from one call site and a GitHub token from another would share one
-     * finding, and a single ruling would silence both, including the one nobody looked at.
+     * Filed against the whole classifier, leaks of different secrets at different call sites would share one finding,
+     * and one ruling would silence both.
      */
     private static final Map<String, String> FACET_KEYS = Map.of(BuiltInDetector.Kind.SECRET_LEAK, "pattern");
 
-    /** The evidence member {@code detector}'s bar counts each value of on its own, or null for a whole-project bar. */
     public static @Nullable String facetKey(String detector) {
         return FACET_KEYS.get(detector);
     }
 
-    /**
-     * Witnesses kept per faceted finding. A cause that keeps firing needs a handful of instances a reader
-     * can open, not every span it ever fired on pinned against retention.
-     */
+    /** A cause that keeps firing needs a handful of instances to open, not every span pinned against retention. */
     static final int MAX_WITNESSES = 50;
 
-    /** The ruling a high-confidence leak is written with at arming, in place of a triage run's summary. */
     public static final String HIGH_CONFIDENCE_LEAK_SUMMARY =
             "A high-confidence credential pattern matched in the agent's output, so this leak was ruled real without triage.";
 
@@ -104,8 +74,6 @@ public class ClassifierArming {
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;
     private final ObjectMapper mapper;
-    /** Opens or joins the case for a facet finding this class just ruled positive at high confidence; see
-     *  {@link #evaluateFaceted}. */
     private final CaseOpener caseOpener;
 
     public ClassifierArming(
@@ -121,20 +89,13 @@ public class ClassifierArming {
         this.caseOpener = caseOpener;
     }
 
-    /**
-     * One classifier's arming configuration: how many of what, over how long, at which band.
-     *
-     * @param confidence {@code high} to count only the HIGH band, {@code any} for both, or null to follow
-     *     the classifier's mode. Set explicitly by a built-in whose low band should stay visible on the
-     *     page (which is what discovery mode means) without counting toward its bar.
-     */
+    /** @param confidence {@code high}, {@code any}, or null to follow the classifier's mode */
     public record Config(
             String basis,
             long threshold,
             long windowSeconds,
             @Nullable String confidence) {
 
-        /** Whether the bar counts only the HIGH band for {@code signal}. */
         public boolean highOnly(ClassifierRow signal) {
             return switch (confidence == null ? "" : confidence) {
                 case "high" -> true;
@@ -143,23 +104,14 @@ public class ClassifierArming {
             };
         }
 
-        /** Whether the bar counts distinct sessions rather than detections. */
         public boolean bySession() {
-            // distinct_users is a SESSION count, the user proxy the threshold rules used, carried over
-            // verbatim so a translated rule keeps counting what its owner set it to count. every_match and
-            // event_count both count detections; they differed only in the threshold, and 0089 folded
-            // every_match's forced threshold of one into the translated config.
+            // distinct_users is a session count, carried over verbatim from the threshold rules so a translated rule
+            // keeps counting what its owner set.
             return "distinct_users".equals(basis);
         }
     }
 
-    /**
-     * Evaluate the {@code signal}'s bar against this sweep's firings and file a finding for every scope
-     * that crossed it.
-     *
-     * @param firedRefs the subjects this sweep flagged, in sweep order — the finding's evidence
-     * @return the ids of the findings opened or refreshed, oldest window first; empty when nothing crossed
-     */
+    /** @return the ids of the findings opened or refreshed, oldest window first */
     @Transactional
     public List<String> evaluate(
             ClassifierRow signal, String projectId, List<FindingEvidenceRepository.Ref> firedRefs, Instant now) {
@@ -171,16 +123,9 @@ public class ClassifierArming {
     }
 
     /**
-     * The classifier-wide shape: one finding, counted over event-time windows — the same walk
-     * {@link #evaluateFaceted} does, minus a facet or call site to key on: a classifier is project-wide,
-     * so its finding implicates no single call site.
-     *
-     * <p><b>Every window this sweep touched is evaluated, not only the one {@code now} falls in.</b>
-     * Windows are bucketed on when the span happened, and a backfill or a late upload hands the sweep
-     * detections from weeks ago; evaluating only the current window would never file those. Filed
-     * oldest first, so a classifier that keeps firing walks forward through its windows, and {@link
-     * FindingRepository#recordArmedWindow} keeps a window that arrives out of order from moving the
-     * finding backwards.
+     * Every window this sweep touched is evaluated, oldest first: a backfill or late upload hands the sweep weeks-old
+     * detections. {@link FindingRepository#recordArmedWindow} keeps an out-of-order window from moving the finding
+     * backwards.
      */
     private List<String> evaluateWhole(
             ClassifierRow signal,
@@ -229,9 +174,8 @@ public class ClassifierArming {
                     at);
             if (recorded == null) continue; // a ruled finding already covers this window or a newer one
 
-            // Same transaction as the finding write, so a finding never exists without the evidence that
-            // justified it. Scoped to this window's own spans: a later refresh adds new members, and the
-            // per-ref idempotency means a re-swept window never re-adds what it already recorded.
+            // Same transaction as the finding write, so a finding never exists without the evidence that justified it.
+            // Per-ref idempotency means a re-swept window never re-adds what it recorded.
             List<FindingEvidenceRepository.Ref> refs = members.getOrDefault(w.windowStartEpochSecond(), List.of());
             int stored = evidence.record(projectId, recorded.findingId(), FindingEvidenceRow.Role.MEMBER, refs, at);
             filed.add(recorded.findingId());
@@ -256,26 +200,11 @@ public class ClassifierArming {
     }
 
     /**
-     * The faceted shape: one finding per call site and facet, counted over event-time windows.
-     *
-     * <p><b>Every window this sweep touched is evaluated, not only the current one.</b> Windows are
-     * bucketed on when the span happened, and a backfill or a late upload hands the sweep detections from
-     * weeks ago. Evaluating only the window {@code now} falls in would never file those, and at a bar of
-     * one that means a leak discovered late is never a finding at all.
-     *
-     * <p>Windows are filed oldest first, so a facet that fired across several walks forward through them,
-     * and {@link FindingRepository#recordArmedFacet} keeps a window that arrives out of order from moving
-     * the finding backwards. Evidence is {@link FindingEvidenceRow.Role#WITNESS}, capped at
-     * {@link #MAX_WITNESSES}: instances to open, not an enumeration of the population.
-     *
-     * <p><b>A high-confidence facet is ruled positive here, without triage.</b> A credential in a format
-     * its provider stamps into the key is a leak whoever looks at it, so the finding is written {@code
-     * positive} with {@link #HIGH_CONFIDENCE_LEAK_SUMMARY} and its case opens (or joins) in the same
-     * transaction. A low-confidence facet stays unruled and goes to triage like any other finding. The
-     * ruling takes the row out of {@code ux_finding_live} (decision 1), so the next re-sweep of the same
-     * window finds no live row to refresh; {@link FindingRepository#recordArmedFacet} returns null for it
-     * rather than forking a duplicate, and only a newer window files a fresh finding, which is ruled here
-     * in turn and joins the same unlocked case.
+     * Every window this sweep touched is evaluated, oldest first; at a bar of one, evaluating only the current window
+     * would mean a late-discovered leak is never a finding. A high-confidence facet is ruled positive here without
+     * triage, since a provider-stamped key format is a leak whoever looks. The ruling takes the row out of
+     * {@code ux_finding_live}, so a re-sweep gets null from {@link FindingRepository#recordArmedFacet} rather than
+     * forking a duplicate.
      */
     private List<String> evaluateFaceted(
             ClassifierRow signal,
@@ -341,8 +270,7 @@ public class ClassifierArming {
                     new FacetScope(w.callSiteId(), w.facet(), w.windowStartEpochSecond()), List.of());
             int stored = evidence.recordUpTo(
                     projectId, recorded.findingId(), FindingEvidenceRow.Role.WITNESS, refs, MAX_WITNESSES, at);
-            // Re-read rather than taken from this window: confidence is sticky across the row's windows, so
-            // an older high window can make a low one's refresh high.
+            // Re-read rather than taken from this window: confidence is sticky across the row's windows.
             boolean high = findings.findById(projectId, recorded.findingId())
                     .map(FindingRow::highConfidence)
                     .orElse(false);
@@ -400,13 +328,11 @@ public class ClassifierArming {
         return List.copyOf(filed);
     }
 
-    /** Which finding and which window a fired span's witness belongs to. */
     private record FacetScope(@Nullable String callSiteId, String facet, long windowStartEpochSecond) {}
 
     /**
-     * Read the {@code arming} block out of a classifier's config, or null when it is absent or
-     * unreadable. Unreadable degrades to unarmed rather than throwing: a malformed config must not stop
-     * the classifier from detecting, which is the part that cannot be recomputed later.
+     * Unreadable degrades to unarmed rather than throwing: a malformed config must not stop detection, which cannot be
+     * recomputed later.
      */
     @Nullable
     Config configOf(ClassifierRow signal) {
@@ -414,10 +340,7 @@ public class ClassifierArming {
         return parse(mapper, signal.configJson());
     }
 
-    /**
-     * The {@code arming} block of a classifier's {@code config_json}, with its defaults, or null when it is absent
-     * or unreadable. The one parse both the sweep and a chart read, so the bar a chart draws is the bar that files.
-     */
+    /** The one parse both the sweep and a chart read, so the bar a chart draws is the bar that files. */
     public static @Nullable Config parse(ObjectMapper mapper, @Nullable String json) {
         if (json == null || json.isBlank()) return null;
         try {
@@ -433,12 +356,7 @@ public class ClassifierArming {
         }
     }
 
-    /**
-     * What the finding says about itself: the bar, the window it was measured over, and the count. The
-     * basis rides along because "17 detections" and "17 sessions" are different claims and a case title
-     * built from this has to be able to say which. A faceted finding also names its call site and facet,
-     * the two things its title is built from.
-     */
+    /** The basis rides along because "17 detections" and "17 sessions" are different claims. */
     private String payload(
             String classifierKey,
             Config config,

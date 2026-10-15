@@ -33,18 +33,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * GitHub App connect surface for a project. Authenticated + owner-gated — we must know which
- * project is connecting to bind the signed {@code state}. Three ways in, all landing back on
- * {@link GithubCallbackController} or its picker:
- *
- * <ul>
- *   <li>{@code GET /install-url} — first install on an account: {@code github.com/apps/<slug>/installations/new}.
- *   <li>{@code GET /authorize-url} — the App is already installed (a 2nd+ project): a standalone OAuth
- *       authorize that reuses the existing installation instead of trying to re-install (which GitHub
- *       won't do — one installation per account).
- *   <li>{@code GET /installation-options} + {@code POST /select-installation} — the repo picker, used
- *       when an authorize/install resolves more than one candidate repo.
- * </ul>
+ * GitHub App connect surface; owner-gated because the signed {@code state} must bind a project. Fresh install, a
+ * standalone OAuth authorize for a 2nd+ project (GitHub installs an App once per account), and a repo picker when more
+ * than one candidate resolves.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/git/github")
@@ -74,7 +65,6 @@ public class GithubInstallController {
         this.workos = workos;
     }
 
-    /** Fresh-install URL: the browser installs the App, GitHub returns to the callback with installation_id + code. */
     @GetMapping("/install-url")
     public ApiResponse<InstallUrlView> installUrl(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
@@ -91,16 +81,14 @@ public class GithubInstallController {
     }
 
     /**
-     * Standalone OAuth authorize URL: reuses an installation already on the user's account/org (the
-     * 2nd+ project case — GitHub installs an App only once per account, so {@code installations/new}
-     * just bounces to "configure" and never re-fires our callback). GitHub returns to the callback
-     * with a {@code code} and NO installation_id, where we enumerate the user's installations.
+     * {@code installations/new} would bounce to "configure" and never re-fire our callback for an existing install.
+     * GitHub returns a {@code code} and no installation_id.
      */
     @GetMapping("/authorize-url")
     public ApiResponse<InstallUrlView> authorizeUrl(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
         Resolved r = requireOwner(ctx, orgSlug, projectSlug);
-        // Both the app key (to mint installation tokens after) and OAuth creds (to identify the user) are required.
+        // The app key mints installation tokens; OAuth creds identify the user.
         if (!props.isConfigured() || !props.hasOAuth()) {
             throw new TessaryException(GitError.MISSING_APP_CONFIG, "github");
         }
@@ -109,11 +97,8 @@ public class GithubInstallController {
                 .append(URLEncoder.encode(props.getClientId(), StandardCharsets.UTF_8))
                 .append("&state=")
                 .append(URLEncoder.encode(s, StandardCharsets.UTF_8));
-        // Pin the redirect explicitly to our callback. Without redirect_uri GitHub leaves the user on its
-        // "you are being redirected to the authorized application" interstitial (relying on the App's
-        // default callback, which may not auto-forward); WITH it GitHub 302s straight back to the callback
-        // carrying ?code&state. Built from the same browser-facing base the callback uses to bounce users
-        // home, so its host matches the App's registered Callback URL on a single-origin (Caddy) deploy.
+        // Without redirect_uri GitHub leaves the user on its interstitial; with it GitHub 302s straight back. Same base
+        // as the callback so the host matches the registered Callback URL.
         String base = frontendBase();
         if (!base.isEmpty()) {
             url.append("&redirect_uri=")
@@ -127,12 +112,7 @@ public class GithubInstallController {
         return (base == null || base.isBlank()) ? "" : base.replaceAll("/+$", "");
     }
 
-    /**
-     * The repos the user can bind, for the picker. Reads the sealed selection token the callback
-     * minted (carrying the verified-administered installation ids) and lists each installation's
-     * repos via the App token. The token is bound to this project — a token minted for another
-     * project is rejected, so the picker can't be driven cross-tenant.
-     */
+    /** The sealed selection token is bound to this project, so the picker can't be driven cross-tenant. */
     @GetMapping("/installation-options")
     public ApiResponse<InstallationOptionsView> installationOptions(
             TenantContext ctx,
@@ -150,12 +130,7 @@ public class GithubInstallController {
         return ApiResponse.ok(new InstallationOptionsView(candidates));
     }
 
-    /**
-     * Finalize a picker choice. Re-validates the pick against the sealed token: the installation must
-     * be one the user was proven to administer, and the repo must actually be in that installation
-     * (checked via the App token, not trusted from the request) — so neither field can be forged to
-     * attach an installation/repo the user has no claim to.
-     */
+    /** Re-validated against the sealed token and the App token, so neither field can be forged. */
     @PostMapping("/select-installation")
     public ApiResponse<GitIntegrationView> selectInstallation(
             TenantContext ctx,
@@ -178,7 +153,6 @@ public class GithubInstallController {
         return ApiResponse.ok(GitIntegrationView.from(row));
     }
 
-    /** Open the selection token and bind it to the caller's project (reject cross-project tokens). */
     private SelectionPayload requireSelectionFor(String token, Resolved r) {
         SelectionPayload sel = state.verifySelection(token);
         if (!sel.projectId().equals(r.project().id())) {

@@ -5,11 +5,8 @@ import ai.tessary.redaction.CustomRuleGate;
 import org.springframework.stereotype.Component;
 
 /**
- * The one implementation of {@link CustomRuleGate}: resolve {@link Capability#CUSTOM_REDACTION} for the org
- * through the same {@link CapabilityService} every other gated surface uses.
- *
- * <p>It lives in {@code product} beside the capability layer rather than in {@code substrate} beside the
- * controller, because that is the direction the dependency has to run — see the interface's own note.
+ * Resolves {@link Capability#CUSTOM_REDACTION} through {@link CapabilityService}. Lives in {@code product} because the
+ * dependency must point that way.
  */
 @Component
 public class CapabilityCustomRuleGate implements CustomRuleGate {

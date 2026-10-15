@@ -15,13 +15,9 @@ import type { TraceDetailView } from "../../api/types";
 import { span, traceItem, type SpanView } from "../../test/fixtures";
 import { currentParams, renderRoute } from "../../test/render";
 import { TraceDetail } from "./TraceDetail";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getTrace: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const j = (v: unknown) => JSON.stringify(v);
 const HISTORY = [
@@ -54,60 +50,34 @@ const TOOL_RESULTS = {
 function turn(): SpanView[] {
   return [
     span({
-      id: "tr-tool",
-      kind: "tool",
-      name: "execute_tool lookup_order",
-      parent_span_id: "sp-agent",
-      started_at: "2026-09-25T10:00:00.600Z",
-      ended_at: "2026-09-25T10:00:00.900Z",
-      duration_ms: 300,
+      id: "tr-tool", kind: "tool", name: "execute_tool lookup_order", parent_span_id: "sp-agent",
+      started_at: "2026-09-25T10:00:00.600Z", ended_at: "2026-09-25T10:00:00.900Z", duration_ms: 300,
       attributes: { "gen_ai.tool.call.id": "call_1" },
       tool_calls: [{ name: "lookup_order", args: '{"id":881}', result: '{"status":"packed"}', error: null, latency_ms: 300, retries: 0 }],
     }),
     span({
-      id: "sp-agent",
-      kind: "agent",
-      name: "invoke_agent policy-gpt",
-      started_at: "2026-09-25T10:00:00.000Z",
-      ended_at: "2026-09-25T10:00:02.000Z",
-      duration_ms: 2_000,
+      id: "sp-agent", kind: "agent", name: "invoke_agent policy-gpt", started_at: "2026-09-25T10:00:00.000Z",
+      ended_at: "2026-09-25T10:00:02.000Z", duration_ms: 2_000,
       input: j([QUESTION]),
       output: j([{ role: "assistant", content: "It ships today." }]),
     }),
     span({
-      id: "sp-llm-1",
-      parent_span_id: "sp-agent",
-      name: "chat claude",
-      model: "claude-sonnet-5",
-      started_at: "2026-09-25T10:00:00.100Z",
-      ended_at: "2026-09-25T10:00:00.500Z",
-      duration_ms: 400,
-      total_tokens: 12_000,
-      total_cost: 0.0042,
+      id: "sp-llm-1", parent_span_id: "sp-agent", name: "chat claude", model: "claude-sonnet-5",
+      started_at: "2026-09-25T10:00:00.100Z", ended_at: "2026-09-25T10:00:00.500Z", duration_ms: 400,
+      total_tokens: 12_000, total_cost: 0.0042,
       input: j([...HISTORY, QUESTION]),
       output: j([TOOL_REQUEST]),
     }),
     span({
-      id: "sp-llm-2",
-      parent_span_id: "sp-agent",
-      name: "chat claude",
-      model: "claude-sonnet-5",
-      started_at: "2026-09-25T10:00:01.000Z",
-      duration_ms: 500,
-      total_tokens: 900,
-      total_cost: null,
+      id: "sp-llm-2", parent_span_id: "sp-agent", name: "chat claude", model: "claude-sonnet-5",
+      started_at: "2026-09-25T10:00:01.000Z", duration_ms: 500, total_tokens: 900, total_cost: null,
       cost_source: "unpriced",
       input: j([...HISTORY, QUESTION, TOOL_REQUEST_REPLAYED, TOOL_RESULTS]),
       output: j([{ type: "text", text: "It ships today." }]),
     }),
     span({
-      id: "sp-search",
-      kind: "retrieval",
-      name: "search_docs",
-      parent_span_id: "sp-agent",
-      started_at: "2026-09-25T10:00:01.600Z",
-      duration_ms: 50,
-      status: "error",
+      id: "sp-search", kind: "retrieval", name: "search_docs", parent_span_id: "sp-agent",
+      started_at: "2026-09-25T10:00:01.600Z", duration_ms: 50, status: "error",
       attributes: { "gen_ai.tool.call.id": "call_x", "gen_ai.tool.name": "search_docs" },
       input: j({ q: "shipping policy" }),
       output: null,

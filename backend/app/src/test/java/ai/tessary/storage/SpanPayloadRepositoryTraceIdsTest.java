@@ -11,31 +11,16 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /** {@link SpanPayloadRepository#listByTraceIds}: the payloads of a set of traces, every column, in one read. */
 @SpringBootTest
-class SpanPayloadRepositoryTraceIdsTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
+record SpanPayloadRepositoryTraceIdsTest(
+        SubstrateV2Fixtures fx, TenantService tenants, TraceV2Repository traces, SpanPayloadRepository payloads) {
 
     @Test
     void readsEveryPayloadOfTheNamedTraces() {
-        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+
         String pid =
                 TenantFixture.bootstrap(tenants, "payloads-by-traces").project().id();
         Instant at = Instant.now().truncatedTo(ChronoUnit.SECONDS);
@@ -54,7 +39,7 @@ class SpanPayloadRepositoryTraceIdsTest {
 
     @Test
     void anotherProjectsPayloadUnderTheSameTraceIdIsNotRead() {
-        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+
         String mine =
                 TenantFixture.bootstrap(tenants, "payloads-mine").project().id();
         String theirs =

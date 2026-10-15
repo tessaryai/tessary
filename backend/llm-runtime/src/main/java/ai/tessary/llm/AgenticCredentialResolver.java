@@ -10,36 +10,15 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The org's own {@link ProviderCredential}, decrypted and shaped for the sandbox
- * launcher's {@code POST /rca} / {@code POST /triage} — the FULL REMOVAL of the launcher's
- * deployment-env-var credential path (AGENT_PROVIDER and every per-provider key/secret it read)
- * means an agentic run now carries its own credential on the wire, not something the launcher's
- * own process env already had. The database is the only source.
- *
- * <p>Shared by {@code E2bRcaSandbox} and {@code E2bTriageSandbox} — both resolve the project's
- * {@link ModelLane#RCA}/{@link ModelLane#TRIAGE} choice to a {@code (provider, modelId)} pair via
- * {@code ProjectModelSettings#resolveAgenticModel}, then hand that provider to this class to fetch
- * and decrypt the org's credential for it.
- *
- * <p><b>Secret handling is first-class here, not incidental.</b> {@link Credential} carries
- * plaintext secrets in-process only, for exactly as long as it takes to serialize it onto the
- * launcher HTTP request body (over the same Bearer-authed connection every other secret on this
- * path — {@code clone_url}, {@code mcp.token} — already travels). It must never be logged, and the
- * launcher itself never persists it to disk or forwards it to the agent's own prompt/context — see
- * {@code sandbox-runner/launcher/server.js}'s file-header doc and {@code requireCredential} for the
- * other half of that discipline.
- *
- * <p>Registered by {@link LlmSeamConfig} only when no other build supplies one, so another build can
- * extend this class and resolve {@link ModelProvider#PLATFORM} to a credential of its own;
- * {@link Credential#platformFunded()} is how that build tells the ledger whose bill the run lands on,
- * and {@link #release} is where it frees whatever it reserved for the run.
+ * The org's own {@link ProviderCredential}, decrypted for the sandbox launcher; the database is the only source.
+ * {@link Credential} holds plaintext secrets in-process only until serialized onto the launcher request: never log it.
+ * Another build can extend this to resolve {@link ModelProvider#PLATFORM}.
  */
 public class AgenticCredentialResolver {
 
     private final ProviderCredentialRepository repo;
     private final SecretBox secretBox;
 
-    /** The shared, cached {@code projectId → orgId} lookup — see its own javadoc. */
     private final ProjectOrgResolver orgResolver;
 
     public AgenticCredentialResolver(
@@ -50,17 +29,9 @@ public class AgenticCredentialResolver {
     }
 
     /**
-     * The wire shape the launcher's {@code credential} request field expects — see that file's
-     * header doc for the two variants (Bedrock/mantle vs. every OpenAI-compat provider). Fields
-     * irrelevant to {@link #provider} are simply null and dropped by {@code @JsonInclude(NON_NULL)}
-     * — the launcher's own {@code requireCredential} validates by provider, so there is no shared
-     * "every field always present" contract to keep.
-     *
-     * <p>{@code egressSecret} names a secret in the sandbox provider's own store that its egress proxy
-     * injects into the model provider's requests, outside the sandbox, in place of {@code apiKey}: the
-     * key never enters the VM. {@code lease} is an opaque handle a resolver can attach to find the
-     * run's reservation again in {@link #release}; it never goes on the wire. This build sets
-     * neither; Tessary Cloud's resolver sets both for its Tessary AI provider.
+     * The launcher's {@code credential} wire shape; fields irrelevant to {@link #provider} are null and dropped.
+     * {@code egressSecret} names a secret the sandbox egress proxy injects in place of {@code apiKey}, so the key never
+     * enters the VM; {@code lease} never goes on the wire.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Credential(
@@ -88,14 +59,9 @@ public class AgenticCredentialResolver {
     }
 
     /**
-     * Resolve, decrypt, and shape the org's credential for {@code provider} — the credential an
-     * agentic (RCA/TRIAGE) sandbox run for {@code projectId} should carry. Throws
-     * {@link ModelConfigError#MISSING_CREDENTIALS} when the org has none, and
-     * {@link ModelConfigError#AGENTIC_IAM_ROLE_UNSUPPORTED} when the org's Bedrock/mantle credential
-     * is {@code auth_mode=iam_role}: an E2B microVM cannot assume the
-     * operator's own ambient AWS identity, and there is no {@code roleArn}/STS-relay path for it to
-     * use instead. IAM-role auth stays usable for the backend's own model-catalog listing; a
-     * credential meant to drive a sandbox agent must be {@code api_key} mode.
+     * Throws {@link ModelConfigError#MISSING_CREDENTIALS} when the org has none, and
+     * {@link ModelConfigError#AGENTIC_IAM_ROLE_UNSUPPORTED} for an {@code iam_role} Bedrock/mantle credential: an E2B
+     * microVM cannot assume the operator's AWS identity.
      */
     public Credential resolve(String projectId, ModelProvider provider) {
         String orgId = orgResolver.orgIdFor(projectId);
@@ -139,13 +105,8 @@ public class AgenticCredentialResolver {
     }
 
     /**
-     * Called once the run {@code credential} was resolved for has ended, however it ended: success,
-     * failure or timeout. Nothing to free here, since an org's own key reserves nothing; a build that
-     * reserves something per run (a slot, a budget) frees it here, using {@link Credential#lease()}.
-     * Tessary Cloud's resolver frees its per-org run slot here, which is why the sandboxes call a
-     * method that does nothing in this build.
+     * Called once the run ends, however it ended. A build that reserves something per run frees it here via
+     * {@link Credential#lease()}.
      */
-    public void release(Credential credential) {
-        // An org's own key reserves nothing per run, so there is nothing to free.
-    }
+    public void release(Credential credential) {}
 }

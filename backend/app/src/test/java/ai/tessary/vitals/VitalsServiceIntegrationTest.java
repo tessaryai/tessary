@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
@@ -20,10 +18,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -34,46 +30,18 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * <p>Still pinned: a container span's cumulative usage must not double the bill, an unpriced model is counted rather
  * than valued at zero, and a stuck turn is reported rather than dropped, so the card reconciles with its drill-down.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
-class VitalsServiceIntegrationTest {
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    VitalsService service;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    VitalsController controller;
-
-    private SubstrateV2Fixtures fx;
+@SpringBootTest
+record VitalsServiceIntegrationTest(
+        SubstrateV2Fixtures fx,
+        TraceV2Repository traces,
+        SpanRepository spans,
+        TenantService tenants,
+        VitalsService service,
+        JdbcClient jdbc,
+        VitalsController controller) {
 
     /** Inside the default 7-day window, far from any boundary. */
     private static final Instant RAN = Instant.now().minus(2, ChronoUnit.HOURS);
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
 
     @Test
     @DisplayName("cost sums llm spans only, so a container's cumulative usage cannot double the bill")

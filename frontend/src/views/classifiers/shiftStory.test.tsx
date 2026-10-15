@@ -22,26 +22,11 @@ const q = (p50: [number | null, number | null], p95?: [number | null, number | n
 
 function shift(over: Partial<Shift>): Shift {
   return {
-    bucketKey: "cost|checkout",
-    bucketKind: "call_site",
-    nCur: 400,
-    nRef: 1_200,
-    sinceVersionId: null,
-    windowClosedAt: null,
-    windowKind: null,
-    windowOpenedAt: null,
-    w1Log: 0.4,
-    control: null,
-    direction: "up",
-    explains: [],
-    floor: 0,
-    measure: "cost",
+    bucketKey: "cost|checkout", bucketKind: "call_site", nCur: 400, nRef: 1_200, sinceVersionId: null,
+    windowClosedAt: null, windowKind: null, windowOpenedAt: null, w1Log: 0.4, control: null, direction: "up",
+    explains: [], floor: 0, measure: "cost",
     quantiles: q([1, 2.5], [10, 40]),
-    ratio: 2.5,
-    reference: "previous",
-    tokens: [],
-    workload: [],
-    ...over,
+    ratio: 2.5, reference: "previous", tokens: [], workload: [], ...over,
   };
 }
 
@@ -142,16 +127,14 @@ describe("ShiftChart", () => {
   });
 });
 
-describe("ShiftPins", () => {
-  it("numbers each pin in chart order, and renders nothing with none", () => {
-    render(<ShiftPins shift={shift({})} />);
-    expect(screen.getByText("A typical turn is 2.5× more")).toBeTruthy();
-    expect(screen.getByText("The tail moved with the middle")).toBeTruthy();
-    expect(screen.getByText("2")).toBeTruthy();
-    cleanup();
-    const { container } = render(<ShiftPins shift={shift({ quantiles: [] })} />);
-    expect(container.innerHTML).toBe("");
-  });
+it("ShiftPins: numbers each pin in chart order, and renders nothing with none", () => {
+  render(<ShiftPins shift={shift({})} />);
+  expect(screen.getByText("A typical turn is 2.5× more")).toBeTruthy();
+  expect(screen.getByText("The tail moved with the middle")).toBeTruthy();
+  expect(screen.getByText("2")).toBeTruthy();
+  cleanup();
+  const { container } = render(<ShiftPins shift={shift({ quantiles: [] })} />);
+  expect(container.innerHTML).toBe("");
 });
 
 describe("ShiftBehind", () => {

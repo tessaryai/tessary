@@ -22,13 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Manage scoped API keys for a project — the unified create / rotate / revoke surface across
- * all three key families (write / query / admin).
- *
- * <p>All bearer tokens ride one underlying {@code api_key} store — there is a single key model, not a
- * parallel auth stack. Listing requires {@link Permission#ORG_VIEW}; create / rotate / revoke
- * require {@link Permission#ORG_MANAGE} (so a viewer cannot mint a billable ingest/query key). The
- * plaintext secret is returned exactly once at create/rotate time and never stored.</p>
+ * Create, rotate and revoke API keys in all three families. Listing needs {@link Permission#ORG_VIEW}; changes need
+ * {@link Permission#ORG_MANAGE}, so a viewer cannot mint a billable key. The plaintext is returned once and never
+ * stored.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/api-keys")
@@ -49,7 +45,6 @@ public class ApiKeyController {
         this.resolver = resolver;
     }
 
-    /** Create a key. {@code name} + {@code scope} (one of write/query/admin) are both required. */
     public record CreateRequest(
             @NotBlank String name, @NotBlank String scope) {}
 
@@ -110,7 +105,7 @@ public class ApiKeyController {
         return ApiResponse.ok(Map.of("revoked", revoked));
     }
 
-    /** The audit trail for this project's keys (create / rotate / revoke), newest first. */
+    /** Newest first. */
     @GetMapping("/audit")
     public ApiResponse<List<AuditLog>> audit(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {

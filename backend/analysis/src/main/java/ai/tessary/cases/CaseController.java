@@ -20,13 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * The case surface — Triage's list and one case's page.
- *
- * <p>Lifecycle is deliberately small: open → resolved. There is no claim, no owner and no
- * "on it" state, so there is no endpoint for one. Multiple people can act on any case; the product
- * does not model who is holding it.
- */
+/** Triage's list and one case's page. Lifecycle is open to resolved only: no claim, owner or "on it" state. */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/cases")
 public class CaseController {
@@ -39,8 +33,6 @@ public class CaseController {
         this.resolver = resolver;
     }
 
-    /** Triage: open cases worst first, plus the week's closures and the coverage the all-clear state
-     *  cites. */
     @GetMapping
     public ApiResponse<TriageView> triage(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
@@ -48,8 +40,7 @@ public class CaseController {
         return ApiResponse.ok(service.triage(r.project().id()));
     }
 
-    /** One case. {@code id} accepts the stored id or the human reference ({@code C-118}), so a link
-     *  quoting the number a person read resolves. */
+    /** {@code id} accepts the stored id or the human reference ({@code C-118}). */
     @GetMapping("/{id}")
     public ApiResponse<CaseDetailView> get(
             TenantContext ctx,
@@ -61,15 +52,8 @@ public class CaseController {
     }
 
     /**
-     * <em>Run RCA</em>: hand the finding behind this case to Layer 3. The press is the whole decision —
-     * a person has read the case, including everything triage wrote on it, and judged the cause worth a
-     * strong model's time.
-     *
-     * <p><b>Only the case id crosses, and only the finding id comes back out of it.</b> The lane is
-     * given no verdict, no summary and no rule-outs from any earlier pass — see
-     * {@code RcaAnalysisService}'s firewall section for why the boundary sits at the agent rather than
-     * at the human. Re-pressing coalesces onto the running report; re-running a finished one is the RCA
-     * surface's own {@code /rca/{id}/rerun}.
+     * Only the case id crosses, and only the finding id comes out: the lane gets no earlier verdict or summary (see
+     * {@code RcaAnalysisService}). Re-pressing coalesces onto the running report.
      */
     @RequiresCapability(Capability.RCA)
     @PostMapping("/{id}/rca")
@@ -95,9 +79,8 @@ public class CaseController {
     }
 
     /**
-     * <em>Legitimate — absorb</em>: close the case AND move the detector's reference so the level it
-     * fired on becomes the new baseline. Distinct from {@code /resolve}, which closes this case and
-     * leaves the bar alone — see {@link CaseService#absorb}.
+     * Closes the case AND moves the detector's reference; {@code /resolve} leaves the bar alone. See
+     * {@link CaseService#absorb}.
      */
     @PostMapping("/{id}/absorb")
     public ApiResponse<CaseView> absorb(

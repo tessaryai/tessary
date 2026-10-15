@@ -24,19 +24,12 @@ function Where() {
 }
 
 const FAKE_ME: Me = {
-  id: "user-fake",
-  email: "smoke@example.com",
-  orgs: [{ id: "org-fake", slug: "fake-org", name: "Fake Org", role: "owner" }],
-  platform_staff: false,
+  id: "user-fake", email: "smoke@example.com",
+  orgs: [{ id: "org-fake", slug: "fake-org", name: "Fake Org", role: "owner" }], platform_staff: false,
 };
 
 const NOT_CONNECTED_STATUS = {
-  has_live: false,
-  untagged_spans: 0,
-  has_tagged_span: false,
-  spans_received: 0,
-  tagged_spans: 0,
-  last_span_at: null,
+  has_live: false, untagged_spans: 0, has_tagged_span: false, spans_received: 0, tagged_spans: 0, last_span_at: null,
   service_name: null,
 };
 
@@ -115,24 +108,22 @@ afterEach(() => {
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
 });
 
-describe("ConnectGate — sample-project link loading state", () => {
-  it("restores the link if the seed request fails", async () => {
-    const { promise, reject } = deferred<Project>();
-    ensureSampleProjectImpl = () => promise;
+it("ConnectGate — sample-project link loading state: restores the link if the seed request fails", async () => {
+  const { promise, reject } = deferred<Project>();
+  ensureSampleProjectImpl = () => promise;
 
-    renderGate();
+  renderGate();
 
-    const link = await screen.findByRole("button", { name: "Start with a sample project" });
-    fireEvent.click(link);
-    await waitFor(() => {
-      expect(screen.queryByText("Setting up your sample project…")).not.toBeNull();
-    });
+  const link = await screen.findByRole("button", { name: "Start with a sample project" });
+  fireEvent.click(link);
+  await waitFor(() => {
+    expect(screen.queryByText("Setting up your sample project…")).not.toBeNull();
+  });
 
-    reject(new Error("boom"));
+  reject(new Error("boom"));
 
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Start with a sample project" })).not.toBeNull();
-    });
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: "Start with a sample project" })).not.toBeNull();
   });
 });
 
@@ -142,27 +133,25 @@ describe("ConnectGate — sample-project link loading state", () => {
  * a full bearer secret is not sitting in a screenshot, while the button puts the WHOLE token on the
  * clipboard through the field's explicit `copyValue`.
  */
-describe("ConnectGate — copy affordances", () => {
-  it("mints nothing until the token control is clicked, then copies the full token", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+it("ConnectGate — copy affordances: mints nothing until the token control is clicked, then copies the full token", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 
-    renderGate();
+  renderGate();
 
-    const mint = await screen.findByRole("button", { name: "Create and copy" });
-    expect(createApiKeyCalls).toBe(0);
-    expect(screen.queryByText(/^tsy_test/)).toBeNull();
+  const mint = await screen.findByRole("button", { name: "Create and copy" });
+  expect(createApiKeyCalls).toBe(0);
+  expect(screen.queryByText(/^tsy_test/)).toBeNull();
 
-    fireEvent.click(mint);
+  fireEvent.click(mint);
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("tsy_test_token"));
-    expect(createApiKeyCalls).toBe(1);
-    expect(writeText).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith("tsy_test_token"));
+  expect(createApiKeyCalls).toBe(1);
+  expect(writeText).toHaveBeenCalledTimes(1);
 
-    // Bug: the on-screen token shown unmasked. First 8 chars, an ellipsis, then the last 4.
-    const header = await screen.findByText(/^tsy_test/);
-    expect(header.textContent).toBe("tsy_test…oken");
-  });
+  // Bug: the on-screen token shown unmasked. First 8 chars, an ellipsis, then the last 4.
+  const header = await screen.findByText(/^tsy_test/);
+  expect(header.textContent).toBe("tsy_test…oken");
 });
 
 /*
@@ -192,15 +181,13 @@ describe("ConnectGate — first tagged span", () => {
   });
 });
 
-describe("ConnectGate — the sample project", () => {
-  it("opens the sample project's Triage once it is set up", async () => {
-    ensureSampleProjectImpl = () => Promise.resolve({ id: "p-s", slug: "sample", name: "Sample" } as Project);
+it("ConnectGate — the sample project: opens the sample project's Triage once it is set up", async () => {
+  ensureSampleProjectImpl = () => Promise.resolve({ id: "p-s", slug: "sample", name: "Sample" } as Project);
 
-    renderGate();
-    fireEvent.click(await screen.findByRole("button", { name: "Start with a sample project" }));
+  renderGate();
+  fireEvent.click(await screen.findByRole("button", { name: "Start with a sample project" }));
 
-    expect(await screen.findByText("Triage at /orgs/fake-org/projects/sample/triage")).toBeTruthy();
-  });
+  expect(await screen.findByText("Triage at /orgs/fake-org/projects/sample/triage")).toBeTruthy();
 });
 
 describe("ConnectGate — the token and the endpoint", () => {
@@ -277,11 +264,7 @@ describe("ConnectGate — an org with other projects", () => {
 describe("ConnectGate — spans without a call site", () => {
   it("counts what arrived untagged and offers the repair prompt instead of the connect steps", async () => {
     status = {
-      ...NOT_CONNECTED_STATUS,
-      has_live: true,
-      untagged_spans: 1200,
-      spans_received: 1200,
-      tagged_spans: 0,
+      ...NOT_CONNECTED_STATUS, has_live: true, untagged_spans: 1200, spans_received: 1200, tagged_spans: 0,
       last_span_at: new Date().toISOString(),
       service_name: "support-agent",
     };

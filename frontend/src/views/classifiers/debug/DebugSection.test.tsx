@@ -9,20 +9,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Classifier, ClassifierDebug } from "../../../api/types";
 import { pending, renderRoute } from "../../../test/render";
 import DebugSection from "./DebugSection";
+import { api } from "../../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getClassifierDebug: vi.fn() }));
-
-vi.mock("../../../tenant/TenantContext", () => ({ useTenant: () => ({ api }) }));
+vi.mock("../../../tenant/TenantContext", () => import("../../../test/api"));
 
 const SWEEP = {
-  status: "running",
-  attempts: 2,
-  last_error: null,
-  cursor_at: "2026-09-25T10:00:00Z",
-  cursor_id: null,
-  lease_owner: "worker-1",
-  lease_expires_at: null,
-  updated_at: null,
+  status: "running", attempts: 2, last_error: null, cursor_at: "2026-09-25T10:00:00Z", cursor_id: null,
+  lease_owner: "worker-1", lease_expires_at: null, updated_at: null,
 };
 const debug = (over: Partial<ClassifierDebug> = {}) =>
   ({ id: "clf-1", detector: "tool_error", family: "deterministic", metric_baselines: null, sweep: SWEEP, ...over }) as ClassifierDebug;
@@ -84,29 +77,16 @@ describe("DebugSection", () => {
         family: "metric_drift",
         metric_baselines: [
           {
-            measure: "cost",
-            bucket_kind: "call_site",
-            bucket_key: "checkout",
-            state: "armed",
-            w1_floor: 0.139,
-            current_count: 42,
-            current_opened_at: "2026-09-25T09:00:00Z",
+            measure: "cost", bucket_kind: "call_site", bucket_key: "checkout", state: "armed", w1_floor: 0.139,
+            current_count: 42, current_opened_at: "2026-09-25T09:00:00Z",
             pinned: sketch(500),
             pinned_at: "2026-09-20T00:00:00Z",
             prev: sketch(480),
             current: null,
           },
           {
-            measure: "duration",
-            bucket_kind: "call_site",
-            bucket_key: "search",
-            state: "learning",
-            w1_floor: 0.2,
-            current_count: 3,
-            current_opened_at: null,
-            pinned: null,
-            pinned_at: null,
-            prev: null,
+            measure: "duration", bucket_kind: "call_site", bucket_key: "search", state: "learning", w1_floor: 0.2,
+            current_count: 3, current_opened_at: null, pinned: null, pinned_at: null, prev: null,
             current: sketch(3),
           },
         ],

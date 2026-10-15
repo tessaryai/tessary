@@ -23,6 +23,7 @@ import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.sandbox.AgentSpanTelemetry;
+import ai.tessary.testsupport.Props;
 import ai.tessary.usage.LlmUsageAccountant;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -72,8 +73,7 @@ class LauncherAgentSessionClientTest {
     private static final ModelsDevRates RATES = bundledRates();
 
     private static ModelsDevRates bundledRates() {
-        ModelsDevProperties p = new ModelsDevProperties();
-        p.setUrl("");
+        ModelsDevProperties p = Props.of(ModelsDevProperties.class, "url", "");
         return new ModelsDevRates(MAPPER, p);
     }
 
@@ -121,12 +121,14 @@ class LauncherAgentSessionClientTest {
     }
 
     private LauncherAgentSessionClient client(String launcherUrl) {
-        AgentRunProperties props = new AgentRunProperties();
-        props.setLauncherUrl(launcherUrl);
-        props.setLauncherApiKey(launcherUrl.isEmpty() ? "" : LAUNCHER_KEY);
-        ObserverProperties observer = new ObserverProperties();
-        observer.getAgentic().setLauncherUrl("");
-        observer.getAgentic().setLauncherApiKey("");
+        AgentRunProperties props = Props.of(
+                AgentRunProperties.class,
+                "launcher-url",
+                launcherUrl,
+                "launcher-api-key",
+                launcherUrl.isEmpty() ? "" : LAUNCHER_KEY);
+        ObserverProperties observer =
+                Props.of(ObserverProperties.class, "agentic.launcher-url", "", "agentic.launcher-api-key", "");
         return new LauncherAgentSessionClient(
                 props,
                 observer,

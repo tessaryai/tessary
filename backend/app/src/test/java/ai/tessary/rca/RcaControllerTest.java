@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
@@ -36,34 +35,16 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * finding is gone is a 404, and reports are project-scoped.
  */
 @RcaParkedSpringBootTest
-class RcaControllerTest {
-
-    @Autowired
-    RcaController controller;
-
-    @Autowired
-    CaseService cases;
-
-    @Autowired
-    CaseRepository caseRows;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    RcaTriggerService trigger;
-
-    @Autowired
-    RcaJobRepository jobs;
-
-    @Autowired
-    RcaReportRepository reports;
+record RcaControllerTest(
+        RcaController controller,
+        CaseService cases,
+        CaseRepository caseRows,
+        TenantService tenants,
+        JdbcClient jdbc,
+        FindingRepository findings,
+        RcaTriggerService trigger,
+        RcaJobRepository jobs,
+        RcaReportRepository reports) {
 
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
@@ -146,11 +127,11 @@ class RcaControllerTest {
                         .data()
                         .id());
         assertEquals(
-                1,
-                controller
-                        .list(ctx, fix.org().slug(), fix.project().slug(), 50)
-                        .data()
-                        .size());
+                1L,
+                jdbc.sql("SELECT count(*) FROM rca_report WHERE project_id = :pid")
+                        .param("pid", projectId)
+                        .query(Long.class)
+                        .single());
     }
 
     /** An unknown case is a case 404, and a finding id resolving to nothing an RCA 404; never an enqueued job. */

@@ -19,34 +19,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * What the Frustration rate test replays: per call site and per hour, how many sessions were scored and how many
- * of them are frustrated now.
- *
- * <p><b>A session is one trial: a conversation on one call site.</b> There is no session table: every fact is a
- * {@code GROUP BY conversation_id, call_site_id} over {@code frustration_assessment} under the current scorer. A
- * session is bucketed in the hour of its first scored turn on that call site. A conversation that reaches two
- * call sites is a trial on each, and a flag on one call site never counts against the other. A session is a
- * failure while it carries an uncleared detection on its call site; a {@code false_alarm} resolve clears it and the
- * next replay counts it calm again.
- *
- * <p><b>Read, not accumulated.</b> An hour's tally is not final when first read (a later turn can flag an old
- * conversation), which is why the replay rebuilds every pass from these counts.
+ * A session is one trial: a conversation on one call site, bucketed in the hour of its first scored turn there; a flag
+ * on one call site never counts against another. Rebuilt from these counts every pass, since a later turn can flag an
+ * old conversation.
  */
 @Repository
 public class FrustrationRateRepository {
 
-    /**
-     * The key a session scored before call sites were picked, with no call site, is tallied under. It never alarms
-     * (the service drops it before the replay); the Tuning view counts it so the gap is visible.
-     */
+    /** Never alarms; the Tuning view counts it so the gap is visible. */
     public static final String UNASSIGNED = "";
 
-    /**
-     * The replay aggregate. The {@code WHERE} runs on the {@code (project_id, classifier_id, turn_started_at)}
-     * index; the {@code EXISTS} is evaluated only for conversations with a flagged turn and runs on the detection
-     * table's partial index over uncleared rows. {@code {detections}} is the registered detection table. Hours
-     * are truncated in UTC, not the session's zone, which in a half-hour zone would put every bucket at :30.
-     */
+    /** Hours are truncated in UTC: in a half-hour session zone every bucket would sit at :30. */
     static final String HOURLY_TALLIES = """
             WITH conv AS (
               SELECT a.conversation_id,
@@ -71,12 +54,8 @@ public class FrustrationRateRepository {
             """;
 
     /**
-     * The sessions a spell's finding enumerates, in the tally's own grouping: each session on the call site and
-     * in the hour it was a trial in. {@code :windowFrom} is the replay window's start, so the first scored turn
-     * is found over the same rows the tally read; {@code :onset} and {@code :until} then bound the sessions to
-     * the hours the spell's rate covers. {@code {frustrated}} is empty for every scored session (the rate's
-     * denominator) or {@code HAVING BOOL_OR(a.frustrated)} for the frustrated ones (its numerator). Reads
-     * neither {@code request} nor {@code response}.
+     * {@code :windowFrom} is the replay window's start, so the first scored turn is found over the rows the tally read.
+     * Reads neither {@code request} nor {@code response}.
      */
     private static final String SPELL_SESSIONS = """
             WITH conv AS (
@@ -95,7 +74,6 @@ public class FrustrationRateRepository {
              ORDER BY c.first_scored_at DESC, c.conversation_id DESC
             """;
 
-    /** The newest uncleared flag of each frustrated session: the turn that fired in it. */
     private static final String FLAGGED_JOIN = """
             JOIN LATERAL (
                 SELECT d.subject_trace_id
@@ -117,10 +95,8 @@ public class FrustrationRateRepository {
             .replace("{flaggedJoin}", "");
 
     /**
-     * One page of the frustrated sessions a finding cites, newest flag first: its witness trace rows, each the
-     * turn that fired in a session, ordered by when that turn happened. With {@code {filter}} set, only one RCA
-     * cause's share: the witnesses whose session the cause names, or whose trace it cites, read off the stored
-     * report (which must be this finding's) so the request carries two short values rather than every id.
+     * With {@code {filter}} set, only one RCA cause's share, read off the stored report so the request carries two
+     * short values rather than every id.
      */
     private static final String WITNESS_PAGE = """
             SELECT e.trace_id, COUNT(*) OVER () AS total
@@ -139,7 +115,6 @@ public class FrustrationRateRepository {
              LIMIT :limit OFFSET :offset
             """;
 
-    /** One page of witness trace ids and how many the finding cites in all, under the same filter. */
     public record WitnessPage(List<String> traceIds, long total) {
 
         public WitnessPage {
@@ -147,20 +122,9 @@ public class FrustrationRateRepository {
         }
     }
 
-    /** One frustrated session a finding cites, and the flagged turn inside it. */
     public record FrustratedConversation(String conversationId, String flaggedTraceId) {}
 
-    /**
-     * One flagged turn as its detection row recorded it: the conversation it belongs to, the score, the turn's
-     * own call site and when it happened. {@code cleared} once a {@code false_alarm} resolve cleared the
-     * conversation.
-     */
-    /**
-     * One flagged turn.
-     *
-     * @param message the user message as it was scored, for a one-line preview; null once retention cleared
-     *     the stored request, or when no assessment is kept for the turn
-     */
+    /** @param message null once retention cleared the request or no assessment is kept */
     public record FlaggedTurn(
             String traceId,
             @Nullable String conversationId,
@@ -169,9 +133,6 @@ public class FrustrationRateRepository {
             @Nullable String startedAt,
             boolean cleared,
             @Nullable String message) {}
-
-    /** A human reset on one call site's state row, for the Tuning view. */
-    public record Reset(String resetAt, @Nullable String note) {}
 
     private final JdbcClient jdbc;
     private final ClassifierDetectionWriteRepository detections;
@@ -183,14 +144,12 @@ public class FrustrationRateRepository {
         this.states = ToolErrorStateRepository.forTable(jdbc, "frustration_state", "call_site_id");
     }
 
-    /** The CUSUM state the shared engine carries between passes, one row per call site. */
     public ToolErrorStateRepository states() {
         return states;
     }
 
     /**
-     * The newest scored turn under {@code scorerVersion}: the anchor the replay window reads back from, as
-     * tool_error anchors on its newest call, so a project whose traffic is old still has a window holding it.
+     * Anchors the replay window on the newest turn, so a project whose traffic is old still has a window holding it.
      */
     public Optional<Instant> newestTurnAt(String projectId, String classifierId, String scorerVersion) {
         return jdbc.sql("""
@@ -206,11 +165,7 @@ public class FrustrationRateRepository {
                 .map(OffsetDateTime::toInstant);
     }
 
-    /**
-     * Scored and frustrated sessions per call site per hour since {@code from}, oldest first, as the tallies
-     * {@code ToolErrorTrend} replays: {@code calls} is sessions, {@code failures} is frustrated ones. A session
-     * scored with no call site, before call sites were picked, is keyed {@link #UNASSIGNED}.
-     */
+    /** {@code calls} is sessions, {@code failures} frustrated ones. */
     public List<HourlyToolTally> hourlyTallies(
             String projectId, String classifierId, String scorerVersion, Instant from) {
         String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
@@ -227,10 +182,6 @@ public class FrustrationRateRepository {
                 .list();
     }
 
-    /**
-     * Every frustrated session of one call site's stream in {@code [onset, until)}, newest first: the spell's
-     * witnesses.
-     */
     public List<FrustratedConversation> frustratedSince(
             String projectId,
             String classifierId,
@@ -250,10 +201,6 @@ public class FrustrationRateRepository {
                 .list();
     }
 
-    /**
-     * Every scored session of one call site's stream in {@code [onset, until)}, newest first: the spell's
-     * members, the population its rate is a fraction of.
-     */
     public List<String> scoredSince(
             String projectId,
             String classifierId,
@@ -276,7 +223,6 @@ public class FrustrationRateRepository {
         return jdbc.sql(sql).param("pid", projectId).param("cid", classifierId).param("scorerVersion", scorerVersion);
     }
 
-    /** The filter that keeps one RCA cause's witnesses: {@code :report} and its 0-based {@code :cause}. */
     private static final String CAUSE_FILTER = """
             AND EXISTS (
                 SELECT 1 FROM rca_report r
@@ -286,14 +232,9 @@ public class FrustrationRateRepository {
                         OR e.trace_id IN (
                             SELECT jsonb_array_elements_text(r.causes -> CAST(:cause AS int) -> 'evidence_trace_ids'))))""";
 
-    /** One RCA cause: the report that found it and its 0-based position in that report's causes. */
     public record CauseRef(String reportId, int index) {}
 
-    /**
-     * One page of {@code findingId}'s witness trace ids, newest flag first, and the total under the same filter.
-     * {@code callSiteId} is the finding's: a witness trace can also hold a flag on another call site. With {@code
-     * cause} set, only the witnesses that cause names: its share.
-     */
+    /** {@code callSiteId} is the finding's: a witness trace can also hold a flag on another call site. */
     public WitnessPage witnessPage(
             String projectId,
             String classifierId,
@@ -323,7 +264,6 @@ public class FrustrationRateRepository {
                 })
                 .list();
         if (ids.isEmpty() && offset > 0) {
-            // Past the end: the window count is on no row, so read it on its own.
             return new WitnessPage(
                     List.of(),
                     witnessPage(projectId, classifierId, callSiteId, findingId, cause, 1, 0)
@@ -332,11 +272,7 @@ public class FrustrationRateRepository {
         return new WitnessPage(ids, total[0]);
     }
 
-    /**
-     * The detection rows on {@code callSiteId} behind {@code traceIds}, by trace: what a finding's page shows beside
-     * each witness. Rows of any clear state, so a session a resolve cleared still reads as what it was when the
-     * finding cited it.
-     */
+    /** Rows of any clear state, so a cleared session still reads as it was when cited. */
     public Map<String, FlaggedTurn> flaggedTurns(
             String projectId, String classifierId, String callSiteId, List<String> traceIds) {
         String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
@@ -372,13 +308,7 @@ public class FrustrationRateRepository {
         return out;
     }
 
-    /**
-     * The turns shown around a flagged one: the flagged trace's session, for a link to the whole
-     * conversation, and the ids of the {@code before} top-level traces of the same call site that started
-     * before it in the same conversation, oldest first.
-     *
-     * @param sessionId null when the flagged trace carries no session
-     */
+    /** @param sessionId null when the flagged trace carries no session */
     public record ConversationContext(@Nullable String sessionId, List<String> priorTraceIds) {
 
         public ConversationContext {
@@ -386,12 +316,7 @@ public class FrustrationRateRepository {
         }
     }
 
-    /**
-     * {@link ConversationContext} for each of {@code traceIds}, keyed by trace id. The conversation key is
-     * {@code session_id}, and an earlier turn is one that reached {@code callSiteId}: the
-     * turns the classifier read, in event time so an upload that stored its turns out of order still reads
-     * them in the order they happened.
-     */
+    /** Ordered in event time, so an upload that stored its turns out of order still reads them in order. */
     public Map<String, ConversationContext> conversationContext(
             String projectId, String callSiteId, List<String> traceIds, int before) {
         Map<String, ConversationContext> out = new HashMap<>();
@@ -438,21 +363,5 @@ public class FrustrationRateRepository {
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    /** Each call site's last human reset, by call site. */
-    public Map<String, Reset> resets(String projectId) {
-        Map<String, Reset> out = new HashMap<>();
-        jdbc.sql("""
-                        SELECT call_site_id, reset_at, reset_note
-                          FROM frustration_state
-                         WHERE project_id = :pid AND reset_at IS NOT NULL
-                        """)
-                .param("pid", projectId)
-                .query((rs, n) -> Map.entry(
-                        rs.getString("call_site_id"), new Reset(rs.getString("reset_at"), rs.getString("reset_note"))))
-                .list()
-                .forEach(e -> out.put(e.getKey(), e.getValue()));
-        return out;
     }
 }

@@ -61,72 +61,37 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Catalogue of MCP tools exposed by this server. Each tool reads the bound project from
- * {@link TenantContext#projectId()} (populated by AuthFilter after token verification) and
- * delegates to the same services REST controllers use.
- *
- * <p>Every tool here reads. Nothing in this catalogue writes a row, spends a token, or starts an
- * agent run, see {@link McpTool}.
- *
- * <p>The buckets of tools:</p>
- * <ul>
- *   <li><b>Project + taxonomy (read-only, ungated):</b> {@code get_project}, {@code list_call_sites},
- *       {@code list_failure_modes}.</li>
- *   <li><b>Cases (read-only):</b> {@code list_cases} / {@code get_case} read the Triage surface, with
- *       the RCA report inlined on the case that owns it. Lifecycle writes stay in the UI, see
- *       {@link #registerCaseTools()}.</li>
- *   <li><b>Query (read-only):</b> {@code query_count} / {@code query_timeseries} / {@code query_facets} /
- *       {@code query_search} over the aggregation-first datasets, and {@code describe_dataset}.</li>
- *   <li><b>Substrate lists (read-only):</b> {@code list_traces}, {@code list_spans},
- *       {@code list_sessions}, {@code get_session}, {@code get_conversation}: rollup rows and previews, paged with
- *       {@code limit}/{@code cursor}. See {@link #registerSubstrateListTools()}.</li>
- *   <li><b>Classifiers (read-only):</b> {@code list_findings} / {@code get_finding} read the
- *       behaviour/metric/tool-error drift findings, and {@code get_finding_evidence} pages the
- *       substrate refs one of them measured.</li>
- * </ul>
+ * Catalogue of MCP tools exposed by this server. Every tool reads: each takes the bound project from
+ * {@link TenantContext#projectId()} and delegates to the same services the REST controllers use. Nothing here writes a
+ * row, spends a token, or starts an agent run.
  */
 @Component
 public class McpToolRegistry {
 
-    /** Paging convention for every {@code list_*} reader over the substrate: 50 rows by default, 100 max. */
     private static final int LIST_DEFAULT_LIMIT = 50;
 
     private static final int LIST_MAX_LIMIT = 100;
 
     /**
-     * {@code get_finding_evidence}'s own page bounds, wider than the substrate lists' by a factor of ten.
-     * An evidence ref carries no text, just a role, a grain and two ids, and the population it pages can
-     * run to six figures for one finding. There is no sampling mode: the caller takes the stride it wants.
+     * Ten times the substrate lists' bounds: an evidence ref carries only a role, a grain and two ids, and one
+     * finding's population can run to six figures.
      */
     private static final int EVIDENCE_DEFAULT_LIMIT = 100;
 
     private static final int EVIDENCE_MAX_LIMIT = 1000;
 
-    /**
-     * The widest window a payload-bearing {@code list_spans} page may cover when it is not pinned to one
-     * trace. 24h is not a size estimate but a shape: a caller who can name a day can name what happened in
-     * it, and one who can't is browsing.
-     */
+    /** The widest window a payload-bearing {@code list_spans} page may cover when it is not pinned to one trace. */
     private static final Duration SPAN_PAYLOAD_SCOPE_WINDOW = Duration.ofHours(24);
 
-    /** The {@code fields} value that opts a {@code list_spans} page into full payloads. */
     private static final String PAYLOAD_FIELD = "payload";
 
     /**
-     * The most spans {@code get_trace} renders. Past a couple hundred, a flagged span's neighbourhood
-     * drowns in the rest and can exhaust the caller's context before it's read.
-     *
-     * <p>The cap keeps the OLDEST spans, not the newest: a trace's head is its instructions and first user
-     * turn, the part every later span is only intelligible against. {@code spans_truncated} says the list
-     * is partial; {@code span_count} says what it's partial of.
+     * The most spans {@code get_trace} renders. The cap keeps the OLDEST spans: a trace's head is what every later span
+     * is only intelligible against.
      */
     private static final int TRACE_SPAN_CAP = 200;
 
-    /**
-     * The case states {@code list_cases} pages, declared once so the schema an agent reads and the check the
-     * handler runs cannot drift apart. The persisted vocabulary itself lives on {@link CaseRow.State}; this is
-     * only the subset a page may ask for, which today is all of it.
-     */
+    /** Declared once so the schema an agent reads and the check the handler runs cannot drift apart. */
     private static final List<String> CASE_STATES = List.of(CaseRow.State.OPEN, CaseRow.State.RESOLVED);
 
     private final PipelineService pipelineService;
@@ -168,10 +133,8 @@ public class McpToolRegistry {
     }
 
     /**
-     * Package-private constructor for unit tests that want to exercise the dispatcher with a
-     * hand-rolled toolset. Skips the default {@link #register()} so callers fully control which
-     * tools exist. The service/repository deps are left null: no default handler that would use
-     * them is registered on this path, so they're never dereferenced.
+     * For unit tests with a hand-rolled toolset. Skips {@link #register()}, so the null service deps are never
+     * dereferenced.
      */
     @SuppressWarnings("NullAway")
     McpToolRegistry(java.util.Collection<McpTool> toolset) {
@@ -188,21 +151,16 @@ public class McpToolRegistry {
         for (McpTool t : toolset) tools.put(t.name(), t);
     }
 
-    /** Every registered tool, in registration order. This is what {@code tools/list} answers. */
     public List<McpTool> tools() {
         return List.copyOf(tools.values());
     }
 
-    /** The tool by name, or null when there is none. */
     public @Nullable McpTool tool(String name) {
         return tools.get(name);
     }
 
-    // ------------------------------------------------------------------ registration
-
     private void register() {
-        // get_project, not list_pipelines: a token binds to exactly one project, so the old name
-        // wrongly promised a collection.
+        // A token binds to exactly one project, so this is get_project, not a collection.
         add(new McpTool(
                 "get_project",
                 "Identify the project this token is bound to: id, slug, name, org, pipeline version, entity"
@@ -259,12 +217,6 @@ public class McpToolRegistry {
                         strArg(args, "pack_id"),
                         strArg(args, "compliance_tag"))));
 
-        // list_graders, get_grader, list_quality_dimensions and propose_grader_edit are gone: grading
-        // is not part of this platform, so there is no curated set to read and no rubric to edit.
-
-        // reload_pipeline is gone. It had been a no-op compat shim, and its only remaining caller read
-        // its stale `valid: true` as proof an import landed. POST .../import reports its own result.
-
         registerCaseTools();
         registerQueryTools();
         registerSubstrateListTools();
@@ -273,21 +225,9 @@ public class McpToolRegistry {
     }
 
     /**
-     * The case surface exposed read-only: {@code list_cases} pages what is wrong with this project (open,
-     * worst-first by default) and {@code get_case} is one case's page. Both go through {@link CaseService},
-     * the same seam {@code CaseController} uses, so a case reads identically here and in the UI.
-     *
-     * <p>{@code list_cases} pages and filters rather than the UI's three fixed buckets, so a caller can ask
-     * for "open tool_error cases on this call site" directly instead of filtering the whole project's cases
-     * itself. {@link CaseService#triage} still composes the buckets for the UI.
-     *
-     * <p>Ungated deliberately: cases are what the default-on classifiers produce, and gating this behind a
-     * capability that's off for every partner would withhold the product's own output. The RCA report a
-     * case owns rides along inline for the same reason, via {@link CaseService#detail}.
-     *
-     * <p>Lifecycle writes ({@code resolve}, {@code absorb}) stay on the
-     * controller and are deliberately not tools: each records a human judgement, and {@code absorb} moves
-     * the detector's baseline, which an agent should not do on its own reasoning.
+     * {@code list_cases} and {@code get_case}, through the same {@link CaseService} as the UI. Ungated: cases are what
+     * the default-on classifiers produce. Lifecycle writes ({@code resolve}, {@code absorb}) are deliberately not
+     * tools: each records a human judgement, and absorb moves the detector's baseline.
      */
     private void registerCaseTools() {
         add(new McpTool(
@@ -340,18 +280,12 @@ public class McpToolRegistry {
     }
 
     /**
-     * The aggregation-first Query API exposed as MCP tools: {@code describe_dataset}, {@code query_count},
-     * {@code query_timeseries}, {@code query_facets}, {@code query_search}. The four queries proxy to
-     * {@link QueryService}, so every read is project-scoped and the dataset allow-list firewall is reused,
-     * never bypassed. {@link TessaryException} is caught in each handler and rethrown as
-     * {@link McpTool.ToolException} so the caller gets a correctable tool error, not a {@code -32603}.
-     *
-     * <p>{@code describe_dataset} reaches no service: the answer is {@link QueryDataset} itself, read off
-     * its accessors rather than recited in prose that can drift from the enum (as it once did).
+     * The four queries proxy to {@link QueryService}, so every read is project-scoped and the dataset allow-list is
+     * reused, never bypassed. {@code describe_dataset} reads {@link QueryDataset} itself so it cannot drift from the
+     * enum.
      */
     private void registerQueryTools() {
-        // Registered first, because it is what a caller should read first: the other four take field names
-        // they will otherwise guess.
+        // Registered first: the other four take field names a caller will otherwise guess.
         add(new McpTool(
                 "describe_dataset",
                 "Describe the query datasets the other query tools read — for each one, the fields that may be"
@@ -458,19 +392,9 @@ public class McpToolRegistry {
     }
 
     /**
-     * The plural substrate readers: {@code list_traces}, {@code list_spans}, {@code list_sessions},
-     * {@code get_session} and {@code get_conversation}. Each wraps the same seam a REST controller or service already reads (cursors are
-     * shared via {@link TracePageCodec}, so a cursor minted here is readable there), so a list here cannot
-     * disagree with the same list in the UI.
-     *
-     * <p>Rows are rollup rows and previews, never full payloads; {@code get_trace} / {@code get_span} are
-     * where the raw text lives. {@code list_spans} is the one exception: {@code fields: ["payload"]} opts
-     * into full text, but only for a page already narrowed to one trace or to
-     * {@link #SPAN_PAYLOAD_SCOPE_WINDOW}, see {@link #listSpans}.
-     *
-     * <p>Paging is the house convention: {@code limit} (default {@value #LIST_DEFAULT_LIMIT}, capped at
-     * {@value #LIST_MAX_LIMIT}), {@code cursor} in, {@code next_cursor} out, and a stale cursor restarts at
-     * page one rather than erroring.
+     * Each wraps the seam its REST controller reads (cursors via {@link TracePageCodec}), so a list here cannot
+     * disagree with the UI. Rows are previews; {@code list_spans} returns full payloads only when scoped, see
+     * {@link #listSpans}. A stale cursor restarts at page one.
      */
     private void registerSubstrateListTools() {
         add(new McpTool(
@@ -611,16 +535,9 @@ public class McpToolRegistry {
     }
 
     /**
-     * The raw trace/span reads: {@code get_span} (one span's full payload, unconditionally) and
-     * {@code get_trace} (a trace's rollup row plus every span, skeleton by default, full payloads on
-     * {@code fields=["payload"]}). These deliberately step outside the aggregation-first query firewall:
-     * {@code query_search} can never return the raw conversation. Both are project-scoped by primary-key
-     * prefix, so a cross-tenant id resolves to not-found rather than leaking, the scoping is the lookup, not
-     * a filter applied after one.
-     *
-     * <p>{@code get_span} requires both ids: a producer span id is unique only within its trace, so there is
-     * no index to look one up alone, and guessing would silently return a span from the wrong turn. A call
-     * with no {@code trace_id} gets a tool error naming the argument to add, not a misleading not-found.
+     * {@code get_span} and {@code get_trace} deliberately step outside the aggregation-first query firewall. Both are
+     * scoped by primary-key prefix, so a cross-tenant id resolves to not-found. {@code get_span} needs both ids: a
+     * producer span id is unique only within its trace.
      */
     private void registerTraceReadTools() {
         add(new McpTool(
@@ -666,19 +583,11 @@ public class McpToolRegistry {
     }
 
     /**
-     * The Classifiers findings read: {@code get_finding} fetches one {@code behavior_finding} row, the same
-     * object {@code FindingController}'s {@code GET /findings/{id}} renders. Delegates to
-     * {@link FindingService#finding}, which is both the project scope and the capability gate (a finding
-     * whose detector this org does not hold reads not-found too).
-     *
-     * <p>{@code get_finding_evidence} pages the population a finding's claim rests on, one ref per measured
-     * row, through the same service and therefore the same gate, so evidence cannot bypass a withheld
-     * classifier. Refs are ids; {@code get_trace} / {@code get_span} / {@code list_spans} read them.
+     * Both delegate to {@link FindingService}, which is the project scope and the capability gate, so evidence cannot
+     * bypass a withheld classifier.
      */
     private void registerClassifierFindingTools() {
-        // list_findings closes get_finding's dead end: get_finding shipped alone, so an agent could not
-        // reach a finding without a human pasting an id from the UI. Returns headline rows without the
-        // evidence blob on purpose, the list-then-fetch pair this surface was missing half of.
+        // Headline rows without the evidence blob: the list half of the list-then-fetch pair.
         add(new McpTool(
                 "list_findings",
                 "List classifier findings for this token's project — the aggregated causes behind"
@@ -777,8 +686,8 @@ public class McpToolRegistry {
 
     private BehaviorFindingsView listFindings(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
-        // Mirrors the controller's own reading of the flag: anything but an explicit "all" means confirmed
-        // only, so a typo narrows rather than silently widening a lead list into an alert list.
+        // Anything but an explicit "all" means confirmed only, so a typo narrows rather than widening a lead list into
+        // an alert list.
         boolean confirmedOnly = !"all".equals(strArg(args, "include"));
         try {
             BehaviorFindingsView view = behaviorDrift.findings(
@@ -798,20 +707,9 @@ public class McpToolRegistry {
     }
 
     /**
-     * A finding detail for an agent's eyes: the triage ruling removed, and every sample and trace/span
-     * id removed from the summary blocks too. RCA receives a finding id and nothing else: no ruling, no
-     * summary, no rule-outs, not even the fact that a triage pass happened, because "nothing happened
-     * here" is a supported RCA conclusion and the only check on the triage gate. The RCA agent runs with
-     * its own finding id against this same tool, so the firewall has to hold here too, not only in the
-     * dossier and the prompt, and is applied to every caller since the RCA key family is not
-     * distinguishable at this layer.
-     *
-     * <p>The id stripping is the second, separate firewall this method carries: {@code get_finding} is a
-     * SUMMARY surface, complete on its numbers but carrying no undeclared sample of instances — an agent
-     * handed a handful of ids reads those and calls the claim audited. Evidence, ids included, is what
-     * {@code get_finding_evidence} pages on purpose. The UI's own {@code GET /findings/{id}} renders the
-     * unstripped {@link BehaviorFindingDetailView} directly (a human following a link is a reading aid,
-     * not a biased sample), so this trimming happens here, at the agent door, and nowhere upstream of it.
+     * Two firewalls for every agent caller. The triage ruling is removed because RCA must reach its own conclusion and
+     * "nothing happened here" is a supported one. Every sample id is removed because an agent handed a few ids reads
+     * only those and calls the claim audited; evidence is paged by {@code get_finding_evidence}.
      */
     private static BehaviorFindingDetailView agentView(BehaviorFindingDetailView detail) {
         ToolErrorEvidence.RateDetail toolError = detail.toolError();
@@ -854,7 +752,6 @@ public class McpToolRegistry {
                 rate.criticality());
     }
 
-    /** An owner's detail is numbers and words only; its rate's trace list is dropped like every other rate's. */
     private static ClassifierDetail withoutIds(ClassifierDetail detail) {
         return new ClassifierDetail(
                 withoutIds(detail.rate()),
@@ -891,7 +788,6 @@ public class McpToolRegistry {
                 detail.windowEnd());
     }
 
-    /** See {@link #agentView}. */
     private BehaviorFindingDetailView getFinding(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
         try {
@@ -902,23 +798,8 @@ public class McpToolRegistry {
     }
 
     /**
-     * {@code get_finding_evidence}: a page of the population a detector enumerated, each row joined to what
-     * was measured on it. Delegates to {@link FindingService#findingEvidenceSpans}, which carries the same
-     * reachability guard {@code get_finding} does, so the gate lives in one place rather than being
-     * restated per tool.
-     *
-     * <p>Measurements rather than bare refs because a reading agent judging a row cannot do it from an id:
-     * with only ids, deciding whether one row of 174 is worth opening costs a {@code get_span} per row, so
-     * it opens a handful, picks them blind, and rules on those. The numbers it selects on now ride the page
-     * it selects from.
-     *
-     * <p>{@code count_only} still goes to {@link FindingService#findingEvidence}: the cheap sizing call
-     * returns no rows, so joining to spans it would not return buys nothing, and that path has no span
-     * variant.
-     *
-     * <p>An unrecognised {@code role} is an error, not an empty page, same reasoning as
-     * {@link #listCases}: a client can send anything regardless of the schema, and an empty page here would
-     * read as "no evidence" rather than "bad argument".
+     * Measurements rather than bare refs, so an agent can choose which rows to open instead of picking blind. An
+     * unrecognised {@code role} is an error, not an empty page that would read as "no evidence".
      */
     private Object getFindingEvidence(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
@@ -957,7 +838,7 @@ public class McpToolRegistry {
         }
     }
 
-    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null = not a witness span → the key is omitted
+    // null = not a witness span → the key is omitted
     private static @Nullable List<GroundednessEvidence.FlaggedSentenceText> witnessSentences(
             BehaviorDtos.EvidenceSpanView row, Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> sentences) {
         if (!FindingEvidenceRow.Role.WITNESS.equals(row.role()) || row.traceId() == null || row.spanId() == null) {
@@ -967,12 +848,8 @@ public class McpToolRegistry {
     }
 
     /**
-     * One evidence row on the MCP door: {@link BehaviorDtos.EvidenceSpanView} without the payload previews.
-     *
-     * <p>The previews are dropped here rather than in the view, which the finding page's evidence table
-     * shares and still renders them in. This surface hands out measurements and ids; payload text comes
-     * from {@code get_span}, where a caller asks for one span's body on purpose instead of receiving a
-     * thousand truncated ones it did not ask for.
+     * {@link BehaviorDtos.EvidenceSpanView} without the payload previews: payload text comes from {@code get_span},
+     * asked for one span at a time.
      */
     record EvidenceSpan(
             String role,
@@ -989,29 +866,18 @@ public class McpToolRegistry {
             @Nullable Long latencyMs,
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
-            /** The distinct models behind this row: one entry on a single-step row, every model the
-             *  run called on a whole-run row. */
             List<String> models,
-            /** True on a whole-run row whose trace has not rolled up yet: {@code totalTokens} and
-             *  {@code totalCost} are not yet trustworthy. */
+            /** True on a whole-run row whose trace has not rolled up yet. */
             boolean notRolledUp,
-            /** True on a whole-run row whose trace carries unpriced spans: {@code totalCost} is a floor. */
             boolean partialCost,
-            /** True on a whole-run row whose trace rollup is not settled: late spans can still change
-             *  the totals. */
             boolean staleTotals,
             @Nullable String callSiteId,
-            /** The masked key that leaked and whether it is still stored raw — already masked, never
-             *  the credential itself, so kept alongside the measurements rather than dropped with the
-             *  previews. Set only on a secret-leak finding's evidence. */
+            /** The leaked key, already masked. Set only on a secret-leak finding's evidence. */
             @Nullable String secretKey,
             @Nullable String storedAs,
-            /** The schema-violation message this row's own output failed with — already a plain message,
-             *  never a credential, so kept alongside the measurements rather than dropped with the
-             *  previews. Set only on a malformed-output finding's evidence. */
+            /** Set only on a malformed-output finding's evidence. */
             @Nullable String violation,
-            /** Each sentence the model flagged in this answer, with its score. Set only on a groundedness
-             *  finding's witness span rows, and absent from every other row. */
+            /** Set only on a groundedness finding's witness span rows. */
             @JsonInclude(JsonInclude.Include.NON_NULL) @Nullable
             List<GroundednessEvidence.FlaggedSentenceText> flaggedSentences) {
 
@@ -1045,7 +911,6 @@ public class McpToolRegistry {
         }
     }
 
-    /** {@link BehaviorDtos.FindingEvidenceSpanPage} with {@link EvidenceSpan} rows: the same envelope. */
     record EvidenceSpanPage(
             List<EvidenceSpan> rows,
             @Nullable String nextCursor,
@@ -1056,15 +921,9 @@ public class McpToolRegistry {
         tools.put(t.name(), t);
     }
 
-    // ------------------------------------------------------------------ handlers
-
     /**
-     * {@code get_project}: the bound project, flat.
-     *
-     * <p>The {@code watching} block lives here rather than on {@code list_cases}: enabled classifiers, call
-     * sites swept, traces in the last 24h, the only signal separating "nothing is wrong" from "nothing is
-     * arriving". An agent that reads an empty {@code list_cases} without it would report an all-clear for a
-     * project that stopped sending traffic. Uses the same {@link CaseService#watching} call Triage does.
+     * {@code watching} lives here because it is the only signal separating "nothing is wrong" from "nothing is
+     * arriving"; without it an empty {@code list_cases} reads as an all-clear.
      */
     private Map<String, Object> getProject(TenantContext ctx) {
         Project p = requireProject(ctx);
@@ -1083,8 +942,6 @@ public class McpToolRegistry {
         entry.put("packs", pipe.packs().size());
         entry.put("watching", cases.watching(p.id()));
 
-        // Compact per-pack roll-up so the agent can see which concern bundles
-        // are engaged without a separate call.
         List<Map<String, Object>> packs = new ArrayList<>();
         for (var pack : pipe.packs()) {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -1177,15 +1034,9 @@ public class McpToolRegistry {
         return Map.of("failure_modes", out);
     }
 
-    // ------------------------------------------------------------------ case handlers
-
     /**
-     * {@code list_cases}: one filtered keyset page, clamped to this surface's own maximum. Defaults to
-     * {@code state=open} since "what is wrong with this project" is not a question about resolved cases.
-     *
-     * <p>An unrecognised {@code state} is an error, not an empty page: a client can ignore the schema's
-     * three values, and a silent empty page for a typo like {@code "closed"} would read as "nothing wrong"
-     * rather than as a bad argument.
+     * Defaults to {@code state=open}. An unrecognised {@code state} is an error, not an empty page that would read as
+     * "nothing wrong".
      */
     private CasesPage listCases(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
@@ -1208,12 +1059,8 @@ public class McpToolRegistry {
         String projectId = requireProject(ctx).id();
         try {
             CaseDetailView detail = cases.detail(projectId, id);
-            // Both of get_finding's firewalls (see agentView). A case's `ruling` is the triage ruling RCA
-            // must not read about the finding it's investigating, and the summary blocks and exemplars
-            // lose every trace and span id; the exemplars are the finding's evidence rows, which
-            // get_finding_evidence pages with latest_finding_id. `rca` is deliberately not stripped: the
-            // firewall is about triage, and an earlier RCA report is this lane's own prior work, not the
-            // gate it checks.
+            // Both of get_finding's firewalls (see agentView). `rca` is deliberately not stripped: an earlier RCA
+            // report is this lane's own prior work, not the triage gate it checks.
             ToolErrorEvidence.RateDetail toolError = detail.toolError();
             MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
             SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
@@ -1245,15 +1092,7 @@ public class McpToolRegistry {
         }
     }
 
-    // ------------------------------------------------------------------ query handlers
-
-    /**
-     * {@code describe_dataset}: every field is read off {@link QueryDataset}'s accessors, so this cannot
-     * disagree with what {@link QueryService} accepts.
-     *
-     * <p>No {@link #requireProject}: this reads no rows, the answer is identical for every token, and
-     * requiring a resolvable project would only fail introspection for a token whose project was deleted.
-     */
+    /** No {@link #requireProject}: this reads no rows, so a token whose project was deleted can still introspect. */
     private Map<String, Object> describeDataset(Map<String, Object> args) {
         String wire = strArg(args, "dataset");
         List<QueryDataset> selected;
@@ -1269,9 +1108,8 @@ public class McpToolRegistry {
             m.put("facet_fields", List.copyOf(d.facetFields()));
             m.put("filter_fields", List.copyOf(d.filterFields()));
             m.put("searchable", d.supportsSearch());
-            // Which tool searches it, not just whether it's searchable: spans supports search but moved to
-            // list_spans, so reporting only `searchable: true` sent agents to query_search(dataset=spans),
-            // which succeeds but silently returns the wrong, thinner reader.
+            // Spans search lives on list_spans; `searchable: true` alone sent agents to query_search, which returns a
+            // thinner reader.
             m.put("searched_by", searchToolFor(d));
             m.put("time_column", d.timeColumn());
             m.put("measure", d.measureColumn());
@@ -1330,22 +1168,14 @@ public class McpToolRegistry {
         }
     }
 
-    /**
-     * Map a service's {@link TessaryException} (a {@link QueryService} validation failure, a finding or case
-     * that is not there) to a {@link McpTool.ToolException} the LLM can correct, not a {@code -32603}
-     * internal error.
-     */
+    /** A {@link McpTool.ToolException} the LLM can correct, not a {@code -32603} internal error. */
     private static McpTool.ToolException toolError(TessaryException e) {
         return new McpTool.ToolException(Objects.requireNonNull(e.getMessage()), e);
     }
 
-    // ------------------------------------------------------------------ substrate list handlers
-
     /**
-     * {@code list_traces}: the REST traces list, argument-for-argument, minus the sort. {@code sort} is
-     * passed as null on purpose: the REST orderings are a table's affordance for a person scanning columns,
-     * whereas "which traces cost the most" is an aggregation the query tools answer more cheaply. Newest-
-     * first also keeps a cursor minted here readable by the REST side's cursor decoder.
+     * {@code sort} is null on purpose: newest-first keeps a cursor minted here readable by the REST decoder, and cost
+     * rankings belong to the query tools.
      */
     private TraceDtos.TracesPage listTraces(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
@@ -1362,7 +1192,6 @@ public class McpToolRegistry {
                 null);
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
         TracePageCodec.Key before = TracePageCodec.decode(strArg(args, "cursor"));
-        // Over-fetch by one; the codec turns the extra row into next_cursor and drops it from the page.
         List<TraceV2Repository.Summary> rows;
         try {
             rows = traces.list(
@@ -1378,21 +1207,9 @@ public class McpToolRegistry {
     }
 
     /**
-     * {@code list_spans}: the spans dataset's own search, rendered as span rows.
-     *
-     * <p>Retrieval is {@link QueryService#search}, not a second query, so this handler contributes only
-     * filters, the page bound and rendering. The typed filters are lifted out of the generic
-     * {@code filters} bag because they are the eight a caller actually reaches for. The page is clamped to
-     * this surface's own cap ({@value #LIST_MAX_LIMIT}), tighter than {@link QueryService}'s REST-sized
-     * default, since these rows can carry whole conversations.
-     *
-     * <p>Rendering re-reads the span rows: the search projection is a handle and a few metadata columns, so
-     * the page's identities are hydrated from {@code span} in one query, then re-ordered back into the
-     * search's ranking (SQL has no order over an id set). A span the retention sweep removed between the
-     * two reads is dropped rather than rendered half-present.
-     *
-     * <p>Payloads are one query for the page or none at all: requested, the whole page comes back in a
-     * single keyed read; otherwise {@code payload_available} is an index-only existence probe.
+     * Retrieval is {@link QueryService#search}; this adds filters, the page bound and rendering. Rows are re-read from
+     * {@code span} and re-ordered into the search's ranking, and a span retention removed between the two reads is
+     * dropped. Payloads are one query for the page or none.
      */
     private Map<String, Object> listSpans(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
@@ -1432,7 +1249,6 @@ public class McpToolRegistry {
         for (QueryRepository.SearchRow row : page.rows()) {
             String rowTrace = row.fields().get("trace_id");
             String rowSpan = row.fields().get("span_id");
-            // A row missing either id means the projection changed under us; there is nothing to render.
             if (rowTrace != null && rowSpan != null) keys.add(new SpanKey(rowTrace, rowSpan));
         }
 
@@ -1464,11 +1280,8 @@ public class McpToolRegistry {
     }
 
     /**
-     * Whether this call opted into full payloads, and a hard error on any other {@code fields} value: a
-     * caller that asked for something and silently got a page without it would read the page as complete.
-     *
-     * <p>Shared by {@code list_spans} and {@code get_trace}, both use the identical
-     * {@code fields=["payload"]} opt-in (see {@link #payloadFieldsField}), validated here for either.
+     * Any other {@code fields} value is a hard error: a caller that silently got a page without what it asked for would
+     * read it as complete.
      */
     private static boolean payloadsRequested(Map<String, Object> args) {
         Object v = args.get("fields");
@@ -1491,14 +1304,9 @@ public class McpToolRegistry {
     }
 
     /**
-     * The payload scope rule: full text only for a page pinned to one trace, or to a window of at most
-     * {@link #SPAN_PAYLOAD_SCOPE_WINDOW}. It fails loudly rather than silently returning compact rows: an
-     * agent that asked for full text and got 200-character previews has no way to know it's reading a
-     * truncation, and would reason over a cut-off prompt as if it were whole.
-     *
-     * <p>A one-sided range does not qualify: {@code {"from": ...}} with no {@code to} means "everything
-     * since", unbounded going forward. Reading the open bound as "now" would make the rule depend on the
-     * server clock, so it stays decidable from the arguments alone.
+     * Full text only for a page pinned to one trace or a window of at most {@link #SPAN_PAYLOAD_SCOPE_WINDOW}. Fails
+     * loudly, since an agent given previews cannot tell it is reading a truncation. A one-sided range does not qualify,
+     * so the rule never depends on the server clock.
      */
     private static void requirePayloadScope(@Nullable String traceId, @Nullable TimeRange range) {
         if (traceId != null) return;
@@ -1524,11 +1332,6 @@ public class McpToolRegistry {
                 + " payload_available says which rows still have full text, and get_span / get_trace return it.");
     }
 
-    /**
-     * A range bound as an instant, for measuring the payload window only. The query layer never parses
-     * these, so a bound well-formed enough for Postgres but not {@link OffsetDateTime} would reach here;
-     * naming the bound in the error tells the caller which one to fix.
-     */
     private static Instant parseBound(String which, String iso) {
         try {
             return OffsetDateTime.parse(iso).toInstant();
@@ -1540,22 +1343,13 @@ public class McpToolRegistry {
         }
     }
 
-    /** Add a typed convenience filter under the spans dataset's own field name, when the caller supplied it. */
     private static void putFilter(Map<String, String> filters, String field, @Nullable String value) {
         if (value != null) filters.put(field, value);
     }
 
     /**
-     * One compact span row: the typed columns and the stored previews, plus {@code payload_available} and
-     * the payload itself only when the caller passed the scope rule.
-     *
-     * <p>{@code payload_available} says a payload row exists, not "has text": payloads age out ahead of the
-     * spans that own them, so false means "we no longer hold what this call said", while true beside an
-     * empty {@code input_preview} means the call genuinely had no input.
-     *
-     * <p>{@code created_at} rides beside {@code started_at} because they're different clocks: started_at is
-     * the producer's own timing, and it is the column this page's {@code range} and keyset actually run on;
-     * created_at is when we received it, shown on every row but never filtered.
+     * {@code payload_available} says a payload row exists, not "has text": payloads age out ahead of their spans.
+     * {@code started_at} is the producer's clock that the range and keyset run on; {@code created_at} is receipt time.
      */
     private static Map<String, Object> spanListRow(
             SpanRow s, boolean payloadAvailable, boolean includePayload, @Nullable SpanPayloadRow payload) {
@@ -1577,15 +1371,13 @@ public class McpToolRegistry {
         m.put("latency_ms", s.latencyMs());
         m.put("total_tokens", s.totalTokens());
         m.put("total_cost", s.totalCost());
-        // A null cost is only readable through cost_source: unpriced means we hold no rate, not that
-        // the call was free.
+        // Unpriced means we hold no rate, not that the call was free.
         m.put("cost_source", s.costSource());
         m.put("input_preview", s.inputPreview());
         m.put("output_preview", s.outputPreview());
         m.put("payload_available", payloadAvailable);
         if (includePayload) {
-            // Keys are always present when requested: null text beside payload_available=false is honest
-            // for an aged-out payload, and an absent key would read as "not asked for".
+            // Keys are always present when requested: an absent key would read as "not asked for".
             m.put("input", payload == null ? null : payload.input());
             m.put("output", payload == null ? null : payload.output());
             m.put("attributes", payload == null ? null : payload.attributes());
@@ -1594,44 +1386,28 @@ public class McpToolRegistry {
         return m;
     }
 
-    /**
-     * {@code list_sessions}: {@link SessionReadService}'s page verbatim, identity rows, recency order, no
-     * totals. A caller wanting a session's totals uses {@code get_session}.
-     */
     private SessionDtos.SessionsPage listSessions(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
         return sessions.page(projectId, pageSize, strArg(args, "cursor"), false, TraceV2Repository.TraceQuery.NONE);
     }
 
-    /**
-     * {@code get_session}: the session detail the REST endpoint renders, unchanged.
-     *
-     * <p>Absent means not-found here as it does over HTTP, because the project scoping IS the lookup: a
-     * session id belonging to another tenant resolves to nothing rather than to a forbidden.
-     */
+    /** The project scoping IS the lookup: another tenant's session id resolves to not-found, not forbidden. */
     private SessionDtos.SessionDetail getSession(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
         return sessions.detail(projectId, id, TraceV2Repository.TraceQuery.NONE)
                 .orElseThrow(() -> new McpTool.ToolException("session not found: " + id));
     }
 
-    /** {@code get_conversation}: one conversation's turns, project-scoped like {@link #getSession}. */
     private SessionDtos.ConversationDetail getConversation(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
         return sessions.conversation(projectId, id)
                 .orElseThrow(() -> new McpTool.ToolException("conversation not found: " + id));
     }
 
-    // ------------------------------------------------------------------ trace/span read handlers
-
     /**
-     * {@code get_span}: one span by its full identity, payload included.
-     *
-     * <p>{@code id} is accepted as a synonym for {@code span_id} so a caller that already learned the new
-     * {@code trace_id} argument is not broken twice over one release. A call with no {@code trace_id} at
-     * all is the pre-cutover shape, and it fails with the rule rather than with a not-found: the id it
-     * sent may well name a real span, just not one that can be found without its trace.
+     * {@code id} is a synonym for {@code span_id}. A call with no {@code trace_id} fails with the rule rather than
+     * not-found, since its id may name a real span.
      */
     private Map<String, Object> getSpan(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
@@ -1654,20 +1430,9 @@ public class McpToolRegistry {
     }
 
     /**
-     * {@code get_trace}: the trace's rollup row plus its spans, both read by primary-key prefix.
-     * {@code is_settled} ships alongside the rollup so an in-flight trace's numbers read as provisional.
-     *
-     * <p>Skeleton by default: {@code withPayloads} mirrors {@code list_spans}'s {@code fields=["payload"]}
-     * opt-in ({@link #payloadsRequested}). A trace investigated for a triage/RCA ruling is routinely
-     * hundreds of spans of which an agent cites a handful, so shipping every span's full text by default
-     * was most of a run's context spend for text never read. {@code get_span} or
-     * {@code fields=["payload"]} here opt back in.
-     *
-     * <p>Payloads are read in one query for the page, keyed to the spans actually rendered, not per span
-     * and not for the whole trace: a six-figure trace would otherwise pull six figures of rows through
-     * memory to render {@value #TRACE_SPAN_CAP} of them. The read itself asks for
-     * {@code TRACE_SPAN_CAP + 1} rows so the extra row's existence answers {@code spans_truncated} without
-     * a second query.
+     * Skeleton by default; {@code fields=["payload"]} opts in like {@code list_spans}, because full text for hundreds
+     * of spans was most of a run's context. Payloads are one query keyed to the rendered spans, and reading
+     * {@code TRACE_SPAN_CAP + 1} rows answers {@code spans_truncated}.
      */
     private Map<String, Object> getTrace(TenantContext ctx, String traceId, boolean withPayloads) {
         String projectId = requireProject(ctx).id();
@@ -1675,8 +1440,7 @@ public class McpToolRegistry {
                 .orElseThrow(() -> new McpTool.ToolException("trace not found: " + traceId));
         List<SpanRow> all = spans.listByTrace(projectId, traceId, TRACE_SPAN_CAP + 1);
         boolean truncated = all.size() > TRACE_SPAN_CAP;
-        // Oldest-first is listByTrace's own order, so the cap keeps the conversation's head, the part
-        // later spans are only intelligible against.
+        // Oldest-first, so the cap keeps the conversation's head.
         List<SpanRow> rendered = truncated ? all.subList(0, TRACE_SPAN_CAP) : all;
         List<SpanKey> keys = new ArrayList<>(rendered.size());
         for (SpanRow span : rendered) keys.add(new SpanKey(span.traceId(), span.id()));
@@ -1692,8 +1456,6 @@ public class McpToolRegistry {
                 spanViews.add(traceSpanView(span, payload != null, true, payload));
             }
         } else {
-            // Same skeleton-mode cost as list_spans' compact page: an index-only existence probe, no
-            // payload text read at all.
             Set<SpanKey> withText = payloads.existingKeys(projectId, keys);
             for (int i = 0; i < rendered.size(); i++) {
                 spanViews.add(traceSpanView(rendered.get(i), withText.contains(keys.get(i)), false, null));
@@ -1709,8 +1471,7 @@ public class McpToolRegistry {
         out.put("started_at", trace.startedAt());
         out.put("ended_at", trace.endedAt());
         out.put("latency_ms", trace.latencyMs());
-        // The rollup, verbatim. A null counter means "not rolled up yet" and is NOT zero; is_settled is
-        // the companion fact that says which of the two a null is.
+        // A null counter means "not rolled up yet", NOT zero; is_settled says which.
         out.put("span_count", trace.spanCount());
         out.put("error_count", trace.errorCount());
         out.put("input_tokens", trace.inputTokens());
@@ -1722,32 +1483,26 @@ public class McpToolRegistry {
         out.put("input_cost", trace.inputCost());
         out.put("output_cost", trace.outputCost());
         out.put("total_cost", trace.totalCost());
-        // Load-bearing beside the total: spans running models we hold no rate for are counted, not priced
-        // at zero, so a low total is never mistaken for a cheap turn.
+        // Spans on unpriced models are counted, not priced at zero, so a low total is never mistaken for a cheap turn.
         out.put("unpriced_spans", trace.unpricedSpans());
         out.put("is_settled", trace.isSettled());
         out.put("call_site_id", trace.callSiteId());
-        // span_count above is the total the cap is measured against; no separate span_count_total needed.
         out.put("spans_truncated", truncated);
         out.put("spans", spanViews);
         return out;
     }
 
     /**
-     * The full raw view of a span for {@code get_span}/{@code get_trace}: the typed columns plus the
-     * payload's text and jsonb. A {@link LinkedHashMap} (not {@code Map.of}) so the many {@code @Nullable}
-     * columns reach the wire as explicit JSON nulls instead of tripping {@code Map.of}'s NPE-on-null.
-     *
-     * <p>A null cost is not a zero: {@code cost_source} says whether it's {@code provided}, {@code inferred},
-     * or {@code unpriced} (we hold no rate for that model). {@code payload} may be entirely absent when a
-     * span outlives the payload retention window, a different statement from a span that carried no input.
+     * A {@link LinkedHashMap} so nullable columns reach the wire as explicit JSON nulls instead of tripping
+     * {@code Map.of}'s NPE. A null cost is not zero (see {@code cost_source}); {@code payload} is absent once a span
+     * outlives payload retention.
      */
     private static Map<String, Object> spanView(SpanRow s, @Nullable SpanPayloadRow payload) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("trace_id", s.traceId());
         m.put("span_id", s.id());
         m.put("parent_span_id", s.parentSpanId());
-        // A null path means ancestry is unresolved, not "this is the root". Root is parent_span_id == null.
+        // A null path means ancestry is unresolved, not "this is the root".
         m.put("path", s.path());
         m.put("depth", s.depth());
         m.put("kind", s.kind());
@@ -1786,17 +1541,14 @@ public class McpToolRegistry {
         m.put("input", payload == null ? null : payload.input());
         m.put("output", payload == null ? null : payload.output());
         m.put("attributes", payload == null ? null : payload.attributes());
-        // The producer's raw usage object, kept as a receipt. Never read for arithmetic; the typed
-        // columns above are the numbers, this is what arrived.
+        // A receipt, never read for arithmetic.
         m.put("provided_usage", payload == null ? null : payload.providedUsage());
         return m;
     }
 
     /**
-     * One span for {@code get_trace}, in either of its two modes: every column {@link #spanView} renders,
-     * plus {@code payload_available} and the stored previews, but {@code input}/{@code output}/
-     * {@code attributes}/{@code provided_usage} only when the caller opted in. Deliberately not a
-     * {@code spanView} overload: {@code get_span}'s full-payload contract is untouched by this.
+     * {@link #spanView} plus previews, with payload columns only when the caller opted in; {@code get_span}'s
+     * full-payload contract is untouched.
      */
     private static Map<String, Object> traceSpanView(
             SpanRow s, boolean payloadAvailable, boolean includePayload, @Nullable SpanPayloadRow payload) {
@@ -1851,8 +1603,6 @@ public class McpToolRegistry {
         return m;
     }
 
-    // ------------------------------------------------------------------ helpers
-
     private Project requireProject(TenantContext ctx) {
         if (ctx == null || ctx.projectId() == null) {
             throw new McpTool.ToolException("no project bound to this token");
@@ -1890,42 +1640,31 @@ public class McpToolRegistry {
         return Map.of("type", "boolean", "description", description);
     }
 
-    // ---- query-tool schema fragments ----------------------------------------------------
-
     /**
-     * The allow-listed dataset enum, derived from {@link QueryDataset} rather than restated: a hand-written
-     * list here once drifted from the enum, so the schema's {@code additionalProperties: false} silently
-     * made a real dataset unreachable over MCP until a literal was updated to match.
+     * Derived from {@link QueryDataset}: a hand-written list once drifted, and {@code additionalProperties: false} made
+     * a real dataset unreachable.
      */
     private static Map<String, Object> datasetField() {
         return enumField("Dataset to query: " + datasetList(false) + ".", datasetNames(false));
     }
 
     /**
-     * The narrower enum for {@code query_search}: datasets that {@linkplain QueryDataset#supportsSearch
-     * support search}, minus {@code spans}. {@code spans} is excluded by decision, not capability:
-     * {@code list_spans} already does the same keyword search with a richer filter set, so leaving spans
-     * here would give the model two tools answering one question. {@link QueryService} still accepts
-     * {@code dataset=spans} on search; only the MCP schema narrows.
+     * {@code spans} is excluded by decision: {@code list_spans} already does that search with richer filters.
+     * {@link QueryService} still accepts it.
      */
     private static Map<String, Object> searchableDatasetField() {
         return enumField("Dataset to search: " + datasetList(true) + ".", datasetNames(true));
     }
 
     /**
-     * Which MCP tool searches this dataset, or null when nothing does. The one place that knows spans
-     * search lives on {@code list_spans}, not {@code query_search}; {@code describe_dataset} reports it and
-     * {@link #datasetNames(boolean)} enforces it so introspection and the allowed enum cannot disagree.
+     * The one place that knows spans search lives on {@code list_spans}, so introspection and the allowed enum cannot
+     * disagree.
      */
     private static @Nullable String searchToolFor(QueryDataset d) {
         if (!d.supportsSearch()) return null;
         return d == QueryDataset.SPANS ? "list_spans" : "query_search";
     }
 
-    /**
-     * The wire names of every queryable dataset, optionally narrowed to the ones {@code query_search}
-     * advertises (see {@link #searchableDatasetField()} for why that is narrower than {@code supportsSearch}).
-     */
     private static List<String> datasetNames(boolean searchableOnly) {
         List<String> out = new ArrayList<>();
         for (QueryDataset d : QueryDataset.values()) {
@@ -1934,17 +1673,13 @@ public class McpToolRegistry {
         return List.copyOf(out);
     }
 
-    /** The same names rendered for prose, so a tool's description cannot disagree with its own schema. */
     private static String datasetList(boolean searchableOnly) {
         return String.join(" | ", datasetNames(searchableOnly));
     }
 
     /**
-     * A half-open time window {@code [from, to)} on the dataset's own event clock (ISO-8601 strings), not
-     * necessarily {@code created_at}: {@code spans} and {@code tool_calls} range on {@code started_at},
-     * {@code classifier_events} on {@code subject_started_at} (the span or trace it judged), and
-     * {@code metric_rollups} on {@code bucket_start} (ingest time — billing). {@code describe_dataset}'s
-     * {@code time_column} names it per dataset.
+     * A half-open {@code [from, to)} window on the dataset's own event clock, not necessarily {@code created_at};
+     * {@code describe_dataset}'s {@code time_column} names it.
      */
     private static Map<String, Object> rangeField() {
         return rangeField(
@@ -1956,9 +1691,8 @@ public class McpToolRegistry {
     }
 
     /**
-     * The same {@code {from, to}} object under caller-supplied descriptions: the query datasets take a
-     * half-open window, the traces list filters {@code started_at} with both bounds inclusive, and a shared
-     * wording would be a false statement about whichever surface it wasn't written for.
+     * Caller-supplied descriptions, because the query datasets are half-open while the traces list is inclusive at both
+     * ends.
      */
     private static Map<String, Object> rangeField(String description, String fromDescription, String toDescription) {
         Map<String, Object> props = new LinkedHashMap<>();
@@ -1972,26 +1706,18 @@ public class McpToolRegistry {
         return m;
     }
 
-    /** The shared {@code limit} argument of every {@code list_*} reader over the substrate. */
     private static Map<String, Object> limitField() {
         return intField("Optional. Max rows in this page (default " + LIST_DEFAULT_LIMIT + ", capped at "
                 + LIST_MAX_LIMIT + ").");
     }
 
-    /**
-     * The shared {@code cursor} argument. An unreadable token restarts at page one rather than erroring,
-     * the posture {@code QueryRepository} already takes.
-     */
+    /** An unreadable token restarts at page one, as {@code QueryRepository} does. */
     private static Map<String, Object> cursorField() {
         return strField("Optional. The next_cursor from a previous page; an unreadable or stale token starts"
                 + " again at the newest page.");
     }
 
-    /**
-     * The {@code list_spans}/{@code get_trace} payload opt-in. An array, not a boolean, because it is the
-     * start of a field-set vocabulary: {@code fields: ["payload"]} says what arrives, where
-     * {@code payloads: true} would only say something changed.
-     */
+    /** An array, not a boolean, so it can grow into a field-set vocabulary. */
     private static Map<String, Object> payloadFieldsField() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("type", "array");
@@ -2006,7 +1732,6 @@ public class McpToolRegistry {
         return m;
     }
 
-    /** Equality filters: a flat map of allow-listed field -> value (dataset-specific). */
     private static Map<String, Object> filtersField() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("type", "object");
@@ -2035,10 +1760,7 @@ public class McpToolRegistry {
         return s;
     }
 
-    /**
-     * Parse an optional boolean argument. Absent is false: every flag on this surface is an opt-in, so
-     * "not sent" and "sent false" are the same request.
-     */
+    /** Absent is false: every flag on this surface is an opt-in. */
     private static boolean boolArg(Map<String, Object> args, String key) {
         Object v = args.get(key);
         if (v == null) return false;
@@ -2046,7 +1768,6 @@ public class McpToolRegistry {
         throw new McpTool.ToolException("argument " + key + " must be a boolean");
     }
 
-    /** Parse an optional integer argument (accepts JSON numbers; rejects other types). */
     private static @Nullable Integer intArg(Map<String, Object> args, String key) {
         Object v = args.get(key);
         if (v == null) return null;
@@ -2055,12 +1776,7 @@ public class McpToolRegistry {
         throw new McpTool.ToolException("argument " + key + " must be an integer");
     }
 
-    /**
-     * Parse the optional nested {@code range} object into a {@link TimeRange}. Mirrors the HTTP wire
-     * shape {@code {"from": ..., "to": ...}}; either bound may be absent. Returns null when no range
-     * is supplied (matching {@code TimeRange == null}); range-completeness for timeseries is enforced
-     * downstream by {@link QueryService}.
-     */
+    /** Either bound may be absent; timeseries completeness is enforced by {@link QueryService}. */
     private static @Nullable TimeRange rangeArg(Map<String, Object> args) {
         Object v = args.get("range");
         if (v == null) return null;
@@ -2072,11 +1788,6 @@ public class McpToolRegistry {
         return new TimeRange(from, to);
     }
 
-    /**
-     * Parse the optional flat {@code filters} object into a string->string map. Returns an empty map
-     * when absent (equivalent to "no filters": {@code QueryService} applies an empty filter set as a
-     * no-op).
-     */
     private static Map<String, String> filtersArg(Map<String, Object> args) {
         Object v = args.get("filters");
         if (v == null) return Map.of();

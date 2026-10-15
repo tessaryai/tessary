@@ -17,29 +17,18 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * {@link CaseLedger#openOrJoin} against real Postgres, so the partial indexes and ISO-text comparisons run for real.
  * Each test calls it on one finding, as {@link CaseOpener} does inside a ruling's transaction (decision 1).
  */
 @RcaParkedSpringBootTest
-class CaseLedgerTest {
-
-    @Autowired
-    CaseLedger ledger;
-
-    @Autowired
-    CaseRepository cases;
-
-    @Autowired
-    CaseEventRepository events;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    TenantService tenants;
+record CaseLedgerTest(
+        CaseLedger ledger,
+        CaseRepository cases,
+        CaseEventRepository events,
+        FindingRepository findings,
+        TenantService tenants) {
 
     private static final String DETECTOR = CaseRow.Detector.CLASSIFIER;
 

@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The rules a chart card on the Classifiers page draws by, apart from React.
- *
- * The wire carries raw units (rates as fractions, durations in milliseconds, cost in dollars) and times as UTC
- * instants, so every word and number a reader sees is made here. A rate's change is in percentage points, never a percent
- * change (see rateStory.tsx), and a change is "worse" when the value rose: every measure charted here is
- * lower-is-better.
- */
+// The wire carries raw units and UTC instants, so every word and number a reader sees is made here.
+// A rate's change is in percentage points, and every measure charted is lower-is-better.
 import type {
   ChartCallSiteOption,
   ChartCard,
@@ -18,7 +12,6 @@ import type {
 } from "../../api/types";
 import { PROVIDER_PAUSES } from "./shared";
 
-/** The rows a card's case strip has. When more cases ran than fit, the last row says "+N more" instead. */
 export const MAX_LANES = 3;
 
 const HOUR_MS = 3_600_000;
@@ -26,7 +19,6 @@ const DAY_MS = 86_400_000;
 
 export type AxisUnit = "percent" | "seconds" | "usd" | "count";
 
-/** The unit a card's values are drawn in on its axis. */
 export function axisUnitOf(card: ChartCard): AxisUnit {
   if (card.kind === "count") return "count";
   if (card.unit === "ms") return "seconds";
@@ -34,7 +26,6 @@ export function axisUnitOf(card: ChartCard): AxisUnit {
   return "percent";
 }
 
-/** A wire value in its card's axis unit: a rate fraction as percent, milliseconds as seconds. */
 export function toAxis(unit: AxisUnit, v: number): number {
   if (unit === "percent") return v * 100;
   if (unit === "seconds") return v / 1000;
@@ -52,10 +43,6 @@ function tickLabel(unit: AxisUnit, v: number, decimals: number): string {
   return unit === "percent" ? `${n}%` : unit === "seconds" ? `${n} s` : `$${n}`;
 }
 
-/**
- * A linear axis from zero to the first round step at or above `max`, in about four steps of 1, 2 or 5 times a power
- * of ten. A count steps in whole numbers, and an axis over nothing still spans one step so it has a height.
- */
 export function yAxis(max: number, unit: AxisUnit): { top: number; ticks: { value: number; label: string }[] } {
   const minStep = unit === "count" ? 1 : 0;
   const span = max > 0 ? max : 1;
@@ -72,17 +59,12 @@ export function yAxis(max: number, unit: AxisUnit): { top: number; ticks: { valu
   return { top: steps * step, ticks };
 }
 
-/** `2026-10-08` or `2026-10-06T23:30:00Z` as the UTC day it falls on: "Oct 6". */
 export function utcDay(iso: string): string {
   const at = iso.length === 10 ? `${iso}T00:00:00Z` : iso;
   return new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-/**
- * A card's time axis in epoch milliseconds: from 00:00 UTC of the range's first day to the end of the current hour.
- * It stretches to the last rate or range point when the server's clock runs ahead of the browser's. A count card's
- * open bucket can end hours past now, so its bar is cut at the axis end instead.
- */
+/** Stretches to the last point when the server's clock runs ahead; a count card's open bucket is cut at the end. */
 export function timeAxis(card: ChartCard, fromDay: string, now: number): { from: number; to: number } {
   const from = Date.parse(`${fromDay}T00:00:00Z`);
   let to = Math.floor(now / HOUR_MS) * HOUR_MS + HOUR_MS;
@@ -90,7 +72,6 @@ export function timeAxis(card: ChartCard, fromDay: string, now: number): { from:
   return { from, to };
 }
 
-/** The day ticks of a range at 00:00 UTC, counted back from the last day: each day for 7 days, each week for 28. */
 export function xTicks(fromDay: string, toDay: string): { at: number; label: string }[] {
   const from = Date.parse(`${fromDay}T00:00:00Z`);
   const last = Date.parse(`${toDay}T00:00:00Z`);
@@ -100,14 +81,9 @@ export function xTicks(fromDay: string, toDay: string): { at: number; label: str
   return ticks;
 }
 
-/** One rate or range point as drawn: a level held from `start` to `end`, in epoch milliseconds. */
 export type Step = { start: number; end: number; v: number; open: boolean };
 
-/**
- * The SVG paths of a step series: each step a horizontal segment, joined to the one before by a vertical at its start
- * only when it starts within an hour of where that one ended, else left apart. The open step, the last one, goes in
- * `dashed` with its connector so it reads as still filling.
- */
+/** Steps join only when the next starts within an hour of the last; the open step is dashed. */
 export function stepPaths(steps: Step[], x: (t: number) => number, y: (v: number) => number): { solid: string; dashed: string } {
   let solid = "";
   let dashed = "";
@@ -125,7 +101,6 @@ export function stepPaths(steps: Step[], x: (t: number) => number, y: (v: number
   return { solid, dashed };
 }
 
-/** A rate fraction as a percent with one decimal; a non-zero rate too small for that reads "<0.1%". */
 export function percent(f: number): string {
   const p = f * 100;
   if (p > 0 && p < 0.05) return "<0.1%";
@@ -141,17 +116,14 @@ function usdDecimals(v: number): number {
   return a >= 1 ? 2 : a >= 0.01 ? 3 : 4;
 }
 
-/** Milliseconds as seconds: one decimal from a second up, two below it. */
 function seconds(ms: number, decimals = secondsDecimals(ms)): string {
   return `${(ms / 1000).toFixed(decimals)} s`;
 }
 
-/** Dollars at the precision a per-turn cost needs: cents from a dollar up, finer below. */
 function dollars(v: number, decimals = usdDecimals(v)): string {
   return `$${v.toFixed(decimals)}`;
 }
 
-/** A card's own value (a rate fraction, milliseconds or dollars) as the reader sees it. */
 function formatValue(card: ChartCard, v: number): string {
   if (card.kind === "count") return Math.round(v).toLocaleString("en-US");
   if (card.unit === "ms") return seconds(v);
@@ -163,7 +135,6 @@ export type DeltaTone = "worse" | "better" | "same";
 
 const MINUS = "−";
 
-/** The change against the baseline, at the precision the headline is printed in. Null while there is no baseline. */
 function deltaOf(card: ChartCard): { text: string; tone: DeltaTone } | null {
   const { value, delta } = card.headline;
   if (card.learning || delta == null || value == null) return null;
@@ -185,7 +156,6 @@ function deltaOf(card: ChartCard): { text: string; tone: DeltaTone } | null {
   return delta > 0 ? { text: `+${magnitude}`, tone: "worse" } : { text: `${MINUS}${magnitude}`, tone: "better" };
 }
 
-/** What a rate classifier's flag means, its population, and the axis title, by classifier key. */
 const RATE_WORDS: Record<string, { verb: string; noun: string; title: string }> = {
   frustration: { verb: "flagged", noun: "conversations", title: "% of conversations flagged" },
   groundedness: { verb: "unsupported", noun: "answers", title: "% of answers unsupported" },
@@ -194,7 +164,6 @@ const RATE_WORDS: Record<string, { verb: string; noun: string; title: string }> 
 };
 const RATE_DEFAULT = { verb: "flagged", noun: "checks", title: "% flagged" };
 
-/** A range card's measure: the slow-end word, the population, and the axis title. */
 const RANGE_WORDS: Record<string, { high: string; one: string; noun: string; label: string; title: string }> = {
   turn_duration: { high: "Slow", one: "turn", noun: "turns", label: "slow turns (p95)", title: "Seconds per turn" },
   tool_duration: { high: "Slow", one: "call", noun: "calls", label: "slow calls (p95)", title: "Seconds per call" },
@@ -205,7 +174,6 @@ const RANGE_DEFAULT = { high: "High", one: "sample", noun: "samples", label: "hi
 const rateWords = (card: ChartCard) => RATE_WORDS[card.classifier_key] ?? RATE_DEFAULT;
 const rangeWords = (card: ChartCard) => RANGE_WORDS[card.measure ?? ""] ?? RANGE_DEFAULT;
 
-/** A stretch of time as words: per "6 hours", "in an hour", "that day". */
 function lengthWords(ms: number): { per: string; within: string; that: string } {
   const hours = ms / HOUR_MS;
   if (hours === 1) return { per: "hour", within: "an hour", that: "hour" };
@@ -213,13 +181,11 @@ function lengthWords(ms: number): { per: string; within: string; that: string } 
   return { per: `${hours} hours`, within: `${hours} hours`, that: `${hours}-hour window` };
 }
 
-/** The width of a count card's buckets in milliseconds: every one is the same. */
 function bucketMs(card: ChartCard): number | null {
   const p = card.points[0];
   return p ? Date.parse(p.end_at) - Date.parse(p.start_at) : null;
 }
 
-/** The y-axis title above a card's chart. */
 export function axisTitle(card: ChartCard): string {
   if (card.kind === "count") {
     const ms = bucketMs(card);
@@ -229,7 +195,6 @@ export function axisTitle(card: ChartCard): string {
   return rateWords(card).title;
 }
 
-/** The card's second row: the last 7 days' value, its change against the baseline, and what the value is. */
 export function headlineOf(card: ChartCard): {
   value: string;
   delta: { text: string; tone: DeltaTone } | null;
@@ -267,13 +232,11 @@ const RESOLUTION_WORDS: Record<string, string> = {
   absorbed: "merged",
 };
 
-/** How a closed case ended: its disposition when a person gave one, else how it was resolved. */
 function howItEnded(span: ChartCaseSpan): string {
   if (span.disposition) return span.disposition.replace(/_/g, " ");
   return RESOLUTION_WORDS[span.resolution ?? ""] ?? "closed";
 }
 
-/** A case bar's hover text: its reference, its title, and when it ran. */
 export function laneTooltip(span: ChartCaseSpan): string[] {
   const when =
     span.end_at == null
@@ -284,10 +247,6 @@ export function laneTooltip(span: ChartCaseSpan): string[] {
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
-/**
- * The threshold of a count card's "N in a day opens a finding" line, and its words. A bar can carry the line only when
- * it is as wide as the arming window; otherwise the bright bars alone say which windows reached it.
- */
 export function armingLine(card: ChartCard): { threshold: number; label: string } | null {
   const ms = bucketMs(card);
   if (!card.arming || ms !== card.arming.window_seconds * 1000) return null;
@@ -295,10 +254,8 @@ export function armingLine(card: ChartCard): { threshold: number; label: string 
 }
 
 /**
- * One bucket's bar on a count card. Its height is this call site's detections (total, not count), the number the
- * headline sums and the tooltip reads, so a user classifier's card never draws other call sites' detections. It is
- * bright when what the arming bar counts reached the threshold in the window holding it; for a user classifier that
- * count is project-wide, so a short bar can be the one that opened a finding.
+ * Height is this call site's `total`, but `reached` comes from the arming count, which is project-wide for
+ * a user classifier, so a short bar can be the one that opened a finding.
  */
 export function countBar(p: ChartPoint): { height: number; reached: boolean } {
   return { height: p.total ?? 0, reached: p.reached === true };
@@ -306,7 +263,6 @@ export function countBar(p: ChartPoint): { height: number; reached: boolean } {
 
 const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
 
-/** A point's stretch of UTC time: "Oct 7, 14:00-16:00 UTC", or both dates when it crosses midnight. */
 export function spanLabel(startAt: string, endAt: string): string {
   const start = Date.parse(startAt);
   const end = Date.parse(endAt);
@@ -366,25 +322,21 @@ export function pointTooltip(card: ChartCard, index: number): string[] {
   ];
 }
 
-/** Call sites in picker order: the most open cases, then the most turns, then by name. */
 export function rankCallSites(options: ChartCallSiteOption[]): ChartCallSiteOption[] {
   return [...options].sort(
     (a, b) => b.open_cases - a.open_cases || b.turns - a.turns || a.call_site_id.localeCompare(b.call_site_id),
   );
 }
 
-/** The call site the page opens on: the first in picker order. */
 export function defaultCallSite(options: ChartCallSiteOption[]): string | null {
   return rankCallSites(options)[0]?.call_site_id ?? null;
 }
 
-/** What a call site option says beside its name. */
 export function callSiteMeta(o: ChartCallSiteOption): string {
   if (o.open_cases > 0) return plural(o.open_cases, "open case", "open cases");
   return o.learning ? "New, learning" : "No open cases";
 }
 
-/** What a tool option says beside its name. */
 export function toolMeta(t: ChartToolOption): string {
   return t.open_cases > 0 ? plural(t.open_cases, "open case", "open cases") : "No open cases";
 }
@@ -392,7 +344,6 @@ export function toolMeta(t: ChartToolOption): string {
 const byCasesThenCalls = (a: ChartToolOption, b: ChartToolOption) =>
   b.open_cases - a.open_cases || b.calls - a.calls || a.label.localeCompare(b.label);
 
-/** The tool picker's groups: the tools this call site calls, then the rest. An empty group is left out. */
 export function toolGroups(
   tools: ChartToolOption[],
   callSite: string | null,
@@ -405,10 +356,6 @@ export function toolGroups(
   ].filter((g) => g.tools.length > 0);
 }
 
-/**
- * The tool the page opens on: one with an open case, this call site's first; else the tool this call site calls
- * most; else the most-called tool of all.
- */
 export function defaultTool(tools: ChartToolOption[], callSite: string | null): string | null {
   const groups = toolGroups(tools, callSite);
   const mine = callSite != null && groups[0]?.label === "Called by this call site" ? groups[0].tools : [];
@@ -421,13 +368,11 @@ export function defaultTool(tools: ChartToolOption[], callSite: string | null): 
   return pick?.tool_key ?? null;
 }
 
-/** "All call sites. Called by 2 call sites." beside the tool picker. */
 export function callersText(t: ChartToolOption): string {
   if (t.callers.length === 0) return "All call sites. No call site called it in this range.";
   return `All call sites. Called by ${plural(t.callers.length, "call site", "call sites")}.`;
 }
 
-/** Why a classifier that is on cannot judge yet, as a short status. */
 function waitingWords(reason: string | null): string {
   if (reason === "no_schema" || reason === "waiting_on_schemas") return "Waiting for a schema";
   if (reason === "not_set_up") return "Waiting for setup";
@@ -437,7 +382,6 @@ function waitingWords(reason: string | null): string {
   return "Waiting";
 }
 
-/** A classifier's line in the Configure menu: where it runs, or why it does not. */
 export function menuStatus(item: ClassifierMenuItem): string {
   if (item.status === "off") return "Off";
   if (item.status === "waiting") return waitingWords(item.waiting_reason);
@@ -448,7 +392,6 @@ export function menuStatus(item: ClassifierMenuItem): string {
   return `On, ${plural(item.call_site_count, "call site", "call sites")}`;
 }
 
-/** A classifier with no card for this scope, and why. */
 export function chipText(chip: ChartChip): string {
   if (chip.state === "off") return `${chip.name} off`;
   if (chip.state === "waiting") {

@@ -185,22 +185,20 @@ describe("confirming", () => {
   });
 });
 
-describe("creating a project to connect to", () => {
-  it("creates it under the trimmed name, selects it, and holds Connect while naming", async () => {
-    auth.createProject.mockImplementation(async () => {
-      auth.listProjects.mockResolvedValue([project("default"), project("support-bot"), project("new-agent")]);
-      return project("new-agent");
-    });
-    await ready();
-
-    fireEvent.click(button("New project"));
-    expect(button("Connect").disabled).toBe(true);
-    expect(button("Create").disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("New project name", { exact: false }), { target: { value: "  New agent " } });
-    fireEvent.click(button("Create"));
-
-    await waitFor(() => expect(select("Project").value).toBe("new-agent"));
-    expect(auth.createProject).toHaveBeenCalledWith("acme", { name: "New agent" });
-    expect(button("Connect").disabled).toBe(false);
+it("creating a project to connect to: creates it under the trimmed name, selects it, and holds Connect while naming", async () => {
+  auth.createProject.mockImplementation(async () => {
+    auth.listProjects.mockResolvedValue([project("default"), project("support-bot"), project("new-agent")]);
+    return project("new-agent");
   });
+  await ready();
+
+  fireEvent.click(button("New project"));
+  expect(button("Connect").disabled).toBe(true);
+  expect(button("Create").disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("New project name", { exact: false }), { target: { value: "  New agent " } });
+  fireEvent.click(button("Create"));
+
+  await waitFor(() => expect(select("Project").value).toBe("new-agent"));
+  expect(auth.createProject).toHaveBeenCalledWith("acme", { name: "New agent" });
+  expect(button("Connect").disabled).toBe(false);
 });

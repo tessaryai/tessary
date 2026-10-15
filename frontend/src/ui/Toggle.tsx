@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cn } from "./cn";
 
-/**
- * Small accessible pill toggle switch.
- *
- * Token-driven: the track is `bg-accent` when checked and `bg-border-strong` when
- * off, and the thumb takes whichever color reads on the track under it — the
- * accent's own label color on the light checked track, primary text on the dark
- * unchecked one. ~34×19px track, 15px thumb.
- *
- * Renders as a `role="switch"` button; pass `label` for the accessible name when
- * there is no adjacent visible label wired via `aria-labelledby`.
- */
+/** Pass `label` for the accessible name when no visible label is wired via `aria-labelledby`. */
 export function Toggle({
   checked,
   onChange,
@@ -32,7 +22,6 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        // focus ring comes from the global :focus-visible rule in index.css
         "relative inline-flex h-[19px] w-[34px] shrink-0 items-center rounded-pill transition-colors",
         checked ? "bg-accent" : "bg-border-strong",
         disabled && "opacity-50 cursor-not-allowed",

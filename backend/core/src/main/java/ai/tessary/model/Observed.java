@@ -5,11 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Observed production stats for one call site, computed from ingested OTel
- * traces at synthesis time. Drives prioritization, cost / latency budgets in
- * Layer C failure-mode hypothesis, and the audit gate.
- */
+/** A call site's production stats, computed from ingested traces at synthesis time. */
 public record Observed(
         @Nullable @JsonProperty("first_seen") String firstSeen,
         @Nullable @JsonProperty("last_seen") String lastSeen,

@@ -4,13 +4,7 @@ import type { RcaCause } from "../../api/types";
 import { Button, Card } from "../../ui";
 import { causeLabels, isCurrentCause, type CauseKind } from "../rcaLabels";
 
-/**
- * One cause an RCA found, the same card for every case type.
- *
- * <p>The prose rows are written by the agent for a reader with no context; the labels beside them are not,
- * they follow from the cause and the case type. Evidence is only ever the id chips and the repository line:
- * the full investigation lives on the report page.
- */
+/** The prose rows are the agent's; the labels follow from the cause and case type. */
 export function CauseCard({
   cause,
   kind,
@@ -22,11 +16,8 @@ export function CauseCard({
   cause: RcaCause;
   kind: CauseKind;
   basePath: string;
-  /** What `affected_count` counts, singular and plural. */
   affected: [singular: string, plural: string];
-  /** Filters the list below the card to this cause's sessions or answers. */
   show?: { count: number; unit: [singular: string, plural: string]; onShow: () => void };
-  /** False when the run had no repository: nothing it says about a prompt or code line was checked. */
   repoRead?: boolean;
 }) {
   const current = isCurrentCause(cause);
@@ -38,7 +29,6 @@ export function CauseCard({
   ];
   const where = repoRead && cause.attribution && cause.attribution.kind !== "unknown" ? cause.attribution : null;
   const n = cause.affected_count;
-  // Where the page has no list to filter, the sessions are links of their own.
   const sessions = show ? [] : cause.evidence_session_ids;
 
   return (
@@ -135,7 +125,6 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-/** What the repository line is, by the cause's type or, on an older cause, its attribution's kind. */
 function whereLabel(kind: string | null): string {
   switch (kind) {
     case "prompt":
@@ -155,10 +144,7 @@ function whereLabel(kind: string | null): string {
   }
 }
 
-/**
- * How sure a cause is. Every current cause carries its level. On an older report only a lead does: a proven
- * cause there carries no badge, because being on the page as a cause says it.
- */
+/** On an older report only a lead carries a level; a proven cause there has no badge. */
 function Confidence({ level, current }: { level: string; current: boolean }) {
   const high = level === "high";
   const medium = level === "medium";

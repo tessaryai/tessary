@@ -10,14 +10,9 @@ import type { Classifier } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import { CallSitesSection } from "./CallSitesSection";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listClassifierCallSites: vi.fn(),
-  setClassifierCallSites: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ api }) }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const EVERYWHERE = { id: "clf-1", detector: "secret_leak", call_site_ids: null } as Classifier;
 const SCOPED = { ...EVERYWHERE, call_site_ids: ["cs-search"] } as Classifier;

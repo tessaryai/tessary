@@ -8,13 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.SeedRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -29,21 +29,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * <p>Fixtures are aged 200 days against the 90-day default, so only the pin saves them.
  */
 @SpringBootTest
-class RetentionPinIntegrationTest {
+record RetentionPinIntegrationTest(
+        RetentionSweeper sweeper, RetentionRepository retention, TenantService tenants, JdbcClient jdbc) {
 
     private static final String AGED = Instant.now().minus(200, ChronoUnit.DAYS).toString();
-
-    @Autowired
-    RetentionSweeper sweeper;
-
-    @Autowired
-    RetentionRepository retention;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
 
     /**
      * An open finding pins its trace and that trace's payload: a surviving row with lost text is the same dead
@@ -257,14 +246,10 @@ class RetentionPinIntegrationTest {
     }
 
     private void session(Project p, String sessionId) {
-        jdbc.sql("""
-                        INSERT INTO session (project_id, id, started_at, last_activity_at, event_ts)
-                        VALUES (:pid, :id, :at::timestamptz, :at::timestamptz, :at::timestamptz)
-                        """)
-                .param("pid", p.id())
-                .param("id", sessionId)
-                .param("at", AGED)
-                .update();
+        SeedRows.insert(jdbc, """
+            session | project_id | id | started_at | last_activity_at | event_ts
+                    | $1         | $2 | $3         | $3               | $3
+            """, p.id(), sessionId, AGED);
     }
 
     /** An aged trace with one span and its payload: the three tiers the traces class deletes. */
@@ -277,34 +262,14 @@ class RetentionPinIntegrationTest {
     }
 
     private void insertTrace(Project p, String traceId, @Nullable String sessionId, String at) {
-        jdbc.sql("""
-                        INSERT INTO trace (project_id, id, session_id, started_at, event_ts)
-                        VALUES (:pid, :id, :sid, :at::timestamptz, :at::timestamptz)
-                        """)
-                .param("pid", p.id())
-                .param("id", traceId)
-                .param("sid", sessionId)
-                .param("at", at)
-                .update();
-        jdbc.sql("""
-                        INSERT INTO span (project_id, trace_id, id, session_id, kind, started_at, event_ts)
-                        VALUES (:pid, :tid, :sid, :sess, 'llm', :at::timestamptz, :at::timestamptz)
-                        """)
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .param("sid", "span-" + traceId)
-                .param("sess", sessionId)
-                .param("at", at)
-                .update();
-        jdbc.sql("""
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        VALUES (:pid, :tid, :sid, 'in', 'out', :at::timestamptz)
-                        """)
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .param("sid", "span-" + traceId)
-                .param("at", at)
-                .update();
+        SeedRows.insert(jdbc, """
+            trace        | project_id | id       | session_id | started_at | event_ts
+                         | $1         | $2       | $3         | $4         | $4
+            span         | project_id | trace_id | id         | session_id | kind | started_at | event_ts
+                         | $1         | $2       | span-$2    | $3         | llm  | $4         | $4
+            span_payload | project_id | trace_id | span_id    | input      | output | event_ts
+                         | $1         | $2       | span-$2    | in         | out    | $4
+            """, p.id(), traceId, sessionId, at);
     }
 
     private String classifier(Project p) {
@@ -316,12 +281,12 @@ class RetentionPinIntegrationTest {
 
     private void assessment(Project p, String classifierId, String traceId) {
         jdbc.sql("""
-                        INSERT INTO frustration_assessment (id, project_id, classifier_id, trace_id, span_id,
-                            conversation_id, turn_started_at, frustrated, scorer_version, provider, model,
-                            request, response)
-                        VALUES (:id, :pid, :cid, :tid, :sid, 'conv-1', :at::timestamptz, true, 'v1', 'TYPESAFE',
-                            'jev', CAST('{"state": "text"}' AS jsonb), CAST('{"model": "jev"}' AS jsonb))
-                        """)
+            INSERT INTO frustration_assessment (id, project_id, classifier_id, trace_id, span_id,
+                conversation_id, turn_started_at, frustrated, scorer_version, provider, model,
+                request, response)
+            VALUES (:id, :pid, :cid, :tid, :sid, 'conv-1', :at::timestamptz, true, 'v1', 'TYPESAFE',
+                'jev', CAST('{"state": "text"}' AS jsonb), CAST('{"model": "jev"}' AS jsonb))
+            """)
                 .param("id", Ids.ulid())
                 .param("pid", p.id())
                 .param("cid", classifierId)
@@ -332,8 +297,8 @@ class RetentionPinIntegrationTest {
     }
 
     private boolean requestNulled(Project p, String traceId) {
-        return jdbc.sql(
-                        "SELECT request IS NULL FROM frustration_assessment WHERE project_id = :pid AND trace_id = :tid")
+        return jdbc.sql("SELECT request IS NULL FROM frustration_assessment WHERE project_id = :pid AND trace_id ="
+                        + " :tid")
                 .param("pid", p.id())
                 .param("tid", traceId)
                 .query(Boolean.class)
@@ -344,11 +309,11 @@ class RetentionPinIntegrationTest {
         String id = Ids.ulid();
         String now = Instant.now().toString();
         jdbc.sql("""
-                        INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
-                                             status, onset_at, last_seen_at, created_at, updated_at)
-                        VALUES (:id, :pid, 'behavior_drift', :cause, 'behavior_profile', 'profile-1',
-                                :status, :now, :now, :now, :now)
-                        """)
+            INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
+                                 status, onset_at, last_seen_at, created_at, updated_at)
+            VALUES (:id, :pid, 'behavior_drift', :cause, 'behavior_profile', 'profile-1',
+                    :status, :now, :now, :now, :now)
+            """)
                 .param("id", id)
                 .param("pid", p.id())
                 .param("cause", causeKey)
@@ -372,19 +337,10 @@ class RetentionPinIntegrationTest {
             @Nullable String sessionId,
             @Nullable String traceId,
             @Nullable String spanId) {
-        jdbc.sql("""
-                        INSERT INTO finding_evidence (id, project_id, finding_id, session_id, trace_id, span_id,
-                                                      role, created_at)
-                        VALUES (:id, :pid, :fid, :sess, :tid, :span, 'exemplar', :now)
-                        """)
-                .param("id", Ids.ulid())
-                .param("pid", p.id())
-                .param("fid", findingId)
-                .param("sess", sessionId)
-                .param("tid", traceId)
-                .param("span", spanId)
-                .param("now", Instant.now().toString())
-                .update();
+        SeedRows.insert(jdbc, """
+            finding_evidence | id | project_id | finding_id | session_id | trace_id | span_id | role     | created_at
+                             | $1 | $2         | $3         | $4         | $5       | $6      | exemplar | $7
+            """, Ids.ulid(), p.id(), findingId, sessionId, traceId, spanId, Instant.now());
     }
 
     /**
@@ -394,14 +350,14 @@ class RetentionPinIntegrationTest {
         String now = Instant.now().toString();
         String caseId = Ids.ulid();
         jdbc.sql("""
-                        INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id,
-                                               subject_label, metric, state, resolved_at, title,
-                                               basis, severity, onset_at, opened_at, last_seen_at, updated_at)
-                        SELECT :id, :pid, COALESCE(MAX(seq), 0) + 1, 'behavior_drift', 'behavior_profile',
-                               :subject, 'label', 'pass_rate', :state, :resolved, 'title', 'basis',
-                               0.5, :now, :now, :now, :now
-                          FROM eval_case WHERE project_id = :pid
-                        """)
+            INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id,
+                                   subject_label, metric, state, resolved_at, title,
+                                   basis, severity, onset_at, opened_at, last_seen_at, updated_at)
+            SELECT :id, :pid, COALESCE(MAX(seq), 0) + 1, 'behavior_drift', 'behavior_profile',
+                   :subject, 'label', 'pass_rate', :state, :resolved, 'title', 'basis',
+                   0.5, :now, :now, :now, :now
+              FROM eval_case WHERE project_id = :pid
+            """)
                 .param("id", caseId)
                 .param("pid", p.id())
                 .param("subject", "subject-" + Ids.ulid())

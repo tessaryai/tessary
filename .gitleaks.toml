@@ -101,10 +101,6 @@ description = "WorkOS placeholders (sk_test_placeholder, client_test_placeholder
 paths = ['''^backend/tenancy/src/test/java/ai/tessary/auth/PublicOriginGuardTest\.java$''']
 
 [[allowlists]]
-description = "the boot canary's deliberate Stripe-shaped literal (see the comment above it); it exists so the secret_leak detector has something to catch"
-paths = ['''^classifiers/data_gen/emit_local\.py$''']
-
-[[allowlists]]
 description = "fixtures for the vendored credential corpus: structurally valid FAKE AWS, GitHub, Stripe, Slack, Tessary and generic-assignment values minted to prove each rule fires, and a base64-wrapped sample JWT; no real credential"
 paths = ['''^backend/substrate/src/test/java/ai/tessary/redaction/GitleaksCorpusTest\.java$''']
 

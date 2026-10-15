@@ -20,18 +20,7 @@ import {
   useToast,
 } from "../../ui";
 
-/**
- * Settings → PII redaction.
- *
- * The rules authored here are the EXACT rules the server-side write-path guard applies before any trace
- * content is persisted (a producer may mirror the same redaction client-side, before transmit). The page
- * is two halves: a ledger of the
- * project's rules (built-in starters you can disable, custom rules you fully own) and a live playground
- * that previews a pattern — or the whole active rule set — against sample text before you commit it.
- *
- * Redaction is a deliberate, declared substitution — never a silent truncation: the preview shows you
- * exactly what reaches the substrate.
- */
+/** The same rules the server-side write-path guard applies before any trace content is persisted. */
 
 const SAMPLE_PLACEHOLDER =
   "Paste trace content here, for example: email jane.doe@example.com, call 415-555-1234, SSN 123-45-6789.";
@@ -52,7 +41,6 @@ export function PiiRedaction() {
   const [pattern, setPattern] = useState("");
   const [replacement, setReplacement] = useState("[REDACTED]");
 
-  // Playground state.
   const [sample, setSample] = useState("");
   const [preview, setPreview] = useState<{ redacted: string; matches: number } | null>(null);
 

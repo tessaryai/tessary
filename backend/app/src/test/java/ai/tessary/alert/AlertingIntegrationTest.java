@@ -7,10 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
@@ -20,9 +17,7 @@ import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -30,50 +25,17 @@ import org.springframework.boot.test.context.SpringBootTest;
  * classifier detection table, and {@link AlertWorker} produces a daily digest when its cron is due, once per period.
  */
 @SpringBootTest
-class AlertingIntegrationTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUpFixtures() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
-    }
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    org.springframework.jdbc.core.simple.JdbcClient jdbc;
-
-    @Autowired
-    AlertService alertService;
-
-    @Autowired
-    AlertEventRepository alertEvents;
-
-    @Autowired
-    AlertWorker worker;
-
-    @Autowired
-    AlertRuleRepository rules;
+record AlertingIntegrationTest(
+        SubstrateV2Fixtures fx,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        SpanRepository spans,
+        ClassifierRepository signals,
+        org.springframework.jdbc.core.simple.JdbcClient jdbc,
+        AlertService alertService,
+        AlertEventRepository alertEvents,
+        AlertWorker worker,
+        AlertRuleRepository rules) {
 
     // Classifier windows open findings now (ClassifierArming), not alert_events; what remains here is the delivery
     // machinery.

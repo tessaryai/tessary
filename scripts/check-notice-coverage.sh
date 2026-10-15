@@ -15,8 +15,7 @@
 #
 # WHAT THIS DOES.
 #   1. Builds the open backend and frontend images from docker-compose.yml, the same build
-#      definitions `docker compose up` uses in production and check-open-boot-selfhost.sh proves
-#      boot with. Not reinvented here. The tags they land under are pinned below.
+#      definitions `docker compose up` uses in production. Not reinvented here. The tags they land under are pinned below.
 #   2. `docker create` + `docker cp`, never `docker run`, pulls out exactly the layer each
 #      Dockerfile actually assembles (backend: /app, the extracted Spring Boot layers plus the
 #      Pyroscope agent jar; frontend: /srv, the built static bundle) without starting either
@@ -61,7 +60,7 @@
 #   - It builds and inspects one architecture (whatever `docker build` resolves to on the host
 #     running this script), not a multi-arch manifest.
 #
-# NEEDS DOCKER AND MINUTES, same cost class as check-open-boot.sh and check-dependency-audit.sh.
+# NEEDS DOCKER AND MINUTES, same cost class as check-dependency-audit.sh.
 # NOT wired into `task check` / scripts/check.sh's per-PR pipeline (see its EXCLUDED manifest row,
 # same disposition and same reasoning as dependency-audit: this is not a per-commit gate, it is a
 # tool a human runs before a release). Invoke it directly:

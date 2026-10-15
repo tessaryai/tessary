@@ -4,7 +4,6 @@ package ai.tessary.sources;
 import jakarta.validation.constraints.NotBlank;
 import java.util.Map;
 
-/** HTTP-shaped DTOs for /api/sources. */
 public final class SourceDtos {
 
     private SourceDtos() {}
@@ -22,6 +21,4 @@ public final class SourceDtos {
                     row.id(), row.provider(), row.name(), row.baseUrl(), row.createdAt(), row.updatedAt());
         }
     }
-
-    public record DeleteResponse(boolean deleted) {}
 }

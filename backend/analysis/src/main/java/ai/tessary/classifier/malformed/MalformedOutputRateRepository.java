@@ -16,13 +16,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The aggregates Malformed Output's rate is recomputed from: per call site and per hour, how many outputs the
- * sweep checked against a schema and how many of those failed.
- *
- * <p><b>Recomputed from source on every pass, never accumulated.</b> The sweep writes a detection only for an
- * output that failed; the outputs that passed leave no row. So the denominator is counted from the spans
- * themselves, which is also what makes a re-run harmless: the counts are read, not added to, the property
- * {@code ToolErrorRepository#hourlyTallies} holds for the same reason.
+ * Recomputed from source on every pass: passes leave no detection row, so the denominator is counted from spans, which
+ * also makes re-runs harmless.
  */
 @Repository
 public class MalformedOutputRateRepository {
@@ -36,22 +31,14 @@ public class MalformedOutputRateRepository {
         this.states = ToolErrorStateRepository.forTable(jdbc, "malformed_output_state", "call_site_id");
     }
 
-    /** The CUSUM state tool_error's engine carries between passes, one row per call site. */
     public ToolErrorStateRepository states() {
         return states;
     }
 
     /**
-     * Checked and failed outputs per call site per hour since {@code from}, oldest first, as the tallies
-     * {@code ToolErrorTrend} replays, keyed on the call site.
-     *
-     * <p>A span counts as checked when the detector would have validated it: its call site carries a schema
-     * and its output is not empty. The preview column stands in for the output so this never reads a payload;
-     * the writer cuts it from the same text and leaves it null exactly when the output is.
-     *
-     * <p><b>Only spans stored before {@code checkedBefore}.</b> The sweep checks in storage order, so a span
-     * stored after its cursor is one it has not reached, and counting it would add a pass it never recorded.
-     * Hours are on the span's own clock, because a CUSUM fed out of order is not a CUSUM.
+     * A span is checked when its call site has a schema and its output is non-empty; the preview column stands in for
+     * the output so no payload is read. Only spans stored before {@code checkedBefore}, the sweep's cursor. Hours are
+     * on the span's clock.
      */
     public List<HourlyToolTally> hourlyTallies(
             String projectId, String classifierId, Instant from, String checkedBefore) {
@@ -86,22 +73,14 @@ public class MalformedOutputRateRepository {
                 .list();
     }
 
-    /** The bucket a not-JSON detection's failures count under: the whole output, no schema field. */
     public static final String FIELD_NOT_JSON = "not_json";
 
-    /**
-     * The bucket a detection written before the structured-violation rework counts under: its {@code
-     * violations} array holds plain strings, not {@code {field, keyword, message}} objects, so which
-     * declared field it hit cannot be recovered.
-     */
+    /** Pre-rework detections hold plain strings, so the field they hit cannot be recovered. */
     public static final String FIELD_OTHER = "other";
 
     /**
-     * A detection's evidence matches {@code :field} when it is the not-JSON bucket, the pre-rework
-     * catch-all, a structured violation whose own {@code field} equals it, or (also under the "other"
-     * bucket) a structured violation whose instance location is the document root, so its collapsed
-     * path is empty rather than absent. Shared between {@link #fieldFailureCounts} and {@link
-     * #failingOutputs} so the two can never disagree about which detections a field owns.
+     * Shared between {@link #fieldFailureCounts} and {@link #failingOutputs} so the two never disagree on which
+     * detections a field owns. A root-level violation has an empty path and counts under "other".
      */
     private static final String FIELD_MATCH = """
             ( (:field = 'not_json' AND d.evidence->>'reason' = 'not_json')
@@ -112,12 +91,7 @@ public class MalformedOutputRateRepository {
               )) )
             """;
 
-    /**
-     * Distinct failing outputs since {@code since}, one count per declared field plus the {@link
-     * #FIELD_NOT_JSON} and {@link #FIELD_OTHER} buckets — what "How outputs broke" annotates the schema
-     * tree with. A span counts once per field even if the same violation fired on it more than once in
-     * its history, and once under EACH field it violates, since one output can break more than one field.
-     */
+    /** One output can break several fields and counts once under each. */
     private record FieldCount(String field, long failing) {}
 
     public Map<String, Long> fieldFailureCounts(
@@ -150,12 +124,7 @@ public class MalformedOutputRateRepository {
         return out;
     }
 
-    /**
-     * One failing output: enough to fetch its payload and place it on a trace. {@code detectionId} is
-     * {@code malformed_output_detection.id}, carried only to reseed {@link Cursor} — a span id is unique
-     * within its trace but not across the whole population this pages over. {@code evidenceJson} is the
-     * detection's own {@code {reason, violations}} blob, read back for the field's own violation message.
-     */
+    /** {@code detectionId} reseeds the {@link Cursor}, since a span id is unique only within its trace. */
     public record DetectionRow(
             String traceId,
             String spanId,
@@ -164,18 +133,11 @@ public class MalformedOutputRateRepository {
             String detectionId,
             @Nullable String evidenceJson) {}
 
-    /** A page of {@link DetectionRow}s, the population size the field owns, and the cursor past this page. */
     public record DetectionPage(
             List<DetectionRow> rows, long total, @Nullable String nextCursor) {}
 
     /**
-     * One field's failing outputs since {@code since}, newest first — what a reader pages through after
-     * selecting a schema field (or {@link #FIELD_NOT_JSON} / {@link #FIELD_OTHER}) on the finding page.
-     *
-     * <p>Keyset on {@code (started_at, id)}, over-fetched by one exactly as {@link
-     * ai.tessary.classifier.finding.FindingEvidenceRepository#spanPage} is: a next page needs no separate
-     * count. {@link #total} is a second, uncursored read of the same {@link #FIELD_MATCH} population — it
-     * rides every page because a reader mid-page ("i of n") needs it beside the row they're looking at.
+     * Keyset on {@code (started_at, id)}, over-fetched by one. {@link #total} rides every page for an "i of n" display.
      */
     public DetectionPage failingOutputs(
             String projectId,
@@ -256,10 +218,6 @@ public class MalformedOutputRateRepository {
         }
     }
 
-    /**
-     * The most recent failing spans at one call site since a spell began, newest first: instances a reader can
-     * open, not the population.
-     */
     public List<FindingEvidenceRepository.Ref> recentFailures(
             String projectId, String classifierId, String callSiteId, String since, int limit) {
         return jdbc.sql("""

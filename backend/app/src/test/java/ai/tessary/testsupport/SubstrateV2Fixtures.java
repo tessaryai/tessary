@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Component;
 
 /**
  * Seeds v2 substrate rows (session, trace, span, payload) with producer-shaped ids, in FK order.
@@ -31,6 +33,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  *
  * <p>Rollup columns are never seeded: run the worker, or the test asserts against itself.
  */
+@Component
 public final class SubstrateV2Fixtures {
 
     private static final AtomicLong COUNTER = new AtomicLong();
@@ -57,6 +60,7 @@ public final class SubstrateV2Fixtures {
      * The core tables plus {@code tool_call} and {@code retrieved_doc}, which take a raw {@link JdbcClient}: their
      * producer-key columns (0077) have no v2 repository yet.
      */
+    @Autowired
     public SubstrateV2Fixtures(
             SessionRepository sessions,
             TraceV2Repository traces,
@@ -439,9 +443,9 @@ public final class SubstrateV2Fixtures {
      */
     public void ingestedAt(SpanRow span, Instant at) {
         jdbc().sql("""
-                        UPDATE span SET created_at = :at::timestamptz
-                        WHERE project_id = :pid AND trace_id = :tid AND id = :sid
-                        """)
+            UPDATE span SET created_at = :at::timestamptz
+            WHERE project_id = :pid AND trace_id = :tid AND id = :sid
+            """)
                 .param("at", at.toString())
                 .param("pid", span.projectId())
                 .param("tid", span.traceId())
@@ -629,8 +633,8 @@ public final class SubstrateV2Fixtures {
 
     /** Settle a trace as its rollup does: its latest span end recorded, no more spans expected. */
     public void settle(String projectId, String traceId, Instant endedAt) {
-        jdbc().sql(
-                        "UPDATE trace SET ended_at = :end::timestamptz, is_settled = true WHERE project_id = :pid AND id = :tid")
+        jdbc().sql("UPDATE trace SET ended_at = :end::timestamptz, is_settled = true WHERE project_id = :pid AND"
+                        + " id = :tid")
                 .param("end", endedAt.toString())
                 .param("pid", projectId)
                 .param("tid", traceId)
@@ -720,11 +724,11 @@ public final class SubstrateV2Fixtures {
             Instant at) {
         String id = "rd-" + COUNTER.incrementAndGet();
         jdbc().sql("""
-                        INSERT INTO retrieved_doc (id, project_id, content, rank, list_role,
-                                                   trace_id, span_id, created_at, event_ts)
-                        VALUES (:id, :pid, :content, :rank, :role,
-                                :tid, :sid, :at::timestamptz, :at::timestamptz)
-                        """)
+            INSERT INTO retrieved_doc (id, project_id, content, rank, list_role,
+                                       trace_id, span_id, created_at, event_ts)
+            VALUES (:id, :pid, :content, :rank, :role,
+                    :tid, :sid, :at::timestamptz, :at::timestamptz)
+            """)
                 .param("id", id)
                 .param("pid", projectId)
                 .param("content", content)
@@ -760,26 +764,20 @@ public final class SubstrateV2Fixtures {
         private @Nullable String parentSpanId;
         private @Nullable String sessionId;
         private @Nullable String threadId;
-        private @Nullable String userId;
         private @Nullable String projectVersionId;
         private @Nullable String callSiteId;
-        private @Nullable String traceName;
         private String kind = "llm";
         private @Nullable String name = "chat";
         private @Nullable String status;
-        private @Nullable String level;
         private @Nullable String errorType;
-        private @Nullable String errorMessage;
         private Instant startedAt = Instant.now();
         private @Nullable Instant endedAt;
         private boolean unterminated;
         private @Nullable String providedModelName;
-        private @Nullable String modelId;
         private @Nullable Long inputTokens;
         private @Nullable Long outputTokens;
         private @Nullable Long cacheReadTokens;
         private @Nullable Long cacheWriteTokens;
-        private @Nullable Long reasoningTokens;
         private @Nullable String inputCost;
         private @Nullable String outputCost;
         private String costSource = SpanRow.CostSource.UNPRICED;
@@ -821,11 +819,6 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        public SpanSeed userId(@Nullable String v) {
-            this.userId = v;
-            return this;
-        }
-
         public SpanSeed projectVersionId(@Nullable String v) {
             this.projectVersionId = v;
             return this;
@@ -833,11 +826,6 @@ public final class SubstrateV2Fixtures {
 
         public SpanSeed callSiteId(@Nullable String v) {
             this.callSiteId = v;
-            return this;
-        }
-
-        public SpanSeed traceName(@Nullable String v) {
-            this.traceName = v;
             return this;
         }
 
@@ -856,20 +844,9 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        public SpanSeed level(@Nullable String v) {
-            this.level = v;
-            return this;
-        }
-
         /** The error class, a short label such as "TimeoutError". */
         public SpanSeed errorType(@Nullable String v) {
             this.errorType = v;
-            return this;
-        }
-
-        /** The error prose, in its own column so the class stays a facet key. */
-        public SpanSeed errorMessage(@Nullable String v) {
-            this.errorMessage = v;
             return this;
         }
 
@@ -898,11 +875,6 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        public SpanSeed modelId(@Nullable String v) {
-            this.modelId = v;
-            return this;
-        }
-
         /** Token buckets; null makes the totals read NULL. */
         public SpanSeed usage(@Nullable Long inputTokens, @Nullable Long outputTokens) {
             this.inputTokens = inputTokens;
@@ -913,11 +885,6 @@ public final class SubstrateV2Fixtures {
         public SpanSeed cacheUsage(@Nullable Long cacheReadTokens, @Nullable Long cacheWriteTokens) {
             this.cacheReadTokens = cacheReadTokens;
             this.cacheWriteTokens = cacheWriteTokens;
-            return this;
-        }
-
-        public SpanSeed reasoningTokens(@Nullable Long v) {
-            this.reasoningTokens = v;
             return this;
         }
 
@@ -948,11 +915,6 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        /** The identity this seed will write, available before {@link #write()}. */
-        public SpanRef ref() {
-            return new SpanRef(traceId, spanId);
-        }
-
         public SpanRow write() {
             fx.trace(projectId, traceId, sessionId, threadId, projectVersionId, startedAt);
             SpanRow row = row();
@@ -974,28 +936,28 @@ public final class SubstrateV2Fixtures {
                     parentSpanId,
                     null,
                     sessionId,
-                    userId,
+                    null,
                     projectVersionId,
                     callSiteId,
-                    traceName,
+                    null,
                     kind,
                     name,
                     parentSpanId == null,
                     status,
-                    level,
+                    null,
                     errorType,
-                    errorMessage,
+                    null,
                     startedAt.toString(),
                     end == null ? null : end.toString(),
                     null,
                     null,
                     providedModelName,
-                    modelId,
+                    null,
                     inputTokens,
                     outputTokens,
                     cacheReadTokens,
                     cacheWriteTokens,
-                    reasoningTokens,
+                    null,
                     inputCost,
                     outputCost,
                     null,
@@ -1016,7 +978,7 @@ public final class SubstrateV2Fixtures {
 
         public SpanRef writeRef() {
             write();
-            return ref();
+            return new SpanRef(traceId, spanId);
         }
     }
 }

@@ -3,7 +3,6 @@ package ai.tessary.open.errors;
 
 import org.springframework.http.HttpStatus;
 
-/** Error codes for the unified alert-rule feature and its delivery channels. */
 public enum AlertError implements ErrorCode {
     RULE_NOT_FOUND(HttpStatus.NOT_FOUND, "No alert rule '%s' for this project"),
     UNSUPPORTED_RULE_TYPE(
@@ -14,7 +13,6 @@ public enum AlertError implements ErrorCode {
     INVALID_BASIS(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Invalid alert basis: %s (expected 'distinct_users', 'event_count', or 'every_match')"),
-    // ---- channels ----
     CHANNEL_NOT_FOUND(HttpStatus.NOT_FOUND, "No alert channel '%s' for this project"),
     UNSUPPORTED_CHANNEL(HttpStatus.BAD_REQUEST, "Unsupported alert channel kind '%s'"),
     INVALID_CHANNEL_CONFIG(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid channel config: %s"),

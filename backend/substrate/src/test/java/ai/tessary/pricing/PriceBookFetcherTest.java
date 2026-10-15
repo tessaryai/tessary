@@ -17,6 +17,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.config.PricingProperties;
 import ai.tessary.telemetry.HomeTessaryClient;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -37,7 +38,7 @@ class PriceBookFetcherTest {
     private static final String PUBLISHED_AT = "2026-09-13T07:20:00.000Z";
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final PricingProperties props = new PricingProperties();
+    private final PricingProperties props = Props.of(PricingProperties.class);
     private final HomeTessaryClient client = mock(HomeTessaryClient.class);
     private final PriceBookRepository books = mock(PriceBookRepository.class);
     private final PriceBookFetcher fetcher = new PriceBookFetcher(props, client, books, mapper);
@@ -80,9 +81,10 @@ class PriceBookFetcherTest {
 
     @Test
     void pricingDisabledTouchesNothing() {
-        props.setEnabled(false);
+        PriceBookFetcher disabled =
+                new PriceBookFetcher(Props.of(PricingProperties.class, "enabled", false), client, books, mapper);
 
-        assertEquals(PriceBookFetcher.Outcome.DISABLED, fetcher.refresh());
+        assertEquals(PriceBookFetcher.Outcome.DISABLED, disabled.refresh());
 
         verifyNoInteractions(client, books);
     }

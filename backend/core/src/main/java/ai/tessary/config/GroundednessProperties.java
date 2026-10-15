@@ -7,28 +7,18 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * How this instance runs the groundedness model, bound from {@code tessary.groundedness.*}. Where the
- * model is and its key are {@code tessary.observer.encoder.*} ({@link ObserverProperties}); the
- * classifier's operating point is per-project data on its {@code config_json}.
- *
- * <p>{@code classifierMode} is {@code TESSARY_GROUNDEDNESS_CLASSIFIER_MODE}, which the setup writes
- * into {@code .env}. {@link Mode#DEV} is a model a developer runs on their own machine: sweeps run
- * whenever it answers, and it being down means scoring is paused. {@link Mode#PRODUCTION} is a GPU
- * instance that wakes on a schedule and stops itself when idle: after a sweep catches up, groundedness
- * is not enqueued again for {@code productionSleepMinutes}, so the instance can go idle and stop, and
- * the model being down between runs is normal. Unset or blank is dev; anything else but the two
- * values fails startup rather than guessing.
+ * How this instance runs the groundedness model. {@link Mode#DEV}: sweeps run whenever it answers.
+ * {@link Mode#PRODUCTION}: a GPU instance that sleeps; after a caught-up sweep nothing is enqueued for
+ * {@code productionSleepMinutes}, so it can stop. Unknown values fail startup.
  */
 @Component
 @ConfigurationProperties(prefix = "tessary.groundedness")
 public class GroundednessProperties {
 
-    /** The two ways the groundedness model runs. */
     public enum Mode {
         DEV,
         PRODUCTION;
 
-        /** The wire and {@code .env} spelling. */
         public String wire() {
             return name().toLowerCase(Locale.ROOT);
         }
@@ -38,13 +28,12 @@ public class GroundednessProperties {
 
     private Mode classifierMode = Mode.DEV;
 
-    /** In production mode, how long after a caught-up sweep groundedness is not enqueued again. */
     private long productionSleepMinutes = 30;
 
-    /** In production mode, how long without a caught-up sweep before the row reports no scores. */
+    /** How long without a caught-up sweep before the row reports no scores. */
     private long productionMissedRunMinutes = 120;
 
-    /** The parsed mode. Named apart from the bound property so the binder sees one type, a string. */
+    /** Named apart from the bound property so the binder sees one type, a string. */
     public Mode mode() {
         return classifierMode;
     }
@@ -54,8 +43,8 @@ public class GroundednessProperties {
     }
 
     /**
-     * Case-insensitive; blank is dev, because an unset mode with a model URL set is a developer's
-     * machine. An unknown value throws, which fails the bind and so startup, naming the variable.
+     * Blank is dev, since an unset mode with a model URL is a developer's machine. Unknown throws, failing startup and
+     * naming the variable.
      */
     public void setClassifierMode(@Nullable String value) {
         this.classifierMode = parse(value);

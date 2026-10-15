@@ -9,30 +9,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The manifest for one built-in classifier: catalog metadata, default operating point, and how to
- * build its detector from the shared dependencies. The catalog derives its built-in list and its
- * detector-dispatch map from the module list, so adding or changing a classifier is one declaration.
- *
- * <ul>
- *   <li>{@code key/name/description/version}: the catalog metadata ({@link #toBuiltIn()}).
- *   <li>{@code capability}: the flag that gates this classifier for an org. Mandatory, and the
- *       only trust dial: whether a classifier actually reaches an org lives entirely in that org's
- *       capability overrides.
- *   <li>{@code defaultEnabled}: whether a freshly seeded row starts enabled. True for every module
- *       except one whose sweep spends the org's own provider credit (Frustration), which a person
- *       turns on knowingly. Never applied to an already-seeded row.
- *   <li>{@code defaultConfigJson}: the per-classifier operating point (e.g. an encoder's
- *       confidence-band thresholds). A band edge must not sit where scores cluster, since scores
- *       wobble a few hundredths by batch composition and a near-threshold verdict could flip between runs.
- *   <li>{@code grain}: what the classifier scores, one observation, one user-facing turn, or a window
- *       of one bucket (see {@link Grain}). The worker reads this to pick the sweep's candidate query.
- *   <li>{@code detectorFactory}: builds the detector from the shared {@link Deps}. {@code null} for
- *       a classifier that is not observation-grain (a window-grain classifier is dispatched through
- *       its {@code ClassifierSweep} instead) or whose detector is supplied externally through the
- *       {@link DetectorSupplier} seam rather than built here. {@code grainFor} still answers
- *       correctly either way, since grain comes from this manifest's {@code grain} field, not from
- *       whether a factory is present.
- * </ul>
+ * The manifest for one built-in classifier; the catalog derives its list and dispatch map from these.
+ * {@code capability} is mandatory and the only trust dial. {@code defaultEnabled} is false only for a sweep that spends
+ * the org's own credit, and never applies to a seeded row. A band edge in {@code defaultConfigJson} must not sit where
+ * scores cluster, since scores wobble by batch. {@code detectorFactory} is null for window-grain or externally supplied
+ * detectors.
  */
 public record ClassifierModelModule(
         String key,
@@ -47,7 +28,6 @@ public record ClassifierModelModule(
         String defaultMode,
         boolean defaultEnabled) {
 
-    /** A module that seeds enabled at the operating point it declares. */
     public ClassifierModelModule(
             String key,
             String name,
@@ -73,10 +53,7 @@ public record ClassifierModelModule(
                 true);
     }
 
-    /**
-     * A module that seeds at the high-recall operating point: the catalog default, and correct for a
-     * classifier nobody has characterised yet: you cannot narrow a band you have never seen fire.
-     */
+    /** The high-recall default: you cannot narrow a band you have never seen fire. */
     public ClassifierModelModule(
             String key,
             String name,
@@ -122,29 +99,19 @@ public record ClassifierModelModule(
         TURN,
 
         /**
-         * One window of one bucket: a stretch of a call site's (or a tool's) own recent traffic,
-         * summarized as a distribution and compared against that same bucket's earlier windows. The
-         * metric-drift classifiers genuinely have no smaller scored unit: duration and cost vary
-         * enormously for legitimate reasons, so there is no per-trace label to assign, only whether a
-         * population moved against its own past.
-         *
-         * <p>A new WINDOW classifier needs a registered {@code ClassifierSweep} before it is declared
-         * here: an unregistered kind is inert and logs a WARN rather than falling through to another
-         * classifier's baselines.
+         * One window of one bucket compared against its own earlier windows. A new WINDOW classifier needs a registered
+         * {@code ClassifierSweep} first, or it is inert.
          */
         WINDOW
     }
 
-    /** The shared dependencies a detector is built from, injected once by the catalog. */
     public record Deps(ObjectMapper mapper, EncoderScorer encoderScorer, SubstrateReadRepository substrate) {}
 
-    /** Builds the classifier's detector from the shared dependencies. */
     @FunctionalInterface
     public interface DetectorFactory {
         BuiltInDetector build(Deps deps);
     }
 
-    /** The catalog-metadata view the seeding path consumes. */
     public BuiltInClassifierCatalog.BuiltIn toBuiltIn() {
         return new BuiltInClassifierCatalog.BuiltIn(
                 key,

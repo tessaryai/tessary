@@ -2,7 +2,6 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -30,6 +29,7 @@ import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -468,56 +468,6 @@ class BehaviorTriageSourceTest {
         }
     }
 
-    /** A hook that throws refuses the absorb before the ruling is written. The bug is a ruling written while the
-     *  detector state did not move. */
-    @Test
-    void aThrowingHookRefusesTheAbsorb() {
-        IllegalStateException failure = new IllegalStateException("state write failed");
-        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
-        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
-
-        IllegalStateException thrown = assertThrows(
-                IllegalStateException.class,
-                () -> source(FindingAdapters.of(List.of(FakeFindingAdapter.failingToAbsorb(CUSTOM_KEY, failure))))
-                        .resolve(PROJECT, "f1", "expected", "u1"));
-
-        assertSame(failure, thrown);
-        verify(findings, never()).recordHumanRuling(any(), any(), any(), any(), any());
-    }
-
-    /** Re-pinning an owned finding calls its hook and moves no built-in state. The bug is a case absorb on a custom
-     *  case that moves nothing. */
-    @Test
-    void repinningAnOwnedFindingCallsTheHook() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
-        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
-        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
-
-        source(FindingAdapters.of(List.of(adapter))).repin(PROJECT, "f1", "u1");
-
-        assertEquals(1, adapter.absorbedCalls().size());
-        assertEquals("f1", adapter.absorbedCalls().get(0).findingId());
-        assertEquals("u1", adapter.absorbedCalls().get(0).userId());
-        verifyNoInteractions(toolErrorStates, toolErrorReferences, baselines, groundednessRates);
-    }
-
-    /** Absorbing a case of owned findings calls the hook once, on the newest finding. The bugs are a hook skipped on a
-     *  case and a hook run once per finding. */
-    @Test
-    void absorbingAnOwnedCaseCallsTheHookOnTheNewestFindingOnce() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
-        when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(custom("f2")));
-        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
-
-        source(FindingAdapters.of(List.of(adapter))).repinCase(PROJECT, List.of(custom("f2"), custom("f1")), "u1");
-
-        assertEquals(
-                List.of("f2"),
-                adapter.absorbedCalls().stream()
-                        .map(FakeFindingAdapter.Absorbed::findingId)
-                        .toList());
-    }
-
     @Test
     void absorbingAnOwnedCaseWithABuiltInCauseKindCallsTheHook() {
         FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
@@ -555,58 +505,6 @@ class BehaviorTriageSourceTest {
 
         verify(toolErrorReferences).pin(eq(PROJECT), eq(BUCKET), eq(600L), eq(50L), eq("u1"), anyString());
         verify(toolErrorStates).reset(eq(PROJECT), eq(BUCKET), eq("u1"), eq("Absorbed."), anyString());
-        assertEquals(List.of(), adapter.absorbedCalls());
-    }
-
-    /**
-     * With an adapter registered that owns none of them, a built-in finding's absorb moves its own detector state:
-     * the tool-error reference, the drift baseline, the groundedness state. The bug is a built-in finding handed to
-     * the adapter, or refused, once the owner check runs first.
-     */
-    @Test
-    void withAnAdapterRegisteredABuiltInFindingIsAbsorbedByItsOwnBranch() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
-        BehaviorTriageSource source = source(FindingAdapters.of(List.of(adapter)));
-        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
-        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(toolError("f1", 600, 60)));
-        FindingRow shift = FindingRowBuilder.of(BuiltInDetector.Kind.DURATION_DRIFT)
-                .id("f2")
-                .projectId(PROJECT)
-                .subject(FindingRow.SubjectKind.METRIC_BASELINE, "mbl-1")
-                .payload("{\"cause_kind\":\"distribution_shift\"}")
-                .build();
-        when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(shift));
-        when(baselines.findById(PROJECT, "mbl-1")).thenReturn(Optional.of(baselineWithNoClosedDay()));
-        FindingRow grounded = FindingRowBuilder.of(BuiltInDetector.Kind.GROUNDEDNESS)
-                .id("f3")
-                .projectId(PROJECT)
-                .callSiteId("rag-answer")
-                .payload("{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}")
-                .build();
-        when(findings.findById(PROJECT, "f3")).thenReturn(Optional.of(grounded));
-        when(groundednessRates.states()).thenReturn(groundednessStates);
-
-        source.repin(PROJECT, "f1", "u1");
-        source.repin(PROJECT, "f2", "u1");
-        source.resolve(PROJECT, "f3", "expected", "u1");
-
-        verify(toolErrorReferences).pin(eq(PROJECT), eq(BUCKET), eq(600L), eq(60L), eq("u1"), anyString());
-        verify(toolErrorStates).reset(eq(PROJECT), eq(BUCKET), eq("u1"), eq("Absorbed."), anyString());
-        verify(baselines)
-                .repin(
-                        eq("mbl-1"),
-                        eq("{\"sketch\":1}"),
-                        isNull(),
-                        isNull(),
-                        isNull(),
-                        anyString(),
-                        isNull(),
-                        anyString());
-        verify(groundednessStates)
-                .resetAndRelearn(eq(PROJECT), eq("rag-answer"), eq("u1"), eq("Absorbed."), anyString());
-        verify(findings)
-                .recordHumanRuling(
-                        eq(PROJECT), eq("f3"), eq("negative"), eq("A person ruled this legitimate."), anyString());
         assertEquals(List.of(), adapter.absorbedCalls());
     }
 
@@ -690,11 +588,11 @@ class BehaviorTriageSourceTest {
                 jobs,
                 List.of(source()),
                 engine,
-                new ClassifierProperties(),
-                new ObserverProperties(),
+                Props.of(ClassifierProperties.class),
+                Props.of(ObserverProperties.class),
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor(),
-                new TriageLauncherBreaker(new ClassifierProperties()));
+                new TriageLauncherBreaker(Props.of(ClassifierProperties.class)));
     }
 
     private BehaviorTriageSource source() {

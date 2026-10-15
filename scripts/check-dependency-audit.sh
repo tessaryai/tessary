@@ -66,7 +66,7 @@ PY
 # ---- 1. maven: backend ----
 # org.owasp:dependency-check-maven 13.0.0. Invoked by full coordinate rather than declared in
 # backend/pom.xml's <pluginManagement> because it is never bound to a lifecycle phase: nothing
-# here wants it running on every `mvn verify` alongside Spotless/PMD/SpotBugs, only on this
+# here wants it running on every `mvn verify` alongside Spotless/SpotBugs, only on this
 # script's own explicit call.
 echo "== maven: backend =="
 _maven_suppression_xml="$(mktemp -t dependency-check-suppressions-XXXXXX.xml)"

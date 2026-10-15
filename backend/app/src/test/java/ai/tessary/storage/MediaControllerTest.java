@@ -10,7 +10,6 @@ import ai.tessary.open.media.MediaStore.MediaRef;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -18,16 +17,7 @@ import org.springframework.http.ResponseEntity;
 
 /** Stored media served back to the trace viewer: the project's own bytes, under the type they were stored as. */
 @SpringBootTest
-class MediaControllerTest {
-
-    @Autowired
-    MediaController controller;
-
-    @Autowired
-    MediaStore media;
-
-    @Autowired
-    TenantService tenants;
+record MediaControllerTest(MediaController controller, MediaStore media, TenantService tenants) {
 
     private record Tenant(TenantContext ctx, String org, String proj, String pid) {}
 

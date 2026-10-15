@@ -19,9 +19,7 @@ import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakKeyView;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakLeakView;
 import ai.tessary.classifier.worker.ClassifierArming;
 import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
@@ -33,9 +31,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -47,46 +43,18 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * pattern, counted on the window each span happened in.
  */
 @SpringBootTest
-class ClassifierArmingIntegrationTest {
+record ClassifierArmingIntegrationTest(
+        SubstrateV2Fixtures fx,
+        ClassifierArming arming,
+        ClassifierDetectionWriteRepository detections,
+        FindingRepository findings,
+        TenantService tenants,
+        CaseService cases,
+        JdbcClient jdbc,
+        SessionRepository sessions,
+        SpanRepository spans) {
 
     private static final long DAY = 86_400;
-
-    @Autowired
-    ClassifierArming arming;
-
-    @Autowired
-    ClassifierDetectionWriteRepository detections;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CaseService cases;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void fixtures() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
-    }
 
     // ---- the classifier-wide shape ----------------------------------------------------------------
 

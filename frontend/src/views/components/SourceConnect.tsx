@@ -6,57 +6,18 @@ import { ApiError } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { Button, CopyButton, cn, useToast } from "../../ui";
 
-/**
- * Shared "connect a source" UI — the OTLP connect story (forward your traces to
- * Tessary as a second exporter), a config screen with copyable secrets.
- *
- * Single-sourced so the first-run connect gate and the in-app "Connect a source"
- * modal (Settings → Sources) show the exact same pieces. Toasts are taken from
- * the live context.
- *
- * This is now the ONLY thing a partner has to do (launch G1), so it also has to
- * be doable without asking us (G2): the agent prompt, the raw endpoint and
- * header, AND working exporter configuration in the language they are actually
- * in. The long-form version lives in docs/self-hosting/setup.mdx.
- */
-
-/**
- * `instrument.md` in the repository root, on the public mirror: the agent-facing WORKFLOW for
- * instrumenting a repository — inspect it and its own AGENTS.md-style instructions, confirm the
- * discovered call sites with the user before editing, extend whatever observability already exists
- * rather than bolting on a second stack, then say exactly where the credentials go. It is the
- * SUBSTANCE the two prompts below used to try to carry inline.
- *
- * A pinned `blob/main` URL rather than a raw one: an agent fetches either, and this is the one a
- * human who reads the prompt before pasting it can open and skim.
- */
+/** `blob/main`, not raw: an agent fetches either, and a human can open and skim this one. */
 export const INSTRUMENT_DOC_URL = "https://github.com/tessaryai/tessary/blob/main/instrument.md";
 
 /**
- * The connect prompt. It is one sentence pointing at {@link INSTRUMENT_DOC_URL}, because a
- * prompt is a bad place to keep a spec: the previous paragraph-long version had to restate the
- * exporter rules AND the `tessary.call_site.id` ask in the copy field itself, could not say
- * anything about WHERE a given repository keeps credentials, and drifted from the docs the moment
- * either changed. The file it names carries all of that, and updates without a frontend release.
- *
- * Deliberately does NOT inline the endpoint or token. They are the two CopyFields directly below
- * this prompt on every surface that renders it, and `instrument.md` §5 tells the agent to ask for
- * them — so the pasted line stays short enough to read, and no secret rides along in a clipboard
- * string that gets pasted into issue trackers and chat logs.
- *
- * Exported so {@link ConnectGate} (the first-run gate) renders the exact same text as this file's
- * own {@link PromptCard}, never a paraphrase.
+ * One sentence pointing at the doc, which updates without a frontend release. The endpoint and token are
+ * never inlined: they are the CopyFields below, and a secret must not ride in a pasted string.
  */
 export const OTLP_PROMPT = `Update the instrumentation using ${INSTRUMENT_DOC_URL} to send traces to Tessary.`;
 
 /**
- * The repair prompt for wait state 2 (spans arriving, none carry a call site) — a narrower ask than
- * {@link OTLP_PROMPT}: the exporter already works by the time this one is shown, so it deep-links
- * the tagging section alone and explicitly says not to touch the exporter.
- *
- * The fragment is GitHub's own slug for `instrument.md`'s "## The call-site tag" heading;
- * renaming that heading breaks the anchor (it degrades to the top of the same file, so the agent
- * still gets correct instructions, just not scoped ones).
+ * The fragment is GitHub's slug for instrument.md's "## The call-site tag"; renaming the heading
+ * degrades it to the top of the file.
  */
 export const TAG_REPAIR_PROMPT = `Tessary is receiving my spans but none carry a call site. Tag them by following ${INSTRUMENT_DOC_URL}#the-call-site-tag. Do not change the exporter, it already works.`;
 
@@ -96,27 +57,14 @@ export function OtlpConnect({ onBack, backLabel }: { onBack: () => void; backLab
   );
 }
 
-/* ---------------------------------------------------- per-language snippets */
-
-/**
- * The token, or an obvious placeholder. Never a blank: a snippet copied before the token was minted
- * would fail with a 401 and no clue why, so the placeholder has to be loud enough to be caught.
- */
+/** Never blank: a snippet copied before the token existed would 401 with no clue why. */
 const TOKEN_PLACEHOLDER = "<create a connection token above>";
 
 type Snippet = { id: string; label: string; render: (endpoint: string, token: string) => string };
 
 /**
- * Working exporter configuration per runtime (launch G2 — "in the partner's language").
- *
- * The environment-variable form is FIRST and is the one to reach for: every OTel SDK reads it, it needs
- * no code change, and it is the only form that cannot drift from the SDK's own API. The language
- * snippets exist for codebases that build their exporter programmatically and would otherwise have to
- * translate the env vars themselves.
- *
- * `OTEL_EXPORTER_OTLP_TRACES_*` rather than the unsuffixed variables on purpose: the unsuffixed pair
- * also redirects metrics and logs, which we do not accept, and a partner who set them would be sending
- * us data we drop while wondering why their metrics backend went quiet.
+ * The env-var form leads: every OTel SDK reads it and it cannot drift. The TRACES_-suffixed variables,
+ * because the unsuffixed pair also redirects metrics and logs, which we drop.
  */
 const SNIPPETS: Snippet[] = [
   {
@@ -245,16 +193,8 @@ function ExporterSnippets({ endpoint, token }: { endpoint: string; token: string
 }
 
 /**
- * Issues a project-scoped ingest token on demand. The token is a WRITE-scoped managed API key —
- * ingest (POST /v1/traces) is the only surface an exporter needs, so callers must never hand the
- * broadest (admin) family to something that only pushes spans.
- *
- * <p>Both callers issue from a visible control, never on mount — a surface that mints a fresh key
- * on every render leaves live keys behind that nobody asked for. {@link OtlpConnect} calls `issue`
- * from its "Create a connection token" button; `ConnectGate` (the first-run gate) calls
- * `issueAsync` from the Bearer Token field's own control, because it puts the plaintext on the
- * clipboard on that click and so needs the value back. Exported for that one caller; every other
- * consumer of this file keeps using {@link OtlpConnect} whole.
+ * Write-scoped: ingest is all an exporter needs. Issued only from a visible control, never on mount,
+ * which left live keys nobody asked for.
  */
 export function useIngestToken() {
   const api = useProjectApi();
@@ -265,9 +205,7 @@ export function useIngestToken() {
     mutationFn: () => api.createApiKey({ name: "OTLP ingest", scope: "write" }),
     onSuccess: (res) => {
       setToken(res.plaintext);
-      // Minting an ingest token means data is about to flow into the substrate via the OTLP ingest path.
-      // Materialize the substrate-backed "sdk" source (idempotent server-side via ensureSdkSource) so the
-      // ingested telemetry shows up as a selectable dataset source — without this the token leads nowhere.
+      // Materialize the "sdk" source (idempotent server-side) so the ingested telemetry has somewhere to show.
       api
         .createSource({ provider: "sdk", name: "Tessary SDK", baseUrl: "tessary://sdk", credentials: {} })
         .then(() => qc.invalidateQueries({ queryKey: ["sources"] }))
@@ -280,14 +218,10 @@ export function useIngestToken() {
   return {
     token,
     issue: () => m.mutate(),
-    // The gate mints from a click and puts the result straight on the clipboard, so it needs the
-    // plaintext back rather than only the state update `issue` leaves behind.
     issueAsync: async () => (await m.mutateAsync()).plaintext,
     issuing: m.isPending,
   };
 }
-
-// ---- shared atoms ------------------------------------------------------------
 
 function CodingAgentLabel() {
   return (
@@ -313,12 +247,7 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-label uppercase text-muted mb-1.5">{children}</div>;
 }
 
-/**
- * Exported for {@link ConnectGate}'s Endpoint/Header fields — same read-only-plus-copy shape.
- *
- * `copyValue` exists for the one field whose display is not what you want on the clipboard:
- * ConnectGate elides the bearer token on screen and has to copy the whole thing.
- */
+/** `copyValue` is for ConnectGate, which elides the bearer token on screen but copies the whole thing. */
 export function CopyField({
   label,
   value,

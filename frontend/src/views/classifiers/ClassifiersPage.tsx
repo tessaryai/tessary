@@ -156,9 +156,8 @@ export function ClassifiersPage() {
 }
 
 /**
- * The cards for one scope. While a new range or a new scope reads, the old cards stay where they are, so the page does
- * not empty and refill. A new range keeps them as they are, with a line saying the range is loading. A new scope fades
- * them and names the scope that is loading, so one call site's charts never read as another's.
+ * Old cards stay while a new range or scope reads; a new scope fades them so one call site's charts
+ * never read as another's.
  */
 function useCharts(scope: "call_site" | "tool", id: string | null, days: ChartRange) {
   const { api } = useTenant();

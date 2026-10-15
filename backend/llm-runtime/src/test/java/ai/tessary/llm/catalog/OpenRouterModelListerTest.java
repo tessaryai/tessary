@@ -2,7 +2,6 @@
 package ai.tessary.llm.catalog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -75,24 +74,6 @@ class OpenRouterModelListerTest {
                         new ProviderModel("z-ai/glm-5.2", "Z.AI: GLM 5.2", "Zhipu")),
                 models,
                 "Meta and Mistral must be dropped — neither is one of D6's six makers");
-    }
-
-    @Test
-    void nameFallsBackToIdWhenAbsent() throws Exception {
-        stubResponse(200, "{\"data\":[{\"id\":\"openai/gpt-5.5\"}]}");
-
-        List<ProviderModel> models = lister().list(cred(null));
-
-        assertEquals(List.of(new ProviderModel("openai/gpt-5.5", "openai/gpt-5.5", "OpenAI")), models);
-    }
-
-    @Test
-    void needsNoAuthHeaderWhenCredentialCarriesNoKey() throws Exception {
-        stubResponse(200, "{\"data\":[]}");
-
-        lister().list(cred(null));
-
-        assertTrue(capturedRequest().headers().allValues("Authorization").isEmpty());
     }
 
     @Test

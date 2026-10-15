@@ -15,10 +15,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -34,35 +32,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
             "tessary.traces.search.walk-threshold=1",
             "tessary.traces.search.timeout-ms=500"
         })
-class TraceSearchShapesTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    DataSource dataSource;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void seedFixtures() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
-    }
+record TraceSearchShapesTest(
+        SubstrateV2Fixtures fx,
+        TenantService tenants,
+        TraceV2Repository traces,
+        SpanRepository spans,
+        JdbcClient jdbc,
+        DataSource dataSource) {
 
     /** The walk finds what the index finds: live spans only, newest first, any word order. */
     @Test

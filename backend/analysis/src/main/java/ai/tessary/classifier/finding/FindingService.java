@@ -8,7 +8,6 @@ import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
-import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
@@ -30,47 +29,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The findings read + correction surface every classifier serves through.
- *
- * <p>It was renamed from {@code BehaviorDriftService} because seven of its eight
- * public methods never had anything to do with behaviour drift. The findings store is shared — rows
- * carry a {@code classifier_key} — and metric drift, tool error and the per-span classifiers all list, page,
- * escalate and resolve through here.
- *
- * <p><b>The merged surface knows no table.</b> Listing, detail, resolution and the dossier all route
- * through {@link TriageSource}, in {@code @Order}, and the first source that claims an id ends the
- * iteration — that is the seam a classifier is lifted out through, and it holds with no
- * exceptions.
- *
- * <p>It is not the whole class, and pretending otherwise would mislead the extraction that reads this
- * next. Three methods still hold {@code FindingRepository} and {@code FindingEvidenceRepository}
- * directly: they serve the SHARED table as itself — evidence rows, the reachability guard — rather
- * than any one classifier's view of it, so there is no source to route them to. What is left here is
- * the page envelope, the routing, the transaction boundary, and those shared-table reads.
- *
- * <p>A correction is a ROW saying "this cause is fine for this project" — auditable, reversible,
- * exportable, and explainable to a compliance reviewer. That property is worth more than any accuracy a
- * learned correction model would buy, which is why the loop rides the existing {@code annotation}
- * channel ({@code of_finding_id}, {@code agrees}) rather than mutating in place the thing it corrects.
- * The anchor used to be {@code of_verdict_id}, and the thing left unmutated was the verdict; that
- * column and that table are gone, the property they bought is not.
+ * The findings read and correction surface for every classifier. Listing, detail, resolution and the dossier route
+ * through {@link TriageSource} in {@code @Order}, and the first source that claims an id handles it. The shared-table
+ * reads (evidence and the reachability guard) stay here. A correction is an auditable, reversible ROW on the
+ * {@code annotation} channel, never an in-place mutation of what it corrects.
  */
 @Service
 public class FindingService {
 
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;
-    /** The flag layer, asked whether this org still has the classifier a finding came from. */
     private final ClassifierService classifiers;
-
-    private final BehaviorBaselineEventRepository events;
-    /**
-     * The finding stores a press or a page can land on, in registration order (the shared table first).
-     * Each one owns its own reads, its own enqueue and its own writes; this class only routes.
-     */
+    /** In registration order, the shared table first. Each source owns its reads and writes; this class only routes. */
     private final List<TriageSource> triageSources;
 
-    /** The one classifier-specific read on this surface: a {@code malformed_rate} finding's failing outputs. */
     private final MalformedOutputDetailService malformedOutputs;
 
     private final FrustrationDetailService frustrations;
@@ -81,7 +53,6 @@ public class FindingService {
             FindingRepository findings,
             FindingEvidenceRepository evidence,
             ClassifierService classifiers,
-            BehaviorBaselineEventRepository events,
             List<TriageSource> triageSources,
             MalformedOutputDetailService malformedOutputs,
             FrustrationDetailService frustrations,
@@ -89,7 +60,6 @@ public class FindingService {
         this.findings = findings;
         this.evidence = evidence;
         this.classifiers = classifiers;
-        this.events = events;
         this.triageSources = triageSources;
         this.malformedOutputs = malformedOutputs;
         this.frustrations = frustrations;
@@ -97,18 +67,9 @@ public class FindingService {
     }
 
     /**
-     * The findings page, Layer-2 gated by default.
-     *
-     * <p>Layer 1 detects change; it cannot tell change from a problem, and at its measured operating
-     * point most of what it flags is legitimate. So the default view is what Layer 2 confirmed is a real
-     * deviation. {@code confirmedOnly=false} is the "show me everything" escape hatch — the raw Layer-1
-     * stream, which is a lead list, not an alert list.
-     *
-     * <p><b>The page is the concatenation of the sources, in {@code @Order}</b>, and that order is
-     * wire-observable. Each source applies its own narrowing — see {@link FindingFilters}, which holds the
-     * one that no query can express — and each pages to its own limit, so a two-source page can hold twice
-     * one source's worth. That was true before the seam and is unchanged by it; there is no cursor on this
-     * list.
+     * Layer-2 gated by default: Layer 1 cannot tell change from a problem, so the unfiltered stream
+     * ({@code confirmedOnly=false}) is a lead list. The page concatenates sources in {@code @Order}, which is
+     * wire-observable, each paging to its own limit.
      */
     public BehaviorFindingsView findings(
             String projectId,
@@ -123,15 +84,8 @@ public class FindingService {
     }
 
     /**
-     * One finding with its evidence parsed, for the finding's own page.
-     *
-     * <p>Goes through each source's own reachability guard, so a classifier the org does not have is a
-     * 404 here exactly as it is everywhere else — otherwise hiding a detector would still leave its
-     * findings readable in full by id.
-     *
-     * <p>No evidence set on the detail either — {@link #findingEvidenceSpans} pages it. A tool-error
-     * finding can cite 27,000 refs, and shipping them to draw a table that shows ten is the bug this
-     * replaced.
+     * Each source's reachability guard makes a withheld classifier's finding a 404 here too. No evidence on the detail:
+     * {@link #findingEvidenceSpans} pages it.
      */
     public BehaviorFindingDetailView finding(String projectId, String findingId) {
         for (TriageSource source : triageSources) {
@@ -141,15 +95,7 @@ public class FindingService {
         throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
     }
 
-    /**
-     * The size of a finding's evidence population, per role, with no rows — the cheap sizing call a
-     * caller makes before it pages {@link #findingEvidenceSpans}.
-     *
-     * <p>Behind the same reachability guard as {@link #finding}, and for the same reason: the refs ARE
-     * the finding's claim, so a classifier the org does not hold must not become readable through its
-     * evidence. Both readings of the counts ride along: see {@link BehaviorDtos.FindingEvidencePage} for
-     * why they can disagree.
-     */
+    /** Behind the same reachability guard as {@link #finding}: the refs ARE the claim. */
     public BehaviorDtos.FindingEvidencePage findingEvidence(String projectId, String findingId) {
         FindingRow finding = requireReachableFinding(projectId, findingId);
         Map<String, Long> recorded = new LinkedHashMap<>();
@@ -159,16 +105,8 @@ public class FindingService {
     }
 
     /**
-     * One page of the finding page's evidence TABLE — the same population, joined to the spans it names.
-     *
-     * <p>Behind the same reachability guard as {@link #finding} and {@link #findingEvidence}, for the
-     * same reason: the refs are the claim, so a withheld classifier must not become readable through
-     * them. The counts come back on every page for the same reason they do there.
-     *
-     * <p>Paged rather than embedded in the finding, and that is the point of it existing. The refs used
-     * to ride the finding view itself, uncapped, on the detail read AND on the list — so opening the
-     * Classifiers page shipped every ref of every finding on it, which on real traffic is tens of
-     * thousands of rows nobody rendered.
+     * Same guard and counts as {@link #findingEvidence}. Paged rather than embedded, since a finding can cite tens of
+     * thousands of refs.
      */
     public BehaviorDtos.FindingEvidenceSpanPage findingEvidenceSpans(
             String projectId, String findingId, @Nullable String role, int limit, @Nullable String cursor) {
@@ -187,14 +125,8 @@ public class FindingService {
     }
 
     /**
-     * One field's failing outputs since onset, for a {@code malformed_rate} finding's "How outputs
-     * broke": the same reachability guard as {@link #finding}, since the field a reader selected is
-     * still a view onto this finding's own population.
-     *
-     * <p>A finding that is not {@code malformed_rate} — or any field a reader selected on one that is —
-     * simply comes back empty rather than 404ing: the field is UI-selected off the finding's own schema
-     * tree, not a client-supplied id, so an empty page is what "nothing failed this field since onset"
-     * looks like, never a broken reference.
+     * A field with no failures, or a non-{@code malformed_rate} finding, is an empty page rather than a 404: the field
+     * is selected from the finding's own schema tree.
      */
     public MalformedOutputEvidence.FailingOutputPage malformedOutputs(
             String projectId, String findingId, String field, int limit, @Nullable String cursor) {
@@ -202,12 +134,7 @@ public class FindingService {
         return malformedOutputs.failingOutputs(finding, field, limit, cursor);
     }
 
-    /**
-     * One page of the frustrated sessions a {@code frustration_rate} finding cites, newest flag first: what the
-     * finding and case pages' session list loads as it scrolls. {@code rcaReport} and {@code cause} (its 0-based
-     * position in that report's causes) narrow it to one RCA cause's share; both or neither. Any other finding
-     * has none.
-     */
+    /** {@code rcaReport} and {@code cause} narrow to one RCA cause's share; both or neither. */
     public FrustrationEvidence.FrustratedSessionPage frustratedSessions(
             String projectId,
             String findingId,
@@ -224,12 +151,7 @@ public class FindingService {
         return frustrations.page(finding, ref, limit, cursor);
     }
 
-    /**
-     * One page of the flagged answers a {@code groundedness_rate} finding cites, newest flag first: what the
-     * finding and case pages' answer list loads as it scrolls. {@code rcaReport} and {@code cause} (its 0-based
-     * position in that report's causes) narrow it to the answers in the traces that RCA cause names; both or
-     * neither. Any other finding has none.
-     */
+    /** {@code rcaReport} and {@code cause} narrow to the traces that RCA cause names; both or neither. */
     public GroundednessEvidence.FlaggedAnswerPage flaggedAnswers(
             String projectId,
             String findingId,
@@ -246,28 +168,17 @@ public class FindingService {
         return groundedness.page(finding, ref, limit, cursor);
     }
 
-    /**
-     * The flagged sentences of the answers in {@code refs}, each as text with its score, for a {@code
-     * groundedness_rate} finding's witness span rows on the agent door. Any other finding has none.
-     */
     public Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> flaggedSentences(
             String projectId, String findingId, Collection<SpanRef> refs) {
-        // Every classifier's witness page asks, and only groundedness has an answer: one row read settles the
-        // kind before the flag-layer guard runs on that same row.
+        // Only groundedness has an answer; one row read settles the kind before the guard runs on it.
         FindingRow finding = findings.findById(projectId, findingId).orElse(null);
         if (finding == null || !FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return Map.of();
         return groundedness.flaggedSentences(requireReachable(projectId, finding), refs);
     }
 
     /**
-     * Tenant + existence guard for one finding, extended to the flag layer: a finding whose classifier
-     * the org does not have is a 404, exactly as the classifier itself is. Without this, hiding a
-     * classifier would still leave its findings reachable — and WRITABLE — by id, so a stale tab could
-     * hand a withheld finding to Layer 2 or resolve it.
-     *
-     * <p>Kept here rather than pushed behind the seam because the two evidence reads above are over the
-     * shared {@code finding_evidence} table for EVERY classifier: the refs are the
-     * one part of the surface the stores genuinely share.
+     * A withheld classifier's finding is a 404, or a stale tab could still read, triage or resolve it by id. Kept here
+     * because the evidence reads span every classifier's rows.
      */
     private FindingRow requireReachableFinding(String projectId, String findingId) {
         FindingRow finding = findings.findById(projectId, findingId)
@@ -283,24 +194,9 @@ public class FindingService {
     }
 
     /**
-     * Run Layer-2 on one finding, because a human asked for it.
-     *
-     * <p>The default and, unless an org opts in, the only way a triage gets enqueued. The sweeps
-     * used to do it, and the reason they stopped is that a finding is a LEAD: metric drift detects change,
-     * and cannot tell it from a problem — slow is not bad and expensive is not bad. Every automatic
-     * escalation was an E2B microVM and an agent session spent to find that out. A person reading the finding
-     * can usually tell, and when they cannot, this is the button. {@link TriageAutoEscalator} is the opt-in
-     * that presses it unattended, flagged off by default and bounded when on.
-     *
-     * <p><b>{@code requestedLane} no longer routes anywhere.</b> It used to choose between the triage
-     * agent and a grader run over the finding's cited traces; grading was removed, so every press
-     * takes the triage agent — the one lane there is. The parameter is kept because it is on the wire
-     * and a stale tab may still send {@code grader}: accepting and ignoring it gives that press the
-     * only ruling the platform can make, rather than a 400 the reader cannot act on.
-     *
-     * <p>Routing only, since the seam: the first {@link TriageSource} that owns the id handles the
-     * press (once-per-cause, payload assembly and the ops log live in the source), and an id no source
-     * claims — unknown, or withheld by the org's flag layer — is a 404 exactly as before.
+     * Run Layer 2 on one finding because a human asked. A finding is a lead, so automatic escalation is opt-in
+     * ({@link TriageAutoEscalator}). {@code requestedLane} is accepted and ignored: a stale tab may still send
+     * {@code grader}, and there is only one lane. An id no source claims is a 404.
      */
     public BehaviorAnalysisView analyze(String projectId, String findingId, @Nullable String requestedLane) {
         for (TriageSource source : triageSources) {
@@ -310,26 +206,10 @@ public class FindingService {
         throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
     }
 
-    public List<BehaviorBaselineEventView> baselineEvents(String projectId, int limit) {
-        return events.listByProject(projectId, Math.clamp(limit, 1, 500)).stream()
-                .map(BehaviorBaselineEventView::of)
-                .toList();
-    }
-
     /**
-     * Resolve a finding: allowlist the cause permanently ({@code expected}) or pin it so it never
-     * graduates and keeps firing ({@code not_expected}).
-     *
-     * <p><b>The transaction is annotated HERE, on the entry point, and that is load-bearing.</b> The
-     * allowlist row, the gram state, the finding status and the changelog entry are one judgement — a
-     * half-applied correction reads as resolved on the finding while the detector keeps firing on it.
-     * Moving the annotation onto the adapter would leave the happy path working and nothing would fail
-     * until a mid-write error left a finding resolved with no allowlist row behind it.
-     *
-     * <p>The verb is validated here and the writes are the source's, because the two verbs mean
-     * different writes for the different classifiers even though the UI labels and the action strings
-     * are the same two. Both labels and both action strings already exist in {@code ClassifiersPage.tsx},
-     * so the branching is entirely server-side and no frontend change goes with it.
+     * The transaction is annotated HERE, on the entry point: the allowlist row, gram state, finding status and
+     * changelog are one judgement, and a half-applied correction reads as resolved while the detector keeps firing. The
+     * verb is validated here; the writes are the source's.
      */
     @Transactional
     public BehaviorFindingView resolve(String projectId, String findingId, String action, @Nullable String userId) {

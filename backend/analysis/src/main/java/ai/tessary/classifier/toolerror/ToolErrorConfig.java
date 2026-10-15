@@ -7,35 +7,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The {@code tool_error} classifier's operating point. Design contract:
- * {@code devdocs/concepts/tool-error.md} §4 and §9.
- *
- * <p>Shaped after {@code CusumParams} and {@code MetricDriftConfig}: per-project dials, clamped on
- * construction, every default tagged {@code EXPERIMENT(tool-error-tuning)}, and deliberately its own
- * record rather than a reuse of either. It shares no dial that means the same thing as metric drift's:
- * a floor in log units on a heavy-tailed distribution and a decision interval in log-likelihood units
- * on a proportion are different quantities, and one record would invite tuning either by looking at the
- * other.
- *
- * <p><b>The arithmetic these numbers feed, and the evidence behind them, is
- * {@code devdocs/concepts/deviation-math.md}.</b> Changing a default here without updating that document
- * leaves the only human-readable account of the operating point describing a detector that no longer
- * exists; the same-PR co-update rule in the root {@code AGENTS.md} covers it.
- *
- * @param arlTarget calls a healthy tool should run between false alarms. <b>The only threshold dial.</b>
- *     The alarm threshold {@code h} is derived from it per tool by {@link #decisionIntervalFor(double)}
- * @param shiftMultiple the multiple of the in-control rate the detector is tuned to catch quickly
- * @param shiftFloor the smallest absolute rise worth arming for, as a rate: what makes a tool that
- *     has never failed detectable at all
- * @param minBaselineCalls calls the in-control reference must hold before anything is judged
- * @param downArmMinRate in-control rate below which the improvement arm does not run
- * @param maxPatterns failure signatures a finding's breakdown carries before the tail folds
- * @param minDecisionInterval the lower clamp on the derived threshold. {@link #MIN_DECISION_INTERVAL} for
- *     tool_error, which never reads it from a blob; see the constant for who may lower it
- * @param freezeBaselineCalls calls the reference keeps learning up to. Judging starts at
- *     {@code minBaselineCalls}; from there each later hour is judged against the reference and then added
- *     to it, until the reference holds this many and stops moving. Defaults to, and is never below,
- *     {@code minBaselineCalls}, which is the reference frozen the moment judging starts
+ * The {@code tool_error} operating point (tool-error.md §4, §9; arithmetic in deviation-math.md, which must change with
+ * any default). Per-project, clamped, every default EXPERIMENT(tool-error-tuning), and deliberately separate from
+ * metric drift's dials, which measure different quantities. {@code arlTarget} is the only threshold dial;
+ * {@code freezeBaselineCalls} is how long the reference keeps learning after judging starts.
  */
 public record ToolErrorConfig(
         long arlTarget,
@@ -48,112 +23,53 @@ public record ToolErrorConfig(
         int freezeBaselineCalls) {
 
     /**
-     * EXPERIMENT(tool-error-tuning): calls a healthy tool should run between false alarms, the ARL₀.
-     *
-     * <p><b>This is the only threshold dial, and it is the one that means something to a person.</b>
-     * Nobody sets {@code h} directly; it is derived per tool by {@link #decisionIntervalFor(double)} so
-     * that every tool, however clean or noisy, cries wolf at about the same rate.
+     * EXPERIMENT(tool-error-tuning): the one dial that means something to a person; {@code h} is derived per tool by
+     * {@link #decisionIntervalFor(double)} so every tool cries wolf at about the same rate.
      */
     public static final long DEFAULT_ARL_TARGET = 250_000L;
 
     /**
-     * EXPERIMENT(tool-error-tuning): the {@code h}-versus-base-rate fit, {@code intercept + slope·ln(p0)}.
-     *
-     * <p>Fitted to the exact threshold at each base rate, solved by Brook–Evans on a refined integer
-     * lattice. It yields 6.0 at 0.5%, 6.4 at 1%, 8.2 at 5% and 9.7 at
-     * 20%, holding the realised ARL₀ between 220k and 309k against the 250k target. A flat threshold
-     * spans 6,936 to 308,498 over the same range, so this collapses a 44x spread to 1.4x.
-     *
-     * <p>Below about 0.5% the fit stops describing anything and {@link #MIN_DECISION_INTERVAL} takes
-     * over. That is not a fudge: below there {@link #DEFAULT_SHIFT_FLOOR} rather than the multiple sets
-     * {@code p1}, so the relationship changes shape, and the exact thresholds sit at 5.8 to 6.1 across
-     * the whole regime. One number is the honest description of a flat stretch.
-     *
-     * <p><b>Exact arithmetic, not a measured operating point.</b> Every figure assumes independent
-     * Bernoulli trials, and real tool failures are bursty: one upstream outage fails two hundred
-     * consecutive calls, which inflates the false-alarm rate by an amount nobody here has measured.
-     * A null run against real traffic is what replaces these two numbers. Expect it to
-     * push them up, not down.
+     * EXPERIMENT(tool-error-tuning): {@code h = intercept + slope·ln(p0)}, fitted to Brook–Evans exact thresholds; it
+     * holds ARL₀ within 220k-309k of the 250k target where a flat threshold spans 44x. Below about 0.5%
+     * {@link #MIN_DECISION_INTERVAL} takes over. Assumes independent trials; real failures are bursty, so a null run
+     * will likely push these up.
      */
     public static final double ARL_FIT_INTERCEPT = 11.42;
 
-    /** EXPERIMENT(tool-error-tuning): see {@link #ARL_FIT_INTERCEPT}. */
     public static final double ARL_FIT_SLOPE = 1.088;
 
     /**
-     * Bounds on the derived threshold. Below 6 the alarm fires on ordinary sampling noise whatever the
-     * rate; above 12 the run length exceeds any corpus anyone will replay, so the detector cannot be shown
-     * to work at all. Both ends are also outside the range the fit was measured over.
-     *
-     * <p>A classifier whose trial is a conversation rather than a tool call may set a lower floor, because its
-     * budget is counted in conversations; frustration's is 4 (see {@code FrustrationConfig}).
+     * Below 6 noise fires the alarm; above 12 no replayable corpus can show the detector works. A classifier counting
+     * conversations may set a lower floor (frustration's is 4).
      */
     public static final double MIN_DECISION_INTERVAL = 6.0;
 
-    /** The lowest floor any classifier may set with {@link #minDecisionInterval}. */
     public static final double LOWEST_DECISION_INTERVAL = 2.0;
 
-    /** See {@link #MIN_DECISION_INTERVAL}. */
     public static final double MAX_DECISION_INTERVAL = 12.0;
 
-    /**
-     * EXPERIMENT(tool-error-tuning): the shift the detector is tuned to catch quickly, as a multiple of
-     * the in-control rate. A doubling.
-     *
-     * <p>This is not a threshold: a smaller shift is still caught, only later, and a larger one sooner.
-     * It sets where the detector is most sensitive, which is the question "what size of regression do we
-     * want to hear about within a day rather than within a week".
-     */
+    /** EXPERIMENT(tool-error-tuning): not a threshold; it sets where the detector is most sensitive. */
     public static final double DEFAULT_SHIFT_MULTIPLE = 2.0;
 
     /**
-     * EXPERIMENT(tool-error-tuning): the smallest absolute rise worth arming for, as a rate. Half a
-     * percentage point.
-     *
-     * <p><b>Without this the most alarming case in the product is undetectable.</b> A tool that has never
-     * failed has an in-control rate at or near zero, and twice nearly-zero is still nearly-zero, so a
-     * purely multiplicative target would tune the detector to catch a shift too small to distinguish from
-     * silence. The floor says: however clean this tool has been, arm for it starting to fail one call in
-     * two hundred.
+     * EXPERIMENT(tool-error-tuning): makes a tool that never failed detectable at all, since twice nearly-zero is still
+     * nearly-zero.
      */
     public static final double DEFAULT_SHIFT_FLOOR = 0.005;
 
-    /**
-     * EXPERIMENT(tool-error-tuning): calls the in-control reference must hold before anything is judged.
-     *
-     * <p>A <em>wait</em>, not a skip: a tool under this keeps accumulating rather than being dropped, so
-     * a rarely-called tool is watched on a slower clock instead of never (tool-error.md §3.3). 500 is about
-     * the least from which a rate near 1% can be told from a rate near 2% at all; below it the interval
-     * on the in-control estimate is wider than the shifts worth catching, and the CUSUM would be
-     * accumulating evidence against a number that is itself noise.
-     */
+    /** EXPERIMENT(tool-error-tuning): a wait, not a skip. About the least from which 1% can be told from 2%. */
     public static final int DEFAULT_MIN_BASELINE_CALLS = 500;
 
-    /**
-     * EXPERIMENT(tool-error-tuning): in-control rate below which the improvement arm does not run.
-     *
-     * <p>Failures falling is watched because a tool that stopped reporting errors has either been fixed
-     * or stopped reporting, and only one of those is good news. But that is only worth saying when there
-     * were errors to lose: on a tool already failing one call in a thousand, a halving is both
-     * uninteresting and, at any sane run length, undetectable. One percent is where the arm starts
-     * earning its keep.
-     */
+    /** EXPERIMENT(tool-error-tuning): falling failures matter only when there were errors to lose. */
     public static final double DEFAULT_DOWN_ARM_MIN_RATE = 0.01;
 
-    /** EXPERIMENT(tool-error-tuning): signatures in a finding's breakdown before the tail folds. */
     public static final int DEFAULT_MAX_PATTERNS = 8;
 
-    /**
-     * Clamped on construction. The blob is operator-editable, and a config that can be edited into
-     * nonsense is a detector that can be edited into permanent silence, or into a false alarm every
-     * hour, without anybody meaning to.
-     */
+    /** Clamped: the blob is operator-editable, and nonsense could mean permanent silence or an hourly false alarm. */
     public ToolErrorConfig {
-        // A budget below a thousand calls is a detector alarming on noise; above a billion it is switched
-        // off. Both ends are far outside the range the fit in decisionIntervalFor was measured over.
+        // Far outside the range the fit was measured over at both ends.
         arlTarget = clampLong(arlTarget, 1_000L, 1_000_000_000L, DEFAULT_ARL_TARGET);
-        // Strictly above 1: a multiple of 1 makes the out-of-control rate equal the in-control one and
-        // the log-likelihood ratio identically zero, which is a detector that can never fire.
+        // Strictly above 1, or the log-likelihood ratio is identically zero.
         shiftMultiple = clamp(shiftMultiple, 1.05, 100.0, DEFAULT_SHIFT_MULTIPLE);
         shiftFloor = clamp(shiftFloor, 0.0001, 0.5, DEFAULT_SHIFT_FLOOR);
         minBaselineCalls = clampInt(minBaselineCalls, 30, 1_000_000, DEFAULT_MIN_BASELINE_CALLS);
@@ -161,12 +77,10 @@ public record ToolErrorConfig(
         maxPatterns = clampInt(maxPatterns, 1, ToolErrorRate.MAX_PATTERNS, DEFAULT_MAX_PATTERNS);
         minDecisionInterval =
                 clamp(minDecisionInterval, LOWEST_DECISION_INTERVAL, MAX_DECISION_INTERVAL, MIN_DECISION_INTERVAL);
-        // Never below the minimum: a reference that stopped learning before judging could start would be one
-        // that never judges anything.
+        // A reference that froze before judging could start would never judge.
         freezeBaselineCalls = clampInt(freezeBaselineCalls, minBaselineCalls, 1_000_000, minBaselineCalls);
     }
 
-    /** A classifier's shape with its own threshold floor, and a reference frozen as soon as judging starts. */
     public ToolErrorConfig(
             long arlTarget,
             double shiftMultiple,
@@ -186,7 +100,6 @@ public record ToolErrorConfig(
                 minBaselineCalls);
     }
 
-    /** tool_error's shape: the threshold floor is always {@link #MIN_DECISION_INTERVAL}. */
     public ToolErrorConfig(
             long arlTarget,
             double shiftMultiple,
@@ -204,28 +117,14 @@ public record ToolErrorConfig(
                 MIN_DECISION_INTERVAL);
     }
 
-    /**
-     * Whether the reference keeps learning after judging has started, which is what a stored accumulator's
-     * epoch has to say (see {@link CarriedState#epochOf}).
-     */
+    /** What a stored accumulator's epoch has to say; see {@link CarriedState#epochOf}. */
     public boolean learnsWhileJudging() {
         return freezeBaselineCalls > minBaselineCalls;
     }
 
     /**
-     * The alarm threshold {@code h} for a tool whose in-control rate is {@code p0}, in log-likelihood
-     * units. <b>Derived, never configured.</b>
-     *
-     * <p>Two tools need very different amounts of evidence before a run of failures means anything. On a
-     * tool that fails one call in a thousand, four failures in a row is already damning. On one that
-     * fails one in five, four failures is a Tuesday, and it takes fifteen. Scoring in log-likelihood
-     * units gets most of the way to a common scale but not all of it, and the residual is what a flat
-     * threshold got wrong, see {@link #DEFAULT_ARL_TARGET}.
-     *
-     * <p>The base-rate term is the fit. The budget term needs no fudge factor: solved exactly, ARL₀ rises
-     * by 0.99 to 1.02 in the log per unit of {@code h} across the whole 0.5%–20% range, so one e-fold per
-     * unit is not an approximation anyone has to apologise for. Moving the budget moves the threshold by
-     * its log.
+     * Derived, never configured: four failures in a row is damning at 0.1% and a Tuesday at 20%. The base-rate term is
+     * the fit; the budget term is exact, since ARL₀ rises one e-fold per unit of {@code h} across the range.
      */
     public double decisionIntervalFor(double p0) {
         if (!Double.isFinite(p0) || p0 <= 0) return minDecisionInterval;
@@ -233,7 +132,6 @@ public record ToolErrorConfig(
         return Math.max(minDecisionInterval, Math.min(MAX_DECISION_INTERVAL, h));
     }
 
-    /** Every default, for a signal whose blob is absent or unreadable. */
     public static ToolErrorConfig defaults() {
         return new ToolErrorConfig(
                 DEFAULT_ARL_TARGET,
@@ -244,13 +142,7 @@ public record ToolErrorConfig(
                 DEFAULT_MAX_PATTERNS);
     }
 
-    /**
-     * Parse a classifier's blob, falling back to the default for any key it does not carry.
-     *
-     * <p>Unreadable JSON yields the defaults rather than an exception, matching {@code MetricDriftConfig}:
-     * a blob written by a newer build must not dead-letter the sweep of an older one, and a sweep that
-     * refuses to run is a worse failure than one running at the shipped operating point.
-     */
+    /** Unreadable JSON yields the defaults, so a newer build's blob cannot dead-letter an older sweep. */
     public static ToolErrorConfig of(ObjectMapper mapper, @Nullable String configJson) {
         if (configJson == null || configJson.isBlank()) return defaults();
         try {
@@ -263,7 +155,7 @@ public record ToolErrorConfig(
                     root.path("down_arm_min_rate").asDouble(DEFAULT_DOWN_ARM_MIN_RATE),
                     root.path("max_patterns").asInt(DEFAULT_MAX_PATTERNS),
                     MIN_DECISION_INTERVAL,
-                    // Absent means the minimum: the reference freezes the moment judging starts.
+                    // Absent: the reference freezes the moment judging starts.
                     root.path("freeze_baseline_calls").asInt(0));
         } catch (JsonProcessingException e) {
             return defaults();

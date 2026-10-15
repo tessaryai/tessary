@@ -5,10 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.frustration.FrustrationRateRepository.ConversationContext;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
@@ -17,9 +13,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -27,34 +21,10 @@ import org.springframework.boot.test.context.SpringBootTest;
  * happened rather than the order they were stored, never a later turn and never another conversation's.
  */
 @SpringBootTest
-class FrustrationConversationContextIntegrationTest {
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    FrustrationRateRepository rates;
-
-    @Autowired
-    TenantService tenants;
+record FrustrationConversationContextIntegrationTest(
+        SubstrateV2Fixtures fx, FrustrationRateRepository rates, TenantService tenants) {
 
     private static final String CHAT = "cs-chat";
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
-    }
 
     @Test
     void theTwoTurnsBeforeTheFlaggedOneOldestFirst() {

@@ -20,7 +20,6 @@ import java.util.Locale;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -35,34 +34,15 @@ import org.springframework.web.server.ResponseStatusException;
  * explicit roles via the membership repository so each role's policy is exercised for real.
  */
 @SpringBootTest
-class RbacEnforcementIntegrationTest {
-
-    @Autowired
-    OrganizationController orgController;
-
-    @Autowired
-    BillingController billingController;
-
-    @Autowired
-    ClassifierController signalController;
-
-    @Autowired
-    ai.tessary.classifier.ClassifierService signalService;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    PrincipalRepository users;
-
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Autowired
-    InvitationRepository invitations;
-
-    @Autowired
-    ProjectRepository projects;
+record RbacEnforcementIntegrationTest(
+        OrganizationController orgController,
+        BillingController billingController,
+        ClassifierController signalController,
+        ai.tessary.classifier.ClassifierService signalService,
+        TenantService tenants,
+        OrgMembershipRepository memberships,
+        InvitationRepository invitations,
+        ProjectRepository projects) {
 
     private TenantContext session(Principal u) {
         return new TenantContext(u.id(), u.email(), null, null, null, null);

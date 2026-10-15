@@ -9,11 +9,7 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/**
- * Per-project alert-channel config storage. Mirrors {@code git/GitIntegrationRepository},
- * but with many rows per project. The fan-out read is {@link #listEnabledByProject(String)}; CRUD is by
- * {@code (projectId, id)} so a channel can never be touched cross-tenant.
- */
+/** Alert channel storage. CRUD is by {@code (projectId, id)} so a channel can never be touched cross-tenant. */
 @Repository
 public class AlertChannelRepository {
 
@@ -34,7 +30,6 @@ public class AlertChannelRepository {
                 .list();
     }
 
-    /** The channels a fired alert fans out to: enabled rows for the project. */
     public List<AlertChannelRow> listEnabledByProject(String projectId) {
         return jdbc.sql(String.format(
                         Locale.ROOT,

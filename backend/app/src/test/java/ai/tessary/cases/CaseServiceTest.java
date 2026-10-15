@@ -41,49 +41,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** Case lifecycle as a human drives it: resolve, mute, unmute, lookup, and pressing RCA (1c). */
 // batch-size=0 parks RcaWorker's drain so this class reads locked_at and the trail itself.
 @RcaParkedSpringBootTest
-class CaseServiceTest {
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    CaseService service;
-
-    @Autowired
-    CaseRepository cases;
-
-    @Autowired
-    CaseLedger ledger;
-
-    @Autowired
-    CaseEventRepository events;
-
-    @Autowired
-    RcaJobRepository rcaJobs;
-
-    @Autowired
-    RcaReportRepository rcaReports;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    ToolErrorStateRepository toolErrorStates;
-
-    @Autowired
-    MalformedOutputRateRepository malformedOutputRates;
-
-    @Autowired
-    JdbcClient jdbc;
+record CaseServiceTest(
+        FindingRepository findings,
+        CaseService service,
+        CaseRepository cases,
+        CaseEventRepository events,
+        RcaJobRepository rcaJobs,
+        RcaReportRepository rcaReports,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        ToolErrorStateRepository toolErrorStates,
+        MalformedOutputRateRepository malformedOutputRates,
+        JdbcClient jdbc) {
 
     @Test
     void resolvingKeepsTheReasonGiven() {

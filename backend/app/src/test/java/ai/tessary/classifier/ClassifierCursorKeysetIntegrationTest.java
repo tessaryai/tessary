@@ -5,10 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
@@ -22,9 +19,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -42,7 +37,15 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 @Import(StubDecisionClientConfig.class)
-class ClassifierCursorKeysetIntegrationTest {
+record ClassifierCursorKeysetIntegrationTest(
+        SubstrateV2Fixtures fx,
+        SpanRepository spans,
+        JdbcClient jdbc,
+        ClassifierWorker worker,
+        ClassifierService service,
+        ClassifierRepository signals,
+        TenantService tenants,
+        CapabilityFixture capabilities) {
 
     private static final int BATCH = 2;
     private static final int SAME_TS_COUNT = 5; // > BATCH, so a boundary falls inside the group
@@ -50,43 +53,6 @@ class ClassifierCursorKeysetIntegrationTest {
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
         r.add("tessary.classifier.batch-size", () -> String.valueOf(BATCH));
-    }
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    ClassifierWorker worker;
-
-    @Autowired
-    ClassifierService service;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
     }
 
     @Test
@@ -130,7 +96,8 @@ class ClassifierCursorKeysetIntegrationTest {
 
         // A bare span id restarts from page one every tick and still reaches every row, so check the cursor parses.
         List<String> cursors = jdbc.sql(
-                        "SELECT cursor_id FROM job WHERE project_id = :pid AND kind = 'classifier' AND cursor_id IS NOT NULL")
+                        "SELECT cursor_id FROM job WHERE project_id = :pid AND kind = 'classifier' AND cursor_id IS"
+                                + " NOT NULL")
                 .param("pid", pid)
                 .query((rs, n) -> rs.getString("cursor_id"))
                 .list();

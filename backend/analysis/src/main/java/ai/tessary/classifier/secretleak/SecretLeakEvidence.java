@@ -5,32 +5,19 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The wire shapes of a secret-leak finding's own detail: what the finding page's "When it leaked"
- * timeline and pins are drawn from. Built off {@code secret_leak_detection}, joined to a finding's
- * facet (its rule and call site) and its bounded witness set, never off {@link
- * ai.tessary.classifier.finding.FindingRow#payloadJson} alone — unlike a tool-error or metric-drift
- * blob, the per-key breakdown and the leak-level detail have no home there.
+ * Secret-leak finding detail, built off {@code secret_leak_detection} joined to the finding's facet and witnesses,
+ * since the per-key breakdown has no home in the payload.
  */
 public final class SecretLeakEvidence {
 
-    /** {@code eval_case.metric} for a secret-leak case. A facet's {@code (detector, subject_kind,
-     *  subject_id)} triple is already unique, so this is a stable marker rather than a real measure. */
+    /** The facet triple is already unique, so this is a stable marker, not a real measure. */
     public static final String MEASURE = "leak_count";
 
     private SecretLeakEvidence() {}
 
     /**
-     * Set exactly on a {@code secret_leak} finding: the facet's rule and confidence, how big the leak
-     * is, and the two breakdowns the page renders — one masked key at a time, and one leak at a time.
-     *
-     * @param rule the gitleaks rule id this facet is about, e.g. {@code aws-access-token}
-     * @param confidence {@code high} when any leak in the facet's population was HIGH band, else
-     *     {@code low}
-     * @param leakCount every leaking output since onset, not only the witnesses below
-     * @param traceCount the traces those leaks span
-     * @param keys one row per masked key the facet has leaked as, newest-leaking-first
-     * @param leaks the finding's own witnesses (at most 50, the cap {@code ClassifierArming} already
-     *     applied), ordered by time, each joined to what {@code secret_leak_detection} recorded
+     * @param confidence {@code high} when any leak in the facet was HIGH band @param leakCount every leaking output
+     * since onset, not only the witnesses @param leaks the finding's witnesses (at most 50), by time
      */
     public record SecretLeakDetail(
             String rule,
@@ -41,7 +28,7 @@ public final class SecretLeakEvidence {
             @Nullable String lastAt,
             List<SecretLeakKeyView> keys,
             List<SecretLeakLeakView> leaks,
-            /** {@code event_count} or {@code distinct_users}: what {@link #threshold} counts. */
+            /** What {@link #threshold} counts. */
             String basis,
             long threshold,
             long windowSeconds,
@@ -56,13 +43,7 @@ public final class SecretLeakEvidence {
             @Nullable String lastAt,
             boolean storedRaw) {}
 
-    /**
-     * One leaking output: when, which key, whether it is still stored raw, and where to open it.
-     *
-     * @param traceId null on the agent-facing view {@code get_finding} builds — see {@code
-     *     McpToolRegistry#withoutIds}: an agent gets the timeline and the masked key, never the id to
-     *     follow, which is what {@code get_finding_evidence} is for. Always set on the UI's own view.
-     */
+    /** @param traceId null on the agent-facing view; agents get ids through {@code get_finding_evidence} */
     public record SecretLeakLeakView(
             @Nullable String at,
             String masked,

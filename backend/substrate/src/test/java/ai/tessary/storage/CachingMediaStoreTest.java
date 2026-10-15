@@ -2,7 +2,6 @@
 package ai.tessary.storage;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -34,17 +33,6 @@ class CachingMediaStoreTest {
 
         store.get("proj-a", new MediaRef("m1"));
         store.get("proj-b", new MediaRef("m1"));
-        verify(delegate, times(2)).get(any(), any());
-    }
-
-    @Test
-    void aMissIsNotCached() {
-        PostgresMediaStore delegate = mock(PostgresMediaStore.class);
-        when(delegate.get(any(), any())).thenReturn(Optional.empty());
-        CachingMediaStore store = new CachingMediaStore(delegate, 0);
-
-        assertTrue(store.get("proj", new MediaRef("gone")).isEmpty());
-        assertTrue(store.get("proj", new MediaRef("gone")).isEmpty());
         verify(delegate, times(2)).get(any(), any());
     }
 

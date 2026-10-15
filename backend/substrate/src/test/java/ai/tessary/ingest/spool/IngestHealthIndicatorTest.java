@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.config.IngestSpoolProperties;
 import ai.tessary.ingest.substrate.SubstrateWriter;
+import ai.tessary.testsupport.Props;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.health.contributor.Health;
@@ -16,7 +17,7 @@ import org.springframework.boot.health.contributor.Status;
 class IngestHealthIndicatorTest {
 
     private final SubstrateWriter writer = mock(SubstrateWriter.class);
-    private final IngestSpoolProperties props = new IngestSpoolProperties();
+    private IngestSpoolProperties props = Props.of(IngestSpoolProperties.class);
     private final IngestSpool spool = mock(IngestSpool.class);
 
     private Health health(boolean alive, long oldestAgeMs, long deadLettered) {
@@ -41,9 +42,9 @@ class IngestHealthIndicatorTest {
 
     @Test
     void downWhenTheOldestBatchIsOlderThanTheLagBudget() {
-        props.setMaxLagMs(1_000);
+        props = Props.of(IngestSpoolProperties.class, "max-lag-ms", 1_000);
         assertEquals(Status.DOWN, health(true, 5_000, 2).getStatus());
-        props.setMaxLagMs(0);
+        props = Props.of(IngestSpoolProperties.class, "max-lag-ms", 0);
         assertEquals(Status.UP, health(true, 5_000, 2).getStatus(), "0 disables the lag check");
     }
 }

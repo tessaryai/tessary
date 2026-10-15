@@ -4,33 +4,15 @@
  * row shows the strongest sentence and how many more, an aged-out or cleared answer says so, and the list
  * reads its next page and one cause's answers from the server.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import type { FlaggedAnswer, FlaggedAnswerPage } from "../../api/types";
+import { fireEvent, screen, within } from "@testing-library/react";
+import type { FlaggedAnswer } from "../../api/types";
 import { FlaggedAnswers } from "./FlaggedAnswers";
 import { dateTime } from "./groundedness";
+import { api } from "../../test/api";
 
-const getFlaggedAnswers =
-  vi.fn<
-    (id: string, params?: { cursor?: string | null; cause?: { rcaReport: string; index: number } }) => Promise<FlaggedAnswerPage>
-  >();
-
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({
-      orgSlug: "acme",
-      projectSlug: "default",
-      api: { base: "/api/orgs/acme/projects/default", getFlaggedAnswers },
-    }),
-  };
-});
-
-afterEach(() => {
-  getFlaggedAnswers.mockReset();
-});
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const ANSWER =
   "Yes. Refunds are available for up to 60 days after purchase. " +
@@ -43,13 +25,8 @@ function span(text: string): { start: number; end: number } {
 
 function answer(over: Partial<FlaggedAnswer> = {}): FlaggedAnswer {
   return {
-    traceId: "4f1c9a07e2b84d0f",
-    spanId: "span-1",
-    sessionId: "sess-1",
-    flaggedAt: "2026-09-23T14:41:00Z",
-    score: 0.99,
-    question: "Can I get a refund after 30 days?",
-    answer: ANSWER,
+    traceId: "4f1c9a07e2b84d0f", spanId: "span-1", sessionId: "sess-1", flaggedAt: "2026-09-23T14:41:00Z", score: 0.99,
+    question: "Can I get a refund after 30 days?", answer: ANSWER,
     flaggedSentences: [
       { ...span("Refunds are available for up to 60 days after purchase."), score: 0.99 },
       { ...span("After 60 days, you can still get half of your payment back."), score: 0.98 },
@@ -58,10 +35,7 @@ function answer(over: Partial<FlaggedAnswer> = {}): FlaggedAnswer {
       { title: "refund-policy.md", text: "Refunds are available within 30 days of purchase." },
       { title: null, text: "Refunds go back to the original payment method." },
     ],
-    premiseHadEvidence: true,
-    stored: true,
-    cleared: false,
-    ...over,
+    premiseHadEvidence: true, stored: true, cleared: false, ...over,
   };
 }
 
@@ -85,10 +59,7 @@ function renderList(
 /** The drawn answer: its text as one paragraph, and the marks in it. */
 function drawnAnswer() {
   const section = screen.getByRole("region", { name: "Answer" });
-  return {
-    text: within(section).getByRole("paragraph").textContent,
-    marks: within(section).queryAllByRole("mark"),
-  };
+  return { text: within(section).getByRole("paragraph").textContent, marks: within(section).queryAllByRole("mark") };
 }
 
 describe("FlaggedAnswers", () => {
@@ -108,47 +79,16 @@ describe("FlaggedAnswers", () => {
     expect(screen.getByText(`Flagged with a score of 0.99 on ${on}. 2 sentences marked.`)).toBeTruthy();
   });
 
-  it("marks what the offsets say, even mid-word", () => {
-    renderList([answer({ answer: "abcdef", flaggedSentences: [{ start: 1, end: 3, score: 0.98 }] })]);
+  it.each([
+    ["marks what the offsets say, even mid-word", [{ start: 1, end: 3, score: 0.98 }], ["bc"]],
+    ["draws overlapping ranges once, as the first mark", [{ start: 2, end: 6, score: 0.98 }, { start: 0, end: 4, score: 0.99 }], ["abcd"]],
+    ["cuts a range that runs past the end at the end", [{ start: 3, end: 99, score: 0.98 }], ["def"]],
+    ["draws no mark for a range that starts past the end", [{ start: 0, end: 2, score: 0.98 }, { start: 10, end: 20, score: 0.99 }], ["ab"]],
+  ])("%s", (_case, flaggedSentences, marked) => {
+    renderList([answer({ answer: "abcdef", flaggedSentences })]);
     const { text, marks } = drawnAnswer();
-    expect(marks.map((m) => m.textContent)).toEqual(["bc"]);
+    expect(marks.map((m) => m.textContent)).toEqual(marked);
     expect(text).toBe("abcdef");
-  });
-
-  it("draws overlapping ranges once, as the first mark", () => {
-    renderList([
-      answer({
-        answer: "abcdef",
-        flaggedSentences: [
-          { start: 2, end: 6, score: 0.98 },
-          { start: 0, end: 4, score: 0.99 },
-        ],
-      }),
-    ]);
-    const { text, marks } = drawnAnswer();
-    expect(marks.map((m) => m.textContent)).toEqual(["abcd"]);
-    expect(text).toBe("abcdef");
-  });
-
-  it("cuts a range that runs past the end at the end, and draws none for one that starts past it", () => {
-    renderList([answer({ answer: "abcdef", flaggedSentences: [{ start: 3, end: 99, score: 0.98 }] })]);
-    let drawn = drawnAnswer();
-    expect(drawn.marks.map((m) => m.textContent)).toEqual(["def"]);
-    expect(drawn.text).toBe("abcdef");
-    cleanup();
-
-    renderList([
-      answer({
-        answer: "abcdef",
-        flaggedSentences: [
-          { start: 0, end: 2, score: 0.98 },
-          { start: 10, end: 20, score: 0.99 },
-        ],
-      }),
-    ]);
-    drawn = drawnAnswer();
-    expect(drawn.marks.map((m) => m.textContent)).toEqual(["ab"]);
-    expect(drawn.text).toBe("abcdef");
   });
 
   it("shows the strongest sentence on the row and how many more were flagged", () => {
@@ -244,12 +184,10 @@ describe("FlaggedAnswers", () => {
   });
 
   it("reads the next page of answers and adds it below the first", async () => {
-    getFlaggedAnswers.mockResolvedValue({
+    api.getFlaggedAnswers.mockResolvedValue({
       rows: [
         answer({
-          traceId: "t-9",
-          spanId: "span-9",
-          answer: "Nonprofits get 50% off every plan.",
+          traceId: "t-9", spanId: "span-9", answer: "Nonprofits get 50% off every plan.",
           flaggedSentences: [{ start: 0, end: 34, score: 0.99 }],
         }),
       ],
@@ -262,18 +200,16 @@ describe("FlaggedAnswers", () => {
     fireEvent.click(screen.getByRole("button", { name: /Load more answers/ }));
 
     await screen.findByRole("button", { name: /Nonprofits get 50% off every plan/ });
-    expect(getFlaggedAnswers).toHaveBeenCalledWith("f-1", expect.objectContaining({ cursor: "50", limit: 50 }));
+    expect(api.getFlaggedAnswers).toHaveBeenCalledWith("f-1", expect.objectContaining({ cursor: "50", limit: 50 }));
     expect(screen.getByText("2 traces")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Load more answers/ })).toBeNull();
   });
 
   it("reads one cause's answers from the server rather than the first page", async () => {
-    getFlaggedAnswers.mockResolvedValue({
+    api.getFlaggedAnswers.mockResolvedValue({
       rows: [
         answer({
-          traceId: "t-7",
-          spanId: "span-7",
-          answer: "The API allows 1,000 requests per minute per key.",
+          traceId: "t-7", spanId: "span-7", answer: "The API allows 1,000 requests per minute per key.",
           flaggedSentences: [{ start: 0, end: 49, score: 0.99 }],
         }),
       ],
@@ -283,7 +219,7 @@ describe("FlaggedAnswers", () => {
     renderList([answer()], 1, "50", { rcaReport: "rca-1", index: 1 });
 
     await screen.findByRole("button", { name: /The API allows 1,000 requests/ });
-    expect(getFlaggedAnswers).toHaveBeenCalledWith(
+    expect(api.getFlaggedAnswers).toHaveBeenCalledWith(
       "f-1",
       expect.objectContaining({ cursor: null, cause: { rcaReport: "rca-1", index: 1 } }),
     );

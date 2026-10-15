@@ -15,19 +15,8 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The pricing schema — {@code model}, {@code price_book}, {@code model_price} — in one place.
- *
- * <p><b>The book in force for a source is its most recently published version.</b> {@link #currentBooks()}
- * returns one row per source — today just {@code litellm} — and {@link #rateFor} walks them in that order,
- * returning the first hit together with the version that produced it, because a writer has to stamp what
- * priced the row. A hand-maintained {@code manual} source used to be layered ahead of the vendored
- * one; every row it carried is now either reconciled upstream or a genuine gap priced as unpriced rather
- * than guessed, so this is single-source in practice, not by a hardcoded assumption.
- *
- * <p><b>Importing a book is one transaction.</b> {@link #importBook} inserts the version, the missing
- * model rows and the rates together or not at all. Half a book is the one state the importer could not
- * recover from on its own: the version row alone would make the next boot decide the book was already
- * present and skip it forever, leaving every model in it permanently unpriced.
+ * The book in force for a source is its most recently published version. {@link #importBook} is one transaction: a
+ * version row without its rates would make the next boot skip the book forever.
  */
 @Repository
 public class PriceBookRepository {
@@ -78,11 +67,7 @@ public class PriceBookRepository {
                 .isPresent();
     }
 
-    /**
-     * The full sha256 of the book in force for {@code source}, or null when there is no book or it predates
-     * the {@code digest} column and has not been backfilled. What the heartbeat reports as
-     * {@code price_book.digest}.
-     */
+    /** Null when there is no book or it predates the {@code digest} column. */
     public @Nullable String currentDigest(String source) {
         return jdbc.sql("SELECT digest FROM price_book WHERE source = :source "
                         + "ORDER BY published_at DESC, created_at DESC LIMIT 1")
@@ -93,13 +78,8 @@ public class PriceBookRepository {
     }
 
     /**
-     * Bring a book an earlier boot imported in line with what this boot knows about it: fill a missing
-     * {@code digest}, and move {@code published_at} back to {@code publishedAt} when it is later.
-     *
-     * <p>The second half is the upgrade repair. Before the bundled book was dated by the jar's build time it
-     * was dated by import time, so a book imported at boot could outrank a newer one fetched from
-     * home.tessary.ai for no reason but when the process started. It only ever moves the date earlier, so it
-     * can never promote a book over one that genuinely came later, and a second call changes nothing.
+     * Fill a missing {@code digest} and move {@code published_at} earlier when needed: older boots dated the bundled
+     * book by import time, which could outrank a newer fetched book. Only ever moves earlier, so it is idempotent.
      */
     public void reconcile(String version, String digest, Instant publishedAt) {
         jdbc.sql("UPDATE price_book SET digest = COALESCE(digest, :digest), "
@@ -111,7 +91,6 @@ public class PriceBookRepository {
                 .update();
     }
 
-    /** Whether the pricing schema knows this model id — the resolver's one question. */
     public boolean hasModel(String modelId) {
         return jdbc.sql("SELECT 1 FROM model WHERE id = :id")
                 .param("id", modelId)
@@ -121,15 +100,8 @@ public class PriceBookRepository {
     }
 
     /**
-     * Insert a snapshot as a new book: the version, any model ids not seen before, and its rates.
-     *
-     * <p>{@code publishedAt} decides which book is in force ({@link #currentBooks} takes the newest), so it
-     * must be when the file's content was published, not when this process got round to importing it: the
-     * jar's build time for the bundled book, home's manifest {@code published_at} for a fetched one.
-     *
-     * <p>The version insert is the gate. Two instances booting at once both reach here; the second one's
-     * {@code ON CONFLICT DO NOTHING} reports nothing inserted and it stops, rather than racing the first
-     * through 2,000 rate rows to the same end.
+     * {@code publishedAt} decides which book is in force, so it must be the content's publish time, not import time.
+     * The version insert's {@code ON CONFLICT DO NOTHING} is the gate when two instances boot at once.
      */
     @Transactional
     public Imported importBook(PriceSnapshot snapshot, Instant publishedAt) {
@@ -170,11 +142,7 @@ public class PriceBookRepository {
         });
     }
 
-    /**
-     * The books in force, most authoritative first: the newest {@code manual} book, then the newest book of
-     * every other source. One row per source — an older snapshot stays in the table so history priced
-     * against it keeps its meaning, but it never prices anything new.
-     */
+    /** One row per source, {@code manual} first. Older books stay so history priced against them keeps its meaning. */
     public List<PriceBook> currentBooks() {
         return jdbc.sql("SELECT DISTINCT ON (source) " + BOOK_COLS + " FROM price_book "
                         + "ORDER BY source, published_at DESC, created_at DESC")
@@ -182,10 +150,7 @@ public class PriceBookRepository {
                 .list();
     }
 
-    /**
-     * This model's rates from the highest-precedence book that carries them, or empty when no book in force
-     * holds a rate for it — which is what makes a span unpriced rather than free.
-     */
+    /** Empty when no book in force holds a rate, which makes a span unpriced rather than free. */
     public Optional<ModelRate> rateFor(String modelId) {
         for (PriceBook book : currentBooks()) {
             Optional<ModelRate> rate = rateIn(book.version(), modelId);
@@ -194,10 +159,7 @@ public class PriceBookRepository {
         return Optional.empty();
     }
 
-    /**
-     * How many distinct models the books in force can price — the coverage figure the vitals card shows
-     * beside its unpriced count, so a thin price book reads differently from a thin corpus.
-     */
+    /** Shown on the vitals card beside the unpriced count. */
     public int pricedModelCount() {
         List<PriceBook> books = currentBooks();
         if (books.isEmpty()) {

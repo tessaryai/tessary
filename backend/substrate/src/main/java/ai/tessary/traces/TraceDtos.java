@@ -12,31 +12,17 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The trace <b>list</b> shapes — the row and the page — plus the one mapping from a repository
- * {@link TraceV2Repository.Summary} onto that row.
- *
- * <p>They live here rather than nested in {@link TracesController} because three surfaces render them and
- * only one of those is that controller: the traces list, a session's detail ({@link SessionDtos.SessionDetail}
- * carries the session's traces as these rows), and the MCP {@code list_traces} reader. A second mapping
- * function is how a rollup column silently starts meaning two things on two wires.
- *
- * <p>The <i>detail</i> shapes stay on the controller ({@code TraceDetail}, {@code SpanView} and its
- * tool-call/retrieval children). Nothing outside it renders those — MCP's {@code get_trace} projects the
- * span columns itself — so moving them would buy nothing.
+ * Trace list shapes and the one mapping onto them, shared by the traces list, session detail and MCP
+ * {@code list_traces}: a second mapping is how a column starts meaning two things. Detail shapes stay on the
+ * controller.
  */
 public final class TraceDtos {
 
     private TraceDtos() {}
 
     /**
-     * One trace's list row — its identity, its timing, and its rollup columns verbatim.
-     *
-     * <p>{@code status} is null for a trace that has not rolled up: it has no error count, so it is
-     * neither ok nor errored, and saying "ok" would be an invention.
-     *
-     * <p>The previews are the stored {@code input_preview}/{@code output_preview} columns, not the payload.
-     * A list row never carries the full conversation — that is what a point read is for — and a reader that
-     * treats a preview as the whole text is reasoning over a truncation.
+     * {@code status} is null for an unrolled trace, neither ok nor errored. Previews are the stored preview columns, a
+     * truncation, not the payload.
      */
     public record TraceListItem(
             String id,
@@ -60,17 +46,16 @@ public final class TraceDtos {
             @JsonProperty("input_cost") @Nullable BigDecimal inputCost,
             @JsonProperty("output_cost") @Nullable BigDecimal outputCost,
             @JsonProperty("total_cost") @Nullable BigDecimal totalCost,
-            // Load-bearing, not diagnostic: a trace holding models we have no rate for shows its total AND
-            // how much of it could not be priced, so a small number is never mistaken for a cheap turn.
+            // A trace with unrated models shows its total and the unpriced part, so a small number is never mistaken
+            // for a cheap turn.
             @JsonProperty("unpriced_spans") @Nullable Integer unpricedSpans,
             // "Nothing has arrived since the last rollup" — never "we gave up waiting".
             @JsonProperty("is_settled") boolean isSettled,
             @JsonProperty("input_preview") @Nullable String inputPreview,
             @JsonProperty("output_preview") @Nullable String outputPreview,
-            // The classifiers that flagged this trace, by name. A flag a false-alarm resolve cleared is not one.
+            // A flag cleared by a false-alarm resolve is not one.
             @JsonProperty("detected_by") List<DetectionLabel> detectedBy) {}
 
-    /** A classifier that flagged a trace or session. */
     public record DetectionLabel(
             @JsonProperty("classifier_id") String classifierId, String name) {}
 
@@ -81,15 +66,12 @@ public final class TraceDtos {
             @JsonProperty("trace_id") String traceId,
             @JsonProperty("span_id") @Nullable String spanId) {}
 
-    /** A page of traces plus the cursor to fetch the next (older) page, or null at the end. */
+    /** Null cursor at the end. */
     public record TracesPage(
             List<TraceListItem> traces,
             @JsonProperty("next_cursor") @Nullable String nextCursor) {}
 
-    /**
-     * Map repository summaries onto the wire, each with the classifiers that flagged it. The only such mapping;
-     * every trace list surface calls it.
-     */
+    /** The only such mapping. */
     public static List<TraceListItem> items(
             List<TraceV2Repository.Summary> rows, List<TraceDetectionRepository.Mark> marks) {
         Map<String, List<DetectionLabel>> labels = new HashMap<>();
@@ -105,7 +87,6 @@ public final class TraceDtos {
                 .toList();
     }
 
-    /** The marks as the wire carries them. */
     public static List<DetectionMark> marks(List<TraceDetectionRepository.Mark> marks) {
         return marks.stream()
                 .map(m -> new DetectionMark(m.classifierId(), m.classifierName(), m.traceId(), m.spanId()))

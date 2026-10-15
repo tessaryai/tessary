@@ -14,7 +14,7 @@ public record OrgMembership(
     public static final String OWNER = "owner";
     public static final String MEMBER = "member";
 
-    /** A membership with the role's full permissions (empty scopes) and no attributes. */
+    /** Empty scopes grant the role's full permissions. */
     public static OrgMembership of(String orgId, String principalId, String role, String createdAt) {
         return new OrgMembership(orgId, principalId, role, "{}", "{}", createdAt);
     }

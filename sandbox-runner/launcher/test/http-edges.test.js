@@ -117,7 +117,7 @@ test('an unusable credential is the caller\'s bad_request, named, before any san
       const res = await request(port, 'POST', '/rca', { auth: 'Bearer testkey', body: { mcp: MCP, credential } });
       assert.equal(res.status, 502);
       assert.equal(res.body.kind, 'bad_request', why);
-      assert.ok(res.body.detail.startsWith(`rca.js: missing or invalid credential (${why}`), res.body.detail);
+      assert.ok(res.body.detail.startsWith(`rca: missing or invalid credential (${why}`), res.body.detail);
     }
   } finally {
     child.kill();
@@ -131,7 +131,7 @@ test('an egress credential on the docker backend is the caller\'s bad_request: o
     const res = await request(port, 'POST', '/rca', { auth: 'Bearer testkey', body: { mcp: MCP, credential } });
     assert.equal(res.status, 502);
     assert.equal(res.body.kind, 'bad_request');
-    assert.equal(res.body.detail, 'rca.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)');
+    assert.equal(res.body.detail, 'rca: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)');
   } finally {
     child.kill();
   }

@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -25,16 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * sent it, so the page can tell the user their exporter is reaching us but tagging nothing.
  */
 @SpringBootTest
-class SubstrateControllerTest {
-
-    @Autowired
-    SubstrateController controller;
-
-    @Autowired
-    SubstrateWriter writer;
-
-    @Autowired
-    TenantService tenants;
+record SubstrateControllerTest(SubstrateController controller, SubstrateWriter writer, TenantService tenants) {
 
     @Test
     void statusIsEmptyBeforeTrafficAndNamesTheNewestSpanAndItsServiceAfter() throws InterruptedException {

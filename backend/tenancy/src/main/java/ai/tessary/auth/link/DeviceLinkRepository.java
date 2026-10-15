@@ -63,7 +63,7 @@ public class DeviceLinkRepository {
                 .update();
     }
 
-    /** Transition {@code from → to} only if the row is still in {@code from}. Returns rows changed (0 or 1). */
+    /** Only if the row is still in {@code from}. Returns rows changed. */
     public int transitionIf(String id, String from, String to) {
         return jdbc.sql("UPDATE device_link SET status = :to WHERE id = :id AND status = :from")
                 .param("to", to)
@@ -72,7 +72,7 @@ public class DeviceLinkRepository {
                 .update();
     }
 
-    /** Confirm only while still pending (closes the confirm/deny race). Returns rows changed. */
+    /** Only while still pending, which closes the confirm/deny race. */
     public int markConfirmed(String id, String orgId, String projectId, String userId) {
         return jdbc.sql("""
             UPDATE device_link SET status = :s, org_id = :orgId, project_id = :projectId, user_id = :userId
@@ -87,11 +87,7 @@ public class DeviceLinkRepository {
                 .update();
     }
 
-    /**
-     * Atomically claim a confirmed link (confirmed → claimed). Returns 1 to the
-     * single winner of a concurrent-poll race, 0 to everyone else — so the token
-     * is minted exactly once. The token id is attached separately via {@link #setToken}.
-     */
+    /** Returns 1 to the single winner of a concurrent-poll race, so the token is minted exactly once. */
     public int beginClaim(String id) {
         return jdbc.sql("UPDATE device_link SET status = :to WHERE id = :id AND status = :from")
                 .param("to", DeviceLink.CLAIMED)

@@ -6,11 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * Wires this build's {@link AgenticCredentialResolver} and {@link PlatformProviderSupplier}. The
- * {@code @ConditionalOnMissingBean} sits on each {@code @Bean} method so another build can register its
- * own and this one yields, the same shape as {@code OrgCreationLimitConfig}.
- */
+/** Each {@code @Bean} is {@code @ConditionalOnMissingBean} so another build's resolver replaces this one. */
 @Configuration(proxyBeanMethods = false)
 public class LlmSeamConfig {
 

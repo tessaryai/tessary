@@ -4,9 +4,8 @@ package ai.tessary.llm.catalog;
 import java.util.List;
 
 /**
- * TypeSafe documents no model-listing endpoint, so this returns the one decision model the catalog
- * offers. Pinned versions are not offered: the provider echoes the version that answered each call,
- * and that echo is what gets recorded.
+ * TypeSafe has no listing endpoint. Pinned versions are not offered: the provider echoes the version that answered, and
+ * that echo is recorded.
  */
 public final class TypeSafeModelLister implements ProviderModelLister {
 

@@ -16,91 +16,77 @@ import { traceItem } from "../../test/fixtures";
 
 const j = (v: unknown) => JSON.stringify(v);
 
-describe("planConversation", () => {
-  it("credits a message to the root, not the child, when both start at the same instant", () => {
-    const question = j([{ role: "user", content: "same instant" }]);
-    const plan = planConversation([
-      span({ id: "child", parent_span_id: "root", started_at: "2026-09-25T10:00:00Z", input: question }),
-      span({ id: "root", started_at: "2026-09-25T10:00:00Z", input: question }),
-      span({ id: "sibling", parent_span_id: "root", started_at: "2026-09-25T10:00:00Z", input: question }),
-    ]);
-    expect(plan.bySpan.get("root")!.input).toHaveLength(1);
-    expect(plan.bySpan.get("child")!.input).toHaveLength(0);
-  });
+it("planConversation: credits a message to the root, not the child, when both start at the same instant", () => {
+  const question = j([{ role: "user", content: "same instant" }]);
+  const plan = planConversation([
+    span({ id: "child", parent_span_id: "root", started_at: "2026-09-25T10:00:00Z", input: question }),
+    span({ id: "root", started_at: "2026-09-25T10:00:00Z", input: question }),
+    span({ id: "sibling", parent_span_id: "root", started_at: "2026-09-25T10:00:00Z", input: question }),
+  ]);
+  expect(plan.bySpan.get("root")!.input).toHaveLength(1);
+  expect(plan.bySpan.get("child")!.input).toHaveLength(0);
 });
 
-describe("planTools", () => {
-  it("claims an execution by name when the producer records no call id", () => {
-    const plan = planTools([
-      span({ id: "llm", output: j([{ role: "assistant", content: [{ type: "tool_use", name: "lookup" }] }]) }),
-      span({ id: "exec", kind: "tool", name: "lookup", started_at: "2026-09-25T10:00:01Z" }),
-    ]);
-    expect(plan.parentOf.get("exec")).toBe("llm");
-    expect(plan.orphans.size).toBe(0);
-    expect(plan.byLlm.get("llm")!.map((s) => s.key)).toEqual(["exec"]);
-  });
+it("planTools: claims an execution by name when the producer records no call id", () => {
+  const plan = planTools([
+    span({ id: "llm", output: j([{ role: "assistant", content: [{ type: "tool_use", name: "lookup" }] }]) }),
+    span({ id: "exec", kind: "tool", name: "lookup", started_at: "2026-09-25T10:00:01Z" }),
+  ]);
+  expect(plan.parentOf.get("exec")).toBe("llm");
+  expect(plan.orphans.size).toBe(0);
+  expect(plan.byLlm.get("llm")!.map((s) => s.key)).toEqual(["exec"]);
 });
 
-describe("planTools on a text-only turn", () => {
-  it("claims nothing for a model turn that answered in plain text", () => {
-    const plan = planTools([
-      span({ id: "llm", output: j([{ role: "assistant", content: "Your refund is on its way." }]) }),
-      span({ id: "exec", kind: "tool", name: "lookup", started_at: "2026-09-25T10:00:01Z" }),
-    ]);
-    expect(plan.byLlm.size).toBe(0);
-    expect(plan.parentOf.size).toBe(0);
-  });
+it("planTools on a text-only turn: claims nothing for a model turn that answered in plain text", () => {
+  const plan = planTools([
+    span({ id: "llm", output: j([{ role: "assistant", content: "Your refund is on its way." }]) }),
+    span({ id: "exec", kind: "tool", name: "lookup", started_at: "2026-09-25T10:00:01Z" }),
+  ]);
+  expect(plan.byLlm.size).toBe(0);
+  expect(plan.parentOf.size).toBe(0);
 });
 
-describe("spanItems", () => {
-  it("draws nothing for a span the plan has no entry for", () => {
-    expect(spanItems(undefined)).toEqual([]);
-  });
+it("spanItems: draws nothing for a span the plan has no entry for", () => {
+  expect(spanItems(undefined)).toEqual([]);
 });
 
-describe("groupTools", () => {
-  it("runs consecutive tool calls into one group, and starts a new group after a message", () => {
-    const step = (key: string) => ({ key, name: key, args: null, result: null, failed: false });
-    const message = { kind: "message", text: "hi", rest: [] } as unknown as Parameters<typeof groupTools>[0][number];
-    const grouped = groupTools([
-      { kind: "tool", step: step("a") },
-      { kind: "tool", step: step("b") },
-      message,
-      { kind: "tool", step: step("c") },
-    ]);
-    expect(grouped.map((g) => (g.kind === "tools" ? g.steps.map((s) => s.key) : g.kind))).toEqual([
-      ["a", "b"],
-      "message",
-      ["c"],
-    ]);
-  });
+it("groupTools: runs consecutive tool calls into one group, and starts a new group after a message", () => {
+  const step = (key: string) => ({ key, name: key, args: null, result: null, failed: false });
+  const message = { kind: "message", text: "hi", rest: [] } as unknown as Parameters<typeof groupTools>[0][number];
+  const grouped = groupTools([
+    { kind: "tool", step: step("a") },
+    { kind: "tool", step: step("b") },
+    message,
+    { kind: "tool", step: step("c") },
+  ]);
+  expect(grouped.map((g) => (g.kind === "tools" ? g.steps.map((s) => s.key) : g.kind))).toEqual([
+    ["a", "b"],
+    "message",
+    ["c"],
+  ]);
 });
 
-describe("chatItems for earlier turns", () => {
-  it("recovers tool calls from the messages, in either vocabulary, with their results", () => {
-    const items = chatItems(
-      [
-        { role: "assistant", raw: { role: "assistant", content: [{ type: "tool_use", id: "c1", name: "lookup", input: { id: 1 } }] } },
-        { role: "assistant", raw: { role: "assistant", parts: [{ type: "tool_call", id: "c2", name: "refund", arguments: { amount: 5 } }, { type: "tool_call" }, "stray"] } },
-        { role: "tool", raw: { role: "tool", parts: [{ type: "tool_result", id: "c2", content: { error: "limit" } }, { type: "tool_result" }] } },
-        { role: "user", raw: { role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "found" }] } },
-      ],
-      true,
-    );
-    const steps = items.filter((i) => i.kind === "tool").map((i) => (i.kind === "tool" ? i.step : null));
-    expect(steps).toEqual([
-      { key: "c1", name: "lookup", args: '{"id":1}', result: "found", failed: false },
-      { key: "c2", name: "refund", args: '{"amount":5}', result: '{"error":"limit"}', failed: false },
-      { key: "m1-t1", name: "tool", args: null, result: null, failed: false },
-    ]);
-  });
+it("chatItems for earlier turns: recovers tool calls from the messages, in either vocabulary, with their results", () => {
+  const items = chatItems(
+    [
+      { role: "assistant", raw: { role: "assistant", content: [{ type: "tool_use", id: "c1", name: "lookup", input: { id: 1 } }] } },
+      { role: "assistant", raw: { role: "assistant", parts: [{ type: "tool_call", id: "c2", name: "refund", arguments: { amount: 5 } }, { type: "tool_call" }, "stray"] } },
+      { role: "tool", raw: { role: "tool", parts: [{ type: "tool_result", id: "c2", content: { error: "limit" } }, { type: "tool_result" }] } },
+      { role: "user", raw: { role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "found" }] } },
+    ],
+    true,
+  );
+  const steps = items.filter((i) => i.kind === "tool").map((i) => (i.kind === "tool" ? i.step : null));
+  expect(steps).toEqual([
+    { key: "c1", name: "lookup", args: '{"id":1}', result: "found", failed: false },
+    { key: "c2", name: "refund", args: '{"amount":5}', result: '{"error":"limit"}', failed: false },
+    { key: "m1-t1", name: "tool", args: null, result: null, failed: false },
+  ]);
 });
 
-describe("chatItems keeps what it cannot read as prose", () => {
-  it("keeps a content block that is neither text nor an object beside the text", () => {
-    const [item] = chatItems([{ role: "assistant", raw: { role: "assistant", content: ["see", 42, null] } }], false);
-    expect(item).toMatchObject({ kind: "message", text: "see", rest: [42, null] });
-  });
+it("chatItems keeps what it cannot read as prose: keeps a content block that is neither text nor an object beside the text", () => {
+  const [item] = chatItems([{ role: "assistant", raw: { role: "assistant", content: ["see", 42, null] } }], false);
+  expect(item).toMatchObject({ kind: "message", text: "see", rest: [42, null] });
 });
 
 describe("toolStepOf", () => {
@@ -138,15 +124,13 @@ describe("toolStepOf", () => {
   });
 });
 
-describe("labels", () => {
-  it("falls back from the span name to the GenAI operation to the kind", () => {
-    expect(spanLabel({ name: "  ", attributes: { "gen_ai.operation.name": "embeddings" }, kind: "embedding" })).toBe("embeddings");
-    expect(spanLabel({ name: null, attributes: { "gen_ai.operation.name": "" }, kind: "embedding" })).toBe("embedding");
-    expect(spanLabel({})).toBe("step");
-    expect(spanKindLabel("mcp")).toBe("mcp");
-    expect(spanKindLabel("custom")).toBe("custom");
-    expect(spanKindLabel(null)).toBe("step");
-  });
+it("labels: falls back from the span name to the GenAI operation to the kind", () => {
+  expect(spanLabel({ name: "  ", attributes: { "gen_ai.operation.name": "embeddings" }, kind: "embedding" })).toBe("embeddings");
+  expect(spanLabel({ name: null, attributes: { "gen_ai.operation.name": "" }, kind: "embedding" })).toBe("embedding");
+  expect(spanLabel({})).toBe("step");
+  expect(spanKindLabel("mcp")).toBe("mcp");
+  expect(spanKindLabel("custom")).toBe("custom");
+  expect(spanKindLabel(null)).toBe("step");
 });
 
 describe("formats", () => {
@@ -187,10 +171,8 @@ describe("corrupt parent chains", () => {
   });
 });
 
-describe("sessionSummary", () => {
-  it("says nothing before the session has been read", () => {
-    expect(sessionSummary(undefined, false)).toBe("");
-  });
+it("sessionSummary: says nothing before the session has been read", () => {
+  expect(sessionSummary(undefined, false)).toBe("");
 });
 
 describe("batchSteps", () => {
@@ -212,16 +194,14 @@ describe("batchSteps", () => {
   });
 });
 
-describe("sessionBounds", () => {
-  it("spans every trace it can place in time, skipping one with no times and no spans", () => {
-    const placed = traceItem({ id: "a", started_at: "2026-09-25T10:00:00Z", ended_at: "2026-09-25T10:05:00Z" });
-    const later = traceItem({ id: "b", started_at: "2026-09-25T11:00:00Z", ended_at: "2026-09-25T11:01:00Z" });
-    const unplaced = traceItem({ id: "c", started_at: null, ended_at: null } as never);
+it("sessionBounds: spans every trace it can place in time, skipping one with no times and no spans", () => {
+  const placed = traceItem({ id: "a", started_at: "2026-09-25T10:00:00Z", ended_at: "2026-09-25T10:05:00Z" });
+  const later = traceItem({ id: "b", started_at: "2026-09-25T11:00:00Z", ended_at: "2026-09-25T11:01:00Z" });
+  const unplaced = traceItem({ id: "c", started_at: null, ended_at: null } as never);
 
-    expect(sessionBounds([placed, unplaced, later], new Map())).toEqual({
-      start: Date.parse("2026-09-25T10:00:00Z"),
-      end: Date.parse("2026-09-25T11:01:00Z"),
-    });
-    expect(sessionBounds([unplaced], new Map())).toBeNull();
+  expect(sessionBounds([placed, unplaced, later], new Map())).toEqual({
+    start: Date.parse("2026-09-25T10:00:00Z"),
+    end: Date.parse("2026-09-25T11:01:00Z"),
   });
+  expect(sessionBounds([unplaced], new Map())).toBeNull();
 });

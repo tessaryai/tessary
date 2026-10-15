@@ -10,39 +10,21 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
- * Issues, verifies, rotates, and revokes managed project API keys. A key carries a
- * {@link KeyScope} family (write / query / admin).
- *
- * <p>Token format: {@code tsy_<scope-letter>_<22-char-url-safe-random>}, where the scope letter is
- * {@code w}/{@code q}/{@code a} (write/query/admin) — a human-readable scope signal so a write-only key is
- * distinguishable at a glance (the DB {@code scope} column stays authoritative). The first
- * {@value #PREFIX_LEN} chars of the full token (the 6-char {@code tsy_<letter>_} literal plus 8 random
- * chars) become the lookup prefix stored plain; bcrypt of the full token is stored for verification.</p>
- *
- * <p>The 8 random chars in the prefix give ~2^48 of search space at the
- * lookup-by-prefix layer, so an attacker can't grind a small alphabet to
- * find live prefixes and then use bcrypt-verify timing to confirm hits.</p>
- *
- * <p>Every lifecycle action (create / rotate / revoke) writes one {@link AuditLog} row so key
- * management is auditable. The raw secret is never stored — only its bcrypt hash and lookup prefix.</p>
+ * Tokens are {@code tsy_<w|q|a>_<22 random>}; the scope letter is a human hint, the DB column is authoritative. The
+ * lookup prefix includes 8 random chars (~2^48), so an attacker can't grind live prefixes and confirm them by bcrypt
+ * timing. Only the bcrypt hash and prefix are stored; every lifecycle action writes an {@link AuditLog} row.
  */
 @Service
 public class ApiKeyService {
 
     public static final String TOKEN_PREFIX = "tsy_"; // base; the full literal prefix is tsy_<scope-letter>_
     public static final int RANDOM_BYTES = 16; // 22 base64url chars
-    // Literal prefix is 6 chars ("tsy_" + scope letter + "_"), constant across scopes, + 8 random chars
-    // for the lookup prefix; the full token is that literal prefix plus 22 random chars.
     public static final int PREFIX_LEN = TOKEN_PREFIX.length() + 2 + 8; // = 14
     public static final int BCRYPT_COST = 10;
 
-    // BCrypt.withDefaults() below, NOT the SHA-512 long-password strategy PasswordAuthProvider pins:
-    // bcrypt reads at most 72 bytes and the default strategy throws past that, but a token here is
-    // always the 6-char literal prefix plus 22 random chars, so it cannot reach the cap. The rule for
-    // a future call site is the length of what gets hashed, not which of these two it sat next to —
-    // anything user-supplied needs PasswordAuthProvider.LONG_PASSWORDS.
+    // BCrypt.withDefaults() is safe here because a token can never reach bcrypt's 72-byte cap; anything user-supplied
+    // needs PasswordAuthProvider.LONG_PASSWORDS.
 
-    /** The 6-char literal prefix for a scope: {@code tsy_w_} / {@code tsy_q_} / {@code tsy_a_}. */
     private static String literalPrefix(KeyScope scope) {
         return TOKEN_PREFIX + scope.letter() + "_";
     }
@@ -58,21 +40,13 @@ public class ApiKeyService {
         this.cache = cache;
     }
 
-    /** Result of an issue() call: row + the plaintext token (shown to user once). */
     public record Issued(ApiKey token, String plaintext) {}
 
-    /**
-     * Issue an admin-scoped (broadest family) key — the MCP personal-token / plugin device-link mint
-     * shape; equivalent to {@code issue(projectId, userId, name, KeyScope.ADMIN)}.
-     */
     public Issued issue(String projectId, String principalId, String name) {
         return issue(projectId, principalId, name, KeyScope.ADMIN);
     }
 
-    /**
-     * Issue a managed key of the given family and write a {@code created} audit row. The returned
-     * plaintext is the only time the secret is recoverable.
-     */
+    /** The returned plaintext is the only time the secret is recoverable. */
     public Issued issue(String projectId, String principalId, String name, KeyScope scope) {
         byte[] random = new byte[RANDOM_BYTES];
         rng.nextBytes(random);
@@ -97,12 +71,7 @@ public class ApiKeyService {
         return new Issued(row, plaintext);
     }
 
-    /**
-     * Rotate a key: revoke the old row and issue a fresh secret with the <em>same</em> name and
-     * scope. Writes a {@code revoked} audit row for the old key and a {@code rotated} audit row
-     * for the new key (noting the old key id). The old key stops verifying immediately. Returns empty if
-     * the key does not exist or is already revoked.
-     */
+    /** The old key stops verifying immediately. Empty if the key does not exist or is already revoked. */
     public Optional<Issued> rotate(String tokenId, String actorUserId) {
         Optional<ApiKey> existing = tokens.findById(tokenId);
         if (existing.isEmpty() || existing.get().isRevoked()) return Optional.empty();
@@ -138,17 +107,8 @@ public class ApiKeyService {
     }
 
     /**
-     * Validate a presented bearer token. Returns the matching {@link ApiKey} when
-     * the token exists, is unrevoked, and the bcrypt verification succeeds. We update
-     * {@code last_used_at} on success (best effort; failure to update is logged but
-     * does not reject the auth).
-     *
-     * <p>A recently-seen token is answered from {@link VerifiedTokenCache} without a query or a bcrypt.
-     * That is the whole point of the cache — bcrypt at cost 10 is deliberately expensive and the answer
-     * for a machine credential does not change between requests — and its bounds, its separation of
-     * verified from rejected tokens, and the reason a revocation does not wait for a TTL are all
-     * documented on that class. {@code last_used_at} is written at most once per
-     * {@code tessary.auth.token-cache.last-used-write-interval-seconds} per key rather than per request.
+     * Answered from {@link VerifiedTokenCache} when recently seen. {@code last_used_at} is written at most once per
+     * configured interval per key, best effort.
      */
     public Optional<ApiKey> verify(String presented) {
         if (presented == null || !presented.startsWith(TOKEN_PREFIX)) return Optional.empty();
@@ -167,8 +127,8 @@ public class ApiKeyService {
             }
         }
 
-        // Read BEFORE the row read, so an invalidation that lands while bcrypt runs below is detected
-        // and this result is discarded instead of re-caching a key that was revoked mid-verification.
+        // Read before the row read, so a revocation landing during bcrypt discards this result instead of re-caching a
+        // revoked key.
         long observedGeneration = cache.generation();
         String prefix = presented.substring(0, PREFIX_LEN);
         Optional<ApiKey> row = tokens.findByPrefix(prefix);
@@ -195,12 +155,10 @@ public class ApiKeyService {
         }
     }
 
-    /** Revoke a key (idempotent) and, when it was live, write a {@code revoked} audit row. */
     public boolean revoke(String tokenId) {
         return revoke(tokenId, null);
     }
 
-    /** Revoke a key and attribute the action to {@code actorUserId} in the audit trail. */
     public boolean revoke(String tokenId, @Nullable String actorUserId) {
         Optional<ApiKey> existing = tokens.findById(tokenId);
         boolean revoked = tokens.revoke(tokenId, Instant.now().toString());

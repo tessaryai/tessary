@@ -40,25 +40,17 @@ public class GitIntegrationService {
     }
 
     /**
-     * Bind a repo whose reachability is already established by the flow that got here: the GitHub
-     * App install and reuse callbacks, which enumerated the repo off an installation the authorizing
-     * user was proved to administer. Stores without asking the provider anything.
+     * For the GitHub App install and reuse callbacks, which already proved the repo is reachable. Stores without asking
+     * the provider.
      */
     public GitIntegrationRow connect(String projectId, ConnectRequest req) {
         return store(candidate(projectId, req));
     }
 
     /**
-     * Bind a repo the caller only claims to be able to read, confirming it against the provider
-     * first. This is the path behind {@code POST /git/connect}, where the credential is typed in
-     * rather than handed to us by an install we watched happen.
-     *
-     * <p>Nothing is written unless the read succeeds. Without this, a typo'd or under-scoped token
-     * binds cleanly and RCA silently drops to trace-only evidence at the next run, with nothing on
-     * screen connecting the thin answer to the credential that caused it.
-     *
-     * <p>The provider also answers with the repo's real default branch, so an unspecified branch
-     * lands on what the repo actually uses instead of a hardcoded {@code main}.
+     * For {@code POST /git/connect}, where the credential is typed in: nothing is written unless the provider read
+     * succeeds, so a bad token cannot bind and silently thin out RCA later. An unspecified branch lands on the repo's
+     * real default branch.
      */
     public GitIntegrationRow connectVerified(String projectId, ConnectRequest req) {
         GitIntegrationRow candidate = candidate(projectId, req);
@@ -68,7 +60,6 @@ public class GitIntegrationService {
         return store(branchGiven ? candidate : withDefaultBranch(candidate, access.defaultBranch()));
     }
 
-    /** The row a connect would write, sealed and validated, but not yet persisted. */
     private GitIntegrationRow candidate(String projectId, ConnectRequest req) {
         GitProvider provider;
         try {

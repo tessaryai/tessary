@@ -282,22 +282,15 @@ class McpQueryToolsTest {
      * {@code ClassCastException} or be dropped, answering a different question.
      */
     @ParameterizedTest(name = "{0} {1}")
-    @CsvSource(
-            delimiter = '|',
-            value = {
-                "query_count | {\"dataset\":5} | argument dataset must be a string",
-                "query_facets | {\"dataset\":\"spans\",\"field\":\"kind\",\"top_n\":\"10\"}"
-                        + " | argument top_n must be an integer",
-                "query_count | {\"dataset\":\"spans\",\"range\":\"yesterday\"}"
-                        + " | argument range must be an object with optional from/to",
-                "query_count | {\"dataset\":\"spans\",\"range\":{\"from\":5}} | range.from must be a string",
-                "query_count | {\"dataset\":\"spans\",\"filters\":{\"kind\":5}}"
-                        + " | filters entries must be string field->value pairs",
-                "get_finding_evidence | {\"finding_id\":\"f-1\",\"count_only\":\"yes\"}"
-                        + " | argument count_only must be a boolean",
-                "get_trace | {\"trace_id\":\"t-1\",\"fields\":\"payload\"}"
-                        + " | argument fields must be an array of strings, e.g. [\"payload\"]",
-            })
+    @CsvSource(delimiter = '|', textBlock = """
+        query_count          | {"dataset":5}                                   | argument dataset must be a string
+        query_facets         | {"dataset":"spans","field":"kind","top_n":"10"} | argument top_n must be an integer
+        query_count          | {"dataset":"spans","range":"yesterday"}         | argument range must be an object with optional from/to
+        query_count          | {"dataset":"spans","range":{"from":5}}          | range.from must be a string
+        query_count          | {"dataset":"spans","filters":{"kind":5}}        | filters entries must be string field->value pairs
+        get_finding_evidence | {"finding_id":"f-1","count_only":"yes"}         | argument count_only must be a boolean
+        get_trace            | {"trace_id":"t-1","fields":"payload"}           | argument fields must be an array of strings, e.g. ["payload"]
+        """)
     void aWronglyTypedArgumentIsAToolErrorNamingIt(String tool, String argsJson, String expected) throws Exception {
         assertEquals(expected, errorText(mcp.callTool(tool, argsJson)));
     }

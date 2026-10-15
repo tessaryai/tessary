@@ -4,8 +4,11 @@ package ai.tessary.classifier.finding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 
 import ai.tessary.config.ClassifierProperties;
+import ai.tessary.testsupport.Props;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -44,23 +47,21 @@ class TriageLauncherBreakerTest {
     /** More failures while parked neither push the cooldown further out nor restart it. */
     @Test
     void failuresWhileOpenDoNotExtendTheTrip() {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setTriageBreakerFailures(1);
-        props.setTriageBreakerCooldownSeconds(COOLDOWN);
+        ClassifierProperties props = spy(Props.of(
+                ClassifierProperties.class, "triage-breaker-failures", 1, "triage-breaker-cooldown-seconds", COOLDOWN));
         TriageLauncherBreaker breaker = new TriageLauncherBreaker(props);
         breaker.recordLauncherFailure("401");
         long before = breaker.secondsRemaining();
 
-        props.setTriageBreakerCooldownSeconds(COOLDOWN * 10);
+        doReturn(COOLDOWN * 10).when(props).triageBreakerCooldownSeconds();
         breaker.recordLauncherFailure("still 401");
 
         assertTrue(breaker.secondsRemaining() <= before, "an open trip keeps its first cooldown");
     }
 
     private static TriageLauncherBreaker breaker() {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setTriageBreakerFailures(3);
-        props.setTriageBreakerCooldownSeconds(COOLDOWN);
+        ClassifierProperties props = Props.of(
+                ClassifierProperties.class, "triage-breaker-failures", 3, "triage-breaker-cooldown-seconds", COOLDOWN);
         return new TriageLauncherBreaker(props);
     }
 }

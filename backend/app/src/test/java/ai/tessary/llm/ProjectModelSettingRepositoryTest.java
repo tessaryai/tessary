@@ -8,7 +8,6 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -17,13 +16,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * write actually satisfy the table's CHECK constraints, and that they map back to the same enums.
  */
 @SpringBootTest
-class ProjectModelSettingRepositoryTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ProjectModelSettingRepository repo;
+record ProjectModelSettingRepositoryTest(TenantService tenants, ProjectModelSettingRepository repo) {
 
     @Test
     void upsertRoundTripsEveryLane() {

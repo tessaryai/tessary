@@ -12,39 +12,22 @@ import type { OrgInvitation, OrgMember, OrgRole, SignupPolicy } from "../../api/
 import { ApiError } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Members } from "./Members";
+import { auth } from "../../test/api";
 
-const auth = vi.hoisted(() => ({
-  listMembers: vi.fn(),
-  listInvitations: vi.fn(),
-  getSignupPolicy: vi.fn(),
-  updateSignupPolicy: vi.fn(),
-  addMember: vi.fn(),
-  updateMember: vi.fn(),
-  removeMember: vi.fn(),
-  revokeInvitation: vi.fn(),
-}));
 const session = vi.hoisted(() => ({ userId: "u-me" }));
 
-vi.mock("../../api/client", () => ({ auth }));
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../../api/client", () => import("../../test/api"));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: session.userId } }) }));
 
 const member = (user_id: string, role: OrgRole, over: Partial<OrgMember> = {}): OrgMember => ({
   user_id,
   email: `${user_id}@acme.com`,
-  display_name: null,
-  avatar_url: null,
-  role,
-  created_at: "2026-01-15T00:00:00Z",
-  ...over,
+  display_name: null, avatar_url: null, role, created_at: "2026-01-15T00:00:00Z", ...over,
 });
 
 const POLICY: SignupPolicy = {
-  mode: "open",
-  domains: [],
-  governing: true,
-  governing_org_slug: "acme",
-  governing_org_name: "Acme",
+  mode: "open", domains: [], governing: true, governing_org_slug: "acme", governing_org_name: "Acme",
 };
 
 function roster(myRole: OrgRole) {
@@ -115,23 +98,21 @@ describe("as an owner", () => {
   });
 });
 
-describe("as an admin", () => {
-  it("manages non-owners only, and cannot grant the owner role anywhere", async () => {
-    auth.listMembers.mockResolvedValue(roster("admin"));
-    renderRoute(<Members />);
-    await screen.findAllByText("u-dev@acme.com");
+it("as an admin: manages non-owners only, and cannot grant the owner role anywhere", async () => {
+  auth.listMembers.mockResolvedValue(roster("admin"));
+  renderRoute(<Members />);
+  await screen.findAllByText("u-dev@acme.com");
 
-    expect(within(row("u-owner2@acme.com")).queryByRole("combobox")).toBeNull();
-    expect(within(row("u-owner2@acme.com")).getByText("Owner")).toBeTruthy();
-    expect(within(row("u-owner2@acme.com")).queryByRole("button", { name: "Remove" })).toBeNull();
-    const devSelect = within(row("u-dev@acme.com")).getByRole("combobox");
-    expect((within(devSelect).getByRole("option", { name: "Owner" }) as HTMLOptionElement).disabled).toBe(true);
-    expect(within(row("u-me@acme.com")).getByText("Admin · you")).toBeTruthy();
+  expect(within(row("u-owner2@acme.com")).queryByRole("combobox")).toBeNull();
+  expect(within(row("u-owner2@acme.com")).getByText("Owner")).toBeTruthy();
+  expect(within(row("u-owner2@acme.com")).queryByRole("button", { name: "Remove" })).toBeNull();
+  const devSelect = within(row("u-dev@acme.com")).getByRole("combobox");
+  expect((within(devSelect).getByRole("option", { name: "Owner" }) as HTMLOptionElement).disabled).toBe(true);
+  expect(within(row("u-me@acme.com")).getByText("Admin · you")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
-    const dialog = screen.getByRole("dialog");
-    expect((within(dialog).getByRole("option", { name: "Owner" }) as HTMLOptionElement).disabled).toBe(true);
-  });
+  fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+  const dialog = screen.getByRole("dialog");
+  expect((within(dialog).getByRole("option", { name: "Owner" }) as HTMLOptionElement).disabled).toBe(true);
 });
 
 describe("as a member", () => {
@@ -219,34 +200,32 @@ describe("inviting", () => {
   });
 });
 
-describe("pending invitations", () => {
-  it("lists each with its age and role, and revokes on confirmation", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-25T12:00:00Z"), toFake: ["Date"] });
-    const invite = (id: string, created_at: string): OrgInvitation => ({ id, email: `${id}@x.com`, role: "viewer", state: "pending", created_at });
-    auth.listInvitations.mockResolvedValue([invite("i-today", "2026-09-25T08:00:00Z"), invite("i-one", "2026-09-24T12:00:00Z"), invite("i-old", "2026-09-22T12:00:00Z")]);
-    auth.revokeInvitation.mockRejectedValueOnce(new Error("already accepted")).mockResolvedValue(null);
-    try {
-      renderRoute(<Members />);
+it("pending invitations: lists each with its age and role, and revokes on confirmation", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-25T12:00:00Z"), toFake: ["Date"] });
+  const invite = (id: string, created_at: string): OrgInvitation => ({ id, email: `${id}@x.com`, role: "viewer", state: "pending", created_at });
+  auth.listInvitations.mockResolvedValue([invite("i-today", "2026-09-25T08:00:00Z"), invite("i-one", "2026-09-24T12:00:00Z"), invite("i-old", "2026-09-22T12:00:00Z")]);
+  auth.revokeInvitation.mockRejectedValueOnce(new Error("already accepted")).mockResolvedValue(null);
+  try {
+    renderRoute(<Members />);
 
-      expect(await screen.findByText("invited today · Viewer")).toBeTruthy();
-      expect(screen.getByText("invited 1d ago · Viewer")).toBeTruthy();
-      expect(screen.getByText("invited 3d ago · Viewer")).toBeTruthy();
+    expect(await screen.findByText("invited today · Viewer")).toBeTruthy();
+    expect(screen.getByText("invited 1d ago · Viewer")).toBeTruthy();
+    expect(screen.getByText("invited 3d ago · Viewer")).toBeTruthy();
 
-      const revoke = within(screen.getByText("i-old@x.com").parentElement!).getByRole("button", { name: "Revoke" });
-      confirmReply = false;
-      fireEvent.click(revoke);
-      await settle();
-      expect(auth.revokeInvitation).not.toHaveBeenCalled();
-      confirmReply = true;
-      fireEvent.click(revoke);
-      expect(await screen.findByText("Could not revoke invitation")).toBeTruthy();
-      fireEvent.click(revoke);
-      await waitFor(() => expect(auth.revokeInvitation).toHaveBeenLastCalledWith("acme", "i-old"));
-      expect(await screen.findByText("Invitation revoked")).toBeTruthy();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    const revoke = within(screen.getByText("i-old@x.com").parentElement!).getByRole("button", { name: "Revoke" });
+    confirmReply = false;
+    fireEvent.click(revoke);
+    await settle();
+    expect(auth.revokeInvitation).not.toHaveBeenCalled();
+    confirmReply = true;
+    fireEvent.click(revoke);
+    expect(await screen.findByText("Could not revoke invitation")).toBeTruthy();
+    fireEvent.click(revoke);
+    await waitFor(() => expect(auth.revokeInvitation).toHaveBeenLastCalledWith("acme", "i-old"));
+    expect(await screen.findByText("Invitation revoked")).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 describe("the sign-up policy", () => {
@@ -278,10 +257,7 @@ describe("the sign-up policy", () => {
 
   it("is read-only through an organization that does not govern it, and names the one that does", async () => {
     auth.getSignupPolicy.mockResolvedValue({
-      ...POLICY,
-      governing: false,
-      governing_org_slug: "first-org",
-      governing_org_name: "First Org",
+      ...POLICY, governing: false, governing_org_slug: "first-org", governing_org_name: "First Org",
     });
     renderRoute(<Members />);
 
@@ -292,10 +268,7 @@ describe("the sign-up policy", () => {
     cleanup();
 
     auth.getSignupPolicy.mockResolvedValue({
-      ...POLICY,
-      governing: false,
-      governing_org_slug: null,
-      governing_org_name: null,
+      ...POLICY, governing: false, governing_org_slug: null, governing_org_name: null,
     });
     renderRoute(<Members />);
     expect(await screen.findByText("unknown")).toBeTruthy();

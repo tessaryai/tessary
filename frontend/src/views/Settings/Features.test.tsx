@@ -9,24 +9,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CapabilityOverrideView } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Features } from "./Features";
+import { auth } from "../../test/api";
 
-const auth = vi.hoisted(() => ({
-  listCapabilityOverrides: vi.fn(),
-  setCapabilityOverride: vi.fn(),
-  listMembers: vi.fn(),
-}));
 const session = vi.hoisted(() => ({ role: "owner" }));
 
-vi.mock("../../api/client", () => ({ auth }));
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../../api/client", () => import("../../test/api"));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: "u-me" } }) }));
 
 const triage = (over: Partial<CapabilityOverrideView> = {}): CapabilityOverrideView => ({
-  capability: "triage_automatic_enabled",
-  enabled: false,
-  default_enabled: false,
-  has_override: false,
-  ...over,
+  capability: "triage_automatic_enabled", enabled: false, default_enabled: false, has_override: false, ...over,
 });
 
 beforeEach(() => {
@@ -41,16 +33,14 @@ beforeEach(() => {
 
 const toggle = () => screen.getByRole("switch", { name: "Automatic triage" }) as HTMLButtonElement;
 
-describe("reading", () => {
-  it("shows only automatic triage, with the build's default", async () => {
-    auth.listCapabilityOverrides.mockResolvedValue([triage({ enabled: true, default_enabled: true })]);
-    renderRoute(<Features />);
+it("reading: shows only automatic triage, with the build's default", async () => {
+  auth.listCapabilityOverrides.mockResolvedValue([triage({ enabled: true, default_enabled: true })]);
+  renderRoute(<Features />);
 
-    await screen.findByText("Automatic triage");
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
-    expect(toggle().getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByText("Default:").textContent).toBe("Default: on");
-  });
+  await screen.findByText("Automatic triage");
+  expect(screen.getAllByRole("switch")).toHaveLength(1);
+  expect(toggle().getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByText("Default:").textContent).toBe("Default: on");
 });
 
 describe("changing", () => {

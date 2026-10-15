@@ -9,10 +9,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
-/**
- * The trace list's filters as SQL over a {@code trace t}, shared by the traces list and the sessions list so
- * that a session matches exactly when one of its traces would show in the traces list.
- */
+/** Shared by the traces and sessions lists so a session matches exactly when one of its traces would show. */
 @Component
 public class TraceFilters {
 
@@ -32,7 +29,6 @@ public class TraceFilters {
         this.search = search;
     }
 
-    /** True when the query narrows the traces at all. */
     public static boolean narrows(TraceV2Repository.TraceQuery query) {
         return present(query.model())
                 || present(query.kind())
@@ -46,30 +42,11 @@ public class TraceFilters {
     }
 
     /**
-     * Appends one {@code AND} clause per filter the query sets, binding its parameters into {@code params}.
-     *
-     * <p>{@code status} reads the rollup: {@code error} means {@code error_count > 0}, {@code ok} means it is zero.
-     * A trace that has never rolled up has a null {@code error_count} and is therefore neither; it is excluded by an
-     * explicit status filter rather than silently counted as healthy.
-     *
-     * <p>{@code q} matches a trace on either of two lanes. The id lane is a case-insensitive substring of the trace's
-     * name, session, thread, user or id, with {@code %} and {@code _} taken literally. The content lane matches when one
-     * live span's input or output holds every word of {@code q}, each as a word prefix, in one of two shapes chosen by
-     * how many of the project's payloads match:
-     *
-     * <ul>
-     *   <li>Fewer than {@link TraceSearchProperties#getWalkThreshold()}: the payload index lists every match once and
-     *       the trace ids are hashed. The subquery binds the project rather than correlating on {@code t}, so Postgres
-     *       runs it once.
-     *   <li>At the threshold: the word is common, so walking the traces newest first and checking each one's payloads
-     *       reaches a page long before listing every match would. {@code OFFSET 0} keeps Postgres from turning the
-     *       correlated {@code EXISTS} back into one full hashed list, which for a common word re-parses every payload
-     *       in the project.
-     * </ul>
-     *
-     * <p>A search also bounds the rest of the caller's transaction to {@link TraceSearchProperties#getTimeoutMs()} and
-     * plans it generically ({@link SpanPayloadRepository#boundSearch}); the caller turns a cancelled statement into
-     * {@link QueryError#SEARCH_TOO_BROAD} with {@link #searchFailure}.
+     * An unrolled trace (null {@code error_count}) is excluded by any status filter rather than counted healthy.
+     * {@code q} matches an id substring or a word-prefix content search; below
+     * {@link TraceSearchProperties#getWalkThreshold()} the payload index lists matches once, above it a newest-first
+     * walk with {@code OFFSET 0} stops Postgres from re-parsing every payload. A search bounds the transaction to
+     * {@link TraceSearchProperties#getTimeoutMs()}.
      */
     public void append(
             String projectId, StringBuilder where, Map<String, Object> params, TraceV2Repository.TraceQuery query) {
@@ -94,14 +71,14 @@ public class TraceFilters {
 
         String q = query.q();
         if (present(q)) {
-            payloads.boundSearch(search.getTimeoutMs());
+            payloads.boundSearch(search.timeoutMs());
             where.append(" AND (t.name ILIKE :q OR t.session_id ILIKE :q OR t.thread_id ILIKE :q"
                     + " OR t.user_id ILIKE :q OR t.id ILIKE :q");
             params.put("q", "%" + escapeLike(q) + "%");
             String words = payloads.prefixQuery(q);
             if (words != null) {
                 boolean common =
-                        payloads.countMatches(projectId, words, search.getWalkThreshold()) >= search.getWalkThreshold();
+                        payloads.countMatches(projectId, words, search.walkThreshold()) >= search.walkThreshold();
                 where.append(common ? WALK_LANE : INDEX_LANE);
                 params.put("qProject", projectId);
                 params.put("qWords", words);
@@ -125,10 +102,7 @@ public class TraceFilters {
     private static final String WALK_LANE =
             " OR EXISTS (SELECT 1" + LIVE_PAYLOAD + " AND p.project_id = t.project_id AND p.trace_id = t.id OFFSET 0)";
 
-    /**
-     * {@code failure} as the error a caller shows: a search cancelled by its timeout is {@link
-     * QueryError#SEARCH_TOO_BROAD}, anything else is rethrown as it was.
-     */
+    /** A search cancelled by its timeout becomes {@link QueryError#SEARCH_TOO_BROAD}; anything else is rethrown. */
     public static RuntimeException searchFailure(DataAccessException failure) {
         for (Throwable t = failure; t != null; t = t.getCause()) {
             if (t instanceof SQLException sql && QUERY_CANCELED.equals(sql.getSQLState())) {
@@ -138,17 +112,13 @@ public class TraceFilters {
         return failure;
     }
 
-    /** {@code value} as a literal inside a {@code LIKE} pattern, whose escape character is the backslash. */
     private static String escapeLike(String value) {
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     /**
-     * {@code EXISTS (SELECT 1 FROM span …)} on one span column, a filter, never an aggregation.
-     *
-     * <p>The correlated predicate carries {@code project_id} as well as {@code trace_id} because the span primary key
-     * leads with the project: without it the subquery would scan by trace id alone, which is both slower and one typo
-     * away from crossing a project boundary.
+     * Carries {@code project_id} because the span primary key leads with it: without it the subquery scans by trace id
+     * alone and risks crossing a project boundary.
      */
     private static void addExists(
             StringBuilder where, Map<String, Object> params, String column, String name, @Nullable String value) {

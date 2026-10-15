@@ -10,27 +10,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The trace-head read surface: {@link #tracesAfter} feeds the metric-drift sweep. Deliberately
- * separate from {@link SubstrateReadRepository}'s projection rather than widening it: these reads need
- * no text at all, and paying for payload joins on every span of every trace would be wasted.
- *
- * <h2>The trace head is one row now</h2>
- *
- * <p>{@link #SELECT_TRACE_HEAD} used to be a four-way join, {@code trace} to its turn context to the
- * ltree-root session, plus a LATERAL into {@code observation} to find the entry point's call site. All
- * four are columns on {@code trace} in v2: {@code session_id} and {@code project_version_id} are
- * denormalized at ingest, and {@code call_site_id} is copied down by the rollup worker's recompute
- * (implementation plan §2.2): the root span's, else the earliest-starting tagged span's. That rule
- * lives in the recompute, resolved once per trace at write time instead of once per trace per sweep.
- *
- * <h2>Settling is a fact, not a wait</h2>
- *
- * <p>Every read here used to exclude traffic younger than a configured window, because a {@code trace}
- * row existed from its FIRST span and sweeping it early truncated the trajectory. {@code
- * trace.is_settled} answers the actual question, "has anything arrived since the last rollup", so the
- * window is gone. That is strictly better than a longer window would have been: a trace that is still
- * receiving spans after ten minutes was swept anyway under the old rule, and a trace that finished in
- * 400ms had to wait out the clock for nothing.
+ * Trace-head reads for the metric-drift sweep, separate from {@link SubstrateReadRepository} because they need no text.
+ * {@code session_id}, {@code project_version_id} and {@code call_site_id} are denormalized on {@code trace};
+ * {@code trace.is_settled} replaces any age window.
  */
 @Repository
 public class BehaviorSubstrateRepository {
@@ -68,11 +50,8 @@ public class BehaviorSubstrateRepository {
             String eventAt) {}
 
     /**
-     * The scope for traces whose producer tagged no call site, kept separate, never merged in.
-     *
-     * <p>Spelled as a literal in {@link #SELECT_TRACE_HEAD} and in {@code behavior_profile}'s column
-     * default rather than spliced in: concatenating into a text block is legal but reformats badly,
-     * and this value already has to agree with the migration's DEFAULT regardless.
+     * Kept separate, never merged in. Spelled as a literal here and in {@code behavior_profile}'s column default, which
+     * it must match.
      */
     public static final String UNATTRIBUTED = "__unattributed__";
 
@@ -90,13 +69,9 @@ public class BehaviorSubstrateRepository {
             WHERE tr.project_id = :pid AND tr.is_deleted IS NOT TRUE""";
 
     /**
-     * Traces strictly after the keyset cursor {@code (afterTs, afterId)} that are settled, oldest first,
-     * using the same monotonic, gap-free cursor shape every other sweep uses.
-     *
-     * <p>{@code is_settled} answers "has anything arrived since the last rollup", so a trace is not swept
-     * mid-trajectory. A trace that settles late, after the cursor has passed its {@code started_at}, is
-     * not re-visited; the rollup worker's ~10s re-fire cadence keeps that window small, and a cursor on
-     * settle time instead would re-scan the whole corpus on every straggler.
+     * Settled traces after the keyset cursor, oldest first. A trace that settles after the cursor passed its
+     * {@code started_at} is not revisited; the rollup's ~10s cadence keeps that small, and a settle-time cursor would
+     * rescan on every straggler.
      */
     public List<TraceHead> tracesAfter(
             String projectId, @Nullable String afterTs, @Nullable String afterId, int limit) {
@@ -124,10 +99,7 @@ public class BehaviorSubstrateRepository {
                 eventAt(rs));
     }
 
-    /**
-     * {@code event_at} as an ISO-8601 instant. {@code trace.started_at} is NOT NULL in v2, so this cannot
-     * be absent.
-     */
+    /** {@code trace.started_at} is NOT NULL, so this cannot be absent. */
     private static String eventAt(ResultSet rs) throws SQLException {
         return Objects.requireNonNull(
                 ai.tessary.storage.Timestamps.iso(rs, "event_at"), "trace.started_at is NOT NULL");

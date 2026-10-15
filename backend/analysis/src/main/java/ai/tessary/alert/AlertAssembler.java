@@ -11,10 +11,8 @@ import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
- * Rolls up a project's detection activity over a period into a digest or brief {@link AlertEventRow}.
- * A digest and a brief are the SAME assembly — a per-classifier count summary over
- * {@code [windowStart, windowEnd)} — differing only in the roll-up rule's {@code rule_type} and the cron
- * that schedules them. Side-effect-free apart from its read; the worker owns the idempotent write + event.
+ * Rolls up a project's detection activity over a period into a digest or brief {@link AlertEventRow}; the two differ
+ * only in {@code rule_type} and cron. The worker owns the idempotent write.
  */
 @Component
 public class AlertAssembler {
@@ -28,10 +26,8 @@ public class AlertAssembler {
     }
 
     /**
-     * Build a roll-up firing for a roll-up {@code rule} over {@code [windowStart, windowEnd)}. The firing's
-     * {@code alert_rule_id} is the rule's id (a real FK) and {@code window_start} is the idempotency key, so
-     * the same period rolls up exactly once. Returns empty when there was no activity in the period (an empty
-     * digest/brief is not fired — nothing to report).
+     * {@code window_start} is the idempotency key, so a period rolls up once. Empty when there was no activity: an
+     * empty digest is not fired.
      */
     public Optional<AlertEventRow> assemble(AlertRuleRow rule, Instant windowStart, Instant windowEnd) {
         String start = windowStart.toString();

@@ -3,7 +3,7 @@ package ai.tessary.auth.link;
 
 import org.jspecify.annotations.Nullable;
 
-/** Row record for the device_link table. The full device code is never stored — only its bcrypt hash + lookup prefix. */
+/** The device code is never stored, only its bcrypt hash and lookup prefix. */
 public record DeviceLink(
         String id,
         String deviceCodePrefix,

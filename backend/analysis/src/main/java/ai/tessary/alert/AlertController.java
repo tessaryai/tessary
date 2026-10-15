@@ -29,10 +29,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The alert config and read surface: one {@code alert_rule} CRUD API across both grains
- * (per-classifier threshold rules and per-project digest/brief roll-up schedules), plus a
- * fired-alert read. Evaluation and firing happen async in {@link AlertWorker}; snooze and
- * disable here never touch the underlying classifier.
+ * {@code alert_rule} CRUD across per-classifier and per-project roll-up rules, plus fired alerts. Firing is
+ * {@link AlertWorker}'s; snooze and disable never touch the classifier.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}")
@@ -53,14 +51,12 @@ public class AlertController {
         this.mapper = mapper;
     }
 
-    /** Resolves the project and checks the alerts entitlement. */
+    /** Also checks the alerts entitlement. */
     private Resolved requireCapableProject(TenantContext ctx, String orgSlug, String projectSlug) {
         Resolved r = resolver.requireProject(ctx, orgSlug, projectSlug);
         capabilities.require(r.org().id(), Capability.ALERTS);
         return r;
     }
-
-    // ---- rule CRUD --------------------------------------------------------------------------------
 
     @GetMapping("/alert-rules")
     public ApiResponse<List<AlertRuleView>> listRules(
@@ -127,16 +123,13 @@ public class AlertController {
     }
 
     /**
-     * A rule as the wire sees it. Only a case-opened rule carries a policy; parsing {@code attributes}
-     * for the others would surface a cadence and a quiet window on a rule that has neither, which the
-     * notification UI would then render as editable settings that do nothing.
+     * Only a case-opened rule carries a policy; parsing {@code attributes} for others would render cadence settings
+     * that do nothing.
      */
     private AlertRuleView view(AlertRuleRow row) {
         if (!AlertRuleRow.RuleType.CASE_OPENED.equals(row.ruleType())) return AlertRuleView.of(row);
         return AlertRuleView.of(row, PolicyView.of(AlertPolicy.of(mapper, row.attributes())));
     }
-
-    // ---- fired alerts -----------------------------------------------------------------------------
 
     @GetMapping("/alert-events")
     public ApiResponse<List<AlertEventView>> fired(

@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Resetting a classifier deletes what it found and learned and checks every kept trace again, which can
- * cost real money, so it asks twice: first what goes and what it costs, then the classifier's name typed
- * back.
- */
+// A reset rechecks every kept trace, which can cost real money, so it asks twice.
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";

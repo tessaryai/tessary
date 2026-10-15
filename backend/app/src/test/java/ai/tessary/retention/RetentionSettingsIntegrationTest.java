@@ -9,7 +9,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import ai.tessary.auth.AuthFilter;
 import ai.tessary.config.RetentionProperties;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.OrganizationRepository;
@@ -20,14 +19,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.HashMap;
 import java.util.Map;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 /**
  * Settings → Data retention: the page reads the install default, a project override is
@@ -35,33 +30,14 @@ import org.springframework.web.context.WebApplicationContext;
  * {@code 0} keeps forever, and a negative number is refused.
  */
 @AuthEnforcedContext
-class RetentionSettingsIntegrationTest {
+record RetentionSettingsIntegrationTest(
+        MockMvc mvc,
+        OrganizationRepository orgs,
+        ProjectRepository projects,
+        RetentionResolver resolver,
+        RetentionProperties props) {
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    @Autowired
-    OrganizationRepository orgs;
-
-    @Autowired
-    ProjectRepository projects;
-
-    @Autowired
-    RetentionResolver resolver;
-
-    @Autowired
-    RetentionProperties props;
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private MockMvc mvc;
-
-    @BeforeEach
-    void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private String path(Organization org, Project project) {
         return "/api/orgs/" + org.slug() + "/projects/" + project.slug() + "/retention";
@@ -71,21 +47,21 @@ class RetentionSettingsIntegrationTest {
         Map<String, Integer> m = new HashMap<>();
         m.put("traces", traces);
         m.put("detections", detections);
-        return mapper.writeValueAsString(m);
+        return MAPPER.writeValueAsString(m);
     }
 
     @Test
     void overrideClearAndBounds() throws Exception {
         MockHttpServletResponse signup = mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(
+                        .content(MAPPER.writeValueAsString(
                                 Map.of("email", "retention-1205@example.com", "password", "a-good-password"))))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse();
         Cookie session = signup.getCookie("tessary-session");
         assertNotNull(session);
-        String orgId = mapper.readTree(signup.getContentAsString())
+        String orgId = MAPPER.readTree(signup.getContentAsString())
                 .path("data")
                 .path("orgId")
                 .asText();
@@ -93,8 +69,8 @@ class RetentionSettingsIntegrationTest {
         Project project = projects.findDefaultForOrg(org.id()).orElseThrow();
         String path = path(org, project);
 
-        int traceDefault = props.getTraceTtlDays();
-        int detectionDefault = props.getDetectionTtlDays();
+        int traceDefault = props.traceTtlDays();
+        int detectionDefault = props.detectionTtlDays();
         mvc.perform(get(path).cookie(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.can_manage").value(true))
@@ -149,12 +125,12 @@ class RetentionSettingsIntegrationTest {
                         .cookie(session)
                         .header("X-Requested-With", "XMLHttpRequest")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(
+                        .content(MAPPER.writeValueAsString(
                                 Map.of("email", "member-1205@example.com", "role", "member"))))
                 .andExpect(status().isOk());
         MockHttpServletResponse memberSignup = mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(
+                        .content(MAPPER.writeValueAsString(
                                 Map.of("email", "member-1205@example.com", "password", "a-good-password"))))
                 .andExpect(status().isOk())
                 .andReturn()

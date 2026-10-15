@@ -36,18 +36,14 @@ def proxied(tokens, path):
     for token in tokens:
         if token == path:
             return True
-        # Caddy's `/x/*` requires the literal `/x/` before the wildcard: it matches `/x/anything` and
-        # `/x/`, but not a bare `/x`, which would fall through to the SPA. Reporting the bare prefix
-        # as covered would mean this checker passes a config that's still broken.
+        # `/x/*` matches `/x/anything` and `/x/` but not a bare `/x`, which falls through to the SPA.
         if token.endswith("/*") and path.startswith(token[:-1]):
             return True
     return False
 
 def main(argv):
-    # --internal PATH: a spec operation that must not be reachable through the proxy. Checked both
-    # ways — the path must still exist in the spec, so the declaration can't rot into a silent
-    # exemption, and it must stay out of the matcher, so nobody widens the public surface by reflex
-    # when this checker reports it missing.
+    # --internal PATH must still exist in the spec and stay out of the matcher, so it cannot rot into a
+    # silent exemption.
     internal = set()
     argv = list(argv)
     while "--internal" in argv:

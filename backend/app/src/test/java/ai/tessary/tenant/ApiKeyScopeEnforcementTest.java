@@ -12,7 +12,6 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.query.QueryController;
 import ai.tessary.query.QueryDtos.CountRequest;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -23,13 +22,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * family rules are unit-checked via {@link KeyScope#permits} in {@link ApiKeyManagementTest}.
  */
 @SpringBootTest
-class ApiKeyScopeEnforcementTest {
-
-    @Autowired
-    OtlpTraceController otlp;
-
-    @Autowired
-    QueryController query;
+record ApiKeyScopeEnforcementTest(OtlpTraceController otlp, QueryController query) {
 
     private static TenantContext keyCtx(KeyScope scope) {
         return new TenantContext("user-1", null, "org-1", "proj-1", "member", "tok-1", scope);

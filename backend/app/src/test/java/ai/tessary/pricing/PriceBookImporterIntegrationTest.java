@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
@@ -21,16 +20,7 @@ import org.springframework.test.context.TestPropertySource;
 // Own context on purpose, shared only with ModelResolverIntegrationTest, which only reads the books: it asserts what a
 // SECOND boot of the importer does, so no other class may write the price-book tables the first boot seeded.
 @TestPropertySource(properties = "test.context-group=pricing-books")
-class PriceBookImporterIntegrationTest {
-
-    @Autowired
-    PriceBookImporter importer;
-
-    @Autowired
-    PriceBookRepository books;
-
-    @Autowired
-    JdbcClient jdbc;
+record PriceBookImporterIntegrationTest(PriceBookImporter importer, PriceBookRepository books, JdbcClient jdbc) {
 
     private long count(String table) {
         return jdbc.sql("SELECT count(*) FROM " + table).query(Long.class).single();

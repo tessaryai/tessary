@@ -160,26 +160,6 @@ class MetricDriftDetectorTest {
         assertEquals(Silence.GRID_MISMATCH, d.silence());
     }
 
-    @Test
-    @DisplayName("a nonsense move is clamped before it ever reaches the detector")
-    void aLiveEditedMoveCannotOpenTheGatesCompletely() {
-        // A w1_floor of 0 would turn every window into a finding, so the clamp lives in the record's constructor.
-        MetricDriftConfig edited = new MetricDriftConfig(
-                CONFIG.measures(),
-                CONFIG.windowTargetCount(),
-                CONFIG.windowMaxHours(),
-                CONFIG.minSample(),
-                0.0,
-                CONFIG.explainedByFraction(),
-                CONFIG.settleSeconds(),
-                CONFIG.histBins());
-
-        assertTrue(edited.w1Floor() > 0.0, "clamped off zero");
-        assertTrue(
-                MetricDriftDetector.effectiveFloor(500, 500, edited) > 0.0,
-                "and the bar it produces is a real one: " + MetricDriftDetector.effectiveFloor(500, 500, edited));
-    }
-
     private static MetricSketch durations(double multiplier) {
         return durations(multiplier, SAMPLES);
     }

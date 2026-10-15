@@ -17,10 +17,7 @@ function turn(trace: string, question: string, step: string, reply: string) {
   return [
     span({
       id: `${trace}-agent`,
-      trace_id: trace,
-      kind: "agent",
-      name: "invoke_agent",
-      started_at: "2026-09-25T10:00:00.000Z",
+      trace_id: trace, kind: "agent", name: "invoke_agent", started_at: "2026-09-25T10:00:00.000Z",
       input: j([{ role: "user", content: question }]),
       output: j([{ role: "assistant", content: reply }]),
     }),

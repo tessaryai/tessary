@@ -15,47 +15,22 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The one read behind the tool-error classifier: hourly call and failure counts per tool, plus the
- * failure signatures behind them.
- *
- * <p>Two queries, both aggregates, and no cursor anywhere: {@code ToolErrorTrend} replays these
- * buckets through the detector on every read, the same way {@code TrendService} does for grader
- * pass rate, so the double-count bug a cursor and watermark exist to prevent can't arise.
- *
- * <p>The counts and the signatures are separate queries deliberately. The count query is the one
- * the detector reads and must stay cheap and complete; the signature query touches {@code
- * error_type} and the result payload and is only ever asked about the handful of tools that
- * actually alarmed. Folding them together would make every read pay the second query's cost to
- * answer the first one's question.
- *
- * <p>{@link #namesByToolKey} exists only to join the other two: the counts come back keyed by a
- * normalized bucket key while the signatures are selected by the raw column.
- *
- * <p>Both interpolate {@link ToolFailure#SQL_PREDICATE}, which is why both alias {@code tool_call}
- * as {@code tc} and the span as {@code o}: that aliasing is part of the constant's contract.
- *
- * <p>The join is on producer keys: {@code tool_call} reaches its span through {@code (project_id,
- * trace_id, span_id)} rather than a bare unscoped id.
+ * Hourly call and failure counts per tool, plus failure signatures. No cursor: {@code ToolErrorTrend} replays the
+ * buckets on every read, so double counting cannot arise. Signatures are a separate, costlier query asked only for
+ * tools that alarmed. Both interpolate {@link ToolFailure#SQL_PREDICATE}, whose contract needs the {@code tc} and
+ * {@code o} aliases.
  */
 @Repository
 public class ToolErrorRepository {
 
     /**
-     * The producer-key join from a tool call to its span, and the settle gate on that span's trace.
+     * {@code trace.is_settled} rather than a time window: a turn's calls arrive across flushes, and counting part of a
+     * turn biases the rate.
      *
-     * <p>{@code trace.is_settled} avoids a caller-supplied settle window: a turn's calls arrive
-     * across several exporter flushes, so reading the last few minutes would count some of a turn's
-     * calls and not others, with no reason to believe the ones that landed first fail at the same
-     * rate. The flag settles that per trace rather than per clock.
-     *
-     * <p>The span is outer-joined, and every read here keeps only a call whose span is there and live with {@code NOT
-     * COALESCE(o.is_deleted, TRUE)}: the rows an inner join keeps. Written as an inner join, Postgres reads its two
-     * key columns as independent, estimates it at about one row in all, and then probes {@code trace} once per call
-     * in a serial nested loop; an outer join is estimated at one row per call. That test is not strict in {@code o}
-     * and the trace joins on the call's own keys, because either one strict in {@code o} would turn the outer join
-     * back into an inner one. The payload joins on the call's keys too, which are the span's on every row kept: joined
-     * on the span's, Postgres may join it to {@code span} first, and on tables it has not analyzed yet it plans that
-     * pair as a nested loop over every span of the project, read again for each call.
+     * <p>The span is outer-joined and kept only when live via {@code NOT COALESCE(o.is_deleted, TRUE)}: as an inner join
+     * Postgres estimates about one row and probes {@code trace} once per call in a serial nested loop. Nothing else may
+     * be strict in {@code o}, or the outer join turns back into an inner one, so the trace and the payload join on the
+     * call's own keys.
      */
     private static final String SPAN_JOIN = """
             LEFT JOIN span o ON o.project_id = tc.project_id
@@ -66,19 +41,8 @@ public class ToolErrorRepository {
             """;
 
     /**
-     * The event clock, and only the event clock: {@code tc.started_at}, with no fallback.
-     *
-     * <p>Never {@code created_at}, the ingest clock: bucketing on it is a different question, not an
-     * approximation. A backfill lands months of traffic in one ingest burst, so hourly buckets cut
-     * on ingest time would pile that whole history into the hour it happened to arrive, and a CUSUM
-     * fed that sequence measures nothing real.
-     *
-     * <p>A row without a start time is skipped, not guessed at. That's safe for a rate: a missing
-     * start time is a property of the producer, not the call's outcome, since an OTLP span is
-     * stamped when created, before the operation runs, so even a crashed call has one. Numerator and
-     * denominator drop together and the fraction is unchanged. {@link #skippedNoStartedAt} counts
-     * them anyway, so a producer that silently stops sending timestamps shows up as a number rather
-     * than as detection quietly getting slower.
+     * Never {@code created_at}: a backfill would pile months into one ingest hour. A row without a start time is
+     * skipped (numerator and denominator drop together) and counted by {@link #skippedNoStartedAt}.
      */
     private static final String EVENT_AT = "tc.started_at";
 
@@ -89,32 +53,14 @@ public class ToolErrorRepository {
     }
 
     /**
-     * One tool's outcomes in one hour.
-     *
-     * @param bucket the hour, in event time, as an ISO-8601 UTC instant. Normalized here rather than
-     *     handed out as the driver rendered it: {@code date_trunc} returns a {@code timestamptz},
-     *     and reading that as a string gives Postgres's session-timezone text form, which downstream
-     *     consumers (an {@link Instant} parse, a lexicographic comparison against an ISO string)
-     *     cannot read correctly.
-     * @param toolKey the {@code ActionSymbol} the tool buckets under, resolved in SQL from {@code
-     *     tool_call.name}, matching what {@code tool_duration} keys on so a tool-error finding and a
-     *     tool-duration finding name the same thing
-     * @param calls every call, failing and succeeding alike: the rate's denominator, and the reason
-     *     this is not a query for failures
+     * {@code bucket} is normalized to ISO-8601 UTC, since a timestamptz read as text is in the session timezone.
+     * {@code toolKey} matches what {@code tool_duration} keys on.
      */
     public record HourlyToolTally(String bucket, String toolKey, long calls, long failures) {}
 
     /**
-     * The most recent event a project has ANY tool-call traffic for — {@code MAX(started_at)} across
-     * every non-deleted call, with no bucketing and no per-tool split.
-     *
-     * <p>The anchor {@link ToolErrorService#refresh} replays its 28-day window back from, in place of
-     * wall-clock {@code now}: a project whose traffic is all months old still gets a window that
-     * contains it, where {@code now - 28d} would read nothing but the empty months since.
-     *
-     * <p>Empty for a project with no tool-call traffic at all — served by {@code
-     * ix_tool_call_project_started}, an index scan backward on {@code (project_id, started_at)} that
-     * stops at the first undeleted row rather than a sequential scan.
+     * The anchor {@link ToolErrorService#refresh} replays back from, served by an index scan on
+     * {@code ix_tool_call_project_started}.
      */
     public Optional<Instant> newestEventAt(String projectId) {
         return jdbc.sql("""
@@ -129,16 +75,7 @@ public class ToolErrorRepository {
                 .map(OffsetDateTime::toInstant);
     }
 
-    /**
-     * Hourly call and failure counts per tool since {@code from}.
-     *
-     * <p>Ordered oldest-first because the replay is sequential: a CUSUM fed out of order is not a
-     * CUSUM.
-     *
-     * <p>Only settled traces are counted, via {@link #SPAN_JOIN}: a turn's calls arrive across
-     * several exporter flushes, so counting a turn mid-flight would count some of its calls and not
-     * others, with no reason to believe the ones that landed first fail at the same rate.
-     */
+    /** Oldest-first: a CUSUM fed out of order is not a CUSUM. Settled traces only, via {@link #SPAN_JOIN}. */
     public List<HourlyToolTally> hourlyTallies(String projectId, Instant from) {
         return hourlyTallies(jdbc.sql(hourlyTalliesSql("")), projectId, from);
     }
@@ -188,18 +125,8 @@ public class ToolErrorRepository {
     }
 
     /**
-     * The raw {@code tool_call.name} values behind each bucket key, over the same window and
-     * predicate {@link #hourlyTallies} grouped: the inverse of the normalization it applied.
-     *
-     * <p>A bucket key is not a name and must never be compared against one. It's {@link
-     * ToolErrorBuckets#toolKey}'s reduction of one: lowercased, uuids and digit runs and a trailing
-     * numeric id stripped, every other run of non-alphanumerics collapsed to an underscore.
-     * Reversing that by hand instead of reading it back from this method silently matches nothing
-     * for a tool whose name isn't already lowercase snake_case, and leaves its finding with no
-     * exemplar for a human to look at.
-     *
-     * <p>One-to-many, and that's not an edge case: {@code search_docs_3} and {@code search_docs_4}
-     * are one bucket by design, so a caller must match on the whole set or drop half the evidence.
+     * The inverse of the bucket normalization, read back rather than reversed by hand, which silently matches nothing.
+     * One-to-many by design, so callers must match the whole set.
      */
     public Map<String, List<String>> namesByToolKey(String projectId, Instant from) {
         List<String> names = jdbc.sql("SELECT DISTINCT COALESCE(NULLIF(tc.name, ''), 'unnamed') AS tool_name "
@@ -225,15 +152,7 @@ public class ToolErrorRepository {
         return Map.copyOf(byKey);
     }
 
-    /**
-     * Tool calls in the same window that {@link #hourlyTallies} couldn't place on the event clock,
-     * and so didn't count.
-     *
-     * <p>Not a correctness mechanism: a missing start time says something about the producer, not
-     * whether the call failed, so the fraction these rows would have contributed matches the counted
-     * rows already. It's an instrument, so a producer that stops sending timestamps shows up as a
-     * number instead of detection quietly getting slower with nothing to say why.
-     */
+    /** An instrument, not correctness: a producer that stops sending timestamps shows up as a number. */
     public long skippedNoStartedAt(String projectId, Instant from) {
         return jdbc.sql("""
                         SELECT COUNT(*)
@@ -252,16 +171,8 @@ public class ToolErrorRepository {
     }
 
     /**
-     * The raw failure descriptions for one tool over a window, for signature grouping.
-     *
-     * <p>Asked only about a tool that has already alarmed, which is what makes it affordable to read
-     * the result payload at all. Returns one row per failing call rather than a {@code GROUP BY}:
-     * the grouping key is {@link ToolFailure#signature}, which normalizes a free-text message in
-     * Java, and SQL cannot compute it. Bounded by {@code limit} for exactly that reason.
-     *
-     * @param toolNames the raw names in this tool's bucket, from {@link #namesByToolKey}, never a
-     *     bucket key, and never one name when the bucket holds several. Empty short-circuits rather
-     *     than emitting {@code IN ()}, which is a syntax error.
+     * One row per failing call, because {@link ToolFailure#signature} normalizes in Java; bounded by {@code limit}.
+     * {@code toolNames} are raw names, never a bucket key. Empty short-circuits, since {@code IN ()} is a syntax error.
      */
     public List<RawFailure> failuresFor(String projectId, List<String> toolNames, Instant from, Instant to, int limit) {
         if (toolNames.isEmpty()) return List.of();
@@ -300,28 +211,16 @@ public class ToolErrorRepository {
     }
 
     /**
-     * Every call of one tool in a window, as span references: the population a rate was measured
-     * over, for {@code finding_evidence}.
-     *
-     * <p>Every call, not every failure: the rate's denominator is what the claim is about, and a
-     * reader handed only the failures can't check the denominator the detector divided by.
-     *
-     * <p>Deliberately unbounded: this is the enumerated population behind one finding, not a page,
-     * and truncating it would hand Layer 2 a sample with an undeclared selection rule. The predicate
-     * matches {@link #hourlyTallies} character for character, minus the hour bucketing, so what's
-     * enumerated and what was counted can't diverge.
+     * Every call, not every failure: the denominator is what the claim is about. Deliberately unbounded, and the
+     * predicate matches {@link #hourlyTallies} exactly.
      */
     public List<SpanRef> callRefsFor(String projectId, List<String> toolNames, Instant from, Instant to) {
         return spanRefs(projectId, toolNames, from, to, false);
     }
 
     /**
-     * The failing calls of one tool in a window, as span references: the numerator the same window's
-     * {@link #callRefsFor} is the denominator of.
-     *
-     * <p>Selected by {@link ToolFailure#SQL_PREDICATE}, the same predicate {@link #hourlyTallies}
-     * counts its {@code failures} with, so the evidence and the rate can't disagree about which calls
-     * failed. Deliberately unbounded, on the same grounds as {@link #callRefsFor}.
+     * The same {@link ToolFailure#SQL_PREDICATE} {@link #hourlyTallies} counts with, so evidence and rate agree.
+     * Unbounded.
      */
     public List<SpanRef> failingCallRefsFor(String projectId, List<String> toolNames, Instant from, Instant to) {
         return spanRefs(projectId, toolNames, from, to, true);
@@ -358,17 +257,10 @@ public class ToolErrorRepository {
                 .list();
     }
 
-    /** One tool call's composite span key: both halves, or it resolves to nothing. */
+    /** Both halves, or it resolves to nothing. */
     public record SpanRef(String traceId, String spanId) {}
 
-    /**
-     * One failing call's error-bearing fields, the five {@link ToolFailure#recognize} reads, plus the
-     * trace the call happened in.
-     *
-     * <p>The trace id is not part of the decision and never reaches the detector. It's carried so a
-     * finding can point at traces where the failures actually happened: Layer 2 refuses to rule on a
-     * finding with no exemplar.
-     */
+    /** The trace id never reaches the detector; it lets a finding point at traces where failures happened. */
     public record RawFailure(
             @Nullable String errorType,
             boolean isError,

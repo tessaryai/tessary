@@ -1,26 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * A rate shift told as a story: what share of calls fails now, against what it used to.
- *
- * <h2>Why this is not {@link ./shiftStory}</h2>
- * A distribution shift has a distribution — a median and a tail that both moved — and its figure is a
- * range on a log axis. A rate has neither. It is one proportion of one population, so the only honest
- * picture is that proportion drawn twice, on a linear axis, as a share of the calls it was measured
- * over. Reusing the log range chart here would draw two points and imply a spread nobody measured.
- *
- * <h2>Percentage points, never percent change</h2>
- * This page never prints the percent change of a rate. `0.30%` to `1.72%` is a 477% rise and that
- * number is worthless: it is ten failed calls. The change of a percentage is stated in PERCENTAGE
- * POINTS, and the headline reading is a count per hundred calls, which is the form a reader can act
- * on. The old page printed `+94%` in a column labelled "Change" and it was the most prominent number
- * on the screen.
- *
- * <h2>Colour is direction and nothing else</h2>
- * A rate that rose is `--color-error`, one that fell is `--color-success`, and every annotation —
- * pins, axis, the reference bar — is neutral. There is no third colour for a weak result: a finding
- * that only just cleared its threshold says so in words, because tinting uncertainty invents a
- * category the detector does not have.
- */
+// A rate is one proportion, so it is drawn twice on a linear axis, never as shiftStory's log range.
+// Its change is in percentage points, never percent change (0.30% to 1.72% is "477%" and ten calls).
+// Colour is direction only: error when it rose, success when it fell, everything else neutral.
 import type { components } from "../../api/generated/schema";
 import { cn } from "../../ui";
 
@@ -41,18 +22,12 @@ export function rateToneTextClass(tone: RateTone): string {
   return tone === "positive" ? "text-success" : "text-error";
 }
 
-/** `0.024876` → `2.49%`. Two decimals throughout: these rates live between 0.1% and 10%. */
+/** Two decimals: these rates live between 0.1% and 10%. */
 export function formatRate(r: number): string {
   return `${(r * 100).toFixed(2)}%`;
 }
 
-/**
- * `tool:mcp_claude_in_chrome_navigate` → `navigate`.
- *
- * <p>The bucket key is already a reduction of the tool's real name (lowercased, ids stripped,
- * punctuation collapsed), so this only takes the last readable segment for use mid-sentence. The full
- * key stays on the page in the subtitle, which is where a reader who needs to match it will look.
- */
+/** The bucket key is already reduced, so this takes its last readable segment; the full key stays in the subtitle. */
 export function toolWords(bucketKey: string): string {
   const bare = bucketKey.replace(/^tool:/, "");
   const tail = bare.split("_").filter(Boolean).at(-1) ?? bare;
@@ -76,17 +51,8 @@ const NUMBER_WORDS = [
 ];
 
 /**
- * A rate as a count per hundred, in words.
- *
- * <p>"Four calls in every hundred" is a thing a reader can picture; "4.02%" is a thing they have to
- * convert first. Words only up to twelve, because past that the numeral reads faster than the word,
- * and never for a rate below one in a hundred — "no calls in every hundred" would be a lie about a
- * tool that does fail, just rarely. That case gets the sub-one phrasing instead.
- *
- * <p>`noun` is the whole countable phrase ("call", "navigate call", "output") — a caller building a
- * tool-specific phrase concatenates its own modifier before calling this, rather than this function
- * gluing " call" onto whatever it is handed. That is what lets a rate finding whose population is
- * outputs rather than calls ask for "outputs" and not "output calls".
+ * Words up to twelve, then numerals. Below one in a hundred gets the sub-one phrasing, since "no calls"
+ * would be a lie. `noun` is the whole countable phrase, so a population of outputs reads "outputs".
  */
 export function perHundred(r: number, noun: string = "call"): string {
   const n = r * 100;
@@ -96,18 +62,11 @@ export function perHundred(r: number, noun: string = "call"): string {
   return `${word} ${noun}${rounded === 1 ? "" : "s"} in every hundred`;
 }
 
-/** Sentence-cases a clause that starts with a number word. */
 function upperFirst(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/**
- * A linear axis wide enough for both bars, ending on a round number.
- *
- * <p>Per finding rather than shared across findings: these rates run from 0.3% to 8%, and one axis
- * covering all of them would draw the small ones as slivers indistinguishable from each other. The
- * ladder is the set of maxima that divide into five readable ticks.
- */
+/** Per finding, not shared: these rates span 0.3% to 8%, and one axis would draw the small ones as slivers. */
 export function axisFor(before: number, after: number): { max: number; ticks: number[] } {
   const top = Math.max(before, after) * 100;
   const ladder = [1, 2, 2.5, 4, 5, 10, 20, 25, 50, 100];
@@ -120,13 +79,7 @@ export function axisFor(before: number, after: number): { max: number; ticks: nu
 const PLOT_X0 = 70;
 const PLOT_X1 = 770;
 
-/**
- * The two windows as a share of their own calls.
- *
- * <p>Both bars start at zero because both are proportions of the same thing, and a bar chart whose
- * baseline is not zero is a bar chart that lies about ratios. The reference bar is neutral and the
- * flagged bar carries the direction, so the colour says which way this went without a legend.
- */
+/** Both bars start at zero: a bar chart with a non-zero baseline lies about ratios. */
 export function RateChart({ rate, label = "Failure rate" }: { rate: Rate; label?: string }) {
   const before = rate.refRate * 100;
   const after = rate.curRate * 100;
@@ -197,8 +150,6 @@ export function RateChart({ rate, label = "Failure rate" }: { rate: Rate; label?
         {formatRate(rate.curRate)}
       </text>
 
-      {/* Pin 1 is always the reading that fired the finding, so it sits on the flagged bar whichever
-          side of the axis that lands on. */}
       <circle cx={x(after)} cy={22} r={10} fill="var(--color-border-strong)" />
       <text x={x(after)} y={26} textAnchor="middle" fontSize={11} fill="var(--color-fg)" fontFamily="var(--font-mono)">
         1
@@ -233,12 +184,6 @@ export function RateChart({ rate, label = "Failure rate" }: { rate: Rate; label?
   );
 }
 
-/**
- * One numbered observation, keyed to a pin on the chart above.
- *
- * Exported so a detector with its own before/after story (the secret-leak timeline, most notably)
- * can carry the same numbered-pin anatomy without a second copy of this markup.
- */
 export function Pin({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <div
@@ -268,7 +213,6 @@ const DAY_MONTH: Intl.DateTimeFormatOptions = { day: "numeric", month: "long" };
 /** Below this many failures, the finding is a lead rather than a result. See {@link RatePins}. */
 const FEW_FAILURES = 20;
 
-/** The bordered chassis a numbered {@link Pin} list sits in, shared with a non-rate before/after story. */
 export function PinList({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col rounded-card border border-border bg-surface mt-2.75">
@@ -278,17 +222,8 @@ export function PinList({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * The two readings worth naming, in the order the argument is made: what it is now, then what it was.
- *
- * <p>Pin 1 is always the flagged window, because that is the number that fired the finding and the
- * one a reader is here for. Pin 2 is the reference, and it carries the sample size — a rate over 500
- * calls and a rate over 13,000 are different kinds of claim, and the denominator is the only thing on
- * this page that says which one this is.
- *
- * <p>`unit` names what a "call" is here, for a rate whose population is not literally calls (a
- * malformed-output rate counts outputs) — it replaces the tool-derived phrase in Pin 1's headline
- * only; the denominator elsewhere on the card stays "calls" because it is the count of attempts a
- * rate is measured over, tool error and malformed output alike.
+ * Pin 1 is the flagged window, the number that fired the finding. Pin 2 carries the sample size: a rate
+ * over 500 calls and one over 13,000 are different claims.
  */
 export function RatePins({ rate, unit }: { rate: Rate; unit?: string }) {
   const tool = toolWords(rate.bucketKey);
@@ -308,10 +243,8 @@ export function RatePins({ rate, unit }: { rate: Rate; unit?: string }) {
         {formatRate(rate.refRate)} across the {rate.nRef.toLocaleString()} calls this classifier was fitted
         on, so the gap is {points.toFixed(2)} percentage point{points === 1 ? "" : "s"}{" "}
         {rose ? "wider" : "narrower"} than it was.
-        {/* How strongly this fired is the detector's own statistic against its per-tool threshold, and
-            neither is on the wire. The absolute failure count is the nearest honest stand-in: a rate
-            resting on a dozen failures moves as far on one bad afternoon as on a real regression,
-            however many calls sit under it. */}
+        {/* The detector's statistic is not on the wire; the failure count is the honest stand-in, since a rate on
+           a dozen failures moves as far on a bad afternoon as on a regression. */}
         {rate.failuresCur < FEW_FAILURES && (
           <>
             {" "}

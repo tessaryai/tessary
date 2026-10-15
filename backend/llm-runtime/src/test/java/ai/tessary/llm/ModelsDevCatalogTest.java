@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.tessary.config.ModelsDevProperties;
 import ai.tessary.config.ObserverProperties;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -26,8 +27,7 @@ class ModelsDevCatalogTest {
     private final ModelsDevRates rates = bundled();
 
     private static ModelsDevRates bundled() {
-        ModelsDevProperties props = new ModelsDevProperties();
-        props.setUrl("");
+        ModelsDevProperties props = Props.of(ModelsDevProperties.class, "url", "");
         return new ModelsDevRates(new ObjectMapper(), props);
     }
 

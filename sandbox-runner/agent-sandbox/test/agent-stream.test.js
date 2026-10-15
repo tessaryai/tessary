@@ -7,7 +7,7 @@
  *
  * Only `createOpencodeClient` from @opencode-ai/sdk is mocked, so turn accumulation, the retry gate, and usage sums
  * run for real. The server process is test/fixtures/fake-opencode on PATH, which records the config it was started
- * with. The failure envelope is tested through the exported `describeError` and `sumUsage` that triage.js and rca.js
+ * with. The failure envelope is tested through the exported `describeError` and `sumUsage` that lane.js
  * call, since their `main()` ends in `process.exit`.
  */
 const { test, mock } = require('node:test');
@@ -499,8 +499,8 @@ test('shutdown: runAgent does not return until an opencode that ignores SIGTERM 
   assert.equal(isAlive(failed.pid), false, 'a failed run rejects only once the server process is gone');
 });
 
-test('b: the failure envelope triage.js/rca.js write is valid JSON with a numeric-only usage object', () => {
-  // What triage.js and rca.js do with a thrown runAgent error, through the same two exported functions.
+test('b: the failure envelope lane.js writes is valid JSON with a numeric-only usage object', () => {
+  // What lane.js does with a thrown runAgent error, through the same two exported functions.
   const { describeError, sumUsage } = require('../agent-stream');
   const err = Object.assign(new Error('opencode produced no usable reply'), {
     turns: [{ usage: { input_tokens: 12, output_tokens: 3, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }],

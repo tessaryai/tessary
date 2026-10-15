@@ -26,16 +26,10 @@ import { registerRouteChunk, trackedChunk } from "./lib/routePreload";
 function named<M, K extends keyof M>(
   loader: () => Promise<M>,
   key: K,
-  /**
-   * The first path segment under `/orgs/:org/projects/:project/` this view is mounted at. Supplying
-   * it registers the chunk for {@link preloadRouteChunk}, see that function for why.
-   */
   preloadAt?: string,
 ): M[K] extends ComponentType<infer P> ? ComponentType<P> : never {
   const chunk = trackedChunk(loader);
   if (preloadAt) registerRouteChunk(preloadAt, chunk.load);
-  // React.lazy expects a module with a `default` export; our views use named
-  // exports, so adapt here while preserving each component's prop types.
   return lazy(() => {
     const module = chunk.loaded();
     if (module) return resolvedNow({ default: module[key] as ComponentType<unknown> });
@@ -54,8 +48,6 @@ const Signup = named(() => import("./views/auth/Signup"), "Signup");
 const Link = named(() => import("./views/Link"), "Link");
 const NewProject = named(() => import("./views/NewProject"), "NewProject");
 
-// 2026-07 redesign IA: Triage, Monitor (Traces, Classifiers, Vitals). Each view is owned by its
-// surface agent; the sheet named in each stub's header is the spec.
 const Triage = named(() => import("./views/triage/Triage"), "Triage", "triage");
 const CasePage = named(() => import("./views/triage/CasePage"), "CasePage", "cases");
 const TracesIndex = named(() => import("./views/traces/TracesIndex"), "TracesIndex", "traces");
@@ -69,7 +61,6 @@ const ClassifierConfigurePage = named(
 const FindingPage = named(() => import("./views/classifiers/FindingPage"), "FindingPage");
 const Vitals = named(() => import("./views/vitals/Vitals"), "Vitals", "vitals");
 
-// Surviving pre-redesign surfaces (route-only or referenced from flows).
 const Sources = named(() => import("./views/Sources"), "Sources");
 const Concepts = named(() => import("./views/Concepts"), "Concepts");
 const RcaReport = named(() => import("./views/RcaReport"), "RcaReport");
@@ -130,14 +121,8 @@ export default function App() {
 }
 
 function RootRedirect() {
-  // The org list comes off GET /auth/me (already fetched: this renders inside ProtectedRoute,
-  // which blocks on AuthProvider's own fetch, so there is no loading state left for this
-  // component to own).
-  //
-  // TenantService#ensureDefaultOrg runs only at signup and login, so `orgs` can be empty: a user
-  // who leaves their only org (Members → Leave organization) keeps the session with no org until
-  // they sign in again, when it gives them one. That cannot go to `/login`, which sends a signed-in
-  // visitor straight back here, so it says so instead.
+  // `orgs` can be empty: a user who leaves their only org keeps the session until they sign in again.
+  // That cannot go to `/login`, which sends a signed-in visitor straight back here.
   const { user } = useAuth();
   const first = user?.orgs[0];
   if (!first) return <NoOrganization />;
@@ -169,34 +154,16 @@ function OrgRedirect() {
     enabled: !!orgSlug,
   });
   if (projects.isLoading) return <FullScreen>Loading…</FullScreen>;
-  // The sample project is filtered out of implicit "which project" resolution here for the same
-  // reason TenantService.ensureDefaultProject filters it on the backend: it is a lazily-created,
-  // deletable demo row that must never become where a bare /orgs/:orgSlug navigation lands, even
-  // if its created_at somehow sorts before the org's real project.
+  // The sample project is deletable demo data and must never be where a bare org URL lands.
   const first = projects.data?.filter((p) => !isSampleProject(p))[0];
   if (!first) return <Navigate to={`/orgs/${orgSlug}/new-project`} replace />;
   return <Navigate to={`/orgs/${orgSlug}/projects/${first.slug}/triage`} replace />;
 }
 
-/*
- * The shell fetches nothing. It is chrome and a router outlet, so a route's lazy chunk and its
- * own data queries start as soon as the route subtree mounts, with nothing blocking ahead of them.
- */
 /**
- * Decides whether this project is behind the connect gate before rendering ShellChrome or any
- * route inside it: the only way to give the gate the sidebar-less, nav-less full screen the design
- * calls for, since ShellChrome always renders `<Sidebar/>`.
- *
- * Two independent reads gate the decision, both cheap and both already-established signals rather
- * than new plumbing: `listProjects` (the same query OrgRedirect and Sidebar's project switcher
- * already run, keyed identically so react-query shares the cache) tells us whether this project is
- * the sample project, and `substrateStatus` tells us whether a tagged span has ever landed. Neither
- * query blocks ShellChrome from mounting once it resolves in the open direction, but the first
- * paint for a genuinely gated project necessarily waits on both, which is the point: a shell that
- * briefly shows before the gate slams shut is worse than a short, one-time loading beat here.
- *
- * On a read error (either query) this fails open, rendering the normal shell, rather than trapping
- * an already-onboarded org behind a gate a backend hiccup made unreadable.
+ * Decides the connect gate before ShellChrome renders, so the gate gets a sidebar-less full screen.
+ * A gated project's first paint waits on both reads rather than flashing the shell. On a read error
+ * it fails open rather than trap an onboarded org behind the gate.
  */
 function ProjectShell() {
   const { orgSlug, projectSlug } = useTenant();
@@ -208,8 +175,6 @@ function ProjectShell() {
 
   const substrate = useQuery({
     ...substrateStatusQuery(api),
-    // Only worth polling here while the gate might still be open -- once a project is known-sample
-    // or the shell has already been chosen this render, ConnectGate (if mounted) owns its own poll.
     enabled: !isSample,
     refetchInterval: (q) => (q.state.data?.has_tagged_span ? false : 3500),
   });
@@ -237,37 +202,26 @@ function ProjectShell() {
       <Routes>
         <Route index element={<Navigate to="triage" replace />} />
 
-        {/* ── Triage, the front door: an inbox that wants to be empty. ── */}
         <Route path="triage" element={<Triage />} />
-        {/* One case = one degradation. The summoned path's landing. */}
         <Route path="cases/:caseId" element={<CasePage />} />
 
-        {/* ── Monitor ── */}
         <Route path="traces" element={<TracesIndex />} />
         <Route path="traces/:traceId" element={<TraceDetail />} />
         <Route path="sessions/:sessionId" element={<SessionDetail />} />
-        {/* The charts of what each classifier detects, per call site and per tool. */}
         <Route path="classifiers" element={<ClassifiersPage />} />
-        {/* A finding's own evidence, which Triage's findings link every row to. */}
         <Route path="classifiers/findings/:findingId" element={<FindingPage />} />
         {/* One classifier: switch, status, call sites, tuning, detections, reset. Static paths above outrank it. */}
         <Route path="classifiers/:classifierId" element={<ClassifierConfigurePage />} />
         {/* The Triage pulse strip's full-size page. Amber only, never red. */}
         <Route path="vitals" element={<Vitals />} />
 
-        {/* ── Surviving pre-redesign routes (no sidebar entry). ── */}
-        {/* One RCA report, deep-linked from cases. */}
         <Route path="rca/:reportId" element={<RcaReport />} />
         <Route path="concepts" element={<Concepts />} />
 
-        {/* Settings: administration only; concept tuning lives with the concept.
-            Gated sections carry the same CapabilityGate the sidebar filter reads, so a bookmark or a
-            hand-typed URL lands on Triage rather than on a page the org has no business seeing. */}
+        {/* Gated sections carry the same CapabilityGate the sidebar reads, so a hand-typed URL lands on Triage. */}
         <Route path="settings" element={<SettingsLayout />}>
           <Route index element={<Navigate to="sources" replace />} />
           <Route path="sources" element={<Sources />} />
-          {/* Ungated: bundle import was behind `graders_enabled`, and that capability is gone.
-              Importing a pipeline is plain authoring, like the pipeline write surfaces. */}
           <Route path="import" element={<ImportYaml />} />
           <Route
             path="providers"
@@ -275,7 +229,6 @@ function ProjectShell() {
           />
           <Route path="git" element={<GitIntegration />} />
           <Route path="models" element={<Models />} />
-          {/* The summoned flow's admin surface: Slack channel, cadence, quiet hours. */}
           <Route
             path="notifications"
             element={<CapabilityGate capability="alerts_enabled"><Notifications /></CapabilityGate>}
@@ -288,8 +241,7 @@ function ProjectShell() {
             path="api-keys"
             element={<CapabilityGate capability="api_access_enabled"><ApiKeys /></CapabilityGate>}
           />
-          {/* Ungated on purpose: the page also states the built-in redaction defaults, which is what a
-              security review reads. `custom_redaction_enabled` gates authoring inside it. */}
+          {/* Ungated: the page states the built-in redaction defaults a security review reads. */}
           <Route path="pii-redaction" element={<PiiRedaction />} />
           <Route path="retention" element={<Retention />} />
           <Route path="members" element={<Members />} />
@@ -297,17 +249,11 @@ function ProjectShell() {
           {/* Renamed from "workspace": redirect old bookmarks. */}
           <Route path="workspace" element={<Navigate to="../organization" replace />} />
           <Route path="features" element={<Features />} />
-          {/* Any other settings path: a retired tab, a typo, a deep link into a section that was
-              removed, folds to Sources rather than rendering an empty <Outlet/>. Absolute, like the
-              project-level catch-all: a relative `to="sources"` resolves against the splat it
-              matched, so /settings/typo redirected to /settings/typo/sources, matched this route
-              again, and appended `sources` until react-router gave up. */}
+          {/* Absolute: a relative `to` resolves against the matched splat and loops. */}
           <Route path="*" element={<ToProjectSegment segment="settings/sources" />} />
         </Route>
 
-        {/* The catch-all. Every unmatched project path lands on Triage instead of rendering a blank
-            shell: a removed route, a mistyped segment and a bookmark from a retired IA all resolve
-            somewhere. Triage is never gated, so this cannot loop. */}
+        {/* Triage is never gated, so this cannot loop. */}
         <Route path="*" element={<ToProjectSegment segment="triage" />} />
       </Routes>
       </Suspense>

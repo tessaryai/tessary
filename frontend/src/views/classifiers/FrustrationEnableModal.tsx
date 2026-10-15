@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Enabling Frustration spends provider credit, so the switch opens this instead of flipping: pick the
- * provider the lane runs on, add its key if the org has none, and read what will be sent and what it
- * costs before anything is. A provider the deployment supplies (`PLATFORM`) needs no key: it runs on
- * the organization's credit.
- *
- * Confirm is three writes in order: the key (only when the chosen provider has none), the lane's
- * model, then the enable. The server refuses the enable without a usable key, so a failure part way
- * leaves the classifier off, never on without a provider.
- */
+// Enabling spends provider credit, so the switch opens this. Confirm writes the key, the lane's model,
+// then the enable; the server refuses the enable without a usable key, so a partial failure leaves it off.
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ModelProvider } from "../../api/types";
@@ -16,10 +8,8 @@ import { useTenant } from "../../tenant/TenantContext";
 import { invalidateClassifierReads } from "./classifierReads";
 import { Button, ErrorNote, Field, Input, LoadingRow, Modal } from "../../ui";
 
-/** `ModelLane.FRUSTRATION`'s wire name. */
 export const FRUSTRATION_LANE = "frustration";
 
-/** Frustration's detector key: enabling it spends the org's own provider credit, so it opens this modal. */
 export const FRUSTRATION_DETECTOR = "frustration";
 
 export function FrustrationEnableModal({
@@ -47,7 +37,6 @@ export function FrustrationEnableModal({
   const configured = useMemo(() => {
     const out = new Set<ModelProvider>();
     for (const c of credentialsQ.data?.credentials ?? []) if (c.has_api_key) out.add(c.provider);
-    // The deployment's own provider has no credential row; the settings say whether it is offered.
     if (settingsQ.data?.configured_providers.includes("PLATFORM")) out.add("PLATFORM");
     return out;
   }, [credentialsQ.data, settingsQ.data]);
@@ -60,7 +49,6 @@ export function FrustrationEnableModal({
   const needsKey = choice != null && !configured.has(choice.provider);
 
   const enableM = useMutation({
-    // Enable is offered only once there is a choice (`canConfirm`).
     mutationFn: async () => {
       const c = choice!;
       if (needsKey) await orgApi.upsertProviderCredential(c.provider, { api_key: apiKey.trim() });

@@ -33,18 +33,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * {@link DecisionClient} over the JDK {@link HttpClient}, for TypeSafe's Jev on either gateway: TypeSafe
- * direct ({@code POST /v1/systemone}) or OpenRouter ({@code POST /api/alpha/decisions}). Both take the
- * same {@code {model, state, questions}} body with a bearer key and answer the same envelope.
- *
- * <p>429, 5xx and transport failures are retried with exponential back-off and jitter, honouring
- * {@code Retry-After}; 401, 402 and 403 are not, since only a new key, or funds on it, can change the
- * answer. 402 is its own error, so a key with no credit reads differently from a refused one.
- *
- * <p><b>Pricing.</b> A call to OpenRouter costs what OpenRouter reports in {@code usage.cost}: its own
- * bill, never TypeSafe's rate for the same model. A response without one leaves the call unpriced.
- * Every other call is priced from the book under {@code typesafe/<bare model id>}, on the REQUESTED
- * id: the echoed dated version is not a book key.
+ * {@link DecisionClient} for Jev on TypeSafe direct or OpenRouter. 429, 5xx and transport failures retry with jittered
+ * back-off honouring {@code Retry-After}; 401/402/403 do not. OpenRouter calls cost what OpenRouter reports in
+ * {@code usage.cost}, else unpriced; others are priced from the book on the requested id, since the echoed dated
+ * version is not a book key.
  */
 @Component
 public class JevDecisionClient implements DecisionClient {
@@ -61,7 +53,7 @@ public class JevDecisionClient implements DecisionClient {
 
     private static final SecureRandom JITTER = new SecureRandom();
 
-    /** How a retry waits; a seam so tests do not sleep. */
+    /** A seam so tests do not sleep. */
     @FunctionalInterface
     interface Sleeper {
         void sleep(long millis) throws InterruptedException;
@@ -90,8 +82,8 @@ public class JevDecisionClient implements DecisionClient {
                 pricer,
                 accountant,
                 Thread::sleep,
-                Duration.ofMillis(Math.max(1, props.getTimeoutMs())),
-                props.getMaxAttempts());
+                Duration.ofMillis(Math.max(1, props.timeoutMs())),
+                props.maxAttempts());
     }
 
     JevDecisionClient(
@@ -162,21 +154,16 @@ public class JevDecisionClient implements DecisionClient {
         }
     }
 
-    /**
-     * A call OpenRouter bills: the org's OpenRouter key, whatever base URL it is pointed at, or any target on
-     * OpenRouter's own host, which is how the deployment's provider reaches it. OpenRouter reports that bill per call.
-     */
+    /** The org's OpenRouter key, or any target on OpenRouter's host (how the deployment's provider reaches it). */
     static boolean billedByOpenRouter(DecisionTarget target) {
         return target.provider() == ModelProvider.OPENROUTER
                 || OPENROUTER_HOST.equalsIgnoreCase(target.endpoint().getHost());
     }
 
-    /** OpenRouter's reported cost in USD, or null when it reported none. */
     private static @Nullable BigDecimal reportedCost(JsonNode cost) {
         return cost.isNumber() ? new BigDecimal(cost.asText()) : null;
     }
 
-    /** The id this call is priced under, see {@link ModelCatalog#decisionPricingId}. */
     static String pricingId(DecisionTarget target) {
         return ModelCatalog.decisionPricingId(target.provider(), target.modelId());
     }
@@ -236,14 +223,11 @@ public class JevDecisionClient implements DecisionClient {
         }
     }
 
-    /** The longest a provider's refusal is carried into the exception message and the log. */
     static final int REFUSAL_CHARS = 200;
 
     /**
-     * What the provider said when it refused the request, for the exception message: the {@code
-     * error.message} of a JSON body, the raw body when it is not JSON, cut to {@link #REFUSAL_CHARS}. A
-     * refusal explains the request's shape or model, never echoes the state, so carrying it does not
-     * repeat customer text; the cap bounds a provider that does.
+     * A refusal explains the request's shape, never echoes the state, so carrying it does not repeat customer text; the
+     * cap bounds a provider that does.
      */
     String refusal(@Nullable String body) {
         if (body == null || body.isBlank()) return "no detail";
@@ -251,7 +235,6 @@ public class JevDecisionClient implements DecisionClient {
         return text.length() <= REFUSAL_CHARS ? text : text.substring(0, REFUSAL_CHARS) + "…";
     }
 
-    /** {@code error.message}, else {@code message}, of a JSON object body; empty when the body carries neither. */
     private Optional<String> refusalMessage(String body) {
         JsonNode node;
         try {
@@ -281,7 +264,7 @@ public class JevDecisionClient implements DecisionClient {
         }
     }
 
-    /** 1s, 2s, 4s, ... plus up to a quarter of that in jitter, so concurrent turns do not retry in step. */
+    /** Jitter so concurrent turns do not retry in step. */
     static long backoffMs(int attempt) {
         long base = BASE_BACKOFF_MS << Math.min(attempt - 1, 10);
         return base + JITTER.nextLong(base / 4 + 1);
@@ -305,12 +288,10 @@ public class JevDecisionClient implements DecisionClient {
             return node;
         } catch (IOException e) {
             // No throwable attached: a parse error echoes the body, which can carry customer text.
-            throw new TessaryException( // NOPMD - PreserveStackTrace: see above
-                    DecisionError.MALFORMED_ANSWER, target.provider(), "body is not JSON");
+            throw new TessaryException(DecisionError.MALFORMED_ANSWER, target.provider(), "body is not JSON");
         }
     }
 
-    /** Every question asked must come back answered, in its own type's documented fields. */
     private static Map<String, DecisionAnswer.Answer> answers(
             DecisionTarget target, DecisionRequest request, JsonNode response) {
         JsonNode answers = response.path("answers");

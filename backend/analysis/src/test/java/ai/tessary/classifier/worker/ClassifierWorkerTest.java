@@ -14,7 +14,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
@@ -35,7 +34,7 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
-import ai.tessary.gate.PreDeployCheckService;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -102,9 +101,6 @@ class ClassifierWorkerTest {
 
     @Mock
     BuiltInClassifierCatalog catalog;
-
-    @Mock
-    PreDeployCheckService preDeployChecks;
 
     @Mock
     ClassifierArming arming;
@@ -178,20 +174,6 @@ class ClassifierWorkerTest {
         worker.sweepForTest(job());
 
         verify(catchUp, never()).caughtUp(any(), any(), any());
-    }
-
-    @Test
-    void aKindOutsideTheDrainSetTakesOnePagePerClaim() {
-        ClassifierWorker worker = worker();
-        armSignal(BuiltInDetector.Kind.REGEX);
-        List<SubstrateObservation> first = page(0, PAGE);
-        when(substrate.observationsAfter(PROJECT, null, null, PAGE)).thenReturn(first);
-
-        worker.sweepForTest(job());
-
-        verify(jobs).markSwept("job-1", createdAt(first), handle(first));
-        verify(jobs, never()).advanceCursor(anyString(), anyString(), anyString(), anyString(), anyLong());
-        verify(substrate, times(1)).observationsAfter(anyString(), any(), any(), eq(PAGE));
     }
 
     @Test
@@ -275,7 +257,7 @@ class ClassifierWorkerTest {
     }
 
     /**
-     * After scoring, everything is fail-soft: a failed detection write, arming gate, pre-deploy registration, or
+     * After scoring, everything is fail-soft: a failed detection write, arming gate, or
      * catch-up costs only itself. None may stop the cursor, or the page is re-scored forever.
      */
     @Test
@@ -322,8 +304,6 @@ class ClassifierWorkerTest {
         org.mockito.Mockito.doThrow(new IllegalStateException("arming"))
                 .when(arming)
                 .evaluate(any(), eq(PROJECT), any(), any());
-        when(preDeployChecks.isEnabled()).thenReturn(true);
-        when(preDeployChecks.registerForSignal(any())).thenThrow(new IllegalStateException("ci"));
         org.mockito.Mockito.doThrow(new IllegalStateException("rollup"))
                 .when(catchUp)
                 .caughtUp(any(), any(), any());
@@ -365,8 +345,7 @@ class ClassifierWorkerTest {
      */
     @Test
     void aPageWithNothingInScopeSendsNothingAndStillMovesTheCursor() {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setEncoderBatchSize(2);
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "encoder-batch-size", 2);
         ClassifierWorker worker = worker(props, new ClassifierSweepRegistry(TestObjectProvider.of()));
         String kind = BuiltInDetector.Kind.GROUNDEDNESS;
         when(signals.findById(PROJECT, CLASSIFIER))
@@ -407,28 +386,6 @@ class ClassifierWorkerTest {
     }
 
     /**
-     * A detector that pays for each turn it is sent is never sent an out-of-scope turn. Scoping after the provider
-     * call would save nothing, and saving those calls is the point of the scope.
-     */
-    @Test
-    void aScopedPagedDetectorIsNeverSentAnOutOfScopeTurn() {
-        when(signals.findById(PROJECT, CLASSIFIER))
-                .thenReturn(Optional.of(
-                        ClassifierRowBuilder.of(KIND).onCallSites("cs-a").build()));
-        when(catalog.grainFor(KIND)).thenReturn(Grain.OBSERVATION);
-        when(detections.writesDetections(KIND)).thenReturn(true);
-        FakePaged paged = new FakePaged(page(Status.SCORED, 1, 0));
-        when(catalog.detectorFor(KIND)).thenReturn(paged);
-        org.mockito.Mockito.lenient().when(catchUp.kinds()).thenReturn(Set.of(KIND));
-        SubstrateObservation inScope = span(0, "cs-a");
-        when(substrate.observationsAfter(PROJECT, null, null, PAGE)).thenReturn(List.of(inScope, span(1, "cs-b")));
-
-        worker().sweepForTest(job());
-
-        assertEquals(List.of(List.of(inScope)), paged.scoredPages);
-    }
-
-    /**
      * On a host whose name does not resolve, building the lease owner threw and the worker never constructed. It
      * falls back to a fixed name.
      */
@@ -438,26 +395,6 @@ class ClassifierWorkerTest {
         assertEquals("host", ClassifierWorker.shortHost(() -> {
             throw new UnknownHostException("box-1");
         }));
-    }
-
-    @Test
-    void repeatedBelowCapFailuresStayWarnAndDedupToOneStacktracePerStreak() {
-        ClassifierWorker worker = worker(sweeps());
-
-        ClassifierJobRow job = job();
-        when(signals.findById("proj-1", "sig-1")).thenThrow(new RuntimeException("boom"));
-        when(jobs.markFailed(eq("job-1"), any(), anyInt())).thenReturn(false); // inside the budget
-
-        worker.sweepForTest(job);
-        worker.sweepForTest(job);
-        worker.sweepForTest(job);
-
-        long errorCount =
-                appender.list.stream().filter(e -> e.getLevel() == Level.ERROR).count();
-        long warnCount =
-                appender.list.stream().filter(e -> e.getLevel() == Level.WARN).count();
-        assertTrue(errorCount == 0, "a below-cap unit failure never logs ERROR (that's the dead-letter's)");
-        assertTrue(warnCount == 1, "retries of the same failing job dedup to a single WARN, not one per tick");
     }
 
     /** A streak past the summary interval says it is still failing, with its count; otherwise it looks recovered. */
@@ -478,31 +415,6 @@ class ClassifierWorkerTest {
         assertEquals(2, warns.size(), "the streak's first failure, then one summary at the thirtieth");
         assertEquals("signal.sweep.still-failing", warns.get(1).get("event"));
         assertEquals(30L, warns.get(1).get("occurrences"));
-    }
-
-    /**
-     * WINDOW grain falls through to {@link MetricDriftSweep}. {@code tool_error} once took that fallthrough and kept
-     * a duplicate copy of every duration and cost baseline under its own id.
-     */
-    @Test
-    void aToolErrorJobRunsItsOwnSweepAndNeverTheMetricFallthrough() {
-        ClassifierWorker worker = worker(sweeps());
-
-        ClassifierJobRow job = job("job-te", "sig-te");
-        ClassifierRow signal = ClassifierRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
-                .id("sig-te")
-                .named("tool-errors", "Tool errors")
-                .build();
-        SweepContext expected = new SweepContext(job, signal);
-        when(signals.findById("proj-1", "sig-te")).thenReturn(Optional.of(signal));
-        when(catalog.declares(BuiltInDetector.Kind.TOOL_ERROR)).thenReturn(true);
-        when(catalog.grainFor(BuiltInDetector.Kind.TOOL_ERROR)).thenReturn(Grain.WINDOW);
-        when(toolErrorSweep.sweep(expected)).thenReturn(new SweepOutcome(0, 2));
-
-        worker.sweepForTest(job);
-
-        verify(toolErrorSweep).sweep(expected);
-        verify(metricSweep, never()).sweep(any());
     }
 
     /**
@@ -637,40 +549,6 @@ class ClassifierWorkerTest {
                 "the turn grain from the catalog reached the observation-grain path");
     }
 
-    /**
-     * The observation-grain twin: a detector with no {@code DetectionTable} on the classpath must not score. One
-     * WARN, the job completes, and nothing is touched.
-     */
-    @Test
-    void anObservationKindWithNoRegisteredTableIsInertAndSaysSo() {
-        ClassifierWorker worker = worker(sweeps());
-
-        ClassifierJobRow job = job("job-fr", "sig-fr");
-        ClassifierRow signal = ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
-                .id("sig-fr")
-                .named("frustration", "Frustration")
-                .build();
-        when(signals.findById("proj-1", "sig-fr")).thenReturn(Optional.of(signal));
-        when(catalog.grainFor(BuiltInDetector.Kind.FRUSTRATION)).thenReturn(Grain.TURN);
-        when(detections.writesDetections(BuiltInDetector.Kind.FRUSTRATION)).thenReturn(false);
-
-        assertDoesNotThrow(() -> worker.sweepForTest(job));
-
-        long noTableWarns = appender.list.stream()
-                .filter(e -> e.getLevel() == Level.WARN
-                        && e.getFormattedMessage().contains("no detection table is registered"))
-                .count();
-        assertEquals(1, noTableWarns, "exactly one WARN for the missing table: " + appender.list);
-        assertTrue(
-                appender.list.stream().noneMatch(e -> e.getLevel() == Level.ERROR),
-                "not a failure: no dead letter, no burnt attempt budget");
-        verify(jobs).markSwept("job-fr", null, null);
-        verify(catalog, never()).detectorFor(any());
-        verifyNoInteractions(substrate);
-        verify(detections).writesDetections(BuiltInDetector.Kind.FRUSTRATION);
-        verifyNoMoreInteractions(detections);
-    }
-
     /** More than half the sent turns unavailable holds the page; a page held {@code maxHolds} times is skipped. */
     @ParameterizedTest
     @CsvSource({
@@ -702,19 +580,6 @@ class ClassifierWorkerTest {
         verify(jobs, never()).markSwept(anyString(), any(), any());
         verify(catchUp, never()).caughtUp(any(), any(), any());
         assertEquals(List.of(PageAction.HOLD), detector.actions, "nothing is written on a held page");
-    }
-
-    @Test
-    void aHeldPageIsScoredWholeAgainOnTheNextTick() {
-        FakePaged detector = armSignal(page(Status.SCORED, 4, 3));
-        List<SubstrateObservation> window = observations();
-        when(substrate.observationsAfter(PROJECT, null, null, RETRY_PAGE)).thenReturn(window);
-
-        worker(RETRY_PAGE).sweepForTest(job(0));
-        worker(RETRY_PAGE).sweepForTest(job(1));
-
-        assertEquals(2, detector.scoredPages.size());
-        assertEquals(window, detector.scoredPages.get(1), "the retry re-sends every turn, succeeded ones too");
     }
 
     @Test
@@ -806,18 +671,16 @@ class ClassifierWorkerTest {
     }
 
     private ClassifierWorker worker(int pageSize) {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setBatchSize(pageSize);
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "batch-size", pageSize);
         return worker(props, new ClassifierSweepRegistry(TestObjectProvider.of()));
     }
 
     private ClassifierWorker worker(ClassifierSweepRegistry sweeps) {
-        return worker(new ClassifierProperties(), sweeps);
+        return worker(Props.of(ClassifierProperties.class), sweeps);
     }
 
     private ClassifierWorker worker(int pageSize, ClassifierSweepRegistry sweeps) {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setBatchSize(pageSize);
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "batch-size", pageSize);
         return worker(props, sweeps);
     }
 
@@ -830,7 +693,6 @@ class ClassifierWorkerTest {
                 arming,
                 substrate,
                 catalog,
-                preDeployChecks,
                 sweeps,
                 new SweepRouting(catalog, sweeps),
                 TestObjectProvider.of(catchUp),

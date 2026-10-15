@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * When a credential was created or last used, as the API key and MCP token ledgers show it: a duration
- * for the last month (`5m ago`, `3d ago`), then a date. Never-used reads as "Never", and a time ahead of
- * the browser's clock is shown as-is rather than as a negative age.
- *
- * Distinct from `relativeTime`, which is a staleness signal and never switches to a date.
- */
+/** A duration for the last month, then a date. A time ahead of the browser's clock is shown as-is. */
 export function ledgerTime(iso: string | null): string {
   if (!iso) return "Never";
   const then = new Date(iso).getTime();

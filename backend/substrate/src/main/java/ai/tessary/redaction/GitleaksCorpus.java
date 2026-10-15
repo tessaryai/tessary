@@ -19,54 +19,28 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.core.io.ClassPathResource;
 
 /**
- * The gitleaks credential corpus, compiled for Java: what the platform treats as a leaked secret.
- *
- * <p><b>Why a corpus rather than our own patterns.</b> The hand-written credential rules were a dozen
- * vendors deep, and a leaked credential from the thirteenth was invisible to both redaction and detection.
- * gitleaks is the list the rest of the industry maintains as providers add formats. It is vendored as JSON
- * by {@code scripts/sync-gitleaks.sh} at a pinned release, with the licence beside it; a bump is a reviewed
- * diff to that one file.
- *
- * <p><b>Matching follows gitleaks.</b> A rule's regex runs only when one of its keywords appears (see
- * {@link KeywordIndex}); the secret is the rule's {@code secret_group}, else its first non-empty capture
- * group, else the whole match; a rule with an entropy floor drops a secret below it; and a secret the
- * global or the rule's own allowlist names is skipped.
- *
- * <p><b>Redaction does not always follow gitleaks.</b> gitleaks reports a secret, and for a rule with one
- * capture group that is the credential, so only that span is replaced and the key name beside it stays
- * readable. A rule with several groups is different: {@code jwt-base64} captures thirty-odd header
- * fragments, and its "secret" is the first ten characters of the token. Redacting that would leave the
- * token readable, so such a rule replaces its whole match.
- *
- * <p><b>Anchored is a fact about the rule's shape.</b> gitleaks writes two kinds of rule. One anchors the
- * credential on a literal the provider stamps into it ({@code AKIA}, {@code ghp_}, {@code xoxb-}), so a
- * match is the credential. The other finds a vendor's name near a random-looking string
- * ({@code (?i)[\w.-]{0,50}?(?:adobe)...}), which is only as good as the context. The first is
- * {@link Finding#anchored}; what that is worth to a detector is the detector's decision.
+ * Vendored by {@code scripts/sync-gitleaks.sh} at a pinned release; a bump is a reviewed diff. Matching follows
+ * gitleaks. Redaction does not always: a rule with several capture groups (e.g. {@code jwt-base64}) replaces its whole
+ * match, since its "secret" is a fragment. {@link Finding#anchored} marks rules anchored on a provider-stamped literal
+ * rather than vendor-name context.
  */
 public final class GitleaksCorpus {
 
-    /** Where {@code scripts/sync-gitleaks.sh} writes the corpus. */
     static final String RESOURCE = "redaction/gitleaks-rules.json";
 
-    /** How a built-in redaction rule names the corpus in place of a regex: {@code gitleaks:v8.30.1}. */
     public static final String PATTERN_SCHEME = "gitleaks:";
 
-    /** gitleaks' keyword-context rule shape, the unanchored one; see the class javadoc. */
     private static final Pattern KEYWORD_CONTEXT = Pattern.compile("^\\(\\?i\\)\\[\\\\w\\.-\\]\\{0,50\\}\\?\\(\\?:");
 
     private static final Pattern POSIX_CLASS =
             Pattern.compile("\\[:(alnum|alpha|digit|lower|upper|space|punct|xdigit|word|blank|cntrl|graph|print):]");
 
-    /** gitleaks' catch-all rules, which lose a tie to any rule that names the vendor. */
     private static final String GENERIC_RULE_PREFIX = "generic";
 
     private static final Pattern QUANTIFIER = Pattern.compile("\\{\\d+(?:,\\d*)?}");
 
-    /** One credential found in a text. */
     public record Finding(String ruleId, boolean anchored, int start, int end) {}
 
-    /** What an allowlist regex is tested against: the secret, the whole match, or the line it sits on. */
     private enum Target {
         SECRET,
         MATCH,
@@ -75,9 +49,6 @@ public final class GitleaksCorpus {
 
     private record Allowlist(List<Pattern> regexes, Target target, List<String> stopwords, boolean requireAll) {}
 
-    /**
-     * @param identifier for a keyword-context rule, just its vendor-name alternation; null for an anchored one
-     */
     private record Rule(
             String id,
             Pattern pattern,
@@ -88,14 +59,9 @@ public final class GitleaksCorpus {
             boolean anchored,
             List<Allowlist> allowlists) {}
 
-    /** How far before a vendor name a keyword-context match may start: the template's {@code [\w.-]{0,50}?}. */
     private static final int CONTEXT_PREFIX = 50;
 
-    /**
-     * How far past a vendor name to look for the assignment a keyword-context match needs. The template allows
-     * twenty name characters and three quotes or spaces before the operator; the rest is slack for a longer
-     * alternative of the name than the one the scan reported.
-     */
+    /** Twenty name characters plus quotes or spaces before the operator, with slack for a longer name alternative. */
     private static final int ASSIGNMENT_REACH = 88;
 
     private static final class Holder {
@@ -114,24 +80,17 @@ public final class GitleaksCorpus {
         this.global = global;
     }
 
-    /** The corpus on this classpath, loaded once. */
     public static GitleaksCorpus get() {
         return Holder.INSTANCE;
     }
 
-    /** The pattern a built-in rule row carries to name this corpus. */
     public String patternValue() {
         return PATTERN_SCHEME + version;
     }
 
     /**
-     * Every credential in {@code text}, ordered by position and never overlapping.
-     *
-     * <p>Where two rules claim overlapping text the earlier start wins, then the anchored rule, then the
-     * longer span, then any rule over {@code generic-api-key}. An AWS key assigned to {@code api_key} is matched
-     * by both {@code aws-access-token} and {@code generic-api-key} on the same characters, and a New Relic token
-     * by {@code new-relic-browser-api-token} and {@code generic-api-key}; in both the specific name is the one
-     * worth keeping, since it is what a reader acts on.
+     * On overlap: earlier start, then anchored, then longer, then anything over {@code generic-api-key}, since the
+     * specific name is what a reader acts on.
      */
     public List<Finding> find(String text) {
         if (text.isEmpty()) return List.of();
@@ -163,16 +122,9 @@ public final class GitleaksCorpus {
     }
 
     /**
-     * A keyword-context rule, tried once per place its vendor name appears rather than at every position.
-     *
-     * <p>This is a performance decision, and it is the one that makes the corpus
-     * affordable on the ingest path. gitleaks' template opens {@code (?i)[\w.-]{0,50}?(?:vendor)}, and Java's
-     * backtracking engine tries that lazy prefix against every alternative at every position of the text:
-     * {@code generic-api-key} alone was most of the corpus's cost on a keyword-dense megabyte. But a match can
-     * only start in the run of name characters at most fifty long that ends at a vendor name, and it needs an
-     * assignment operator shortly after. So the vendor names are found with the bare alternation, a name with no
-     * operator after it is skipped, and the full rule is anchored once at the leftmost start it could have. The
-     * match that returns is the leftmost one a scan of the whole text would have found there.
+     * Performance: Java's backtracking tries the template's lazy {@code [\w.-]{0,50}?} prefix at every position, which
+     * made {@code generic-api-key} most of the corpus's cost. Find vendor names first, skip any without an operator
+     * after, and anchor the full rule once; the result is the same leftmost match.
      */
     private void findInContext(Rule rule, Pattern identifier, String text, List<Finding> found) {
         Matcher m = rule.pattern().matcher(text).useTransparentBounds(true).useAnchoringBounds(false);
@@ -188,7 +140,6 @@ public final class GitleaksCorpus {
         }
     }
 
-    /** Record {@code m} as a finding unless the rule's entropy floor or an allowlist rules it out. */
     private boolean accept(Rule rule, String text, Matcher m, List<Finding> found) {
         if (m.end() == m.start()) return false;
         String secret = secretOf(m, rule);
@@ -203,10 +154,6 @@ public final class GitleaksCorpus {
         return true;
     }
 
-    /**
-     * Whether an assignment operator can follow a vendor name ending at {@code end}: only name characters,
-     * spaces and quotes may stand between, and an operator must arrive within {@link #ASSIGNMENT_REACH}.
-     */
     private static boolean assignmentFollows(String text, int end) {
         int limit = Math.min(text.length(), end + ASSIGNMENT_REACH);
         for (int i = end; i < limit; i++) {
@@ -224,7 +171,6 @@ public final class GitleaksCorpus {
         return false;
     }
 
-    /** {@code [\w.-]} in ASCII, the characters of the template's name prefix. */
     private static boolean isNameChar(char c) {
         return (c >= 'a' && c <= 'z')
                 || (c >= 'A' && c <= 'Z')
@@ -234,7 +180,6 @@ public final class GitleaksCorpus {
                 || c == '-';
     }
 
-    /** gitleaks' secret: the named group, else the first non-empty group, else the match. */
     private static String secretOf(Matcher m, Rule rule) {
         if (rule.secretGroup() > 0 && rule.secretGroup() <= rule.captureGroups()) {
             String g = m.group(rule.secretGroup());
@@ -247,7 +192,6 @@ public final class GitleaksCorpus {
         return m.group();
     }
 
-    /** The span to replace: the secret for a rule that captures exactly it, else the whole match. */
     private static int[] replacedSpan(Matcher m, Rule rule) {
         int group = rule.secretGroup() > 0 ? rule.secretGroup() : rule.captureGroups() == 1 ? 1 : 0;
         if (group > 0 && group <= rule.captureGroups() && m.start(group) >= 0 && m.end(group) > m.start(group)) {
@@ -283,7 +227,6 @@ public final class GitleaksCorpus {
         return text.substring(from, to < 0 ? text.length() : to);
     }
 
-    /** Shannon entropy in bits per character, the measure gitleaks' {@code entropy} floor is written in. */
     static double entropy(String s) {
         if (s.isEmpty()) return 0;
         java.util.Map<Character, Integer> counts = new java.util.HashMap<>();
@@ -297,11 +240,8 @@ public final class GitleaksCorpus {
     }
 
     /**
-     * Rewrite a Go RE2 regex into Java syntax, for the three constructs the two spell differently: a named
-     * group ({@code (?P<name>} or {@code (?<name>}), which becomes a plain group because Java rejects the
-     * underscores gitleaks puts in group names and a plain group keeps the same number; a POSIX class inside
-     * brackets ({@code [[:alnum:]]}); and a {@code {} that starts no repetition, which RE2 reads as a
-     * literal and Java refuses to compile.
+     * Named groups become plain groups (Java rejects underscores in group names, and numbering is kept); POSIX classes
+     * are rewritten; a {@code {} that starts no repetition is escaped, since Java refuses it.
      */
     static String toJava(String re2) {
         StringBuilder out = new StringBuilder(re2.length() + 8);
@@ -379,7 +319,7 @@ public final class GitleaksCorpus {
         }
     }
 
-    /** Compile a corpus document; a rule whose regex will not compile is left out. */
+    /** A rule whose regex will not compile is left out. */
     static GitleaksCorpus load(JsonNode document) {
         List<Rule> rules = new ArrayList<>();
         List<List<String>> keywordsByRule = new ArrayList<>();
@@ -420,10 +360,6 @@ public final class GitleaksCorpus {
                 allowlist(document.path("allowlist")));
     }
 
-    /**
-     * The vendor-name alternation of a keyword-context rule, case-insensitive and on its own: the group the
-     * template opens after its name prefix (which ends at {@code open}), up to the paren that closes it.
-     */
     private static Pattern identifierOf(String regex, int open) {
         int depth = 1;
         int i = open;
@@ -440,7 +376,7 @@ public final class GitleaksCorpus {
         return Pattern.compile("(?i)(?:" + toJava(regex.substring(open, i - 1)) + ")");
     }
 
-    /** An allowlist regex in Java syntax, or null when it will not compile: it then allows nothing, and the rule it guards still runs. */
+    /** Null allows nothing; the rule it guards still runs. */
     private static @Nullable Pattern compileOrNull(String re2) {
         try {
             return Pattern.compile(toJava(re2));

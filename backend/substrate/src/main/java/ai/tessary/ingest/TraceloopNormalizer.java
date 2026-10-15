@@ -6,36 +6,21 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Normalizes the OpenLLMetry/Traceloop framework-span convention into canonical {@code gen_ai.*} at the
- * ingest edge — the foreign-sender fallback peer to {@link OpenInferenceNormalizer}.
- *
- * <p>OpenLLMetry emits native {@code gen_ai.*} for raw model calls but its own {@code traceloop.*}
- * convention for framework / agent / tool / workflow steps: {@code traceloop.span.kind}
- * ({@code workflow}/{@code task}/{@code agent}/{@code tool}/{@code llm}) + {@code traceloop.entity.input}
- * / {@code traceloop.entity.output}, with no {@code gen_ai.operation.name} and no {@code gen_ai.*.messages}.
- * Without this mapping such spans land kind-unknown with null I/O.
- *
- * <p>Producers that emit canonical gen_ai already do this, so for canonicalized traffic
- * this is redundant — it exists for <em>foreign</em> senders (a raw OpenLLMetry app, an older/foreign
- * producer). It is
- * dormant unless a {@code traceloop.*} marker is present, and never overrides a value the native
- * {@code gen_ai.*} read already produced.
+ * Maps OpenLLMetry/Traceloop framework spans ({@code traceloop.span.kind}, {@code traceloop.entity.*}) to canonical
+ * {@code gen_ai.*} for foreign senders; otherwise they land kind-unknown with null I/O. Dormant without a
+ * {@code traceloop.*} marker, and never overrides a native {@code gen_ai.*} value.
  */
 public final class TraceloopNormalizer {
 
-    /** {@code traceloop.span.kind} — Traceloop's operation discriminator (workflow/task/agent/tool/llm). */
     public static final String SPAN_KIND = "traceloop.span.kind";
-    /** {@code traceloop.entity.input} — a framework step's generic (non-message) input payload. */
     public static final String ENTITY_INPUT = "traceloop.entity.input";
-    /** {@code traceloop.entity.output} — a framework step's generic (non-message) output payload. */
     public static final String ENTITY_OUTPUT = "traceloop.entity.output";
 
     private TraceloopNormalizer() {}
 
     /**
-     * Map a {@code traceloop.span.kind} value to the canonical {@code gen_ai.operation.name}. {@code task}
-     * (a coordinated sub-step) has no gen_ai registry value; it maps to {@code invoke_workflow}, the closest
-     * canonical kind (mirroring {@link OpenInferenceNormalizer}'s CHAIN mapping). Unknown/blank → {@code null}.
+     * {@code task} has no gen_ai value and maps to {@code invoke_workflow}, as {@link OpenInferenceNormalizer} maps
+     * CHAIN. Unknown or blank is {@code null}.
      */
     public static @Nullable String operationName(@Nullable Object spanKind) {
         if (spanKind == null) {
@@ -50,12 +35,10 @@ public final class TraceloopNormalizer {
         };
     }
 
-    /** The framework step's generic input payload, as a string; {@code null} when absent. */
     public static @Nullable String input(Map<String, ? extends @Nullable Object> attrs) {
         return value(attrs, ENTITY_INPUT);
     }
 
-    /** The framework step's generic output payload, as a string; {@code null} when absent. */
     public static @Nullable String output(Map<String, ? extends @Nullable Object> attrs) {
         return value(attrs, ENTITY_OUTPUT);
     }

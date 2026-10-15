@@ -7,19 +7,14 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The action alphabet: the pure reduction of one substrate action to a symbol
- * {@code <kind>:<normalized-name>}. The tool-duration and tool-error buckets both key on it, so a
- * finding from either names the same tool.
+ * Reduces one substrate action to {@code <kind>:<normalized-name>}. The tool-duration and tool-error buckets both key
+ * on it, so their findings name the same tool.
  */
 public final class ActionSymbol {
 
-    /** The name used when an observation carries none. */
     public static final String UNNAMED = "unnamed";
 
-    /**
-     * The kinds whose name is unbounded in cardinality and must bucket to a container rather than be
-     * kept verbatim: a document or chunk id per call would make every symbol unique.
-     */
+    /** Names of these kinds are unbounded (a document id per call), so they bucket to a container. */
     private static final Set<String> BUCKETED_KINDS = Set.of("retrieval", "embedding", "reranker");
 
     private static final Pattern UUID =
@@ -32,10 +27,7 @@ public final class ActionSymbol {
 
     private ActionSymbol() {}
 
-    /**
-     * The symbol for one action. Retrieval names bucket to their corpus (the leading path segment) so
-     * a per-document name space cannot explode the vocabulary.
-     */
+    /** Retrieval names bucket to their corpus so per-document names cannot explode the vocabulary. */
     public static String of(@Nullable String kind, @Nullable String name) {
         String k = normalizeName(kind);
         String raw = BUCKETED_KINDS.contains(k) ? corpusBucket(name) : name;
@@ -45,9 +37,8 @@ public final class ActionSymbol {
     }
 
     /**
-     * Lowercase, strip uuids / long hex blobs / digit runs / a trailing numeric id, and collapse every
-     * remaining non-alphanumeric run to a single underscore. Returns {@code ""} for a null/blank input
-     * so callers can substitute their own fallback.
+     * Strips uuids, hex blobs, digit runs and a trailing numeric id, then collapses non-alphanumeric runs to one
+     * underscore. Returns {@code ""} for null or blank so callers can substitute their own fallback.
      */
     public static String normalizeName(@Nullable String name) {
         if (name == null || name.isBlank()) return "";
@@ -64,7 +55,7 @@ public final class ActionSymbol {
         return s.substring(from, to);
     }
 
-    /** The leading path segment of a retrieval name: {@code policy_docs/2024/s4.pdf} → {@code policy_docs}. */
+    /** {@code policy_docs/2024/s4.pdf} → {@code policy_docs}. */
     public static String corpusBucket(@Nullable String name) {
         if (name == null || name.isBlank()) return "";
         String[] parts = CORPUS_SPLIT.split(name.trim(), 2);

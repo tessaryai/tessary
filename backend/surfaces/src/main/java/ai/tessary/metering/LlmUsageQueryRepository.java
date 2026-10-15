@@ -8,19 +8,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The READ half of the llm_call ledger — usage reporting.
- *
- * <p>Split from {@code usage.LlmCallWriteRepository} (which keeps only the insert) because the two halves
- * sit at different layers: recording a call is a substrate concern every LLM caller performs, while
- * aggregating calls into a bill is a surface one. Sharing a class made every caller of the recorder
- * depend on the reporting stack.
- *
- * <p><b>Why not {@code metric_rollup}.</b> That table meters CLOSED hour/day buckets of one
- * {@code llm_tokens} scalar — no lane, no model, no per-bucket token split — so it can say how many
- * tokens an org burned last hour and nothing about which part of the product burned them, at which
- * price, in which bucket. This ledger is written per call and read live, so the usage page is current
- * to the last call rather than lagging a bucket grain. The rollup stays the billing basis; this is the
- * breakdown.
+ * Read live from the per-call ledger, current to the last call; {@code metric_rollup} stays the billing basis but has
+ * no lane, model or bucket split.
  */
 @Repository
 public class LlmUsageQueryRepository {
@@ -32,13 +21,8 @@ public class LlmUsageQueryRepository {
     }
 
     /**
-     * The org's LLM usage over a window, optionally narrowed by a filter. {@code key} and {@code label}
-     * are always null for this total.
-     *
-     * <p>{@code costUsd} sums only the calls the pricing catalog held a rate for, so
-     * {@code unpricedCalls} is the size of the blind spot behind it: a non-zero count means the real
-     * cost is higher than the number shown, and the reader is told rather than quietly under-billed.
-     * {@code byoCostUsd} is the part of {@code costUsd} the customer's own provider keys paid for.
+     * A non-zero {@code unpricedCalls} means the real cost is higher than shown. {@code byoCostUsd} is the part of
+     * {@code costUsd} the customer's own provider keys paid for.
      */
     public record UsageSlice(
             @Nullable String key,
@@ -53,11 +37,7 @@ public class LlmUsageQueryRepository {
             BigDecimal byoCostUsd,
             long unpricedCalls) {}
 
-    /**
-     * One {@code (bucket, group)} cell of the usage timeseries. Carries the chartable measures only —
-     * the four token buckets, their total, the call count and cost — because the funding split and the
-     * unpriced-call count are read once off the window total, not per bar.
-     */
+    /** The funding split and unpriced count are read once off the window total, not per bar. */
     public record UsageCell(
             String bucketStart,
             String key,
@@ -70,10 +50,7 @@ public class LlmUsageQueryRepository {
             long totalTokens,
             BigDecimal costUsd) {}
 
-    /**
-     * The aggregate select list of the window total: the four token buckets, the derived total, the
-     * cost and its BYO share, and the unpriced-call count.
-     */
+    /** One constant so every view agrees on what "total tokens" and "cost" mean. */
     private static final String AGGREGATES = """
             COUNT(*) AS calls,
             COALESCE(SUM(c.input_tokens), 0) AS input_tokens,
@@ -86,13 +63,8 @@ public class LlmUsageQueryRepository {
             COUNT(*) FILTER (WHERE c.cost_usd IS NULL) AS unpriced_calls""";
 
     /**
-     * The window every read shares: the org's projects, over {@code [from, to)}, optionally narrowed to
-     * one lane / project / model. Either bound may be open ({@code null} → unbounded on that side),
-     * matching {@code MetricRollupRepository.orgTotals}; a null filter component drops that predicate.
-     *
-     * <p>Lane and model are compared against {@code COALESCE(col, '')} because the empty string is a
-     * real key on both axes — a call that reported no model groups under {@code ''} in the model
-     * series, so filtering by that key has to match the same rows.
+     * Lane and model compare against {@code COALESCE(col, '')} because the empty string is a real key that the model
+     * series groups under.
      */
     private static final String ORG_WINDOW = """
             FROM llm_call c
@@ -104,7 +76,6 @@ public class LlmUsageQueryRepository {
               AND (:project::text IS NULL OR c.project_id = :project::text)
               AND (:model::text IS NULL OR COALESCE(c.model, '') = :model::text)""";
 
-    /** The org's whole-period total, honouring {@code filter} — one slice with a null key. */
     public UsageSlice orgTotal(String orgId, @Nullable String from, @Nullable String to, LlmUsageFilter filter) {
         List<UsageSlice> one = query(
                 "SELECT NULL::text AS key, NULL::text AS label, " + AGGREGATES + "\n" + ORG_WINDOW,
@@ -115,26 +86,10 @@ public class LlmUsageQueryRepository {
         return one.get(0);
     }
 
-    // ---- read: per-subject spend (what one unit of work cost) ----------------------------------
-
-    /**
-     * One unit of work and what it cost — a triage of one finding, for the launch case.
-     *
-     * @param subjectId the ledger's {@code subject_id}; for triage, a {@code behavior_finding} id
-     * @param runs how many sandbox runs booked against it. Normally one; more than one means the finding
-     *     was re-triaged, which is itself worth seeing on a spend page.
-     */
+    /** @param runs more than one means the finding was re-triaged */
     public record SubjectSpend(
             String subjectId, long runs, long totalTokens, BigDecimal costUsd, long unpricedRuns, String lastAt) {}
 
-    /**
-     * The org's spend per subject of {@code subjectKind}, costliest first — "which rulings cost what".
-     *
-     * <p>This is the half of launch H2 the lane alone cannot answer. The lane total says the triage agent cost a
-     * project $40 this week; this says across how many rulings, and therefore what one ruling costs — the
-     * number H3's question ("is an agent session per distinct cause the right price for a filter?") turns
-     * on, and the evidence H4 wants before anyone decides whether to cap.
-     */
     public List<SubjectSpend> bySubject(
             String orgId, @Nullable String from, @Nullable String to, String subjectKind, int limit) {
         return jdbc.sql("SELECT c.subject_id AS subject_id,\n"
@@ -165,12 +120,6 @@ public class LlmUsageQueryRepository {
                 .list();
     }
 
-    // ---- read: bucketed timeseries (the usage chart) -------------------------------------------
-
-    /**
-     * The chartable measures per bucket. Narrower than {@link #AGGREGATES} on purpose — the BYO
-     * share and the unpriced-call count are window-level footnotes, not per-bar values.
-     */
     private static final String CELL_AGGREGATES = """
             COUNT(*) AS calls,
             COALESCE(SUM(c.input_tokens), 0) AS input_tokens,
@@ -181,19 +130,13 @@ public class LlmUsageQueryRepository {
             COALESCE(SUM(c.cost_usd), 0) AS cost_usd""";
 
     /**
-     * Bucket boundaries are cut in UTC ({@code created_at AT TIME ZONE 'UTC'}) rather than in whatever
-     * the session timezone happens to be, so the same window returns the same bars from any connection,
-     * and rendered as an explicit {@code Z} instant so {@link #seriesAxis} and the cells agree
-     * character-for-character on a bucket's identity.
+     * Cut in UTC so every connection returns the same bars, rendered with an explicit {@code Z} so {@link #seriesAxis}
+     * matches the cells character for character.
      */
     private static final String BUCKET_START =
             "to_char(date_trunc(:grain::text, c.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')";
 
-    /**
-     * The org's usage per {@code grain} bucket, cut by {@code grouping} and narrowed by {@code filter}.
-     * Returns only buckets that have calls — {@link #seriesAxis} supplies the full axis, so a quiet
-     * bucket renders as a gap rather than being missing.
-     */
+    /** Only buckets with calls; {@link #seriesAxis} supplies the full axis. */
     public List<UsageCell> series(
             String orgId,
             String from,
@@ -226,11 +169,7 @@ public class LlmUsageQueryRepository {
                 .list();
     }
 
-    /**
-     * Every bucket start in {@code [from, to)} at {@code grain}, ascending — the chart's x-axis. Built
-     * in SQL off the same {@code date_trunc} the cells use so a week never starts on a different day in
-     * the axis than in the data.
-     */
+    /** Built off the same {@code date_trunc} as the cells, so a week never starts on a different day. */
     public List<String> seriesAxis(String from, String to, LlmUsageGrain grain) {
         return jdbc.sql("""
                         SELECT to_char(g, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS bucket_start
@@ -247,7 +186,7 @@ public class LlmUsageQueryRepository {
                 .list();
     }
 
-    /** The grouping's series key — always non-null on the wire, so the empty string carries "none of these". */
+    /** Never null on the wire; the empty string carries "none of these". */
     private static String keyExpr(LlmUsageGrouping grouping) {
         return switch (grouping) {
             case NONE -> "''::text";
@@ -257,7 +196,6 @@ public class LlmUsageQueryRepository {
         };
     }
 
-    /** The grouping's display label where the server knows one the client cannot derive from the key. */
     private static String labelExpr(LlmUsageGrouping grouping) {
         return grouping == LlmUsageGrouping.PROJECT ? "p.name" : "NULL::text";
     }

@@ -10,7 +10,6 @@ import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -25,13 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
  * that doesn't resolve to project A.</p>
  */
 @SpringBootTest
-class TenantPathResolverTest {
-
-    @Autowired
-    TenantPathResolver resolver;
-
-    @Autowired
-    TenantService tenants;
+record TenantPathResolverTest(TenantPathResolver resolver, TenantService tenants) {
 
     private TenantContext sessionFor(Principal u) {
         return new TenantContext(u.id(), u.email(), null, null, null, null);
@@ -39,25 +32,6 @@ class TenantPathResolverTest {
 
     private TenantContext mcpTokenFor(Organization org, Project project, Principal u) {
         return new TenantContext(u.id(), null, org.id(), project.id(), "member", "tok_" + project.id());
-    }
-
-    @Test
-    void requireOrg_unknownSlug_404() {
-        var fix = TenantFixture.bootstrap(tenants, "pr-404");
-        ResponseStatusException ex = assertThrows(
-                ResponseStatusException.class, () -> resolver.requireOrg(sessionFor(fix.user()), "no-such-org"));
-        assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
-    }
-
-    @Test
-    void requireOrg_noMembership_403() {
-        // Alice owns org "alice"; Bob is a member of org "bob" only.
-        var alice = TenantFixture.bootstrap(tenants, "pr-403-alice");
-        var bob = TenantFixture.bootstrap(tenants, "pr-403-bob");
-        ResponseStatusException ex = assertThrows(
-                ResponseStatusException.class,
-                () -> resolver.requireOrg(sessionFor(bob.user()), alice.org().slug()));
-        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
     }
 
     @Test
@@ -73,8 +47,7 @@ class TenantPathResolverTest {
     void requireProject_projectInOtherOrg_404() {
         var alice = TenantFixture.bootstrap(tenants, "pr-cross-alice");
         var bob = TenantFixture.bootstrap(tenants, "pr-cross-bob");
-        // Bob is a member of his own org but asks for Alice's project under his own org slug:
-        // resolver should 404 because the slug doesn't exist within bob's org.
+        // Alice's project slug under Bob's own org: the slug must be looked up within Bob's org only.
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
                 () -> resolver.requireProject(

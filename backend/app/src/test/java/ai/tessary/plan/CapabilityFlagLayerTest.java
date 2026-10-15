@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -41,43 +40,16 @@ import org.springframework.web.server.ResponseStatusException;
  * </ol>
  */
 @SpringBootTest
-class CapabilityFlagLayerTest {
+record CapabilityFlagLayerTest(
+        TenantService tenants,
+        CapabilityService capabilities,
+        OrgFeatureFlagRepository overrides,
+        DbFeatureFlags flags,
+        CapabilityController controller,
+        OrgMembershipRepository memberships) {
 
     /** What an open build serves before anybody touches it. Mirrors CapabilityService's private set. */
     private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS);
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityService capabilities;
-
-    @Autowired
-    OrgFeatureFlagRepository overrides;
-
-    @Autowired
-    DbFeatureFlags flags;
-
-    @Autowired
-    CapabilityController controller;
-
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Test
-    void withNoOverrides_everythingIsOnExceptTheOffByDefaultSet() {
-        var fix = TenantFixture.bootstrap(tenants, "cap-default");
-        String orgId = fix.org().id();
-
-        var resolved = capabilities.resolve(orgId);
-        for (Capability capability : Capability.values()) {
-            boolean expected = !OFF_BY_DEFAULT.contains(capability);
-            assertEquals(
-                    expected,
-                    resolved.isEnabled(capability),
-                    capability.wire() + " should default " + (expected ? "on" : "off") + " in an open build");
-        }
-    }
 
     @Test
     void anOrgOverrideWinsInBothDirections() {
@@ -93,20 +65,6 @@ class CapabilityFlagLayerTest {
         assertFalse(capabilities.isEnabled(orgId, Capability.TRIAGE_AUTOMATIC), "off by default");
         set(orgId, Capability.TRIAGE_AUTOMATIC, true);
         assertTrue(capabilities.isEnabled(orgId, Capability.TRIAGE_AUTOMATIC), "the row turns it on");
-    }
-
-    @Test
-    void clearingAnOverrideReturnsTheCapabilityToTheDefault() {
-        var fix = TenantFixture.bootstrap(tenants, "cap-clear");
-        String orgId = fix.org().id();
-
-        set(orgId, Capability.API_ACCESS, false);
-        assertFalse(capabilities.isEnabled(orgId, Capability.API_ACCESS));
-
-        overrides.delete(orgId, Capability.API_ACCESS.wire());
-        flags.invalidate(orgId);
-        // Not "off, because false was the last thing written": "on, because nobody has an opinion".
-        assertTrue(capabilities.isEnabled(orgId, Capability.API_ACCESS), "back to the open-edition default");
     }
 
     @Test

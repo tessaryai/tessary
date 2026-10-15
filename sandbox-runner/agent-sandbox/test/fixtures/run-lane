@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * rca.js or triage.js run the way the launcher runs them: a real process over a real input.json, with
+ * A lane of lane.js run the way the launcher runs it: a real process over a real input.json, with
  * test/fixtures/fake-opencode on PATH as `opencode`. No extension, so node --test skips it.
  *
  * Async, so tests that each wait out a 5s guard can run side by side. `pathFor(binDir)` sets the
@@ -16,7 +16,7 @@ const { makeFakeOpencodeBin } = require('./fake-opencode');
 
 const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 
-async function runLane(script, input, {
+async function runLane(lane, input, {
   reply = '{"verdict":"supported"}',
   env = {},
   pathFor = (bin) => `${bin}${path.delimiter}${process.env.PATH}`,
@@ -36,7 +36,7 @@ async function runLane(script, input, {
   }));
   const start = Date.now();
   const result = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(__dirname, '..', '..', script), inputPath], {
+    const child = spawn(process.execPath, [path.join(__dirname, '..', '..', 'lane.js'), lane, inputPath], {
       env: {
         WORK_DIR: workDir,
         PATH: pathFor(binDir),

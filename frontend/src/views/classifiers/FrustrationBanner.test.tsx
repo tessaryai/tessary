@@ -8,48 +8,26 @@ import { renderRoute } from "../../test/render";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import type { Classifier, ModelSettingsResponse, ProviderCredentialListResponse } from "../../api/types";
 import { FrustrationBanner } from "./FrustrationBanner";
+import { api, orgApi } from "../../test/api";
 
-const getModelSettings = vi.fn<() => Promise<ModelSettingsResponse>>();
-const listProviderCredentials = vi.fn<() => Promise<ProviderCredentialListResponse>>();
-
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({
-      orgSlug: "acme",
-      projectSlug: "default",
-      api: { base: "/api/orgs/acme/projects/default", getModelSettings },
-      orgApi: { base: "/api/orgs/acme", listProviderCredentials },
-    }),
-  };
-});
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 afterEach(() => {
   localStorage.clear();
-  getModelSettings.mockReset();
-  listProviderCredentials.mockReset();
 });
 
 const SETTINGS = {
   groups: [],
   lanes: [
     {
-      id: "frustration",
-      label: "Frustration",
-      description: "",
-      group: "decision_calls",
+      id: "frustration", label: "Frustration", description: "", group: "decision_calls",
       provider_options: [
         {
-          provider: "OPENROUTER",
-          label: "OpenRouter",
-          model_keys: ["OPENROUTER:~typesafe/jev-latest"],
+          provider: "OPENROUTER", label: "OpenRouter", model_keys: ["OPENROUTER:~typesafe/jev-latest"],
           default_model_key: "OPENROUTER:~typesafe/jev-latest",
         },
         {
-          provider: "TYPESAFE",
-          label: "TypeSafe",
-          model_keys: ["TYPESAFE:jev-latest"],
+          provider: "TYPESAFE", label: "TypeSafe", model_keys: ["TYPESAFE:jev-latest"],
           default_model_key: "TYPESAFE:jev-latest",
         },
       ],
@@ -57,11 +35,7 @@ const SETTINGS = {
       automatic: true,
     },
   ],
-  models: [],
-  catalog_models: [],
-  rates: [],
-  settings: [],
-  configured_providers: [],
+  models: [], catalog_models: [], rates: [], settings: [], configured_providers: [],
 } as ModelSettingsResponse;
 
 function frustration(enabled: boolean): Classifier {
@@ -72,8 +46,8 @@ const renderBanner = (enabled = false) => renderRoute(<FrustrationBanner classif
 
 describe("FrustrationBanner", () => {
   it("offers either provider's key while the org has none", async () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [] });
     renderBanner();
 
     screen.getByText("Frustration classifier is off");
@@ -81,8 +55,8 @@ describe("FrustrationBanner", () => {
   });
 
   it("names the key the org already holds", async () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({
       credentials: [{ provider: "TYPESAFE", has_api_key: true }] as ProviderCredentialListResponse["credentials"],
     });
     renderBanner();
@@ -91,16 +65,16 @@ describe("FrustrationBanner", () => {
   });
 
   it("is not shown once Frustration is on", () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [] });
     renderBanner(true);
 
     expect(screen.queryByText("Frustration classifier is off")).toBeNull();
   });
 
   it("hides on Not now and stays hidden for this project", () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [] });
     renderBanner();
 
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
@@ -113,8 +87,8 @@ describe("FrustrationBanner", () => {
   });
 
   it("opens the enable modal", async () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [] });
     renderBanner();
 
     fireEvent.click(screen.getByRole("button", { name: "Enable Frustration" }));
@@ -129,8 +103,8 @@ describe("FrustrationBanner", () => {
     const spy = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
       throw new Error("denied");
     });
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [] });
     renderBanner();
 
     expect(screen.getByText("Frustration classifier is off")).toBeTruthy();

@@ -6,14 +6,8 @@ import { useTenant } from "../tenant/TenantContext";
 import { useCapabilities } from "./useCapabilities";
 
 /**
- * The capability gate. While the capability read is loading (see {@link useCapabilities}, fail-closed),
- * renders a loading state rather than deciding — otherwise a hard navigation or reload to a gated route
- * reads `isEnabled` as false before the org's capabilities have arrived and redirects away before it ever
- * gets a real answer. Once the read settles: when the org has `capability`, renders `children`; when it
- * does not, redirects to Triage, which is never gated (so no redirect loop).
- *
- * There is ONE gating axis now: this one. `CapabilityService.require` on each gated endpoint is the
- * authority; this only keeps a user from reaching a surface their org doesn't have.
+ * Renders a loading state until the capability read settles, or a reload would redirect away first.
+ * Without the capability it redirects to Triage, which is never gated. The server is the authority.
  */
 export function CapabilityGate({
   capability,

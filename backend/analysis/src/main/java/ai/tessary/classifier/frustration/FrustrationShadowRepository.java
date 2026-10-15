@@ -8,15 +8,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * {@code frustration_shadow}: the shadow decision model's answer beside each Frustration assessment.
- * Insert only, idempotent on {@code assessment_id}. The backlog is every assessment that still holds
- * its request body (retention nulls it with the span payload) and has no shadow row yet, oldest first,
- * so a turn the shadow never reached before its text aged out is simply never shadowed.
+ * {@code frustration_shadow}: the shadow model's answer beside each Frustration assessment, insert-only and idempotent
+ * on {@code assessment_id}. The backlog holds only assessments whose request body retention has not nulled yet, so a
+ * turn that aged out first is never shadowed.
  */
 @Repository
 public class FrustrationShadowRepository {
 
-    /** An assessment the shadow has not answered yet, with the exact body its model was sent. */
     public record Backlog(
             String assessmentId,
             String projectId,
@@ -27,12 +25,10 @@ public class FrustrationShadowRepository {
             boolean referenceFrustrated) {}
 
     /**
-     * One shadow row.
-     *
-     * @param score the shadow's probability of {@code unhappy_with_assistant}; null when it refused the request
-     * @param frustrated {@code score} against the classifier's threshold at scoring time; null with a null score
-     * @param referenceFrustrated the assessment's own flag, copied so the pair reads from one row
-     * @param responseJson the shadow's answer, or its refusal
+     * @param score probability of {@code unhappy_with_assistant}; null when the shadow refused @param frustrated
+     * {@code score} against the threshold at scoring time; null with a null score @param referenceFrustrated the
+     * assessment's own flag, copied so the pair reads from one row @param responseJson the shadow's answer, or its
+     * refusal
      */
     public record ShadowRow(
             String id,
@@ -48,7 +44,7 @@ public class FrustrationShadowRepository {
             String responseJson,
             @Nullable Integer latencyMs) {}
 
-    /** How the two models have agreed so far, over every project. */
+    /** Agreement across every project. */
     public record Summary(long scored, long agree, long referenceOnly, long shadowOnly, long refused) {}
 
     private final JdbcClient jdbc;
@@ -57,7 +53,6 @@ public class FrustrationShadowRepository {
         this.jdbc = jdbc;
     }
 
-    /** The oldest {@code limit} assessments the shadow has not answered and whose request body still exists. */
     public List<Backlog> backlog(int limit) {
         return jdbc.sql("""
                         SELECT a.id, a.project_id, a.classifier_id, a.trace_id, a.scorer_version,
@@ -80,7 +75,7 @@ public class FrustrationShadowRepository {
                 .list();
     }
 
-    /** Insert {@code r} unless its assessment already has a shadow row. Returns whether it was written. */
+    /** Returns whether it was written. */
     public boolean insert(ShadowRow r) {
         return jdbc.sql("""
                         INSERT INTO frustration_shadow (id, assessment_id, project_id, classifier_id, trace_id,
@@ -105,7 +100,7 @@ public class FrustrationShadowRepository {
                 > 0;
     }
 
-    /** Agreement so far: rows with a score, split by the two flags; refusals counted apart. */
+    /** Refusals are counted apart. */
     public Summary summary() {
         return jdbc.sql("""
                         SELECT COUNT(*) FILTER (WHERE score IS NOT NULL) AS scored,

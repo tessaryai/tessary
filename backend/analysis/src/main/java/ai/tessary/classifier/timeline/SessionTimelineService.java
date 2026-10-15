@@ -26,8 +26,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Loads the {@link SessionTimeline} of a session from the substrate: the session's traces latest end first, a page at
- * a time, each trace whole (its spans, payloads and tool calls), so the builder derives every trace on its own.
+ * Loads a session's traces latest end first, a page at a time, each trace whole, so the builder derives every trace on
+ * its own.
  */
 @Service
 public class SessionTimelineService {
@@ -54,42 +54,29 @@ public class SessionTimelineService {
         this.toolCalls = toolCalls;
     }
 
-    /** The whole timeline of the session. */
     public SessionTimeline load(String projectId, String sessionId) {
         return read(projectId, sessionId, Long.MAX_VALUE, null);
     }
 
     /**
-     * {@code load(projectId, sessionId).tail(maxBytes)}, without reading the traces that cannot reach it: the same
-     * events, with the same ids, sizes and data, numbered from 0. Reads whole traces latest end first and stops before a
-     * trace when the events loaded after its end already weigh more than {@code maxBytes}: every event of that trace
-     * and of the traces after it is at or before that end, so it sorts before the first event the tail leaves out. The
-     * traces are read a page at a time, the first page one trace and each next page twice the last, so the spans of a
-     * trace the tail leaves out are read only in the last page. The trace rows are read the same way, so a tail of a
-     * session with many traces reads only its newest rows. A trace that is not settled has no end yet, since a span may
-     * still arrive, so it is always read.
-     *
-     * <p>The one event a trace row does not bound: a user message whose carrying span never ended, in a settled trace,
-     * which the builder places at the start of that span or of a span above it; when that start is later than the
-     * trace's latest span end, a tail can miss it.
+     * The same events as {@code load(...).tail(maxBytes)}, without reading traces that cannot reach the tail: stops
+     * before a settled trace once the events after its end already exceed {@code maxBytes}. Unsettled traces are always
+     * read. Known gap: a user message whose span never ended, placed later than its settled trace's latest span end,
+     * can be missed.
      */
     public SessionTimeline loadTail(String projectId, String sessionId, long maxBytes) {
         return read(projectId, sessionId, maxBytes, null);
     }
 
     /**
-     * {@code load(projectId, sessionId)} with only its events at or before {@code through}, then {@code tail(maxBytes)}:
-     * the start of the full timeline, numbered from 0. The order puts every event at or before an instant ahead of
-     * every event after it, so a match that ends at or before {@code through} is the same match on this timeline as
-     * on the whole one; a caller reaches the old part of a long session with it, where {@link #loadTail} keeps only the
-     * newest. Reads as {@link #loadTail} does, and does not read the spans of a settled trace that starts after
-     * {@code through}, since none of its events can be at or before it.
+     * Only events at or before {@code through}, then the tail, so a match ending at or before {@code through} is the
+     * same match as on the whole timeline. Skips the spans of settled traces starting after {@code through}.
      */
     public SessionTimeline loadTailThrough(String projectId, String sessionId, long maxBytes, Instant through) {
         return read(projectId, sessionId, maxBytes, through);
     }
 
-    /** The tail of at most {@code maxBytes}; the load line counts the events it returns, not the events it read. */
+    /** The load line counts the events it returns, not the events it read. */
     private SessionTimeline read(String projectId, String sessionId, long maxBytes, @Nullable Instant through) {
         Instant start = Instant.now();
         SessionTraces source = new SessionTraces(traces, projectId, sessionId);
@@ -143,9 +130,8 @@ public class SessionTimelineService {
     }
 
     /**
-     * A session's traces latest end first, a page at a time: the traces with no settled end in one read, then the ended
-     * ones a page at a time after the last one read, so a tail that stops early never reads the older trace rows. A
-     * trace that settles during the read could come back in an ended page; it is read once.
+     * Unsettled traces in one read, then ended ones a page at a time. A trace that settles during the read is read
+     * once.
      */
     private static final class SessionTraces {
         private final TraceV2Repository traces;
@@ -163,7 +149,6 @@ public class SessionTimelineService {
             this.unended = new ArrayDeque<>(traces.listUnendedSessionTraces(projectId, sessionId));
         }
 
-        /** Up to {@code n} traces not returned before; fewer only when none remain. */
         List<SessionTrace> next(int n) {
             List<SessionTrace> page = new ArrayList<>(n);
             while (page.size() < n && !unended.isEmpty()) {
@@ -183,23 +168,19 @@ public class SessionTimelineService {
         }
     }
 
-    /**
-     * Whether the trace can hold an event at or before {@code through}: every trace with no bound, a trace that has not
-     * settled (its start can still move earlier), and a settled one that starts at or before it.
-     */
+    /** An unsettled trace's start can still move earlier. */
     private static boolean reaches(SessionTrace trace, @Nullable Instant through) {
         return through == null
                 || !trace.settled()
                 || !Instant.parse(trace.startedAt()).isAfter(through);
     }
 
-    /** Whether the events loaded after the trace's end already fill the tail, so the trace and the ones after it are not read. */
     private static boolean enough(
             List<SessionTimelineBuilder.Derived> derived, long bytes, long maxBytes, SessionTrace trace) {
         return bytes > maxBytes && bytesAfter(derived, trace.settledEnd()) > maxBytes;
     }
 
-    /** The summed size of the events later than {@code end}; 0 for a trace with no end, so that trace is read. */
+    /** 0 for a trace with no end, so that trace is read. */
     private static long bytesAfter(List<SessionTimelineBuilder.Derived> derived, @Nullable String end) {
         if (end == null) return 0;
         Instant bound = Instant.parse(end);
@@ -210,7 +191,6 @@ public class SessionTimelineService {
         return sum;
     }
 
-    /** The spans of a page of traces, each with its payload and its first tool call, grouped by trace. */
     private Map<String, List<TimelineSpan>> timelineSpans(String projectId, List<SessionTrace> page) {
         if (page.isEmpty()) return Map.of();
         List<String> ids = page.stream().map(SessionTrace::id).toList();

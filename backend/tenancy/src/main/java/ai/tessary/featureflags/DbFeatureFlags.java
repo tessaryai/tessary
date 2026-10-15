@@ -8,30 +8,19 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * {@link FeatureFlags} over {@code org_feature_flag}, this build's flag adapter. A build may wire a
- * different adapter behind the same interface; the resolution layer above cannot tell them apart.
- *
- * <p>It holds no defaults. A capability with no row for this org returns empty, "nobody has an opinion",
- * and {@code CapabilityService} supplies the default. An empty table therefore serves the same
- * configuration as a table nobody has touched, which is what makes a fresh self-hosted install a
- * coherent product rather than a dark one.
- *
- * <p>Resolving one capability payload asks about all 21 capabilities, and the capability interceptor
- * asks again on every gated request, so this caches: one whole-org read per {@link #TTL} rather than a
- * SELECT per request. {@link #invalidate} makes an operator's toggle immediate on this node, so the TTL
- * only bounds how long a different node serves the old answer.
+ * {@link FeatureFlags} over {@code org_feature_flag}. Holds no defaults: no row returns empty and
+ * {@code CapabilityService} supplies the default, so an empty table is a coherent product. Caches one whole-org read
+ * per {@link #TTL}; {@link #invalidate} makes a toggle immediate on this node.
  */
 public class DbFeatureFlags implements FeatureFlags {
 
-    /** How long one org's override map is reused before it is re-read. */
     static final Duration TTL = Duration.ofSeconds(10);
 
     private final OrgFeatureFlagRepository overrides;
 
     /**
-     * Keyed by org id. Nothing evicts, so this is unbounded in principle, but it is bounded in practice by
-     * the org count, which is one on a self-hosted install and small on ours. No caching library is in use
-     * anywhere else in this codebase, so this is a plain map on purpose rather than a Caffeine cache.
+     * Unbounded in principle, bounded in practice by the org count. A plain map since no caching library is used
+     * elsewhere.
      */
     private final Map<String, Entry> cache = new ConcurrentHashMap<>();
 
@@ -43,18 +32,13 @@ public class DbFeatureFlags implements FeatureFlags {
     public Optional<Boolean> override(String key, FlagContext context) {
         String orgId = context.orgId();
         if (orgId == null || orgId.isBlank()) {
-            // A global evaluation. There is no global row and deliberately no global table: an override is
-            // something an organization states about itself, so a global evaluation has no opinion and
-            // lands the caller on the default.
+            // No global row by design: an override is something an organization states about itself.
             return Optional.empty();
         }
         return Optional.ofNullable(forOrg(orgId).get(key));
     }
 
-    /**
-     * Drop one org's cached map so the next read re-loads it. Called by the write path, so an operator's
-     * toggle bites on this node immediately instead of up to {@link #TTL} later.
-     */
+    /** Called by the write path. */
     public void invalidate(String orgId) {
         cache.remove(orgId);
     }
@@ -69,6 +53,5 @@ public class DbFeatureFlags implements FeatureFlags {
         return entry.flags();
     }
 
-    /** One org's whole override map plus the instant it stops being reused. */
     private record Entry(Map<String, Boolean> flags, Instant expiresAt) {}
 }

@@ -13,25 +13,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Lists {@code GET https://api.anthropic.com/v1/models} — native Anthropic auth ({@code x-api-key} +
- * {@code anthropic-version}), NOT the OpenAI-compat shape {@link OpenAiCompatModelLister} covers,
- * because Anthropic's direct API never spoke that dialect. Response
- * shape: {@code {"data":[{"id":"...", "display_name":"..."}], "has_more":bool, "last_id":"..."}} — a
- * cursor-paginated list, unlike OpenAI's single page; {@link #MAX_PAGES} bounds the walk so a vendor
- * bug in {@code has_more} cannot loop this call forever.
- *
- * <p>Single-maker like the rest of the direct providers, so returned unfiltered — every id Anthropic
- * reports is offered, with {@code vendor} fixed to {@code "Anthropic"}.
+ * Lists {@code GET https://api.anthropic.com/v1/models} with native Anthropic auth; the direct API never spoke the
+ * OpenAI-compat dialect. Cursor-paginated, with {@link #MAX_PAGES} bounding the walk so a {@code has_more} bug cannot
+ * loop forever. Returned unfiltered, with {@code vendor} fixed to {@code "Anthropic"}.
  */
 public final class AnthropicModelLister implements ProviderModelLister {
 
     private static final String DEFAULT_BASE_URL = "https://api.anthropic.com/v1/models";
 
-    /** Anthropic's stable API version header. */
     private static final String ANTHROPIC_VERSION = "2023-06-01";
 
-    /** A page is up to 1,000 models; six pages is generous headroom over Anthropic's real catalog size
-     *  while still bounding a buggy/malicious {@code has_more} to a fixed number of round trips. */
+    /** Pages hold up to 1,000 models, so six is generous headroom while bounding a buggy {@code has_more}. */
     private static final int MAX_PAGES = 6;
 
     private final HttpClient http;
@@ -39,8 +31,7 @@ public final class AnthropicModelLister implements ProviderModelLister {
     private final String baseUrl;
     private final Duration timeout;
 
-    /** @param timeout per-call ceiling on each page request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
+    /** @param timeout per-page ceiling */
     public AnthropicModelLister(HttpClient http, ObjectMapper mapper, Duration timeout) {
         this(http, mapper, DEFAULT_BASE_URL, timeout);
     }
@@ -54,9 +45,7 @@ public final class AnthropicModelLister implements ProviderModelLister {
 
     @Override
     public List<ProviderModel> list(ResolvedCredential credential) {
-        // A local rather than two separate credential.apiKey() calls: spotbugs cannot correlate two
-        // invocations of the same accessor as returning the same (or non-null) value, and flags the
-        // second as a possible NPE even though this null-check already guards it.
+        // A local because spotbugs flags a repeated accessor call as a possible NPE.
         String apiKey = credential.apiKey();
         if (apiKey == null || apiKey.isBlank()) {
             throw new ModelListingException("no api key configured for this credential", null);

@@ -29,7 +29,6 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -41,31 +40,17 @@ import org.springframework.boot.test.context.SpringBootTest;
  * not move" is load-bearing.
  */
 @SpringBootTest
-class MetricFindingResolveIntegrationTest {
+record MetricFindingResolveIntegrationTest(
+        FindingService drift,
+        FindingRepository findings,
+        MetricBaselineRepository baselines,
+        BehaviorBaselineEventRepository events,
+        ClassifierRepository signals,
+        ClassifierService classifiers,
+        TenantService tenants) {
 
     /** Before anything the fixtures stamp, so a finding written twice reads as one running spell. */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
-
-    @Autowired
-    FindingService drift;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    BehaviorBaselineEventRepository events;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    TenantService tenants;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 

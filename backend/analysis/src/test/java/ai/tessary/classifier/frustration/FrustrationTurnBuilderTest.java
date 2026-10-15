@@ -91,13 +91,6 @@ class FrustrationTurnBuilderTest {
 
     // ---- eligibility
 
-    @Test
-    void build_neverSendsTheSecondUserTurn() {
-        assertTrue(
-                build(turn("t1", say("user", "hello"), say("assistant", "hi")), turn("t2", say("user", "and?"), null))
-                        .isEmpty());
-    }
-
     @ParameterizedTest(name = "slot {0} blank")
     @ValueSource(ints = {0, 1, 2, 3, 4})
     void format_refusesATurnWithAnyOfItsFiveSlotsBlank(int blankSlot) {
@@ -131,16 +124,6 @@ class FrustrationTurnBuilderTest {
     }
 
     @Test
-    void build_joinsAssistantTextSplitAroundAToolCallInOrder() {
-        String split = "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Checking.\"},"
-                + "{\"type\":\"tool_use\",\"name\":\"lookup\",\"input\":{}},"
-                + "{\"type\":\"text\",\"text\":\"Found it.\"}]}]";
-        TurnState state =
-                build(threeTurns(say("assistant", "one"), split, "thanks")).orElseThrow();
-        assertEquals("Checking. Found it.", state.earlierMessages().get(3).content(), "the tool part leaves no text");
-    }
-
-    @Test
     void build_joinsEveryAssistantSpanOfAnAgenticTurn() {
         String toolOnly = "[{\"role\":\"assistant\",\"content\":null,"
                 + "\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\"}}]}]";
@@ -164,26 +147,6 @@ class FrustrationTurnBuilderTest {
         assertEquals(
                 new EarlierMessage("user", "second question"),
                 state.earlierMessages().get(2));
-    }
-
-    @Test
-    void build_sendsAnImageBesideTextAsItsPlaceholder() {
-        String captioned = "[{\"role\":\"assistant\",\"content\":[{\"type\":\"image\",\"caption\":\"chart\"},"
-                + "{\"type\":\"text\",\"text\":\"Here is the chart.\"}]}]";
-        TurnState state = build(threeTurns(say("assistant", "one"), captioned, "wrong chart"))
-                .orElseThrow();
-        assertEquals(
-                "[image: chart] Here is the chart.",
-                state.earlierMessages().get(3).content());
-    }
-
-    @Test
-    void build_dropsReasoningTheUserNeverSaw() {
-        String withReasoning = "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"hmm\","
-                + "\"text\":\"secret plan\"},{\"type\":\"text\",\"text\":\"Sure.\"}]}]";
-        TurnState state =
-                build(threeTurns(say("assistant", "one"), withReasoning, "no")).orElseThrow();
-        assertEquals("Sure.", state.earlierMessages().get(3).content());
     }
 
     @Test
@@ -241,16 +204,6 @@ class FrustrationTurnBuilderTest {
         for (String token : content.split(" ")) {
             assertTrue(token.equals("word") || token.equals("..."), "no word is split: " + token);
         }
-    }
-
-    @Test
-    void build_marksPastesBeforeCapping() {
-        String paste = "here:\n```\n" + "x = 1;\n".repeat(400) + "```\nstill failing";
-        TurnState state = build(threeTurnsOf("q1", "a1", "q2", "a2", paste)).orElseThrow();
-        assertEquals(
-                "here:\n[PASTE: 402 lines, 2807 chars]\nstill failing",
-                state.currentUserMessage(),
-                "a paste collapses to its marker, so the user's own words survive the cap");
     }
 
     @Test

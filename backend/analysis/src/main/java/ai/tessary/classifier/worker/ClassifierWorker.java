@@ -17,8 +17,6 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
-import ai.tessary.gate.PreDeployCheckService;
-import ai.tessary.gate.PreDeployCheckService.ClassifierDiscovery;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.RepeatedFailureLogger;
@@ -49,20 +47,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * The async signal-detection worker. On an operational heartbeat it dead-letters poison jobs,
- * enqueues a sweep job per enabled signal for every project that has substrate observations, then
- * claims due jobs ({@code FOR UPDATE SKIP LOCKED}) and dispatches each to the bounded {@code
- * signalTaskExecutor}. Each sweep reads observations past the classifier's cursor, runs the
- * built-in detector, writes signal detections as verdicts idempotently, and advances the cursor.
- *
- * <p>This worker doesn't provision the catalog: which built-ins a project has is {@code
- * ClassifierCatalogWorker}'s job, over every active project. Which of them this worker sweeps is
- * scoped to "projects with observations," since a job on a project with no spans would be claimed
- * and dispatched to sweep an empty window every tick forever.
- *
- * <p>Strictly off the ingest hot path: it reads what the substrate write path produced and is
- * never hooked into {@code SubstrateWriter.enqueue}. The worker itself is always on, and every
- * project is seeded, so participation is decided only by which built-ins the tenant left enabled.
+ * The async classifier worker: each heartbeat dead-letters poison jobs, enqueues a sweep per enabled signal for
+ * projects with observations (a project with no spans would sweep an empty window forever), and dispatches claimed jobs
+ * ({@code FOR UPDATE SKIP LOCKED}) to the bounded {@code signalTaskExecutor}. Strictly off the ingest hot path.
  */
 @Component
 public class ClassifierWorker {
@@ -70,29 +57,18 @@ public class ClassifierWorker {
     private static final Logger log = LoggerFactory.getLogger(ClassifierWorker.class);
 
     private static final int MAX_CLAIM_ROUNDS = 10_000;
-    // Jobs claimed per round; the bounded signalTaskExecutor backpressures dispatch, so this only
-    // bounds how many job rows one UPDATE...SKIP LOCKED flips at once (not the per-sweep batch size).
+    // The bounded executor backpressures dispatch; this only bounds how many job rows one claim flips.
     private static final int CLAIM_BATCH = 5;
 
     /**
-     * The kinds whose sweep keeps paging inside one claim until it reaches the head of the stream.
-     *
-     * <p>A backlog for these arrives all at once rather than a page a minute: a backfill upload lands months
-     * of spans in one go, and Malformed Output rewinds to the start of history the moment a call site's schema
-     * arrives. At one page a tick, a 250,000-span project takes most of a day to catch up. Both are
-     * deterministic and cheap per span.
-     *
-     * <p>The encoder-backed kind (groundedness) drains too, but at {@code encoder-batch-size} a page rather than
-     * {@code batch-size}: each observation is a model call, so a page is sized to finish well inside the
-     * lease on a CPU encoder, the cursor lands after every page, and the scorer holds at most {@code
-     * tessary.observer.encoder.max-inflight} requests open and backs off on a 429 — so a backlog reaches
-     * the encoder at the pace it can take, never as one tick's worth of calls.
+     * Kinds whose backlog arrives at once (a backfill, or Malformed Output rewinding when a schema lands), so a sweep
+     * keeps paging inside one claim until the head. Groundedness drains at {@code encoder-batch-size} pages so each
+     * finishes inside the lease, and the scorer caps in-flight requests.
      */
     private static final Set<String> DRAIN_TO_HEAD = Set.of(
             BuiltInDetector.Kind.SECRET_LEAK, BuiltInDetector.Kind.MALFORMED_OUTPUT, BuiltInDetector.Kind.GROUNDEDNESS);
 
-    // A job stuck failing every tick gets one full stacktrace, then a "still failing" summary
-    // every 30 occurrences (~30 ticks at the default 60s heartbeat) instead of one per tick.
+    // A job failing every tick gets one stacktrace, then a summary every 30 occurrences.
     private static final int SWEEP_FAILURE_SUMMARY_EVERY = 30;
 
     private final ClassifierService signalService;
@@ -102,17 +78,11 @@ public class ClassifierWorker {
     private final ClassifierArming arming;
     private final SubstrateReadRepository substrate;
     private final BuiltInClassifierCatalog catalog;
-    private final PreDeployCheckService preDeployChecks;
-    /**
-     * Every classifier sweep on this classpath, by the detector kind it claims. The worker doesn't
-     * know which classifiers exist; a classifier attaches by being on the classpath.
-     */
+    /** A classifier attaches by being on the classpath. */
     private final ClassifierSweepRegistry sweeps;
 
-    /** The grain each detector kind sweeps at; see {@link SweepRouting}. */
     private final SweepRouting routing;
 
-    /** Population work a classifier does once its sweep has caught up; see {@link ClassifierCatchUp}. */
     private final ObjectProvider<ClassifierCatchUp> catchUps;
 
     private final ClassifierProperties props;
@@ -130,7 +100,6 @@ public class ClassifierWorker {
             ClassifierArming arming,
             SubstrateReadRepository substrate,
             BuiltInClassifierCatalog catalog,
-            PreDeployCheckService preDeployChecks,
             ClassifierSweepRegistry sweeps,
             SweepRouting routing,
             ObjectProvider<ClassifierCatchUp> catchUps,
@@ -144,7 +113,6 @@ public class ClassifierWorker {
         this.arming = arming;
         this.substrate = substrate;
         this.catalog = catalog;
-        this.preDeployChecks = preDeployChecks;
         this.sweeps = sweeps;
         this.routing = routing;
         this.catchUps = catchUps;
@@ -153,11 +121,7 @@ public class ClassifierWorker {
         this.executor = executor;
     }
 
-    /**
-     * Fail the boot when a detector kind has both a {@link BuiltInDetector} and a {@link
-     * ClassifierSweep}. The worker dispatches a kind through one of them, so the other would stop
-     * scoring with nothing to say so.
-     */
+    /** The worker dispatches a kind through only one of them, so the other would silently stop scoring. */
     @PostConstruct
     void validateRouting() {
         List<String> both = sweeps.registeredKinds().stream()
@@ -172,19 +136,15 @@ public class ClassifierWorker {
     }
 
     /**
-     * The scheduled heartbeat. {@code tessary.classifier.initial-delay-ms} defaults to 0, so the first tick runs at
-     * startup; a test suite that drives {@code tick()} itself delays it past the run, since a long heartbeat alone
-     * still fires once at startup.
+     * The default initial delay is 0, so the first tick runs at startup; tests that drive {@code tick()} delay it past
+     * the run.
      */
     @Scheduled(
             fixedDelayString = "${tessary.classifier.heartbeat-ms:60000}",
             initialDelayString = "${tessary.classifier.initial-delay-ms:0}")
     public void tick() {
-        // Spring's built-in @Scheduled observability already opens a span for this invocation
-        // (visible in Tempo as "task signalWorker.tick"), but that span never reaches MDC on the
-        // scheduler thread by itself. Bind it now, before any job is dispatched, so sweep() logs
-        // (via MdcTaskDecorator on signalTaskExecutor) carry the same trace/span id and pivot to
-        // this tick's trace in Grafana.
+        // Spring's @Scheduled span never reaches MDC on the scheduler thread by itself; bind it so sweep logs carry
+        // this tick's trace id.
         try (LogContext ignored = traceBridge.bindCurrentTrace()) {
             tickInner();
         }
@@ -192,7 +152,7 @@ public class ClassifierWorker {
 
     private void tickInner() {
         try {
-            int exhausted = jobs.failExhausted(props.getMaxAttempts());
+            int exhausted = jobs.failExhausted(props.maxAttempts());
             if (exhausted > 0) {
                 StructuredLog.error(log, Markers.OPS, "signal.dead-lettered")
                         .field("count", exhausted)
@@ -228,7 +188,7 @@ public class ClassifierWorker {
         for (int round = 0; round < MAX_CLAIM_ROUNDS; round++) {
             List<ClassifierJobRow> batch;
             try {
-                batch = jobs.claimBatch(leaseOwner, CLAIM_BATCH, props.getLeaseSeconds(), props.getMaxAttempts());
+                batch = jobs.claimBatch(leaseOwner, CLAIM_BATCH, props.leaseSeconds(), props.maxAttempts());
             } catch (RuntimeException e) {
                 StructuredLog.warn(log, Markers.OPS, "signal.claim-failed")
                         .field("error", e.getMessage())
@@ -249,7 +209,6 @@ public class ClassifierWorker {
         }
     }
 
-    /** Whether {@code e}, or anything it wraps, is the scorer finding the model unreachable. */
     private static boolean isEncoderUnreachable(Throwable e) {
         Throwable t = e;
         for (int depth = 0; t != null && depth < 8; depth++, t = t.getCause()) {
@@ -258,30 +217,21 @@ public class ClassifierWorker {
         return false;
     }
 
-    /** Test seam: the lease owner this worker claims as, for tests that claim a job on its behalf. */
     String leaseOwnerForTest() {
         return leaseOwner;
     }
 
-    /** Test seam: run the production {@link #sweep} for one job directly (mirrors MeteringWorker's analogous seam). */
     void sweepForTest(ClassifierJobRow job) {
         sweep(job);
     }
 
-    /**
-     * Run one classifier's sweep: load its (enabled) definition, dispatch its detector over observations
-     * past the cursor, write fired detections idempotently, advance the cursor to the last observation
-     * seen. A kind with no detection table completes without scoring (so it doesn't re-scan forever).
-     */
+    /** A kind with no detection table completes without scoring, so it does not re-scan forever. */
     private void sweep(ClassifierJobRow job) {
         Map<String, String> ctx = new LinkedHashMap<>();
         ctx.put(LogContext.PROJECT_ID, job.projectId());
-        // Structured (not message-text-only) so Loki can filter on {jobId="..."} instead of
-        // substring-matching "job=" out of the body (obs Gap 4).
+        // Structured so Loki can filter on {jobId="..."}.
         ctx.put(LogContext.JOB_ID, job.id());
         Instant start = Instant.now();
-        // Readable signal key when the row loads; failure paths use it for `.field("signal", …)`
-        // and keep the ULID under `classifierId` so Loki filters stay consistent with post-load events.
         @Nullable String classifierKey = null;
         try (LogContext ignored = LogContext.put(ctx)) {
             Optional<ClassifierRow> maybe = signals.findById(job.projectId(), job.classifierId());
@@ -293,15 +243,14 @@ public class ClassifierWorker {
                         .field("classifierId", job.classifierId())
                         .field("reason", reason)
                         .log();
-                jobs.markSwept(job.id(), null, null); // signal removed/disabled: leave the cursor, finish
+                jobs.markSwept(job.id(), null, null);
                 sweepFailures.clear(job.id());
                 return;
             }
             ClassifierRow signal = maybe.get();
             classifierKey = signal.classifierKey();
             if (signalService.encoderDown(signal)) {
-                // Pending from before the model went away: hand it back unrun and uncounted. The
-                // enqueue gate keeps it from coming back until the model answers again.
+                // Pending from before the model went away: hand it back unrun and uncounted.
                 jobs.releaseWithoutAttempt(job.id(), leaseOwner);
                 sweepFailures.clear(job.id());
                 StructuredLog.debug(log, "groundedness.sweep.skipped")
@@ -314,9 +263,8 @@ public class ClassifierWorker {
                 return;
             }
             try (LogContext ignoredSignal = LogContext.with(LogContext.CLASSIFIER_KEY, signal.classifierKey())) {
-                // DEBUG, not INFO: this announces intent, not state. It was 45% of production log
-                // volume (168 lines / 10 min) and every fact in it also appears on the completion
-                // line below, which additionally says what actually happened.
+                // DEBUG: it announces intent, every fact recurs on the completion line, and it was 45% of production
+                // log volume.
                 StructuredLog.debug(log, "signal.sweep.start")
                         .field("job", job.id())
                         .field("signal", signal.classifierKey())
@@ -329,9 +277,8 @@ public class ClassifierWorker {
             }
         } catch (RuntimeException e) {
             if (isEncoderUnreachable(e)) {
-                // The model is asleep or stopped, not broken: the scorer has already marked it down,
-                // so hand the job back without spending an attempt. Five of these in a row must never
-                // dead-letter the sweep; a 5xx or a 401 still does.
+                // The model is asleep or stopped, not broken, so no attempt is spent; a 5xx or a 401 still
+                // dead-letters.
                 jobs.releaseWithoutAttempt(job.id(), leaseOwner);
                 sweepFailures.clear(job.id());
                 StructuredLog.info(log, Markers.OPS, "signal.sweep.encoder-unreachable")
@@ -345,11 +292,9 @@ public class ClassifierWorker {
                         .log();
                 return;
             }
-            // One sweep failing is a WARN, deduped: the first of a streak carries the stacktrace,
-            // repeats collapse to a summary. The alertable ERROR is reserved for the budget-exhausted
-            // dead-letter transition. Clearing the streak on dead-letter means each post-cooldown
-            // revival probe that fails again logs fresh.
-            boolean deadLettered = jobs.markFailed(job.id(), e.getMessage(), props.getMaxAttempts());
+            // One failing sweep is a deduped WARN; the alertable ERROR is the dead-letter transition. Clearing the
+            // streak on dead-letter makes each failed revival probe log fresh.
+            boolean deadLettered = jobs.markFailed(job.id(), e.getMessage(), props.maxAttempts());
             final @Nullable String readableSignal = classifierKey;
             if (deadLettered) {
                 sweepFailures.clear(job.id());
@@ -357,7 +302,7 @@ public class ClassifierWorker {
                         .field("job", job.id())
                         .field("signal", readableSignal)
                         .field("classifierId", job.classifierId())
-                        .field("attempts", props.getMaxAttempts())
+                        .field("attempts", props.maxAttempts())
                         .cause(e)
                         .log();
             } else {
@@ -381,18 +326,9 @@ public class ClassifierWorker {
     }
 
     /**
-     * The body of one sweep, once the signal is resolved and its {@code classifierKey} is bound to
-     * MDC. The grain enum is the single source of truth for which seam runs: the fitting tier
-     * (WINDOW) scores a unit larger than an observation against fitted per-project state,
-     * so it can't ride the observation-grain detector seam, but it reuses this job's cursor, lease,
-     * and dead-letter budget verbatim. There's no new scheduler and no new job table for any of it.
-     *
-     * <p>Which sweep runs inside that seam is a lookup, not an {@code if/else} chain: it holds
-     * {@link ClassifierSweepRegistry} and a classifier attaches by being on the classpath.
-     *
-     * <p>The grain of a kind the catalog declares comes from the catalog. A kind no catalog module
-     * declares runs at window grain when a sweep claims it, and otherwise takes the catalog's
-     * default; see {@link SweepRouting}.
+     * The grain decides which seam runs. WINDOW-grain classifiers score against fitted per-project state but reuse this
+     * job's cursor, lease and dead-letter budget. Which sweep runs is a {@link ClassifierSweepRegistry} lookup; see
+     * {@link SweepRouting} for undeclared kinds.
      */
     private void sweepSignal(ClassifierJobRow job, ClassifierRow signal, Instant start) {
         SweepRouting.Routing route = routing.routeFor(signal.detector());
@@ -436,13 +372,8 @@ public class ClassifierWorker {
     }
 
     /**
-     * Drop turns whose session this classifier has already flagged: a session with any detection nobody has
-     * cleared is not scored again, whatever its band, and one whose flag was cleared is. A session is a
-     * conversation on one call site, so a flag on the reply call site does not stop a second call site in the
-     * same conversation.
-     *
-     * <p>A turn-grain classifier's subject is what the user said, but the thing an operator acts on is
-     * the session, which is one event, not one per turn.
+     * A session with an uncleared detection is not scored again: the operator acts on the session, one event, not one
+     * per turn. A session is per call site.
      */
     private List<SubstrateObservation> suppressUnclearedSessions(
             String projectId, ClassifierRow signal, List<SubstrateObservation> candidates) {
@@ -469,10 +400,7 @@ public class ClassifierWorker {
                 o.traceId(), Objects.requireNonNull(o.callSiteId(), "a turn candidate has a call site"));
     }
 
-    /**
-     * Drop observations outside the classifier's call sites, before anything is sent to a detector. A span with no
-     * call site of its own takes its trace's, from any span of that trace: the rule the traces list filters by.
-     */
+    /** A span with no call site of its own takes its trace's, as the traces list filters. */
     private List<SubstrateObservation> inCallSiteScope(
             String projectId, ClassifierRow signal, List<SubstrateObservation> candidates) {
         if (signal.callSiteIds() == null || candidates.isEmpty()) return candidates;
@@ -501,18 +429,11 @@ public class ClassifierWorker {
     }
 
     /**
-     * The observation-grain sweep, drawing its candidate windows at {@code grain}.
-     *
-     * <p>One page per claim, except for a kind in {@link #DRAIN_TO_HEAD}, which keeps taking pages until one
-     * comes back short, its drain budget runs out, or it loses the lease. The cadence stays one tick a minute
-     * either way; what changes is how far one tick gets. Each page is persisted before the next is read and
-     * armed after its cursor lands, so a failure part way loses at most the page in hand.
+     * One page per claim, except kinds in {@link #DRAIN_TO_HEAD}, which page until a short page, the drain budget or a
+     * lost lease. Each page persists before the next is read, so a failure loses at most the page in hand.
      */
     private void sweepObservationGrain(ClassifierJobRow job, ClassifierRow signal, Grain grain, Instant start) {
-        // A detector with no registered DetectionTable has nowhere to write a fired detection, and
-        // ClassifierDetectionWriteRepository's own javadoc says the caller checks writesDetections first. Applies
-        // to CLASSIFIER and REGEX too, since both route through this same TURN/OBSERVATION grain and
-        // share user_classifier_detection.
+        // A detector with no DetectionTable has nowhere to write; CLASSIFIER and REGEX share user_classifier_detection.
         if (!detections.writesDetections(signal.detector())) {
             StructuredLog.warn(log, Markers.OPS, "signal.sweep.no-table")
                     .message(
@@ -530,14 +451,14 @@ public class ClassifierWorker {
             sweepFailures.clear(job.id());
             return;
         }
-        // writesDetections above guarantees a detector for this kind.
+        // writesDetections guarantees a detector for this kind.
         BuiltInDetector detector = Objects.requireNonNull(catalog.detectorFor(signal.detector()));
         String detectorConfig = signal.configJson();
         boolean drain = DRAIN_TO_HEAD.contains(signal.detector());
-        Duration budget = Duration.ofSeconds(props.getLeaseSeconds() / 2);
+        Duration budget = Duration.ofSeconds(props.leaseSeconds() / 2);
         int pageSize = BuiltInDetector.Kind.ENCODER_BACKED.contains(signal.detector())
-                ? props.getEncoderBatchSize()
-                : props.getBatchSize();
+                ? props.encoderBatchSize()
+                : props.batchSize();
 
         String cursorAt = job.cursorAt();
         String cursorId = job.cursorId();
@@ -546,10 +467,6 @@ public class ClassifierWorker {
         int fired = 0;
         boolean leaseLost = false;
         boolean atHead = false;
-        // The first genuinely-new detection of this sweep, captured to drive the pre-deploy
-        // registration exactly once per sweep, never per-event, so the trigger stays cheap even
-        // when a whole drain fires.
-        NewDetection firstNew = null;
         while (true) {
             Page page = sweepPage(job, signal, grain, detector, detectorConfig, cursorAt, cursorId, pageSize);
             if (page == null) {
@@ -560,8 +477,7 @@ public class ClassifierWorker {
             pages++;
             scanned += page.scored();
             if (!page.advance()) {
-                // Held or abandoned: nothing was written, so the cursor stays and the next tick re-reads
-                // this page. Not at the head either, so the population work waits too.
+                // Nothing was written, so the cursor stays and the next tick re-reads this page.
                 if (page.held()) {
                     jobs.holdPage(job.id());
                 } else {
@@ -570,30 +486,25 @@ public class ClassifierWorker {
                 break;
             }
             fired += page.fired();
-            if (firstNew == null) firstNew = page.firstNew();
             cursorAt = page.cursorAt();
             cursorId = page.cursorId();
             boolean more = drain
                     && page.windowSize() >= pageSize
                     && Duration.between(start, Instant.now()).compareTo(budget) < 0;
             if (more) {
-                leaseLost = !jobs.advanceCursor(job.id(), leaseOwner, cursorAt, cursorId, props.getLeaseSeconds());
+                leaseLost = !jobs.advanceCursor(job.id(), leaseOwner, cursorAt, cursorId, props.leaseSeconds());
             } else {
                 jobs.markSwept(job.id(), cursorAt, cursorId);
                 atHead = page.windowSize() < pageSize;
             }
-            // The classifier's own arming, evaluated here rather than by an alerting worker reading the
-            // detections back out: N in W opens or refreshes a finding with these spans as its evidence.
-            // After the cursor lands and fail-soft, for the same reason: the detections have been written,
-            // and a failure to roll them up must not make the sweep re-score the page.
+            // N in W opens or refreshes a finding with these spans as evidence. After the cursor lands and fail-soft: a
+            // roll-up failure must not re-score the page.
             armIfConfigured(job.projectId(), signal, page.firedRefs(), Instant.now());
             if (!more || leaseLost) break;
         }
         sweepFailures.clear(job.id());
         if (atHead) {
-            // Encoder-backed: remember when the sweep reached the head, so production mode can sleep
-            // after it and the status can say when the last run was. Before the population work, so a
-            // failure there cannot lose it.
+            // Recorded before the population work, so a failure there cannot lose it; production mode sleeps off it.
             if (BuiltInDetector.Kind.ENCODER_BACKED.contains(signal.detector())) {
                 jobs.recordCaughtUp(job.id(), leaseOwner, Instant.now());
             }
@@ -601,8 +512,7 @@ public class ClassifierWorker {
         }
 
         if (pages == 0) {
-            // DEBUG: a sweep with no new observations is the steady state, not news. Together with
-            // sweep.start this was 77% of all backend log volume, all of it saying nothing happened.
+            // DEBUG: an empty sweep is the steady state.
             StructuredLog.debug(log, "signal.sweep.empty")
                     .message("no new observations for %s since the last sweep", signal.classifierKey())
                     .field("job", job.id())
@@ -626,18 +536,9 @@ public class ClassifierWorker {
                     .log();
         }
         logSweepComplete(job, signal, grain, SweepRouting.Route.CATALOG, scanned, fired, pages, start);
-        // A genuinely-new production signal discovery closes the loop to the edge: register a
-        // routed, surface-scoped pre-deploy check so a future PR touching those surfaces is checked
-        // pre-merge. Fired once per sweep off `firstNew`, not per-event, behind
-        // tessary.predeploy.enabled, fail-soft.
-        registerPreDeployCheck(job.projectId(), signal, firstNew);
     }
 
-    /**
-     * Hand a sweep that just caught up to the classifier's population work, if it has any. Fail-soft for the
-     * reason arming is: the detections have landed and the cursor has moved, and a failure to roll them up must
-     * not make the sweep re-score what it already checked.
-     */
+    /** Fail-soft, as arming is: the detections and cursor have landed. */
     private void catchUp(ClassifierJobRow job, ClassifierRow signal, @Nullable String checkedBefore) {
         catchUps.orderedStream()
                 .filter(c -> c.kinds().contains(signal.detector()))
@@ -657,29 +558,20 @@ public class ClassifierWorker {
     }
 
     /**
-     * What one page of a sweep did.
-     *
-     * @param windowSize rows the cursor advanced over, which is how a drain tells a full page from the head
-     * @param scored rows actually handed to the detector, after the grain's own filtering
-     * @param advance false when nothing was written and the cursor must stay (a {@link PagedDetector} page
-     *     held or abandoned)
-     * @param held of a page that does not advance, whether it was held for a re-send rather than abandoned
+     * {@code windowSize} tells a full page from the head; {@code advance} is false when the cursor must stay;
+     * {@code held} tells a page held for re-send from one abandoned.
      */
     private record Page(
             int windowSize,
             int scored,
             int fired,
-            @Nullable NewDetection firstNew,
             List<FindingEvidenceRepository.Ref> firedRefs,
             String cursorAt,
             String cursorId,
             boolean advance,
             boolean held) {}
 
-    /**
-     * Score one page past {@code (cursorAt, cursorId)} and write what fired, or return null when there is
-     * nothing past the cursor. Persists nothing about the job: the caller owns the cursor and the lease.
-     */
+    /** The caller owns the cursor and the lease. */
     private @Nullable Page sweepPage(
             ClassifierJobRow job,
             ClassifierRow signal,
@@ -689,9 +581,8 @@ public class ClassifierWorker {
             @Nullable String cursorAt,
             @Nullable String cursorId,
             int pageSize) {
-        // The window is what the cursor advances over, the same unfiltered stream at both grains so
-        // the cursor always moves. `obs`, what actually gets scored, is the window minus the rows the
-        // grain rejects, so a dropped row is never re-offered on a later tick.
+        // The cursor advances over the unfiltered window so it always moves; a row the grain rejects is never
+        // re-offered.
         List<SubstrateObservation> window;
         List<SubstrateObservation> obs;
         if (grain == Grain.TURN) {
@@ -720,13 +611,9 @@ public class ClassifierWorker {
         }
 
         int fired = 0;
-        NewDetection firstNew = null;
-        // What this page flagged, in sweep order, as evidence refs, handed to the arming gate so a
-        // finding it opens is already pointing at the spans that opened it.
+        // Handed to the arming gate so a finding it opens already cites the spans that opened it.
         List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>();
-        // Batch dispatch: deterministic detectors loop detect() internally; the encoder tier scores the
-        // whole batch in one serving call.
-        // A page the call-site scope emptied sends nothing to the detector, but still moves the cursor.
+        // A page the call-site scope emptied sends nothing, but still moves the cursor.
         List<Detection> scored = List.of();
         if (!obs.isEmpty()) {
             scored = detector.sweepBatch(signal, obs, detectorConfig);
@@ -741,32 +628,23 @@ public class ClassifierWorker {
         for (int i = 0; i < obs.size(); i++) {
             Detection d = scored.get(i);
             if (!d.fired()) continue;
-            // Write EVERY fired detection into this classifier's own table regardless of the
-            // classifier's mode, stamping the confidence band; the discovery/tracking mode gate is a
-            // READ-time filter, so flipping mode never loses history. Idempotent via the table's
-            // own subject index, so a genuinely-new firing is the one that inserts.
+            // Every fired detection is written regardless of mode, since the mode gate is a read-time filter.
+            // Idempotent on the table's subject index.
             SubstrateObservation o = obs.get(i);
-            NewDetection nd = writeDetection(job.projectId(), signal, o, d);
-            if (nd != null) {
-                if (firstNew == null) firstNew = nd;
+            if (writeDetection(job.projectId(), signal, o, d)) {
                 fired++;
                 firedRefs.add(FindingEvidenceRepository.Ref.span(o.traceId(), o.observationId()));
             }
         }
 
-        // Cursor advances over the WINDOW, not the scored subset: a per-turn duplicate dropped above must
-        // stay dropped, not resurface as the first row of the next window and get scored after all.
+        // Over the WINDOW, so a dropped per-turn duplicate is not scored as the next window's first row.
         SubstrateObservation last = window.get(window.size() - 1);
-        // The composite handle, not a bare span id. Span identity is (project_id, trace_id, id), and
-        // the job table has two cursor columns for a three-part keyset, so both id halves ride
-        // cursor_id as "<trace_id>:<span_id>", the spelling SubstrateReadRepository.parseHandle reads
-        // back. A bare span id has no colon, parses as "no cursor", and the sweep then restarts from
-        // page one on every tick forever: not a crash, just an unbounded re-scan that never advances.
+        // The composite "<trace_id>:<span_id>" handle: a bare span id parses as "no cursor" and the sweep would re-scan
+        // from page one forever.
         return new Page(
                 window.size(),
                 obs.size(),
                 fired,
-                firstNew,
                 firedRefs,
                 last.createdAt(),
                 SubstrateReadRepository.handle(last.traceId(), last.observationId()),
@@ -774,11 +652,7 @@ public class ClassifierWorker {
                 false);
     }
 
-    /**
-     * {@link #sweepPage} for a {@link PagedDetector}: score the page, let {@link PageRetryRule} decide what
-     * becomes of it, then have the detector write what that allows. The detector writes its own detection
-     * rows, so the ones it reports back are already genuinely new.
-     */
+    /** The detector writes its own rows, so what it reports back is already new. */
     private <P extends PagedDetector.ScoredPage> Page pagedPage(
             ClassifierJobRow job,
             ClassifierRow signal,
@@ -809,10 +683,8 @@ public class ClassifierWorker {
                     .log();
         }
         boolean advance = action == PageAction.PERSIST || action == PageAction.SKIP || action == PageAction.PASS;
-        NewDetection firstNew = null;
         List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>(newlyFired.size());
         for (PagedDetector.FiredTurn f : newlyFired) {
-            if (firstNew == null) firstNew = new NewDetection(f.detectionId(), f.severity());
             SubstrateObservation o = f.turn();
             firedRefs.add(FindingEvidenceRepository.Ref.trace(o.traceId()));
         }
@@ -820,7 +692,6 @@ public class ClassifierWorker {
                 window.size(),
                 obs.size(),
                 newlyFired.size(),
-                firstNew,
                 firedRefs,
                 last.createdAt(),
                 cursorId,
@@ -828,11 +699,7 @@ public class ClassifierWorker {
                 action == PageAction.HOLD);
     }
 
-    /**
-     * Hand this sweep's firings to the arming gate. A classifier with no {@code arming} block in its
-     * config does nothing here: a user's classifier ships unarmed, and only a built-in whose bar the
-     * platform authored arrives with one.
-     */
+    /** Only built-ins whose bar the platform authored arrive with an {@code arming} block. */
     private void armIfConfigured(
             String projectId, ClassifierRow signal, List<FindingEvidenceRepository.Ref> firedRefs, Instant now) {
         try {
@@ -846,7 +713,6 @@ public class ClassifierWorker {
         }
     }
 
-    /** One field set for every grain, so a Loki query does not have to know which sweep ran. */
     private void logSweepComplete(
             ClassifierJobRow job,
             ClassifierRow signal,
@@ -874,21 +740,13 @@ public class ClassifierWorker {
     }
 
     /**
-     * Write a fired detection into this classifier's own table, carrying the producer subject the
-     * detection is about (the session it belongs to, null for anonymous traffic, its trace, and its
-     * span) plus the detector's severity, confidence band, and evidence.
-     *
-     * <p>Fail-soft: a persistence failure degrades to a logged warning so one bad detection never
-     * fails the sweep or blocks the cursor.
-     *
-     * @return the new detection, or null when this classifier had already spoken about this subject
+     * Fail-soft: one bad detection must not fail the sweep or block the cursor. Null when this classifier already spoke
+     * about the subject.
      */
-    private @Nullable NewDetection writeDetection(
-            String projectId, ClassifierRow signal, SubstrateObservation o, Detection d) {
-        String detectionId = Ids.ulid();
+    private boolean writeDetection(String projectId, ClassifierRow signal, SubstrateObservation o, Detection d) {
         try {
-            boolean inserted = detections.insert(
-                    detectionId,
+            return detections.insert(
+                    Ids.ulid(),
                     signal.detector(),
                     projectId,
                     signal.id(),
@@ -900,8 +758,6 @@ public class ClassifierWorker {
                     d.severity(),
                     d.confidence(),
                     d.evidenceJson());
-            // First-write-wins: a genuinely-new detection is the one that inserted.
-            return inserted ? new NewDetection(detectionId, d.severity()) : null;
         } catch (RuntimeException e) {
             StructuredLog.warn(log, Markers.OPS, "signal.detection.failed")
                     .field("project", projectId)
@@ -910,36 +766,10 @@ public class ClassifierWorker {
                     .field("span", o.observationId())
                     .field("error", e.getMessage())
                     .log();
-            return null;
+            return false;
         }
     }
 
-    /** A newly-inserted signal detection: its stable detection id + coarse severity. */
-    private record NewDetection(
-            String detectionId, @Nullable String severity) {}
-
-    /**
-     * Close the production → pre-deploy loop: on a genuinely-new discovery, register a routed
-     * pre-deploy check for the classifier's implicated surfaces. No-op when nothing new fired this sweep or
-     * the loop is disabled. Maps the {@link ClassifierRow} to the {@code ci}-package input record at the call
-     * site so the {@code signal → ci} dependency stays one-way. Fail-soft: a failure here is logged and
-     * never fails the sweep or blocks the cursor (the discovery itself already landed).
-     */
-    private void registerPreDeployCheck(String projectId, ClassifierRow signal, @Nullable NewDetection firstNew) {
-        if (firstNew == null || !preDeployChecks.isEnabled()) return;
-        try {
-            preDeployChecks.registerForSignal(ClassifierDiscovery.of(
-                    projectId, signal.id(), signal.classifierKey(), signal.configJson(), firstNew.severity()));
-        } catch (RuntimeException e) {
-            StructuredLog.warn(log, Markers.OPS, "signal.predeploy-registration.failed")
-                    .field("project", projectId)
-                    .field("signal", signal.classifierKey())
-                    .field("error", e.getMessage())
-                    .log();
-        }
-    }
-
-    /** The host name {@code hostName} reports, or {@code host} when this machine's own name does not resolve. */
     static String shortHost(Callable<String> hostName) {
         try {
             return hostName.call();

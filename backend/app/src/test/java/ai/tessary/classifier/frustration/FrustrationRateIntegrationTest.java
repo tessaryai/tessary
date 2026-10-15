@@ -27,7 +27,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -37,40 +36,20 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * RCA runs, the next spell opens a new case.
  */
 @SpringBootTest
-class FrustrationRateIntegrationTest {
+record FrustrationRateIntegrationTest(
+        FrustrationRateService service,
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        CaseRepository cases,
+        CaseService caseService,
+        BehaviorTriageSource triageSource,
+        FrustrationDetailService frustrationDetail,
+        JdbcClient jdbc,
+        FrustrationRateRepository rates,
+        RateClassifierFixture fixture) {
 
     private static final String VERSION =
             JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
-
-    @Autowired
-    FrustrationRateService service;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    CaseRepository cases;
-
-    @Autowired
-    CaseService caseService;
-
-    @Autowired
-    BehaviorTriageSource triageSource;
-
-    @Autowired
-    FrustrationDetailService frustrationDetail;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    FrustrationRateRepository rates;
-
-    @Autowired
-    RateClassifierFixture fixture;
 
     @Test
     void aRiseFilesOneRuledFindingWithEverySessionAsEvidenceAndOpensItsCase() {

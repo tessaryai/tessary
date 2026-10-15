@@ -5,70 +5,46 @@
  * on without a provider. A provider that already has a key, or the deployment's own provider, skips the key
  * write.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
 import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ModelSettingsResponse, ProviderCredentialListResponse } from "../../api/types";
 import { FrustrationEnableModal } from "./FrustrationEnableModal";
+import { api, orgApi } from "../../test/api";
 
 const calls: string[] = [];
-const getModelSettings = vi.fn<() => Promise<ModelSettingsResponse>>();
-const listProviderCredentials = vi.fn<() => Promise<ProviderCredentialListResponse>>();
-const upsertProviderCredential = vi.fn(async (provider: string, body: { api_key?: string }) => {
-  calls.push(`upsert ${provider} ${body.api_key}`);
-  return {};
-});
-const setLaneModel = vi.fn(async (lane: string, body: { model_key: string }) => {
-  calls.push(`lane ${lane} ${body.model_key}`);
-  return {};
-});
-const setClassifierEnabled = vi.fn(async (id: string, enabled: boolean) => {
-  calls.push(`enable ${id} ${enabled}`);
-  return {};
-});
 
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({
-      orgSlug: "acme",
-      projectSlug: "default",
-      api: { base: "/api/orgs/acme/projects/default", getModelSettings, setLaneModel, setClassifierEnabled },
-      orgApi: { base: "/api/orgs/acme", listProviderCredentials, upsertProviderCredential },
-    }),
-  };
-});
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
-afterEach(() => {
+beforeEach(() => {
   calls.length = 0;
-  getModelSettings.mockReset();
-  listProviderCredentials.mockReset();
-  upsertProviderCredential.mockClear();
-  setLaneModel.mockClear();
-  setClassifierEnabled.mockClear();
+  orgApi.upsertProviderCredential.mockImplementation(async (provider: string, body: { api_key?: string }) => {
+    calls.push(`upsert ${provider} ${body.api_key}`);
+    return {};
+  });
+  api.setLaneModel.mockImplementation(async (lane: string, body: { model_key: string }) => {
+    calls.push(`lane ${lane} ${body.model_key}`);
+    return {};
+  });
+  api.setClassifierEnabled.mockImplementation(async (id: string, enabled: boolean) => {
+    calls.push(`enable ${id} ${enabled}`);
+    return {};
+  });
 });
 
 const SETTINGS = {
   groups: [],
   lanes: [
     {
-      id: "frustration",
-      label: "Frustration",
-      description: "Scores each eligible user turn.",
-      group: "decision_calls",
+      id: "frustration", label: "Frustration", description: "Scores each eligible user turn.", group: "decision_calls",
       provider_options: [
         {
-          provider: "TYPESAFE",
-          label: "TypeSafe",
-          model_keys: ["TYPESAFE:jev-latest"],
+          provider: "TYPESAFE", label: "TypeSafe", model_keys: ["TYPESAFE:jev-latest"],
           default_model_key: "TYPESAFE:jev-latest",
         },
         {
-          provider: "OPENROUTER",
-          label: "OpenRouter",
-          model_keys: ["OPENROUTER:~typesafe/jev-latest"],
+          provider: "OPENROUTER", label: "OpenRouter", model_keys: ["OPENROUTER:~typesafe/jev-latest"],
           default_model_key: "OPENROUTER:~typesafe/jev-latest",
         },
       ],
@@ -76,25 +52,14 @@ const SETTINGS = {
       automatic: true,
     },
   ],
-  models: [],
-  catalog_models: [],
-  rates: [],
-  settings: [],
-  configured_providers: [],
+  models: [], catalog_models: [], rates: [], settings: [], configured_providers: [],
 } as ModelSettingsResponse;
 
 function credential(provider: "OPENROUTER" | "TYPESAFE"): ProviderCredentialListResponse["credentials"][number] {
   return {
     id: `cred-${provider}`,
-    provider,
-    base_url_override: "",
-    has_api_key: true,
-    aws_region: "",
-    has_aws_credentials: false,
-    bedrock_model_arn: "",
-    custom_model_name: "",
-    auth_mode: "api_key",
-    created_at: "2026-09-01T00:00:00Z",
+    provider, base_url_override: "", has_api_key: true, aws_region: "", has_aws_credentials: false,
+    bedrock_model_arn: "", custom_model_name: "", auth_mode: "api_key", created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
   };
 }
@@ -107,8 +72,8 @@ function renderModal(onEnabled = vi.fn()) {
 describe("FrustrationEnableModal", () => {
   // Bug: Frustration enabled here still reads "Off" in the Configure menu on Classifiers until the staleTime ends.
   it("marks the Classifiers charts and menu stale once it enables", async () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [credential("OPENROUTER")] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [credential("OPENROUTER")] });
     const onEnabled = vi.fn();
     const { queryClient } = renderRoute(
       <FrustrationEnableModal classifierId="clf-1" onClose={vi.fn()} onEnabled={onEnabled} />,
@@ -123,8 +88,8 @@ describe("FrustrationEnableModal", () => {
   });
 
   it("asks for the key of an unconfigured provider, then saves it, sets the lane and enables, in order", async () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [] });
     const onEnabled = renderModal();
 
     const key = await screen.findByLabelText("TypeSafe API key");
@@ -139,8 +104,8 @@ describe("FrustrationEnableModal", () => {
   });
 
   it("defaults to the provider that already has a key and writes no key", async () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [credential("OPENROUTER")] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [credential("OPENROUTER")] });
     const onEnabled = renderModal();
 
     expect(await screen.findByLabelText(/OpenRouter/)).toHaveProperty("checked", true);
@@ -153,7 +118,7 @@ describe("FrustrationEnableModal", () => {
   });
 
   it("runs on the deployment's own provider with no key when the org has no key of its own", async () => {
-    getModelSettings.mockResolvedValue({
+    api.getModelSettings.mockResolvedValue({
       ...SETTINGS,
       lanes: [
         {
@@ -161,9 +126,7 @@ describe("FrustrationEnableModal", () => {
           provider_options: [
             ...SETTINGS.lanes[0].provider_options,
             {
-              provider: "PLATFORM",
-              label: "Tessary AI",
-              model_keys: ["PLATFORM:~typesafe/jev-latest"],
+              provider: "PLATFORM", label: "Tessary AI", model_keys: ["PLATFORM:~typesafe/jev-latest"],
               default_model_key: "PLATFORM:~typesafe/jev-latest",
             },
           ],
@@ -171,7 +134,7 @@ describe("FrustrationEnableModal", () => {
       ],
       configured_providers: ["PLATFORM"],
     });
-    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [] });
     const onEnabled = renderModal();
 
     expect(await screen.findByLabelText(/Tessary AI/)).toHaveProperty("checked", true);
@@ -185,8 +148,8 @@ describe("FrustrationEnableModal", () => {
   });
 
   it("shows the key field when the other, unconfigured provider is chosen", async () => {
-    getModelSettings.mockResolvedValue(SETTINGS);
-    listProviderCredentials.mockResolvedValue({ credentials: [credential("OPENROUTER")] });
+    api.getModelSettings.mockResolvedValue(SETTINGS);
+    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [credential("OPENROUTER")] });
     renderModal();
 
     fireEvent.click(await screen.findByLabelText(/TypeSafe/));

@@ -12,13 +12,8 @@ import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
- * Project to decision target: the decision lane's provider and model for this project, then the org's
- * key for that provider, decrypted.
- *
- * <p>The provider comes from {@link ProjectModelSettings}, so a project that pinned OpenRouter on the
- * lane runs there even when the org also holds a TypeSafe key, and an unpinned lane follows
- * {@code LanePriority} (TypeSafe first). Empty when the org holds a key for no provider the lane
- * offers, which a caller treats as "no provider".
+ * Resolves the decision lane's provider (pinned, else {@code LanePriority}) and the org's decrypted key; empty means no
+ * provider.
  */
 @Component
 public class DecisionProviderResolver {
@@ -39,7 +34,7 @@ public class DecisionProviderResolver {
         this.orgResolver = orgResolver;
     }
 
-    /** Whether the lane has a provider to run on: the org holds a key for it. Opens no key. */
+    /** Opens no key. */
     public boolean hasProvider(String projectId, ModelLane lane) {
         return Optional.ofNullable(orgResolver.orgIdFor(projectId))
                 .flatMap(orgId -> settings.resolveDecisionModel(projectId, lane)

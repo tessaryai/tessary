@@ -29,30 +29,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * The RCA pipeline, anchored on a FINDING: (1) read the finding's CLAIM — {@link FindingClaim}, which is
- * the claim and nothing anybody ruled about it; (2) read its {@code finding_evidence} rows for what the
- * run may cite, whether there is a {@code baseline} side, and how many rows were flagged; (3) hand the
- * claim, its numbers, the classifier's RCA method and the MCP tools to a sandboxed agent ({@link
- * AgenticRcaEngine}) which reads every row it cites through MCP, with the project repo cloned beside it
- * when there is one. The result is stamped onto the {@code rca_report} row.
- *
- * <h2>The context firewall</h2>
- *
- * <p><b>Nothing Layer 2 concluded crosses into this run.</b> A person may read the triage ruling, its
- * summary and its check scripts and then press "Run RCA"; the agent may not. Layer 2 runs a cheap model
- * and its mistakes must not arrive here as premises — the failure to avoid is an RCA that confirms a
- * triage error in more words and with more authority. The enforcement is structural rather than
- * conventional: this class reads {@link FindingRepository#findClaim}, whose SELECT list has no
- * {@code triage_*} column in it, so there is no ruling in scope to leak; the case's other findings are
- * found by id alone ({@link FindingRepository#caseSiblingIds}). The prompt says the findings are confirmed
- * and never says by whom.
- *
- * <h2>Evidence by reference, not by copy</h2>
- *
- * <p>The dossier is what is finding-specific — the claim and the detector's own numbers — and the
- * substrate is read on demand. The evidence refs are uncapped at write time so the agent decides at
- * read time what to open: it pages {@code get_finding_evidence}, reads what it chooses with
- * {@code get_trace}, and states what it took.
+ * The context firewall: nothing Layer 2 concluded crosses into this run, so a cheap model's mistakes cannot arrive as
+ * premises. Enforced structurally: {@link FindingRepository#findClaim} selects no {@code triage_*} column. Evidence is
+ * by reference; the agent pages and reads what it chooses through MCP.
  */
 @Service
 public class RcaAnalysisService {
@@ -64,7 +43,6 @@ public class RcaAnalysisService {
     private final RcaReportRepository reports;
     private final AgenticRcaEngine agenticEngine;
     private final ObjectMapper mapper;
-    /** The {@code method.md} of a finding a classifier outside the catalog filed; empty in the open edition. */
     private final FindingAdapters adapters;
 
     public RcaAnalysisService(
@@ -112,11 +90,7 @@ public class RcaAnalysisService {
                 result.repoAvailable());
     }
 
-    /**
-     * Every finding the job's case holds, oldest first: RCA reads the whole case. The job names the case's
-     * newest finding, and the case is locked when RCA is pressed, so this set is the one the person saw. A
-     * finding with no case is read alone.
-     */
+    /** The case is locked when RCA is pressed, so this set is the one the person saw. */
     private List<FindingClaim> subject(String projectId, String findingId) {
         List<String> ids = findings.caseSiblingIds(projectId, findingId);
         List<FindingClaim> claims = new ArrayList<>();
@@ -128,29 +102,20 @@ public class RcaAnalysisService {
     }
 
     /**
-     * Roles that name the flagged population when a classifier draws no narrower subset. {@code member}
-     * is the population itself; {@code exemplar} and {@code changepoint} are picks from within it, and
-     * are included so a classifier that writes them and nothing else is not read as having flagged
-     * nothing at all.
+     * {@code exemplar} and {@code changepoint} are included so a classifier that writes only those is not read as
+     * flagging nothing.
      */
     private static final Set<String> FLAGGED_WHEN_NO_WITNESS = Set.of(
             FindingEvidenceRow.Role.MEMBER, FindingEvidenceRow.Role.EXEMPLAR, FindingEvidenceRow.Role.CHANGEPOINT);
 
     /**
-     * What the run needs from the findings' evidence rows, read across every finding as one population.
-     *
-     * <p>The flagged rows are the narrowest set the classifier drew: {@code witness} rows where it wrote any, since
-     * a witness is a member the detector singled out (tool error's members are every call, its witnesses the
-     * failing ones), and the population roles otherwise. A cause may cite a flagged row or a {@code baseline} row,
-     * never a member the detector did not flag: it would read as explained when it is healthy. Session-grain refs
-     * (no trace id) are counted the same way; only frustration writes them, and its grain is sessions.
+     * A cause may cite a flagged row or a {@code baseline} row, never an unflagged member: it would read as explained
+     * when it is healthy.
      */
     private AgenticRcaEngine.Evidence evidence(String projectId, List<String> findingIds) {
         Set<String> baseline = new LinkedHashSet<>();
         Set<String> witnessTraces = new LinkedHashSet<>();
         Set<String> populationTraces = new LinkedHashSet<>();
-        // Sessions named by a session-grain ref (no trace id) decide the grain; any session a flagged row names
-        // is citable.
         Set<String> witnessSessionRefs = new LinkedHashSet<>();
         Set<String> populationSessionRefs = new LinkedHashSet<>();
         Set<String> witnessSessions = new LinkedHashSet<>();
@@ -175,7 +140,7 @@ public class RcaAnalysisService {
         Set<String> flaggedTraces = anyWitness ? witnessTraces : populationTraces;
         Set<String> flaggedSessionRefs = anyWitness ? witnessSessionRefs : populationSessionRefs;
         Set<String> citableSessions = anyWitness ? witnessSessions : populationSessions;
-        // A trace cited on both sides is flagged: it is what the claim is about, not a comparison anchor.
+        // A trace cited on both sides is flagged: it is what the claim is about.
         baseline.removeAll(flaggedTraces);
         Set<String> citableTraces = new LinkedHashSet<>(flaggedTraces);
         citableTraces.addAll(baseline);
@@ -215,17 +180,9 @@ public class RcaAnalysisService {
                 causes.size());
     }
 
-    // ---- dossier assembly ---------------------------------------------------------------------------
-
     /**
-     * The dossier as sandbox files (relative path → content): the claim, the detector's own numbers
-     * verbatim (or the owning adapter's evidence file), the classifier's RCA method, or its adapter's RCA
-     * method, when it has one, and the MCP tools. The adapter is handed the {@link FindingClaim}, so the
-     * firewall above still holds. Files rather than one long
-     * prompt because an agent that can open, re-read and quote a file reasons over it better than one
-     * handed a wall of JSON — and the numbers stay verbatim instead of being paraphrased into prose.
-     *
-     * <p>The layout is the contract {@link AgenticRcaEngine}'s prompt describes; change them together.
+     * Files rather than one prompt, so numbers stay verbatim. The layout is the contract {@link AgenticRcaEngine}'s
+     * prompt describes; change them together.
      */
     private Map<String, String> dossierFiles(RcaReportRow report, List<FindingClaim> subject) {
         Map<String, String> files = new LinkedHashMap<>();
@@ -233,10 +190,7 @@ public class RcaAnalysisService {
             FindingClaim finding = subject.get(i);
             String folder = findingFolder(i, finding);
             files.put(folder + "finding.md", findingDoc(report, finding));
-            // The owning adapter's evidence file comes first. Otherwise a dedicated per-shape assembler writes
-            // markdown when this classifier's payload matches one (see ClassifierDossierAssembler's dispatch-by-shape
-            // note); any other payload is the stripped JSON, fenced, so the file is markdown under one name for every
-            // classifier.
+            // An adapter's file first, then a per-shape assembler, else fenced JSON.
             String payload = ownersEvidence(finding)
                     .map(ClassifierDossierAssembler::budget)
                     .or(() -> ClassifierDossierAssembler.assemble(
@@ -251,7 +205,6 @@ public class RcaAnalysisService {
                 files.put(folder + EVIDENCE_FILE, payload);
             }
         }
-        // One case, one classifier: the method is the same for every finding.
         FindingClaim first = subject.get(0);
         String method = AgenticRcaEngine.method(first.classifierKey());
         if (method == null) method = adapters.rcaMethod(first).orElse(null);
@@ -260,10 +213,6 @@ public class RcaAnalysisService {
         return files;
     }
 
-    /**
-     * The owning adapter's {@code evidence.md}, handed the same counts and enumeration page the shape assemblers read.
-     * The page is read only when an adapter owns the finding.
-     */
     private Optional<String> ownersEvidence(FindingClaim finding) {
         if (adapters.ownerOf(finding).isEmpty()) return Optional.empty();
         ClassifierDossierAssembler.EvidenceCounts counts = evidenceCounts(finding);
@@ -272,9 +221,7 @@ public class RcaAnalysisService {
         return adapters.evidence(finding, new EvidenceContext(counts, enumeration));
     }
 
-    /** {@link FindingClaim#evidenceCount} for every role, read once for the dossier assembler — see
-     *  {@code BehaviorTriageEngine}'s identically-named helper, kept as two copies because the two
-     *  callers read the count off two different DTOs ({@code FindingClaim} vs {@code FindingRow}). */
+    /** Kept as two copies because the callers read the count off different DTOs. */
     private static ClassifierDossierAssembler.EvidenceCounts evidenceCounts(FindingClaim finding) {
         return new ClassifierDossierAssembler.EvidenceCounts(
                 finding.evidenceCount(FindingEvidenceRow.Role.EXEMPLAR),
@@ -286,13 +233,11 @@ public class RcaAnalysisService {
 
     static final String EVIDENCE_FILE = "evidence.md";
 
-    /** {@code findings/<n>-<id>/}, numbered from 1, oldest first: the layout the prompt describes. */
     static String findingFolder(int index, FindingClaim finding) {
         return "findings/" + (index + 1) + "-" + finding.id() + "/";
     }
 
-    /** A raw payload as markdown. The fence is longer than any backtick run in the JSON, so a string value that
-     *  holds a code block cannot close it early. */
+    /** The fence is longer than any backtick run in the JSON, so a value holding a code block cannot close it early. */
     private static @Nullable String fenced(@Nullable String json) {
         if (json == null || json.isBlank()) return null;
         int longest = 0;
@@ -304,8 +249,6 @@ public class RcaAnalysisService {
 
     private static final Pattern BACKTICKS = Pattern.compile("`+");
 
-    /** {@code dossier/finding.md} — what the classifier claims, over what, and how many refs it recorded
-     *  per role, which is what says whether the evidence can be read whole or has to be sampled. */
     private static String findingDoc(RcaReportRow report, FindingClaim finding) {
         StringBuilder sb = new StringBuilder();
         sb.append("# The finding\n\n");

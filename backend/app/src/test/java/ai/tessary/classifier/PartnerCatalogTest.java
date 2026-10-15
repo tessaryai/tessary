@@ -19,7 +19,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -34,31 +33,15 @@ import org.springframework.boot.test.context.SpringBootTest;
  * seedBuiltIns} or by {@link ClassifierCatalogWorker} itself.
  */
 @SpringBootTest
-class PartnerCatalogTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    OrgFeatureFlagRepository overrides;
-
-    @Autowired
-    DbFeatureFlags flags;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    ClassifierRepository rows;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    ClassifierCatalogWorker catalogWorker;
-
-    @Autowired
-    SubstrateReadRepository substrate;
+record PartnerCatalogTest(
+        TenantService tenants,
+        OrgFeatureFlagRepository overrides,
+        DbFeatureFlags flags,
+        ClassifierService classifiers,
+        ClassifierRepository rows,
+        ClassifierJobRepository jobs,
+        ClassifierCatalogWorker catalogWorker,
+        SubstrateReadRepository substrate) {
 
     /** Pin one capability ON for one org. */
     private void grant(String orgId, Capability capability) {

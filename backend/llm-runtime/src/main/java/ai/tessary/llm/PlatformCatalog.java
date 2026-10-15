@@ -8,31 +8,21 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Per-platform connection metadata, served alongside the {@link ModelCatalog}
- * so the "Add a model" form can render generically. The {@code auth} kind drives
- * which credential fields the UI shows, which keeps the form consistent across
- * platforms (every {@code api_key} platform looks identical) and means adding a
- * platform is one descriptor here, with no per-provider conditionals to edit in the frontend.
+ * Per-platform connection metadata for the "Add a model" form. The {@code auth} kind drives which fields render, so
+ * adding a platform is one descriptor here.
  */
 public final class PlatformCatalog {
 
-    /** How a platform authenticates, and therefore which fields the form renders. */
     public static final String AUTH_API_KEY = "api_key";
 
     public static final String AUTH_AWS = "aws";
 
-    /**
-     * No credential of the org's own: the deployment supplies it ({@link ModelProvider#PLATFORM}). The
-     * form renders no fields, only the supplier's label and {@code detail}.
-     */
+    /** The deployment supplies the credential; the form renders only the supplier's label and {@code detail}. */
     public static final String AUTH_PLATFORM = "platform";
 
     /**
-     * @param usedBy the lanes, by wire name, that are the only reason to add this platform's key: set for a
-     *     provider that serves one feature and no chat lane, so the Providers page can say what it is for.
-     *     Empty for a chat provider, which every agentic lane may use.
-     * @param detail a short status line the Providers page shows under the label; set only on the
-     *     {@link #AUTH_PLATFORM} descriptor a {@link PlatformProviderSupplier} describes, null otherwise
+     * @param usedBy the lanes this platform's key is only for; empty for a chat provider @param detail set only on the
+     * {@link #AUTH_PLATFORM} descriptor a {@link PlatformProviderSupplier} describes
      */
     public record PlatformDescriptor(
             ModelProvider id,
@@ -59,14 +49,10 @@ public final class PlatformCatalog {
         }
     }
 
-    // Every platform but PLATFORM requires an org-provided credential. PLATFORM's descriptor is a
-    // placeholder: the settings endpoints drop it unless a PlatformProviderSupplier offers the
-    // provider, and replace its label and detail with the supplier's when one does.
+    // PLATFORM's descriptor is a placeholder the settings endpoints drop unless a supplier offers it.
     private static final List<PlatformDescriptor> PLATFORMS = List.of(
             new PlatformDescriptor(ModelProvider.OPENAI, "OpenAI", AUTH_API_KEY, true, "https://api.openai.com/v1"),
-            // WITH the /v1: OpenCode's @ai-sdk/anthropic in the agentic sandbox appends the bare path
-            // "messages" to whatever baseUrl it's given rather than adding the version segment itself.
-            // A bare host here would post to /messages and 404 if a user typed it into the form.
+            // WITH the /v1: OpenCode's @ai-sdk/anthropic appends bare "messages" to the baseUrl.
             new PlatformDescriptor(
                     ModelProvider.ANTHROPIC, "Anthropic", AUTH_API_KEY, true, "https://api.anthropic.com/v1"),
             new PlatformDescriptor(
@@ -84,16 +70,12 @@ public final class PlatformCatalog {
             new PlatformDescriptor(
                     ModelProvider.GLM, "Zhipu GLM", AUTH_API_KEY, true, "https://open.bigmodel.cn/api/paas/v4"),
             new PlatformDescriptor(ModelProvider.GROK, "xAI Grok", AUTH_API_KEY, true, "https://api.x.ai/v1"),
-            // No default base URL: CUSTOM is "any other OpenAI-compatible endpoint", so the user must
-            // supply one. supportsBaseUrl is true and required in practice, since the form has nothing
-            // else to send the request to.
+            // No default base URL: the user must supply one.
             new PlatformDescriptor(ModelProvider.CUSTOM, "Custom (OpenAI-compatible)", AUTH_API_KEY, true, null),
             new PlatformDescriptor(ModelProvider.BEDROCK, "AWS Bedrock", AUTH_AWS, false, null),
-            // Mantle authenticates with the same AWS credentials as Bedrock (SigV4), just against the
-            // bedrock-mantle service name, so it reuses AUTH_AWS and the Providers form renders it
-            // unchanged. No base-URL override: the host is derived from the region.
+            // Same SigV4 credentials as Bedrock against the bedrock-mantle service; the host derives from the region.
             new PlatformDescriptor(ModelProvider.BEDROCK_MANTLE, "AWS Bedrock (mantle)", AUTH_AWS, false, null),
-            // A decision-model provider, not a chat one: its key reaches llm/decisions/ only.
+            // Its key reaches llm/decisions/ only.
             new PlatformDescriptor(
                     ModelProvider.TYPESAFE,
                     "TypeSafe",
@@ -113,7 +95,6 @@ public final class PlatformCatalog {
         return PLATFORMS.stream().filter(p -> p.id() == id).findFirst();
     }
 
-    /** Auth kind for a platform. */
     public static String authOf(ModelProvider id) {
         return find(id).orElseThrow().auth();
     }

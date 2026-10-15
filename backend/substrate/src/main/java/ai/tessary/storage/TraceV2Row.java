@@ -4,27 +4,10 @@ package ai.tessary.storage;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A v2 trace row — one turn: one thing the user asked for and waited on (substrate-model.md §5.1).
- *
- * <p>Identity is {@code (projectId, id)} with the producer's trace id verbatim. Everything after
- * {@code status} is a rollup, and every rollup is <b>written by the worker, never by an arrival</b>: the
- * counters and sums are recomputed wholesale from the trace's spans and stored as a replacement, and the
- * three timestamps are folded in with {@code min}/{@code max}. Nothing on this row is ever incremented.
- *
- * <p><b>Null is not zero here.</b> A trace that has not been rolled up yet carries null counters, which is
- * a different statement from "this turn used no tokens" and has to stay tellable apart all the way out to
- * the wire. {@code isSettled} is the companion fact: it means precisely "nothing has arrived since the
- * last rollup", never "we stopped waiting".
- *
- * <p>Timestamps ride as ISO-8601 {@code String}s per the substrate convention. {@code latencyMs} is a
- * generated column — read only, and null until the trace has an end.
- *
- * @param parentTraceId set only for a sub-agent that OUTLIVED the turn. One the user waited on is a span
- *     of this trace, not a trace of its own (§9).
- * @param threadId the provider's conversation id. Sub-grouping inside a session is a column, because
- *     sessions never nest.
- * @param unpricedSpans load-bearing, not diagnostic: it is what stops a total computed over models we
- *     hold no rate for from reading as a cheap turn.
+ * A v2 trace row: one turn. Every rollup is written by the worker as a replacement, never incremented by an arrival.
+ * Null is not zero: an unrolled trace carries null counters. {@code isSettled} means "nothing arrived since the last
+ * rollup". @param parentTraceId set only for a sub-agent that outlived the turn @param unpricedSpans load-bearing:
+ * stops a total over unrated models reading as a cheap turn
  */
 public record TraceV2Row(
         String projectId,
@@ -63,11 +46,8 @@ public record TraceV2Row(
         boolean isDeleted) {
 
     /**
-     * The get-or-create shape: identity and correlation only, every rollup column left null.
-     *
-     * <p>This is the ONLY constructor ingest should reach for. The §6.1 get-or-create writes identity
-     * fields and nothing else — timing and rollups belong to §7 alone, and a create that seeded them would
-     * put an arrival's opinion where only the worker's replacement is allowed to be.
+     * The only constructor ingest should use: get-or-create writes identity only, since timing and rollups belong to
+     * the worker.
      */
     public static TraceV2Row of(
             String projectId,

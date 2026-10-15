@@ -1,37 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Shared OpenCode runner for the agent lanes (rca.js, triage.js, run.js) and the long-lived
- * session.js. ONE source of truth for:
- *   - starting `opencode serve` and driving it over the SDK, and the config it starts with
- *     (basePermission, customAgent, remoteMcp),
- *   - turning its session messages into the `turns[]` shape the backend's
- *     AgentSpanTelemetry.recordTurns expects,
- *   - synthesising the result envelope the backend parses (`resultRaw`),
- *   - the clone-token scrubber.
- *
- * WHY THE SERVER, NOT `opencode run`: `run --format json` drops text and step_finish events in
- * containers (anomalyco/opencode#31435) — which is exactly this microVM.
- *
- * WE OWN THE PROCESS, THE SDK OWNS THE PROTOCOL. spawnOpencodeServer starts `opencode serve` and
- * waits for its own `opencode server listening on <url>` announcement, never for "the TCP port
- * accepts": an earlier hand-rolled version did that, and every RCA hung in the ~320ms between
- * accept and readiness (measured), burning Node's 300s fetch cap before failing. The spawn is ours
- * rather than the SDK's createOpencodeServer because that one's close() is a lone SIGTERM that
- * neither waits nor escalates, and an opencode that ignores it kept the lane's process alive after
- * the run was over. Ours SIGTERMs, waits, SIGKILLs, and releases the child's pipes, and runAgent
- * awaits all of it. Everything spoken over HTTP still goes through the SDK's client.
- *
- * WHY runAgent LISTS MESSAGES INSTEAD OF STREAMING: no lane renders live progress. The
- * backend reads one payload at the end, so reading the session's messages once the
- * prompt resolves is the same data with none of the event-ordering exposure. session.js
- * streams, because a person watches its replies as they are written.
- *
- * Runs identically in-VM (E2B template, /home/user) and in local/host mode
- * (agent-sandbox/), because `require('./agent-stream')` resolves beside the caller in
- * both. THEREFORE this file MUST be copied into the E2B template next to the scripts (see
- * template.ts `.copy('agent-stream.js', ...)`) — a missing copy turns every lane run
- * into a require-not-found crash.
+ * Shared OpenCode runner for the agent lanes and session.js. It drives `opencode serve` over the SDK
+ * because `opencode run --format json` drops text and step_finish events in containers
+ * (anomalyco/opencode#31435). Must be copied beside the lanes in the E2B template (template.ts).
  */
 const { execFileSync, spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -41,15 +13,10 @@ const path = require('node:path');
 const { Agent, fetch: undiciFetch } = require('undici');
 const { startMcpRelay } = require('./mcp-relay');
 
-// The custom opencode agent triage runs under (see runAgent's spec.systemPrompt branch). Chosen
-// with `body.agent` on every session.prompt call for that run, never on the RCA path.
 const TRIAGE_AGENT = 'tessary-triage';
 
-// opencode's own scratch directories, where its bash tool already tells the model it may write
-// without asking — the agent-facing prompt promises this, so denying it at the permission layer
-// (the blanket `external_directory: {'*': 'deny'}` below) would just contradict what the agent was
-// told. Triage only (see runAgent's `external_directory` branch below): RCA's own config never
-// runs a bash-heavy enough workflow to have grown a dependency on either path.
+// opencode's own scratch dirs, where its bash tool tells the model it may write; denying them would
+// contradict that. Triage only.
 const OPENCODE_TMP_GLOB = path.join(os.tmpdir(), 'opencode', '*');
 const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
   process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
@@ -59,21 +26,9 @@ const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
 );
 
 /**
- * The permission base every lane starts from, with the lane's own rules merged over it.
- *
- * Headless: every tool the lane needs must be 'allow' outright, because an 'ask' has nobody to
- * answer it and would burn the run's wall-clock waiting. bash is on (git, the agent's own check
- * scripts); webfetch is off — nothing here has a reason to reach the network, and it would be the
- * cheapest exfiltration channel out of a sandbox holding cloud credentials. external_directory pins
- * the agent inside AGENT_CWD, with OpenCode's own tmp and tool-output globs allowed when
- * `scratchDirs` (see OPENCODE_TMP_GLOB above) — opencode matches multiple rules on the SAME map by
- * taking the last one that matches a given path, so listing the allows after the `'*': 'deny'` is
- * what makes them win rather than be shadowed by it.
- *
- * webfetch/websearch take a BARE action, not a `{'*': ...}` map — those two are not pattern-scoped
- * the way bash/edit/external_directory are. Sending the map form makes the server reject the whole
- * config with ConfigInvalidError, which 400s every endpoint including session creation, so the
- * lane fails before it can invoke anything.
+ * Headless: every needed tool must be 'allow', since an 'ask' has nobody to answer it. webfetch is off
+ * as the cheapest exfiltration channel. opencode takes the last matching rule, so the scratch allows
+ * come after `'*': 'deny'`. webfetch/websearch take a bare action; the map form 400s every endpoint.
  */
 function basePermission(lanePermission, { scratchDirs = false } = {}) {
   return {
@@ -89,10 +44,8 @@ function basePermission(lanePermission, { scratchDirs = false } = {}) {
 }
 
 /**
- * A custom primary agent whose `prompt` REPLACES the provider's default system prompt. `task` and
- * `skill` are denied because no lane runs sub-agents or ships skills of its own; `todowrite` stays
- * allowed, so the agent may still track its own steps. `steps` is OpenCode's step count: on the
- * step that reaches it OpenCode tells the model to answer in text only.
+ * A custom primary agent whose `prompt` replaces the provider's default system prompt. On the step that
+ * reaches `steps`, OpenCode tells the model to answer in text only.
  */
 function customAgent({ prompt, steps }) {
   return {
@@ -103,11 +56,6 @@ function customAgent({ prompt, steps }) {
   };
 }
 
-/**
- * Materialize a dossier (relative path → content) under root, refusing anything that would escape
- * it. The paths come from the backend's own store, but a traversal must be impossible by
- * construction rather than by trust.
- */
 function writeDossier(root, files) {
   for (const [rel, content] of Object.entries(files || {})) {
     const full = path.resolve(root, rel);
@@ -120,39 +68,19 @@ function writeDossier(root, files) {
 }
 
 /**
- * Raise Node's 300s cap on a SINGLE fetch to the run's own deadline.
- *
- * session.prompt() holds ONE HTTP request open for the WHOLE agent run — every turn, every
- * model call — and Node's fetch defaults headersTimeout to 300s. A lane that thinks for longer
- * is killed by the CLIENT while the server is still working, surfacing as a bare
- * `TypeError: fetch failed`. The SDK tries to lift this (`req.timeout = false`) but that is a
- * Bun-ism: Bun honours it, Node ignores an unknown property on a WHATWG Request, and these
- * scripts run on Node (node:24-alpine3.24 in both recipes), not Bun.
- *
- * Bounded by the deadline rather than disabled outright, so the launcher's timeout_ms stays the
- * one authority on how long a run may take. Disabling it (headersTimeout: 0) would let a
- * genuinely wedged request sit until the sandbox is reaped, turning a 5-minute failure into a
- * 15-minute one.
- *
- * Two dead ends worth not re-walking, both measured against a slow stub server:
- *   - `setGlobalDispatcher` is SILENTLY IGNORED by the built-in fetch when the runtime's
- *     bundled undici is a different major than this package's — no error, just no effect.
- *   - a `dispatcher` in the built-in fetch's init throws UND_ERR_INVALID_ARG, same reason.
- * Calling undici's OWN fetch with an explicit dispatcher sidesteps the split entirely.
+ * session.prompt() holds one request open for the whole run and Node's fetch kills it at 300s
+ * (the SDK's `req.timeout = false` only works on Bun). Bounded by the deadline, not disabled. Uses
+ * undici's own fetch: the built-in one ignores a dispatcher from a different undici major.
  */
 function makeFetch(runMs) {
   const dispatcher = new Agent({ headersTimeout: runMs, bodyTimeout: runMs });
-  // undici's fetch cannot consume a cross-realm global `Request` (it stringifies to
-  // "[object Request]" and throws Invalid URL), and a Request is exactly what the SDK hands its
-  // override — so unwrap it. The body is buffered rather than streamed to stay off the
-  // half-duplex path; these payloads are prompts, not uploads.
+  // undici's fetch cannot consume a cross-realm `Request`, which is what the SDK hands its override, so
+  // unwrap it. The body is buffered to stay off the half-duplex path.
   return async function boundedFetch(req) {
     const method = req.method || 'GET';
     return undiciFetch(req.url, {
       method,
       headers: Object.fromEntries(req.headers.entries()),
-      // Carried across the unwrap: dropping it would strand the socket of a request whose
-      // caller has already given up.
       signal: req.signal,
       body: method === 'GET' || method === 'HEAD' ? undefined : Buffer.from(await req.arrayBuffer()),
       dispatcher,
@@ -160,49 +88,27 @@ function makeFetch(runMs) {
   };
 }
 
-// WORK is the filesystem root for a run. Default '/home/user' keeps the E2B template behavior
-// byte-for-byte; the host launcher (local mode) sets WORK_DIR to a per-request temp dir.
 const WORK = process.env.WORK_DIR || '/home/user';
 const REPO = `${WORK}/repo`;
 const MAX_TURNS = 200;
 
-// The agent is started in WORK, NOT in the clone. OpenCode discovers opencode.json and
-// .opencode/ (whose plugins it EXECUTES at startup) from its start directory up to the
-// nearest git root, and reads AGENTS.md/CLAUDE.md by walking up from it. Starting inside a
-// customer's clone would hand that repo control of our agent's config, plugins and system
-// prompt. Starting in WORK — which we own and which is not a git repo — puts every one of
-// those lookups on ground we control, while leaving REPO fully readable: it is a child of
-// the start directory, so the `external_directory` permission never applies to it.
+// Started in WORK, not the clone: OpenCode executes .opencode/ plugins and reads opencode.json and
+// AGENTS.md walking up from its start directory, so starting in a customer's clone would hand that repo
+// our agent's config and prompt. REPO is a child of WORK, so it stays readable.
 const AGENT_CWD = WORK;
 
-// Repo-sourced agent configuration, moved aside immediately after checkout by quarantineRepo().
-// Belt to AGENT_CWD's braces: nothing here is discovered from WORK anyway, but a future
-// upstream change to discovery must not silently re-open the hole.
+// Belt and braces to AGENT_CWD: a future upstream discovery change must not reopen the hole.
 const QUARANTINED = ['.opencode', 'opencode.json', 'opencode.jsonc', 'AGENTS.md', 'CLAUDE.md', '.cursor'];
 
-// Strip embedded secrets before they can reach a log: clone tokens
-// (https://x-access-token:TOKEN@host) and platform API keys (tsy_<scope>_<random> —
-// the ephemeral MCP key rca.js wires into the sandbox has this shape).
+// Clone tokens and platform API keys (tsy_<scope>_<random>, the shape of the ephemeral MCP key).
 function scrubToken(s) {
   return String(s)
     .replace(/x-access-token:[^@\s]+@/g, 'x-access-token:***@')
     .replace(/tsy_[a-z]_[A-Za-z0-9_-]+/g, 'tsy_***');
 }
 
-// Node's fetch (undici) throws `TypeError: fetch failed` for every transport failure —
-// DNS, connection refused, TLS, a reset mid-response — and buries the actual cause one
-// level down in `.cause`. rca.js's top-level catch used to log only `.message`, so a run
-// that died talking to the local opencode server or a Bedrock endpoint left nothing in the
-// launcher logs but the word "failed": undebuggable. Walk the cause chain and any
-// code/errno/syscall Node attaches, so the real failure (e.g. ECONNREFUSED, ENOTFOUND,
-// a 403 from Bedrock) survives into the log line a human actually reads.
-//
-// A cause is not always an Error. The SDK's throwOnError path wraps a 4xx body into
-// `new Error(name, { cause: { body, status } })` — a PLAIN OBJECT whose `body` holds the only
-// copy of the server's actual complaint (ConfigInvalidError's failing path, BadRequest's zod
-// issue). `String(pojo)` is "[object Object]", so walking the chain naively throws that detail
-// away and leaves a bare error name — which is the failure mode this whole harness exists to
-// avoid. Serialise a non-Error cause instead, capped so a large body cannot flood the log.
+// fetch failures bury the real cause (ECONNREFUSED, a 403) in `.cause`, so walk the chain. The SDK wraps
+// a 4xx body as a plain-object cause, which String() renders as "[object Object]", so serialise it, capped.
 const CAUSE_MAX = 1000;
 
 function describeError(e, depth = 0) {
@@ -222,38 +128,12 @@ function describeError(e, depth = 0) {
   return causeStr ? `${head} <- caused by: ${causeStr}` : head;
 }
 
-/** Wall-clock ceiling for any one git invocation. Far below every caller's own deadline. */
 const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS || 180_000);
 
 /**
- * Run git, and FAIL rather than wait for a human who is not there.
- *
- * <p>This helper used to exist as one copy per lane, each
- * `execFileSync('git', args, { stdio: 'ignore' })` with no timeout and no prompt suppression. That
- * is a hang, not an error: when a clone's credentials are rejected — an expired installation token,
- * a revoked app — git asks for a username, the question goes to an ignored stdin, and it waits
- * forever. Nothing is logged, because stdio is discarded. The only symptom is the caller's own
- * deadline expiring: measured as a 20-minute silent burn per repo-grounded adjudication, reported
- * as `kind=timeout`, with a fail-safe `unclear` verdict recorded against a finding nobody ruled on.
- * Every agentic path shared the defect, so an auth problem looked identical to a slow agent.
- *
- * <p>Three guards, in the order they matter:
- * <ul>
- *   <li>{@code GIT_TERMINAL_PROMPT=0} plus empty askpass vars — a credential request becomes an
- *       immediate non-zero exit instead of a blocked read.
- *   <li>{@code -c credential.helper=} resets the helper list, so a configured helper (macOS
- *       keychain on a dev host, anything inherited in an image) can neither hang nor silently
- *       substitute different credentials than the caller passed.
- *   <li>a hard {@code timeout} — the backstop for a network stall, which no prompt setting covers.
- * </ul>
- *
- * <p>stdout comes back trimmed, for the callers that read an answer from git (a sha from rev-list).
- *
- * <p>stderr is captured and scrubbed rather than discarded, so the thrown error can say
- * <em>why</em>. That is the whole point: "Authentication failed" and "connection timed out" are
- * different operational problems and used to be the same opaque sentence. Args are never echoed —
- * they carry the tokenized clone URL — and {@link scrubToken} covers the case where git quotes the
- * remote back at us in its own message.
+ * Run git and fail rather than wait for a human: GIT_TERMINAL_PROMPT=0 and empty askpass turn a
+ * credential prompt into an exit, an empty credential.helper stops inherited helpers, and a timeout
+ * covers network stalls. stderr is scrubbed into the error; args carry the clone token and are never echoed.
  */
 function git(args) {
   try {
@@ -286,11 +166,7 @@ function git(args) {
   }
 }
 
-/**
- * Move repo-sourced agent configuration out of the clone, into REPO/quarantine/. The files stay
- * readable as evidence — an AGENTS.md is a legitimate thing for the observer to describe — they
- * just stop sitting where any agent harness looks for instructions to obey.
- */
+/** The files stay readable as evidence; they just stop sitting where an agent harness looks for instructions. */
 function quarantineRepo() {
   const dest = path.join(REPO, 'quarantine');
   for (const name of QUARANTINED) {
@@ -300,42 +176,22 @@ function quarantineRepo() {
       fs.mkdirSync(dest, { recursive: true });
       fs.renameSync(from, path.join(dest, name));
     } catch {
-      // Best-effort: a file we cannot move is one AGENT_CWD already protects us from.
     }
   }
 }
 
 // --- server lifecycle --------------------------------------------------------
 //
-// Readiness is opencode's own announcement, not "the port accepts". This used to spawn
-// `opencode serve` and treat an accepted TCP connection as ready. It is not. Measured in the E2B
-// template: the port accepts at 3.22s and the server announces itself at 3.54s, and a request that
-// lands in that ~320ms window HANGS FOREVER rather than being queued. Every RCA died there — the
-// hang burned Node's 300s fetch cap and surfaced as `fetch failed` at ~309s, with no model ever
-// invoked (Bedrock logged zero invocations for those runs).
-//
-// So spawnOpencodeServer waits for the process to print `opencode server listening on <url>` on
-// stdout and hands back that url — the same contract, env and failure messages as the
-// SDK's createOpencodeServer (@opencode-ai/sdk 1.18.30, dist/server.js), which this replaced. It
-// still takes a TYPED config object and serialises OPENCODE_CONFIG_CONTENT itself — a hand-built
-// JSON string is how an invalid `permission.webfetch` shape once shipped unnoticed.
-//
-// WHY NOT THE SDK'S OWN: its close() is a single fire-and-forget SIGTERM. No wait for the exit, no
-// SIGKILL if the process ignores it, and the child's stdio pipes stay referenced. An opencode that
-// has just served a session does not always exit on SIGTERM, so the lane's node process was held
-// open by the child and its pipes after main() returned, until triage.js's 5s exit guard killed it
-// (`still alive ... PipeWrap, ProcessWrap`). The SDK hands back no process handle, so the only way
-// to stop the child deterministically is to own the spawn.
+// Ready means opencode's own `listening on <url>` line, not an accepting port: a request in the
+// ~320ms between the two hangs forever. The spawn is ours, not the SDK's, because its close() is a
+// lone SIGTERM that neither waits nor escalates and left the lane's process alive.
 
-/** How long a SIGTERM'd opencode gets to exit on its own before it is SIGKILLed. */
 const STOP_GRACE_MS = 3_000;
-/** How long to wait for the exit a SIGKILL causes before giving up on observing it. */
 const KILL_WAIT_MS = 1_000;
 
 /**
- * Stop `proc` and resolve once it is gone: SIGTERM, up to STOP_GRACE_MS for it to exit, then
- * SIGKILL. Either way its stdio pipes are destroyed at the end, so nothing of the child holds this
- * process's event loop — even a grandchild that inherited the child's stdout cannot. Never rejects.
+ * SIGTERM, up to STOP_GRACE_MS, then SIGKILL; the stdio pipes are destroyed either way so nothing of
+ * the child holds the event loop. Never rejects.
  */
 function stopProcess(proc) {
   return new Promise((resolve) => {
@@ -349,7 +205,6 @@ function stopProcess(proc) {
       for (const stream of [proc.stdin, proc.stdout, proc.stderr]) if (stream) stream.destroy();
       resolve();
     };
-    // Never spawned (ENOENT: no pid) or already gone: nothing to signal, only pipes to release.
     if (proc.pid === undefined || proc.exitCode !== null || proc.signalCode !== null) return finish();
     proc.once('exit', finish);
     proc.kill('SIGTERM');
@@ -361,17 +216,8 @@ function stopProcess(proc) {
 }
 
 /**
- * Spawn `opencode serve` and resolve with `{url, close, exited}` once it announces itself. `close()`
- * returns a promise that settles only when the process is gone (see stopProcess). `exited` settles
- * with `{code, signal}` whenever the process exits, also after the announcement, so a long-lived
- * caller learns that its OpenCode died.
- *
- * Rejects, after stopping the process, with the same messages createOpencodeServer used:
- *   - the process exits → `Server exited with code N` plus the stdout+stderr it printed,
- *   - no announcement within `timeout` → `Timeout waiting for server to start after Nms`, now
- *     also with whatever it printed (the SDK discarded that),
- *   - an announcement with no url in it → `Failed to parse server url from output: <line>`,
- *   - the spawn itself fails (a missing binary) → the spawn error as-is.
+ * Resolves `{url, close, exited}` once it announces itself; `exited` also settles after that, so a
+ * long-lived caller learns its OpenCode died.
  */
 function spawnOpencodeServer({ hostname, port, timeout, config }) {
   const args = ['serve', `--hostname=${hostname}`, `--port=${port}`];
@@ -396,8 +242,7 @@ function spawnOpencodeServer({ hostname, port, timeout, config }) {
       timeout,
     );
 
-    // Both streams stay drained for the life of the process, not just until the announcement: an
-    // unread pipe fills and blocks opencode on its next write.
+    // An unread pipe fills and blocks opencode, so both stay drained for the life of the process.
     proc.stdout.on('data', (chunk) => {
       if (settled) return;
       output += chunk.toString();
@@ -419,10 +264,8 @@ function spawnOpencodeServer({ hostname, port, timeout, config }) {
 }
 
 /**
- * The launcher's provider config (agentEnvs), passed down in the env var OpenCode reads. Must be
- * MERGED, not replaced: the var holds one value, so overwriting it drops the provider block and
- * bedrock-mantle-gpt never registers — the GPT-5.6 lanes then fail to resolve a model while every
- * bedrock-runtime lane still works off the ambient AWS_REGION.
+ * Merged, not replaced: overwriting the var drops the launcher's provider block and bedrock-mantle-gpt
+ * never registers.
  */
 function inheritedConfig() {
   const raw = process.env.OPENCODE_CONFIG_CONTENT;
@@ -431,28 +274,8 @@ function inheritedConfig() {
 }
 
 /**
- * Start the server on loopback, rooted at AGENT_CWD.
- *
- * No basic auth: the server is bound to 127.0.0.1 inside a single-tenant microVM that is torn
- * down after one run, so a password would only protect the sandbox from the agent we are
- * deliberately running in it.
- *
- * Two things the spawn does NOT do for us, so we do them here, before it:
- *   - cwd. The child inherits the parent's working directory, and the agent's start directory is
- *     a SECURITY boundary (see AGENT_CWD) — so chdir first rather than hope the launcher invoked
- *     us from the right place.
- *   - the OPENCODE_DISABLE_* pins. The child gets process.env, so setting them on ourselves is
- *     what reaches it: auto-update (a network fetch mid-run), LSP downloads (nothing here needs a
- *     language server) and .claude compatibility reads (a customer repo must not reach our system
- *     prompt).
- *
- * The port is chosen HERE. opencode's default is a fixed 4096, which two concurrent runs on one
- * host (local mode) would collide on, and `port: 0` does NOT mean "any free port" — measured,
- * opencode ignores it and binds 4096 anyway. An explicitly chosen free port is honoured, and the
- * real url is still read back off the announcement.
- *
- * Timeout is generous because a cold microVM is slow to boot: the SDK's own default was 5s and we
- * measured 3.5s warm, which leaves no headroom at all.
+ * No basic auth: loopback in a single-tenant sandbox. opencode ignores `port: 0` and binds 4096, so a
+ * free port is chosen here for concurrent local runs.
  */
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -474,10 +297,8 @@ function portTaken(port) {
 }
 
 /**
- * freePort releases its port before opencode binds it, so another process can take it in between
- * (parallel test files, or two local-mode runs on one host). opencode 1.18.30 then exits printing
- * only `ServeError`, so the collision is recognised by finding the port held after the failed start,
- * not by reading the output.
+ * freePort releases its port before opencode binds it, and opencode then exits printing only
+ * `ServeError`, so a collision is recognised by the port being held after the failed start.
  */
 const PORT_ATTEMPTS = 3;
 
@@ -486,8 +307,7 @@ async function startServer(configJson) {
   process.env.OPENCODE_DISABLE_AUTOUPDATE = '1';
   process.env.OPENCODE_DISABLE_LSP_DOWNLOAD = '1';
   process.env.OPENCODE_DISABLE_CLAUDE_CODE = '1';
-  // Run-scoped keys last, so the lane's permission rules win over anything inherited. Read
-  // BEFORE the spawn, which overwrites the var in the child's env with the merged object.
+  // Run-scoped keys last so the lane's rules win; read before the spawn overwrites the var.
   const config = { ...inheritedConfig(), ...configJson };
   const startMs = Date.now();
   try {
@@ -510,13 +330,8 @@ async function startServer(configJson) {
 }
 
 /**
- * `provider/model` → the `{providerID, modelID}` the prompt API takes. Sending the joined string
- * is a 400 (`Expected object | null, got "amazon-bedrock/..." at ["model"]`), which the SDK
- * surfaces as an empty reply rather than a throw — so it reads as "the agent said nothing".
- *
- * Split on the FIRST slash only: provider ids never contain one, model ids can (and routinely
- * carry a `:0` version suffix, e.g. `anthropic.claude-sonnet-4-5-20250929-v1:0`). An id with no
- * slash is passed through as a bare modelID and left for the server to resolve.
+ * The prompt API takes `{providerID, modelID}`; the joined string is a 400 that reads as an empty reply.
+ * First slash only: model ids can contain one.
  */
 function splitModel(model) {
   const i = typeof model === 'string' ? model.indexOf('/') : -1;
@@ -525,20 +340,9 @@ function splitModel(model) {
 }
 
 /**
- * Schema-constrained output, asked for in the PROMPT rather than through the server's `format`.
- *
- * `format: {type:'json_schema', schema}` is accepted by opencode 1.18.13 and then does not work:
- * the reply comes back with no text and no structured output, and the session is left in a state
- * where GET messages 400s with `Expected OutputFormatJsonSchema` — the server cannot re-read the
- * format it just stored. Measured both ways against a live model: identical prompt, `format` set
- * → empty reply + poisoned session; `format` omitted → a real answer and a readable session.
- *
- * So we instruct instead of constrain, and rebuild `structured_output` ourselves in extractJson.
- * The envelope the backend reads is unchanged, which is the contract that actually matters.
- * Revisit if a later opencode fixes it — schemaInstruction/extractJson/missingKeys are the three
- * places to delete. NOTE upstream's own mechanism is a forced `StructuredOutput` TOOL CALL, and
- * its documented retry knob (`format.json_schema.retryCount`) is accepted but ignored
- * (anomalyco/opencode#25430) — so even when it works there is no second attempt. Ours retries.
+ * Asked for in the prompt, not the server's `format`: opencode 1.18.13 accepts `format` and returns an
+ * empty reply and a session whose messages then 400. Its documented retry knob is also ignored
+ * (anomalyco/opencode#25430). schemaInstruction, extractJson and missingKeys go if that is fixed.
  */
 function schemaInstruction(jsonSchema) {
   if (!jsonSchema) return '';
@@ -550,14 +354,8 @@ function schemaInstruction(jsonSchema) {
 }
 
 /**
- * The top-level `required` keys a parsed reply is missing, as a list. NOT a JSON Schema validator
- * — a real one is a dependency this microVM does not need, and the backend re-parses and re-checks
- * everything anyway (RcaSynthesisOutput). This exists to catch the one failure that is both common
- * and cheap to fix by asking again: a model that answered in prose, or dropped a required field.
- *
- * "The reply was not JSON at all" is NOT signalled here — a caller already knows that from a null
- * `parsed`, and folding it in as a pseudo-key put the string "<no JSON object>" into the list the
- * correction prompt names back to the model.
+ * Top-level `required` keys only; the backend re-checks everything. A non-JSON reply is signalled by a
+ * null `parsed`, not here.
  */
 function missingKeys(parsed, jsonSchema) {
   const required = jsonSchema && Array.isArray(jsonSchema.required) ? jsonSchema.required : [];
@@ -566,15 +364,8 @@ function missingKeys(parsed, jsonSchema) {
 }
 
 /**
- * The first BALANCED `{...}` span in `text`, as a slice, or null.
- *
- * String-aware on purpose: the RCA schema's `detailed_report` is a markdown document carried
- * inside a JSON string, and markdown is full of braces and backticks. A depth counter that did
- * not skip string contents would close the object on the first `}` inside the report.
- *
- * Scanning from each `{` in turn (rather than trusting the first) is what tolerates leading
- * prose that happens to contain a brace. A span that never balances — the shape a reply
- * truncated by an output-token limit has — yields nothing, which is the honest answer.
+ * String-aware because markdown inside a JSON string is full of braces. A span that never balances (a
+ * reply truncated at the token limit) yields nothing.
  */
 function balancedSpans(text) {
   const out = [];
@@ -604,17 +395,7 @@ function balancedSpans(text) {
   return out;
 }
 
-/**
- * Pull the reply's JSON object back out of the text. Tolerates a markdown fence and prose on
- * either side because "ONLY JSON" is an instruction, not a guarantee; returns null when there is
- * nothing parseable, leaving the caller's normal empty-result handling to fire.
- *
- * This USED TO be `indexOf('{')` to `lastIndexOf('}')`, which is wrong in both directions and
- * silently so: a sentence before the object containing a brace moved the start, a sentence after
- * it containing one moved the end, and either produced an unparseable slice — reported to the
- * caller as "the model ignored the schema" when the model had in fact complied. balancedSpans
- * finds the object itself.
- */
+/** Tolerates a markdown fence and prose on either side, since "ONLY JSON" is an instruction, not a guarantee. */
 function extractJson(text) {
   if (!text) return null;
   for (const span of balancedSpans(text)) {
@@ -622,25 +403,14 @@ function extractJson(text) {
       const parsed = JSON.parse(span);
       if (parsed && typeof parsed === 'object') return parsed;
     } catch {
-      // Fall through to the next candidate.
     }
   }
   return null;
 }
 
 /**
- * Why a schema lane is about to reject, in a form a log can carry.
- *
- * A schema miss is the most expensive failure this file has: it lands at the END of a run that
- * has already spent its whole wall-clock and its whole bill, and the reply that caused it is
- * discarded by the throw. That left the operator with one sentence — "did not return a JSON
- * object" — and no way to tell a truncated reply from a prose one from a parser bug, which is
- * exactly the ambiguity that made the first such failure undiagnosable.
- *
- * Deliberately BOUNDED and SCRUBBED: this goes to the launcher console, which keeps the last 4KB
- * of a run's stderr, and the reply can quote evidence. Head and tail rather than the middle —
- * the two ends are what distinguish the failure modes. `output_tokens` is the tell for
- * truncation: a reply that stopped at the provider's cap reports the cap.
+ * A schema miss is discarded by the throw, so log a bounded, scrubbed head and tail of the reply.
+ * `output_tokens` at the provider cap is the tell for truncation.
  */
 function describeSchemaMiss(text, turns, jsonSchema) {
   const t = String(text || '');
@@ -659,27 +429,8 @@ function describeSchemaMiss(text, turns, jsonSchema) {
 }
 
 /**
- * What the run has spent so far, as one line, for the launcher console.
- *
- * F1: a failing lane USED TO reach only this line — its tokens never reached the launcher, and the
- * backend booked NOTHING for it (a run could burn its whole wall-clock and whole bill and leave a
- * ledger that said it cost zero). triage.js/rca.js now also write `sumUsage(e.turns)` into a small
- * JSON envelope on stdout before exiting non-zero, which server.js's buildErrorBody carries into the
- * 502 body as `usage`, and E2bTriageSandbox/E2bRcaSandbox book it from there. This line stays as the
- * human-readable copy on the launcher console — the two must never disagree, hence both read sumUsage.
- *
- * Cache reads are called out separately because on a repo-grounded or evidence-heavy run they are
- * most of the input and are priced at a tenth of it — an input_tokens figure that folded them in
- * would read an order of magnitude too expensive.
- */
-/**
- * Sum a turns[] array into one numeric-only usage object — the ONE place both the success envelope
- * (toEnvelope) and a failing run's stdout envelope (triage.js/rca.js's catch block, via this same
- * exported name) compute spend, so the two can never drift apart.
- *
- * Every field here is a plain number, on purpose: this crosses into sandbox-runner/launcher/server.js's
- * HARD RULE territory (buildErrorBody forwards exactly this shape into the 502 body it sends the
- * backend), so nothing added to this object may ever become a string.
+ * The one place both the success envelope and a failing lane's stdout envelope compute spend. Every
+ * field is a number: server.js's buildErrorBody forwards this shape into its 502 body.
  */
 function sumUsage(turns) {
   const z = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0 };
@@ -698,17 +449,14 @@ function sumUsage(turns) {
 function usageLine(turns) {
   const u = sumUsage(turns);
   return (
-    `spend (booked on failure by the caller — see triage.js/rca.js): in=${u.input_tokens} out=${u.output_tokens} ` +
+    `spend (booked on failure by the caller — see lane.js): in=${u.input_tokens} out=${u.output_tokens} ` +
     `cache_read=${u.cache_read_input_tokens} cache_write=${u.cache_creation_input_tokens} cost_usd=${u.cost_usd} ` +
     `turns=${(turns || []).length}`
   );
 }
 
-// --- message → turn mapping --------------------------------------------------
-
-// OpenCode message parts are a tagged union whose exact field names have moved between
-// releases. Every reader below is written to accept the shapes we have seen rather than one
-// of them, because a rename upstream must degrade telemetry, never fail the run.
+// Part field names move between OpenCode releases; a rename upstream must degrade telemetry, never
+// fail the run.
 function partsOf(message) {
   const p = message && (message.parts || message.content);
   return Array.isArray(p) ? p : [];
@@ -746,9 +494,7 @@ function toolResultsOf(parts) {
   return out;
 }
 
-// `cost_usd` is OpenCode's own figure for the message, summed over every model call in it, from the
-// rates the launcher declared for the model (its `model_cost`). That is the run's bill: the backend
-// books it as reported and no longer prices tokens itself.
+// `cost_usd` is OpenCode's own figure from the rates the launcher declared; the backend books it as reported.
 function usageOf(message) {
   const t = (message && message.tokens) || {};
   const cache = t.cache || {};
@@ -763,14 +509,8 @@ function usageOf(message) {
 }
 
 /**
- * An assistant message carrying neither text, nor a tool call, nor any output tokens.
- *
- * Bedrock returns these on the non-Anthropic model families: a completed response, stop reason
- * and all, with nothing in it (anomalyco/opencode#31430, closed as a provider bug). An agent
- * reads it as "the task is done", so a run that hit one has silently truncated — which is worse
- * than a crash, because the caller cannot tell. runAgent retries once when the LAST assistant
- * message looks like this — a fresh session normally, but a same-session, no-tools resume when
- * it is triage hitting its own turn cap after real work (see the isEmptyCompletion branch below).
+ * Bedrock returns these on non-Anthropic families (anomalyco/opencode#31430), and an agent reads it as
+ * "done", silently truncating the run, so runAgent retries once.
  */
 function isEmptyCompletion(turns) {
   const last = turns[turns.length - 1];
@@ -778,10 +518,7 @@ function isEmptyCompletion(turns) {
   return !last.text && last.tool_calls.length === 0 && last.usage.output_tokens === 0;
 }
 
-/**
- * Build the `turns[]` the backend renders as child llm_request spans. `input` is what that
- * model call was responding to: the prompt for turn 0, the previous turn's tool results after.
- */
+/** `input` is what the call responded to: the prompt for turn 0, the previous turn's tool results after. */
 function toTurns(messages, prompt) {
   const turns = [];
   let pendingInput = prompt;
@@ -807,13 +544,8 @@ function toTurns(messages, prompt) {
 }
 
 /**
- * The result envelope. This shape is OURS — the backend's AgentSpanTelemetry and the lanes' Java
- * sandboxes read `usage`, `num_turns` and `structured_output` by name — so it is a contract between
- * this file and Java, not an artifact of the harness that used to produce it.
- *
- * The run's cost travels inside `usage` as `cost_usd`: OpenCode's own figure, from the models.dev
- * rates the launcher declared for the model. The backend books it as reported; a run that used
- * tokens but reports $0 had no rate, and the backend books it unpriced, not free.
+ * A contract with the backend's AgentSpanTelemetry and the lanes' Java sandboxes. A run with tokens
+ * but $0 `cost_usd` had no rate; the backend books it unpriced, not free.
  */
 function toEnvelope(turns, structured, text) {
   const usage = sumUsage(turns);
@@ -822,9 +554,6 @@ function toEnvelope(turns, structured, text) {
   return JSON.stringify(env);
 }
 
-// --- the run -----------------------------------------------------------------
-
-/** One remote OpenCode MCP entry per relay URL. No headers: the relay holds every token. */
 function remoteMcp(urls) {
   const mcp = {};
   for (const [name, url] of Object.entries(urls)) mcp[name] = { type: 'remote', url, enabled: true, oauth: false };
@@ -833,58 +562,24 @@ function remoteMcp(urls) {
 
 
 /**
- * Run one agent invocation against `spec.prompt`; collect per-turn telemetry + a result envelope.
- *
- * @param {{model: string, prompt: string, jsonSchema: object, mcp: {url: string, token: string},
- *          permission: object, timeoutMs: number, maxTurns?: number, systemPrompt?: string}} spec
- *   - model: a `provider/model` id (see toProviderModel in the launcher); split for the wire.
- *   - jsonSchema: the reply is schema-constrained and lands in `structured_output`. The run
- *     rejects when it produced no usable reply, or no reply that satisfies the schema: its VALUE
- *     is that reply. Null (run.js, asked for prose) drops the constraint: no schema
- *     instruction, no schema-miss retry, and the reply's text is the answer, with
- *     `structured_output` present only when that text happened to carry a JSON object.
- *   - permission: the lane's OpenCode permission rules. Every lane passes one — an agent that
- *     may edit anything is a choice, not a default.
- *   - timeoutMs: the launcher's deadline for this run; bounds the client-side fetch.
- *   - maxTurns: the operator-configured turn BUDGET. Without systemPrompt, passed to the SDK as `config.agent.build.maxSteps`
- *     (see the `steps` doc below for the with-systemPrompt case), whose own doc comment ("Maximum
- *     number of agentic iterations before forcing text-only response") is the mechanism this
- *     relies on for a soft landing rather than a hard kill — set 2 LOWER than the budget so the
- *     forced text-only turn lands with margin, per the issue's "two turns before the cap" ask. NOT
- *     independently confirmed against a live run in the change that added this field — see that
- *     change's PR description.
- *   - systemPrompt: triage only (RCA omits it). When set, this run starts an
- *     `mcp-relay` in front of `spec.mcp` (so opencode's own config carries no platform token — see
- *     mcp-relay.js) and defines a custom opencode agent (`TRIAGE_AGENT`) whose `prompt` REPLACES
- *     the provider's default system prompt, `steps` carries the same maxTurns-2 budget as
- *     `build.maxSteps` above, and whose `permission` denies `task`/`skill` (sub-agents and skills
- *     are not this lane's to run) while allowing `todowrite`. It also opens `external_directory` to
- *     opencode's own tmp and tool-output globs (see OPENCODE_TMP_GLOB above), which the base config
- *     otherwise denies outright. Selected on every `session.prompt` call via `body.agent`. Omitting
- *     it (RCA) leaves every part of this function byte-for-byte the same as before this field
- *     existed.
- * @returns {Promise<{startMs: number, turns: object[], resultRaw: string}>}
+ * spec: model (`provider/model`), prompt, jsonSchema (null asks for prose: no schema retry),
+ * permission (required), mcp, timeoutMs (bounds the fetch), maxTurns (opencode steps at maxTurns - 2
+ * so the forced text-only turn lands with margin), and systemPrompt (triage: puts mcp-relay in front of
+ * the platform token and runs under TRIAGE_AGENT).
  */
 async function runAgent(spec) {
   const startMs = Date.now();
-  // The ROOT surface, deliberately. The package also ships `@opencode-ai/sdk/v2`, which is the
-  // only one whose types know about `format` — but its prompt route answers UnknownError
-  // ("Unexpected server error") against this server, while the root client drives it correctly.
-  // Since schemaInstruction replaces `format` entirely (see there), v2 buys nothing.
+  // The root SDK surface: v2's prompt route answers UnknownError against this server.
   const { createOpencodeClient } = await import('@opencode-ai/sdk');
 
   const config = {
     permission: basePermission(spec.permission, { scratchDirs: Boolean(spec.systemPrompt) }),
     lsp: {},
   };
-  // The turn budget as an opencode step count, shared by both branches below — 2 lower than the
-  // configured maxTurns so the forced text-only turn lands with margin (see the JSDoc).
   const steps = Number.isFinite(spec.maxTurns) && spec.maxTurns > 0 ? Math.max(1, spec.maxTurns - 2) : undefined;
 
   let relay = null;
   if (spec.systemPrompt) {
-    // Triage only. The relay holds the live platform token; opencode's own MCP config never sees
-    // it (see mcp-relay.js's header for why that split matters).
     relay = await startMcpRelay({
       servers: [{ name: 'tessary-evals', url: spec.mcp.url, token: spec.mcp.token }],
       workDir: WORK,
@@ -892,7 +587,6 @@ async function runAgent(spec) {
     config.mcp = remoteMcp(relay.urls);
     config.agent = { [TRIAGE_AGENT]: customAgent({ prompt: spec.systemPrompt, steps }) };
   } else {
-    // Config, never argv: the platform key must not be visible in the process table.
     config.mcp = {
       'tessary-evals': {
         type: 'remote',
@@ -902,15 +596,11 @@ async function runAgent(spec) {
       },
     };
     if (steps !== undefined) {
-      // See the JSDoc above for the mechanism and its margin. No prompt selects a
-      // non-default agent (the `body` below carries no `agent` field), so the SESSION runs under
-      // opencode's default agent identity, which is `build` — the one this config key names.
+      // No prompt selects an agent here, so the session runs as opencode's default `build`.
       config.agent = { build: { maxSteps: steps } };
     }
   }
 
-  // Null until startServer() resolves, so the `finally` below can tell a start failure (nothing to
-  // close) from a start success (something to close) — see there for why that distinction matters.
   let server = null;
   try {
     server = await startServer(config);
@@ -922,50 +612,22 @@ async function runAgent(spec) {
     let turns = [];
     let structured = null;
     let text = '';
-    // F1/F3: turns from a session this run ABANDONED (the fresh-session-retry branch below starts
-    // a brand-new session, which orphans whatever the previous session already spent). Folded back
-    // in just before a fresh session is created — see the `if (!resume)` branch — so the final
-    // usage this function reports (on success via toEnvelope, on failure via the throw sites'
-    // `.turns`) is the sum of EVERY session this run opened, not just the last one. A schema-miss
-    // resume never needs this: it stays on the same session, so `client.session.messages` below
-    // already returns that session's full history on its own.
+    // Turns from abandoned sessions, so the reported spend covers every session this run opened.
     let allTurns = [];
 
-    // Two attempts, for two transient failures worth one more try each:
-    //   - an empty completion (a provider that answered "done" with nothing in it, see
-    //     isEmptyCompletion), and
-    //   - a schema miss: prose instead of JSON, or a dropped required key. Upstream's own
-    //     structured-output path has no retry at all (#25430), which is half of why a schema
-    //     miss used to sink a run.
-    // A real error repeats, so neither is retried more than once. The second attempt names what
-    // was wrong rather than just asking again.
+    // One retry each for an empty completion and a schema miss; a real error repeats.
     let correction = '';
     let sessionID = '';
-    // Whether attempt 2 CONTINUES attempt 1's session or starts a new one, and the two are not
-    // interchangeable. A schema miss means the investigation happened and only its final
-    // rendering was wrong, so the fix is to ask the same session to restate it — a fresh session
-    // would throw away the whole run and re-do it inside whatever wall-clock is left, which is
-    // both the expensive answer and the one that makes "your previous reply" refer to nothing.
-    // An EMPTY completion is the opposite case: the session itself produced nothing, so the
-    // retry has to start clean — UNLESS (E) that session already did real work and only its LAST
-    // turn came back empty, in which case a fresh session would re-pay for that work rather than
-    // recover it. For triage specifically, that shape is also what opencode's own turn cap looks
-    // like — a forced text-only turn with nothing in it — and the fix there is neither a fresh
-    // session nor letting the run fail: it is THIS same resume, telling the agent to stop calling
-    // tools and answer with what it already has. See the isEmptyCompletion branch below.
+    // A schema miss resumes the same session (only the rendering was wrong). An empty completion starts
+    // fresh, unless the session already did real work, which a fresh session would pay for again.
     let resume = false;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (!resume) {
-        // Starting a brand-new session abandons whatever `turns` currently holds from the PRIOR
-        // session (attempt 0 here is a no-op: `turns` is still `[]`) — fold it into the accumulator
-        // before it is overwritten below, or that spend silently vanishes (the exact F1 bug).
         allTurns = allTurns.concat(turns);
         const session = await client.session.create({ body: { title: 'tessary-agent' } });
         sessionID = (session && (session.id || (session.data && session.data.id))) || '';
       }
-      // On a resume the session already holds the task and the evidence; re-sending the
-      // investigation prompt would order a second investigation. Send the correction and the
-      // schema, nothing else.
+      // On a resume the session already holds the task; re-sending the prompt orders a second investigation.
       const prompt = resume
         ? correction.trim() + schemaInstruction(spec.jsonSchema)
         : spec.prompt + schemaInstruction(spec.jsonSchema) + correction;
@@ -986,21 +648,10 @@ async function runAgent(spec) {
       structured = extractJson(text);
 
       if (isEmptyCompletion(turns)) {
-        // (E) Gate the fresh-session retry on how little this session actually did. A LONE empty
-        // turn (no prior turns, no tool calls) is cheap to redo from scratch. A session that
-        // already ran a multi-turn investigation and only stumbled on its FINAL reply is not: a
-        // fresh-session retry would throw away everything it learned and re-run the whole
-        // investigation inside whatever wall-clock is left, silently doubling the run's cost for a
-        // failure that a retry is not even likely to fix (the same model, the same task).
         const substantialWork = turns.length > 1 || turns.some((t) => (t.tool_calls || []).length > 0);
         if (substantialWork) {
-          // Triage only, and only once (attempt 0): this shape — real work, then an empty final
-          // turn — is exactly what opencode's own step cap produces (a forced text-only turn with
-          // no tool budget left), not a provider that gave up. A new prompt on the SAME session
-          // reopens the step count with tools enabled again (checked against opencode 1.18.30), so
-          // the correction has to tell the agent not to use them — an instruction, not an enforced
-          // limit. A real run that ignores it still ends on its own deadline, and decision 3 spends
-          // that as a normal run failure rather than this loop retrying further.
+          // Real work then an empty turn is opencode's own step cap. A new prompt on the same session reopens
+          // tools, so the correction tells the agent not to use them; the run's deadline still bounds it.
           if (spec.systemPrompt && attempt === 0) {
             console.error('empty completion at the turn cap after real work: resuming the same session once, no tools');
             resume = true;
@@ -1009,16 +660,13 @@ async function runAgent(spec) {
               'read, reply now with the ruling JSON object and nothing else.';
             continue;
           }
-          // Let it fail instead — `unusable` below will reject it, and Step 1's accumulation means
-          // the failure's usage line/envelope still carries every token this session actually spent.
           break;
         }
         resume = false;
         continue;
       }
-      // Both halves matter. A schema with no `required` list makes missingKeys vacuously empty,
-      // so "we parsed an object at all" is the check that carries the prose case. No schema at all
-      // (run.js, asked for prose) means any non-empty reply is the answer.
+      // A schema with no `required` list makes missingKeys vacuously empty, so parsing an object at all is
+      // what catches prose.
       const missing = missingKeys(structured, spec.jsonSchema);
       if (!spec.jsonSchema || (structured && missing.length === 0)) break;
       if (attempt === 0) console.error(describeSchemaMiss(text, turns, spec.jsonSchema));
@@ -1032,18 +680,9 @@ async function runAgent(spec) {
           'that the whole object fits in one reply.';
     }
 
-    // The final tally: every session this run opened, not just the last one (see `allTurns` above).
     const finalTurns = allTurns.concat(turns);
 
-    // No stderr tail to append any more, and none is needed. `throwOnError` turns a rejected
-    // request into a throw carrying the server's own body (ConfigInvalidError, BadRequest, …) —
-    // as an Error whose `cause` is the parsed body, which is why describeError has to serialise a
-    // non-Error cause. Server-start failures are wrapped in startServer. Both land in the lanes'
-    // top-level catch, all four of which now go through describeError.
-    //
-    // F1: every throw below carries `.turns = finalTurns` — a plain data property on the Error,
-    // never a string field derived from model output — so triage.js/rca.js's catch block can book
-    // what this run actually spent instead of the backend recording a $0 failure.
+    // Every throw carries `.turns` so a failing lane can still book what the run spent.
     const empty = finalTurns.length === 0;
     const unusable = empty || (!structured && !text);
     if (empty) {
@@ -1055,9 +694,7 @@ async function runAgent(spec) {
       throw Object.assign(new Error('opencode produced no usable reply'), { turns: finalTurns });
     }
 
-    // A schema miss that survived the retry is a FAILED run, not a thin one. Prose is truthy
-    // `text`, so it clears `unusable` above and would otherwise resolve as success. Reject here so
-    // the backend records a failure instead of persisting a plausible-looking artifact.
+    // Prose clears `unusable` above, so a schema miss that survived the retry is rejected here.
     const missing = missingKeys(structured, spec.jsonSchema);
     if (spec.jsonSchema && (!structured || missing.length)) {
       console.error(describeSchemaMiss(text, finalTurns, spec.jsonSchema));
@@ -1077,13 +714,8 @@ async function runAgent(spec) {
 
     return { startMs, turns: finalTurns, resultRaw: toEnvelope(finalTurns, structured, text) };
   } finally {
-    // The relay is started BEFORE startServer(), so a start failure never reaches this `try` but
-    // still leaves the relay's listening socket open. Closing it here, not only on success, is
-    // what stops a failed server start from hanging the process until the run's outer deadline.
-    //
-    // The server close is AWAITED: it resolves only once opencode is gone (see stopProcess), so
-    // runAgent never returns while the child and its pipes still hold the event loop. stopProcess
-    // never rejects, so the close cannot replace the run's own error.
+    // The relay starts before startServer(), so it is closed here even on a start failure. The server close
+    // is awaited and never rejects, so it cannot replace the run's own error.
     try {
       if (server) await server.close();
     } finally {

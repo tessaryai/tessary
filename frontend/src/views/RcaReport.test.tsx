@@ -4,49 +4,28 @@
  * own heading; on a current one, every cause together with its confidence. A groundedness cause counts flagged
  * answers and links its traces; a frustration cause counts sessions and links the sessions and their turns.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../test/render";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { RcaReport as RcaReportData } from "../api/types";
-import type { Me } from "../api/types-auth";
 import { AuthProvider } from "../auth/AuthContext";
 import { RcaReport } from "./RcaReport";
 import { CURRENT_GROUNDEDNESS_REPORT, GROUNDEDNESS_REPORT } from "../test/groundednessFixtures";
+import { api, auth } from "../test/api";
 
-const { me } = vi.hoisted(() => ({ me: vi.fn<() => Promise<Me>>() }));
-
-vi.mock("../api/client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../api/client")>();
-  return { ...actual, auth: { ...actual.auth, me } };
-});
+vi.mock("../api/client", () => import("../test/api"));
+vi.mock("../tenant/TenantContext", () => import("../test/api"));
 
 let report: RcaReportData = GROUNDEDNESS_REPORT;
-const api = {
-  base: "/api/orgs/acme/projects/default",
-  getRcaReport: vi.fn(async (_id: string) => report),
-  getGitIntegration: vi.fn(async () => null),
-  rerunRca: vi.fn(),
-};
-
-vi.mock("../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-    useProjectApi: () => api,
-  };
-});
-
-afterEach(() => {
+beforeEach(() => {
   report = GROUNDEDNESS_REPORT;
-  api.rerunRca.mockReset();
+  api.getRcaReport.mockImplementation(async () => report);
+  api.getGitIntegration.mockResolvedValue(null);
 });
 
 function renderReport(role: "owner" | "member" = "member") {
-  me.mockResolvedValue({
-    id: "user-1",
-    email: "a@example.com",
-    orgs: [{ id: "org-1", slug: "acme", name: "Acme", role }],
+  auth.me.mockResolvedValue({
+    id: "user-1", email: "a@example.com", orgs: [{ id: "org-1", slug: "acme", name: "Acme", role }],
     platform_staff: false,
   });
   renderRoute(
@@ -105,12 +84,8 @@ describe("RcaReport", () => {
       ...GROUNDEDNESS_REPORT,
       ruled_out: [
         {
-          check: "model_swap",
-          question: "Did the serving model change?",
-          assessment: "explains",
-          detail: "Model id changed.",
-          measurement: null,
-          passed: false,
+          check: "model_swap", question: "Did the serving model change?", assessment: "explains",
+          detail: "Model id changed.", measurement: null, passed: false,
         },
         { check: "grader_drift", question: null, assessment: "ruled_out", detail: "Grader unchanged.", measurement: null, passed: true },
       ],
@@ -152,21 +127,14 @@ describe("RcaReport", () => {
 
   it("counts a frustration report's causes in sessions and links the sessions and their turns", async () => {
     report = {
-      ...GROUNDEDNESS_REPORT,
-      report_kind: "frustration_causes",
-      metric: "frustration",
-      current_value: 0.052,
+      ...GROUNDEDNESS_REPORT, report_kind: "frustration_causes", metric: "frustration", current_value: 0.052,
       prior_value: 0.018,
       causes: [
         {
-          title: "The agent repeats the same clarifying question",
-          confidence: "high",
-          change: null,
-          type: null,
+          title: "The agent repeats the same clarifying question", confidence: "high", change: null, type: null,
           what_changed: "Asked for the order number after the user gave it.",
           how_it_caused_this: "Users had to repeat themselves.",
-          next_step: "Read the order number from the conversation before asking.",
-          attribution: null,
+          next_step: "Read the order number from the conversation before asking.", attribution: null,
           evidence_session_ids: ["session-0000aa01", "session-0000aa02"],
           evidence_trace_ids: ["trace-0000bb01"],
           affected_count: 4,

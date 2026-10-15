@@ -16,8 +16,6 @@ import ai.tessary.query.QueryDtos.FacetsRequest;
 import ai.tessary.query.QueryDtos.SearchRequest;
 import ai.tessary.query.QueryDtos.TimeRange;
 import ai.tessary.query.QueryDtos.TimeseriesRequest;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
@@ -35,7 +33,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -45,35 +42,16 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * and repository.
  */
 @SpringBootTest
-class QueryApiIntegrationTest {
-
-    @Autowired
-    QueryController controller;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record QueryApiIntegrationTest(
+        SubstrateV2Fixtures fx,
+        QueryController controller,
+        TraceV2Repository traces,
+        SpanRepository spans,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     private static TenantContext token(String projectId) {
         return new TenantContext("user-1", null, "org-1", projectId, "member", "tok-1");
-    }
-
-    private SubstrateV2Fixtures fixtures() {
-        return new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
     }
 
     /** Two spans (llm "chat", tool "search") at t0 and t0+2h. */
@@ -81,7 +59,6 @@ class QueryApiIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, name).project().id();
         Instant t0 = Instant.parse("2026-06-10T00:00:00Z");
         Instant t2 = t0.plus(2, ChronoUnit.HOURS);
-        var fx = fixtures();
         String sessionId = SubstrateV2Fixtures.sessionId();
         String traceId = SubstrateV2Fixtures.traceId();
         fx.session(pid, sessionId, t0);
@@ -266,7 +243,6 @@ class QueryApiIntegrationTest {
         Instant t0 = Instant.parse("2026-06-10T00:00:00Z");
         Instant t2 = t0.plus(2, ChronoUnit.HOURS);
         Instant arrived = Instant.parse("2026-06-15T00:00:00Z");
-        var fx = fixtures();
         String sessionId = SubstrateV2Fixtures.sessionId();
         String traceId = SubstrateV2Fixtures.traceId();
         fx.session(pid, sessionId, t0);
@@ -335,7 +311,6 @@ class QueryApiIntegrationTest {
                 TenantFixture.bootstrap(tenants, "query-call-site").project().id();
         Instant t0 = Instant.parse("2026-06-10T00:00:00Z");
 
-        var fx = fixtures();
         String sessionId = SubstrateV2Fixtures.sessionId();
         String traceId = SubstrateV2Fixtures.traceId();
         fx.session(pid, sessionId, t0);
@@ -371,8 +346,7 @@ class QueryApiIntegrationTest {
     }
 
     private void insertTagged(String pid, String traceId, String sessionId, @Nullable String callSiteId, Instant at) {
-        var ref = fixtures()
-                .spanSeed(pid)
+        var ref = fx.spanSeed(pid)
                 .traceId(traceId)
                 .sessionId(sessionId)
                 .callSiteId(callSiteId)

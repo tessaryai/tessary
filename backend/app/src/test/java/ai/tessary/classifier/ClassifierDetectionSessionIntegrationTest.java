@@ -8,9 +8,6 @@ import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
@@ -21,9 +18,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -32,43 +27,16 @@ import org.springframework.boot.test.context.SpringBootTest;
  * the flagged trace, or the rail links to a session page that does not exist.
  */
 @SpringBootTest
-class ClassifierDetectionSessionIntegrationTest {
+record ClassifierDetectionSessionIntegrationTest(
+        SubstrateV2Fixtures fx,
+        SessionRepository sessions,
+        ClassifierService service,
+        ClassifierRepository signals,
+        ClassifierDetectionWriteRepository detections,
+        TenantService tenants,
+        CapabilityFixture capabilities) {
 
     private static final String THREAD = "thread-1";
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    ClassifierService service;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    ClassifierDetectionWriteRepository detections;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
-    }
 
     @Test
     void aThreadedFrustrationDetection_namesTheFlaggedTraceSession_notTheConversationKey() {

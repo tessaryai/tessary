@@ -8,7 +8,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import ai.tessary.auth.AuthFilter;
 import ai.tessary.testsupport.AuthEnforcedContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,15 +22,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -52,34 +47,15 @@ import org.springframework.web.server.ResponseStatusException;
  * </ul>
  */
 @AuthEnforcedContext
-class OrgCreationBoundaryTest {
+record OrgCreationBoundaryTest(MockMvc mvc, TenantService tenants) {
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    @Autowired
-    TenantService tenants;
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private MockMvc mvc;
-
-    @BeforeEach
-    void setUp() {
-        // Without addFilters(authFilter) the security filter never runs at all under MockMvc, so
-        // every request reaches the controller with no TenantContext -- which happened to read as
-        // "route absent" (404, no filter to hard-401 first) for the two GET/POST calls this test
-        // originally exercised without a real filter chain, silently proving nothing about auth.
-        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Signs a fresh account up and returns the session cookie the frontend would carry forward. */
     private Cookie signUp(String email) throws Exception {
         MockHttpServletResponse res = mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("email", email, "password", "a-good-password"))))
+                        .content(MAPPER.writeValueAsString(Map.of("email", email, "password", "a-good-password"))))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse();
@@ -112,7 +88,7 @@ class OrgCreationBoundaryTest {
                         .cookie(session)
                         .header("X-Requested-With", "XMLHttpRequest")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("name", "second-org"))))
+                        .content(MAPPER.writeValueAsString(Map.of("name", "second-org"))))
                 .andExpect(status().isTooManyRequests());
     }
 
@@ -131,7 +107,7 @@ class OrgCreationBoundaryTest {
                         .cookie(session)
                         .header("X-Requested-With", "XMLHttpRequest")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("to_user_id", "someone"))))
+                        .content(MAPPER.writeValueAsString(Map.of("to_user_id", "someone"))))
                 .andExpect(status().isNotFound());
         // Deliberately not asserting DELETE /api/orgs/{orgSlug} here: the path pattern itself is
         // still mapped open-side (GET getOrg, PATCH updateOrg), so an unmapped DELETE on it 405s,
@@ -150,12 +126,12 @@ class OrgCreationBoundaryTest {
         String email = "race-" + Ids.ulid().toLowerCase(Locale.ROOT) + "@example.com";
         MockHttpServletResponse res = mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(
+                        .content(MAPPER.writeValueAsString(
                                 Map.of("email", email, "password", "correct-horse-battery-staple"))))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse();
-        JsonNode body = mapper.readTree(res.getContentAsString());
+        JsonNode body = MAPPER.readTree(res.getContentAsString());
         String userId = (body.has("data") ? body.get("data") : body).get("id").asText();
 
         // Signup already bootstrapped ONE org; a cap of 2 leaves exactly one slot for two racers.

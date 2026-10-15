@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.config.SubstrateProperties;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.testsupport.LogCapture;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import java.util.List;
@@ -33,7 +34,7 @@ class TraceRollupWorkerTest {
     final LogCapture log = LogCapture.of(TraceRollupWorker.class);
 
     private TraceRollupWorker worker() {
-        return new TraceRollupWorker(traces, new TraceRollupMetrics(), new SubstrateProperties());
+        return new TraceRollupWorker(traces, new TraceRollupMetrics(), Props.of(SubstrateProperties.class));
     }
 
     /** One trace deleted under the worker and one that fails to recompute cost only themselves. */

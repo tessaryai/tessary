@@ -1,54 +1,29 @@
 version: '3'
 
-# Top-level dev commands. Install Task: https://taskfile.dev/installation/.
-#
-# Three services run together in dev:
-#   - backend (Spring Boot)  on :8080
-#   - frontend (Vite)        on :5173
-#   - caddy (reverse proxy)  on :8000 bare metal (`task caddy`)
-# `task dev` serves the whole stack at http://localhost (TESSARY_DEV_PORT, default 80).
+# Top-level dev commands (https://taskfile.dev/installation/). `task dev` serves the whole stack at
+# http://localhost (TESSARY_DEV_PORT, default 80).
 
 vars:
   SESSION: tessary-dev
-  # The dev stack. scripts/lib/dev-compose.sh is the ONE derivation every dev compose string
-  # (this, DC_DEV_ALL, scripts/dev.sh, scripts/dev-up.sh) calls.
-  #
-  # Two independent `sh:` calls rather than DC_DEV_ALL: '{{.DC_DEV}} ...' — one Task var must not
-  # depend on another's resolution order for something this load-bearing.
+  # scripts/lib/dev-compose.sh is the one derivation of every dev compose string. Two separate `sh:` calls
+  # so neither var depends on the other's resolution order.
   DC_DEV:
     sh: 'bash scripts/lib/dev-compose.sh'
-  # TEARDOWN ONLY — never for `up` or a restart shortcut. Teardown has to know about every
-  # service startup could have created: `down` with only the base file cannot see the pyroscope
-  # container from the profiling overlay, so it survives the "stop" still holding :4040.
-  # It is deliberately NOT reused for `up`/`--force-recreate`, because the overlay also attaches
-  # -javaagent to the backend — a plain `task rb` would then start a profiler nobody asked for and
-  # fail outright when the agent jar was never fetched (dev.sh only fetches it under
-  # TESSARY_PROFILING=1; scripts/dev-up.sh keeps off the overlay for the same reason).
-  # Extra `-f` is harmless for `down`: absent services are simply nothing to remove.
+  # Teardown only. It adds the profiling overlay so `down` also removes pyroscope; never use it for `up`,
+  # which would attach a -javaagent nobody asked for.
   DC_DEV_ALL:
     sh: 'bash scripts/lib/dev-compose.sh -f docker-compose.profiling.yml'
-  # For anything that creates or recreates dev containers (`up`, `--force-recreate`). DC_DEV alone
-  # exports none of the choices `task dev` resolved (launcher URL, MCP base URL, AGENT_IMAGE,
-  # COMPOSE_PROFILES, sign-in), so compose would recreate the container from the file's empty
-  # defaults. This re-resolves the saved choices without prompting, then runs DC_DEV's command.
-  # Read-only calls (logs, exec, ps) stay on DC_DEV.
+  # For anything that creates or recreates dev containers: re-resolves the saved `task dev` choices
+  # without prompting. Read-only calls (logs, exec, ps) stay on DC_DEV.
   DC_DEV_UP: 'bash scripts/lib/dev-choices.sh compose'
-  # The prod stack. All four prod targets route through this, teardown included — that is the
-  # point of doing it in one place. See the DC_DEV_ALL note above for what happens when `down`
-  # cannot see a service that `up` created: the container survives the stop still holding its port.
+  # Every prod target, teardown included, goes through this one string.
   DC_PROD: 'docker compose -f docker-compose.yml'
 
-# The pnpm version baked into every image built locally. The compose files and the frontend and
-# launcher Dockerfiles carry the same literal as their default so a bare `docker compose build`
-# works with nothing exported; keep every copy equal to this one by hand. CI mirrors it with the
-# `PNPM_VERSION` GitHub Actions variable (see the deploy workflows). Keep this in step with the
-# `packageManager` field in each package.json. Exported at the top level so it reaches
-# `bash scripts/dev.sh` and every `docker compose` invocation below.
+# The pnpm version for local image builds. The compose files and Dockerfiles carry the same literal as a
+# default; keep every copy, the `packageManager` fields and the CI `PNPM_VERSION` variable equal by hand.
 env:
   PNPM_VERSION: "11.15.1"
-  # The version identity stamped on the backend and frontend images: the repo's short-SHA
-  # convention, the same expression release.yml tags with, plus the full SHA as the revision. Both
-  # flow into docker-compose.yml's build args.
+  # Short and full SHA, as release.yml tags; both flow into docker-compose.yml's build args.
   IMAGE_VERSION:
     sh: git rev-parse --short HEAD 2>/dev/null || echo dev
   IMAGE_REVISION:
@@ -93,46 +68,36 @@ tasks:
   rb:
     aliases: [restart:backend]
     desc: Restart backend container (fast — no image rebuild).
-    cmds:
-      - tmux send-keys -t {{.SESSION}}:backend C-c
-      - sleep 1
-      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate backend"
-      - tmux send-keys -t {{.SESSION}}:backend "{{.DC_DEV}} logs -f --no-log-prefix backend" Enter
+    cmds: [{ task: _restart, vars: { SVC: backend } }]
 
   rf:
     aliases: [restart:frontend]
     desc: Restart frontend container (fast — no image rebuild; Vite HMR resumes).
-    cmds:
-      - tmux send-keys -t {{.SESSION}}:frontend C-c
-      - sleep 1
-      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate frontend"
-      - tmux send-keys -t {{.SESSION}}:frontend "{{.DC_DEV}} logs -f --no-log-prefix frontend" Enter
+    cmds: [{ task: _restart, vars: { SVC: frontend } }]
 
   rc:
     aliases: [restart:caddy]
     desc: Restart Caddy reverse proxy (picks up Caddyfile changes).
-    cmds:
-      - tmux send-keys -t {{.SESSION}}:caddy C-c
-      - sleep 1
-      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate caddy"
-      - tmux send-keys -t {{.SESSION}}:caddy "{{.DC_DEV}} logs -f --no-log-prefix caddy" Enter
+    cmds: [{ task: _restart, vars: { SVC: caddy } }]
 
   rb:full:
     desc: Rebuild backend image (use when pom.xml / backend Dockerfile changes).
-    cmds:
-      - tmux send-keys -t {{.SESSION}}:backend C-c
-      - sleep 1
-      - "{{.DC_DEV_UP}} up -d --build --force-recreate --no-deps backend"
-      - tmux send-keys -t {{.SESSION}}:backend "{{.DC_DEV}} logs -f --no-log-prefix backend" Enter
+    cmds: [{ task: _restart, vars: { SVC: backend, BUILD: '--build' } }]
 
   rf:full:
     desc: Rebuild frontend image + reinstall deps (use when package.json / frontend Dockerfile changes).
     cmds:
-      - tmux send-keys -t {{.SESSION}}:frontend C-c
-      - sleep 1
       - docker volume rm -f tessary_frontend-node-modules 2>/dev/null || true
-      - "{{.DC_DEV_UP}} up -d --build --force-recreate --no-deps frontend"
-      - tmux send-keys -t {{.SESSION}}:frontend "{{.DC_DEV}} logs -f --no-log-prefix frontend" Enter
+      - task: _restart
+        vars: { SVC: frontend, BUILD: '--build' }
+
+  _restart:
+    internal: true
+    cmds:
+      - tmux send-keys -t {{.SESSION}}:{{.SVC}} C-c
+      - sleep 1
+      - '{{.DC_DEV_UP}} up -d {{.BUILD | default ""}} --no-deps --force-recreate {{.SVC}}'
+      - tmux send-keys -t {{.SESSION}}:{{.SVC}} "{{.DC_DEV}} logs -f --no-log-prefix {{.SVC}}" Enter
 
   logs:
     desc: 'Tail logs for a single dev service. Usage: task logs -- backend'
@@ -144,29 +109,11 @@ tasks:
     desc: Run the Spring Boot backend (dev mode, JVM). Needs Postgres 16 + pgvector via TESSARY_JDBC_URL (e.g. `task dev:up`).
     dir: backend
     env:
-      # The bare-metal dev path, like the Docker one, runs unauthenticated -- and it has to SAY so.
-      # Absent WorkOS credentials used to be the off switch by themselves; they now fail
-      # closed, so without this every /api/** call here answers 401. Set here rather than left to
-      # the developer because this task loads no dotenv: there is nowhere else it could come from,
-      # and a dev path that 401s with no explanation is a failure this must not cause.
-      #
-      # Hardcoded rather than defaulted-from-the-environment: the safe default for a task that
-      # loads no dotenv should not require a developer to remember an override.
-      #
-      # TESSARY_AUTH_DISABLED=true here is authoritative on its own: exporting a WorkOS key changes
-      # NOTHING about this task's posture, it stays unauthenticated. To actually test enforced auth
-      # locally, edit this line to "false" (or unset it) rather than relying on WorkOS config to
-      # override it.
-      #
-      # "The real auth flow" no longer means WorkOS specifically: PasswordAuthProvider
-      # (dependency-free email/password) is the open edition's always-on default and wins this same
-      # AuthProviderConfig selection whenever WORKOS_API_KEY/WORKOS_CLIENT_ID aren't exported --
-      # TESSARY_AUTH_DISABLED here just decides whether that default is enforced or bypassed for dev.
+      # Hardcoded on purpose: this task loads no dotenv and, without WorkOS credentials, every /api/** call
+      # would 401. Exporting a WorkOS key does not change it; edit this line to test enforced auth locally.
       TESSARY_AUTH_DISABLED: "true"
     cmds:
-      # Install app's whole dependency chain first, then run ONLY the app module. spring-boot:run
-      # can't run reactor-wide (it dies on the non-executable parent pom), and app-only can't
-      # resolve its sibling jars unless they are installed into the local repo.
+      # spring-boot:run cannot run reactor-wide, and app alone cannot resolve uninstalled siblings.
       - mvn -q -pl app -am install -DskipTests
       - mvn -q -pl app spring-boot:run
 
@@ -198,14 +145,6 @@ tasks:
     cmds:
       - mvn -f backend/pom.xml -pl app -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=OpenApiSpecDriftTest -Dtessary.openapi.regenerate=true test
 
-  backend:coverage:
-    desc: "Refresh the JaCoCo coverage baseline for the 11 backend modules. Runs the IDENTICAL command as backend:check — same reactor, same full Spotless/forbidden-apis/SpotBugs/PMD/Error Prone/NullAway/test gate — it is not a lighter or coverage-only path, and a lint or static-analysis failure anywhere in the reactor aborts it before jacoco:report runs, same as it would for backend:check. It exists only as a separately-named entry point for refreshing coverage locally; CI's check.yml uploads the same reports on every pull request. Only the coverage NUMBER is non-gating — no threshold is enforced on it anywhere. Needs Docker: `app` is the one module in this list with Testcontainers-backed @SpringBootTest coverage to record. Per-module reports land at backend/<module>/target/site/jacoco/index.html; the cross-module aggregate, which credits the app module's @SpringBootTest runs to the module that owns the code, lands at backend/app/target/site/jacoco-aggregate/index.html."
-    cmds:
-      # Through the script, not a bare mvn invocation: the JDK-major-25 guard has to run before
-      # Maven starts, or a mismatch surfaces as an opaque PMD/compiler crash deep in the reactor
-      # instead of a clear message.
-      - bash scripts/check-backend.sh
-
   check:license-headers:
     desc: "SPDX header presence over the tree. Pass --fix to insert missing headers in place: task check:license-headers -- --fix. Shared with CI via scripts/check-license-headers.sh."
     cmds:
@@ -217,11 +156,8 @@ tasks:
     cmds:
       - mvn -q clean package -DskipTests
 
-  # ---- node packages ----
-  # Every Node package here is installed with pnpm (see AGENTS.md). They are deliberately NOT a
-  # workspace: each keeps its own pnpm-lock.yaml so the Dockerfiles can build from their own
-  # directory. pnpm's shared content-addressable store means a second worktree hardlinks these
-  # rather than re-downloading ~640 MB.
+  # Every Node package uses pnpm and keeps its own lockfile (deliberately not a workspace) so each
+  # Dockerfile builds from its own directory.
   node:install:
     desc: Install deps for every Node package (pnpm). Run this once after creating a worktree.
     cmds:
@@ -237,13 +173,8 @@ tasks:
       - silent: true
         cmd: |
           cd "{{.DIR}}"
-          # Self-heal a checkout that predates the pnpm migration. npm's flat node_modules has no
-          # .pnpm/ marker (every pnpm layout has one, including lambda's hoisted tree, where it holds
-          # just lock.yaml). pnpm installs happily on top of npm's tree but never removes npm's
-          # directories, which leaves two problems: ~170 MB of dead files, and — the real one —
-          # undeclared transitive imports keep resolving from the leftover flat layout, silently
-          # defeating the strict resolution that would otherwise catch them. Re-installing from the
-          # shared store costs ~1s, so clearing is close to free.
+          # Clears an npm-era node_modules (no .pnpm/ marker): pnpm never removes npm's tree, and leftover flat
+          # layout would let undeclared transitive imports keep resolving.
           if [ -d node_modules ] && [ ! -d node_modules/.pnpm ]; then
             echo "{{.DIR}}: clearing pre-pnpm (npm) node_modules before installing"
             rm -rf node_modules
@@ -317,33 +248,8 @@ tasks:
       - bash scripts/check-vendored-plugin.sh
 
   # ---- combined ----
-  # The project gate. CI is a per-PR gate: .github/workflows/check.yml runs `bash scripts/check.sh`
-  # on `pull_request:`, which is this same manifest, so local green => CI green on the same script.
-  # drift-checks.yml holds the one gate check.sh does NOT run (vendored-plugin),
-  # dispatch-only. Merge-blocking is still not possible: branch protection is plan-gated on this
-  # repo.
-  # Each target here and CI invoke the SAME scripts/check-*.sh, so the gate is defined once. There
-  # are no per-gate CI JOBS to pair with: check.yml runs one job calling check.sh:
-  #   contract:check        -> scripts/check-contract-consistency.sh (vendored contract drift)
-  #   contract:plugin       -> scripts/check-vendored-plugin.sh (freshness vs plugins@main; drift-checks.yml)
-  #   backend:check         -> scripts/check-backend.sh  (mvn -B -T 2 verify)
-  #   frontend:check        -> scripts/check-frontend.sh (pnpm run lint + pnpm run test [the route
-  #                            render smoke test] + pnpm run build)
-  #   caddy:validate        -> scripts/check-caddy.sh    (caddy validate + spec route coverage)
-  #   check:license-headers -> scripts/check-license-headers.sh (SPDX header presence)
-  #   migrations:populated (not in `check`) -> scripts/check-migrations-populated.sh
-  # These are THREE gate sets, not one. `task check` (i.e. scripts/check.sh) runs 16 of the 29
-  # scripts/check-*.sh. The 13 it does not run each carry an EXCLUDED manifest row, so the
-  # completeness assertion covers them: check-migrations-populated.sh (wants a populated
-  # Postgres), check-vendored-plugin.sh (network; drift-checks.yml), the boot, self-host, egress,
-  # exposure and artifact checks (Docker and minutes; boot-checks.yml or release.yml), and
-  # check-dependency-audit.sh and check-notice-coverage.sh (manual/on-demand only, no real
-  # credential in any check). scripts/check.sh's manifest is where each gate's disposition is
-  # declared, and the manifest is asserted complete against the scripts on disk before anything
-  # runs.
-  # (A first-party OTLP-producer SDK previously lived under sdk/ with its own on-demand gate; it was
-  # removed to be rebuilt from scratch when needed. The platform consumes standard OTLP attributes from
-  # any producer, so nothing in `check` depends on it.)
+  # The project gate. CI's check.yml runs the same scripts/check.sh, whose manifest declares every
+  # scripts/check-*.sh as run or excluded and is asserted complete before anything runs.
   check:
     desc: 'The project gate, mirroring CI. No argument runs everything. An argument narrows it to a comma-separated list of slices, where a slice is a backend product area or `frontend`: task check -- rca,metering / task check -- frontend. Nothing enforces this locally — CI is the gate — so run the slices your change touches before pushing.'
     # silent: Task would otherwise echo the invocation above the gate's own output. The logic lives
@@ -355,60 +261,15 @@ tasks:
       # rca,metering` and the unknown-slice error path all go through it.
       - bash scripts/check.sh "{{.CLI_ARGS}}"
 
-  check:open:boot:
-    desc: "The detached open-edition BOOT check (EXCLUDED from `task check` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe, boots the dev stack keyless in that export, and asserts caddy serves the dev port with an authenticated triage flow producing a real classifier verdict and no denied credential anywhere. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or boot-checks.yml in CI, never run by an agent (see CLAUDE.md's toolchain notes)."
-    cmds:
-      - bash scripts/check-open-boot.sh
-
-  check:open:boot:selfhost:
-    desc: "The self-host gate's second leg: boots the SELF-HOST artifact, docker-compose.yml, in a clean-room export under the production profile (AuthRequiredInProdGuard, real backend/frontend Dockerfiles, sandbox-runner on the docker default) with only generated run-scoped values and no cloud credential. Needs Docker and minutes; never run by an agent; EXCLUDED from `task check`."
-    cmds:
-      - bash scripts/check-open-boot-selfhost.sh {{.CLI_ARGS}}
-
   check:open:artifacts:
     desc: "Builds the four open images release.yml publishes and diffs each one's real contents (every file, every jar entry, the served bundle) against scripts/lib/open-artifact-denylist.txt; --negative also proves the diff goes red on one planted violation per role. Needs Docker and minutes; EXCLUDED from `task check`; release.yml runs the same script against the images it just built before merging any manifest."
     cmds:
       - bash scripts/check-open-artifacts.sh {{.CLI_ARGS}}
 
-  check:namespaces:
-    desc: "Every registry, hub and source-control coordinate the tree references resolves to tessaryai through the platform's own ownership signal, and every referenced coordinate is in scripts/lib/namespace-inventory.txt; --negative proves the check goes red on a foreign coordinate. Needs the network (and gh auth while the repository is private). EXCLUDED from `task check`; quarterly plus dispatch via namespace-recheck.yml."
-    cmds:
-      - bash scripts/check-namespaces.sh {{.CLI_ARGS}}
-
-  check:exposure:sweep:
-    desc: "Boots the self-host artifact keyless under the production profile and attacks it from outside and from a neighbouring tenant: every spec operation unauthenticated, default credentials, the served bundle for maps and secrets, SSRF and traversal against a listener on the stack network, and a two-tenant substitution sweep. Writes the result set with --record so a later run can re-run it unmodified and diff. Needs Docker and minutes; never run by an agent; EXCLUDED from `task check`."
-    cmds:
-      - bash scripts/check-exposure-sweep.sh {{.CLI_ARGS}}
-
-  check:selfhost:quickstart:
-    desc: "The self-host quickstart rehearsal. Executes docs/self-hosting/setup.mdx's own command blocks verbatim in a clean-room export on the compose defaults (needs ports 80 and 443 free), asserts every Check as the page words it, and walks the onboarding ladder to fitting. Pass -- --build while the images are unpublished. Docker and minutes; never run by an agent; EXCLUDED from `task check`."
-    cmds:
-      - bash scripts/check-selfhost-quickstart.sh {{.CLI_ARGS}}
-
-  check:zero:egress:
-    desc: "Opt-out means silent. Runs the quickstart rehearsal on an internal network with a DNS sink and TESSARY_TELEMETRY_ENABLED=false, asserts no lookup outside the permitted set on docs/self-hosting/configuration.mdx, no daemon pull in the window, no foreign origin on the served page; then the heartbeat as positive control and a planted call. Pass -- --build while the images are unpublished. Docker, ports 80/443, minutes; never run by an agent; EXCLUDED from `task check`."
-    cmds:
-      - bash scripts/check-zero-egress.sh {{.CLI_ARGS}}
-
-  check:selfhost:images:
-    desc: "Asserts the four published image references (backend/frontend/sandbox-runner/AGENT_IMAGE) resolve with no registry login, are labeled with the version they're tagged as, and cover linux/amd64 + linux/arm64 — at BOTH `<service>-<version>` and `<service>-latest`, since an unset TESSARY_VERSION now resolves to the floating tag. Reads the version from the newest `v<semver>` git tag; pass `-- --version=<semver>` to check a specific release. Needs Docker and the network; never run by an agent; EXCLUDED from `task check`; run before the self-host boot job in boot-checks.yml."
-    cmds:
-      - bash scripts/check-selfhost-images.sh {{.CLI_ARGS}}
-
-  check:selfhost:compose:
-    desc: "The one-command install, end to end. Publishes docker-compose.yml as an OCI artifact to a throwaway TLS registry on this host, then runs `docker compose -f oci://.../tessary:compose up -d -y` from an EMPTY directory (no clone, no .env, no build context) and asserts the stack reaches healthy, pins this release's image tags, mounts no host path, leaves the working directory empty, and tears down clean. Builds four images and boots a stack; never run by an agent; EXCLUDED from `task check`; run by boot-checks.yml's fourth job."
-    cmds:
-      - bash scripts/check-selfhost-compose-artifact.sh
-
   publish:compose:
     desc: "Publish docker-compose.yml as the OCI artifact behind the one-command install, to Docker Hub and GHCR under `compose` and `compose-<version>`. The published copy is build-stripped AND version-stamped: the file in the repository holds no version literal, so the release's own version is substituted into its floating image defaults on the way out. Version comes from `--version=` (what release.yml passes) or the newest `v<semver>` git tag. Normally run by release.yml AFTER the images are merged and parity-verified, never on its own; needs a registry login for both repositories. Add --dry-run to see what it would write."
     cmds:
       - bash scripts/publish-compose-artifact.sh {{.CLI_ARGS}}
-  egress:capture:
-    desc: "Boots docker-compose.yml twice (TESSARY_TELEMETRY_ENABLED=true, then =false) and tcpdumps the compose network's own bridge interface on the HOST for each boot, proving the true pass reaches exactly {home.tessary.ai} and the false pass reaches nothing. Needs Docker, tcpdump, a Linux Docker host (not Docker Desktop for Mac/Windows — see scripts/lib/egress-capture.sh's header), and minutes; never run by an agent; EXCLUDED from `task check` and from scripts/check.sh's manifest by name (the script lives at scripts/lib/, not scripts/check-*.sh — see its own header for why)."
-    cmds:
-      - bash scripts/lib/egress-capture.sh
-
   # ---- docker (dev) ----
   # No tmux, so this is the only `up` available to CI, agents, and a plain ssh. It goes through a
   # script rather than inlining `{{.DC_DEV}} up -d --build` so the saved dev choices are resolved
@@ -422,10 +283,7 @@ tasks:
     desc: Stop the dev stack and kill its tmux session.
     cmds:
       - tmux kill-session -t {{.SESSION}} 2>/dev/null || true
-      # DC_DEV_ALL, not DC_DEV — see the note on those vars: the base file alone cannot see the
-      # profiling overlay's pyroscope container, which would then outlive `dev:stop` on :4040.
-      # `--profile '*'` for the same reason: `down` skips any service whose profile is not active,
-      # so the `launcher` sandbox-runner that `task dev` starts would survive, holding the network.
+      # DC_DEV_ALL and `--profile '*'`, so the profiling and launcher containers do not outlive the stop.
       - "{{.DC_DEV_ALL}} --profile '*' down --remove-orphans"
 
   dev:logs:

@@ -39,16 +39,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleTessary(TessaryException ex) {
         HttpStatus status = ex.error().status();
         if (status.is5xxServerError()) {
-            // 5xx TessaryExceptions (upstream failures, internal errors) are otherwise
-            // invisible: the envelope is built and returned with no log line, so a
-            // 502 from an ingestion source only ever surfaces in the proxy access log.
-            // Pass the cause last so the stack trace is logged when one exists.
+            // 5xx TessaryExceptions are otherwise invisible; pass the cause last so its stack trace is logged.
             log.error("{} {}: {}", status.value(), ex.error().code(), ex.getMessage(), ex.getCause());
         } else {
-            // NOTE: 4xx stays DEBUG here, i.e. invisible in prod (APP_LOG_LEVEL=INFO). Egressing it
-            // needs Markers.OPS, and `web_is_http_plumbing_only` bars web/ from open.obs — so a
-            // 4xx worth operational attention is logged by the slice that raises it (see
-            // RcaController), not centrally. Revisit only by widening that rule deliberately.
+            // 4xx stays DEBUG: egressing needs Markers.OPS, which `web_is_http_plumbing_only` bars here, so the raising
+            // slice logs it.
             log.debug("{} {}: {}", status.value(), ex.error().code(), ex.getMessage());
         }
         ResponseEntity<ApiResponse<Void>> response = build(ex.error(), ex.getMessage(), null);
@@ -66,9 +61,7 @@ public class GlobalExceptionHandler {
         for (FieldError fe : ex.getBindingResult().getFieldErrors()) {
             details.put(fe.getField(), fe.getDefaultMessage());
         }
-        // Summarize the field errors into the top-level message too; the per-field
-        // breakdown stays in `details`. VALIDATION_FAILED's template carries a %s,
-        // so it must always be rendered with an arg (never render() bare).
+        // VALIDATION_FAILED's template carries a %s, so it must always be rendered with an arg.
         String summary = details.isEmpty()
                 ? "invalid request"
                 : details.entrySet().stream()
@@ -124,21 +117,15 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * An unmatched path that fell through to the static-resource handler. Spring MVC raises this rather
-     * than {@code NoHandlerFoundException} once resource handling is registered, so without it a typo'd
-     * {@code /api/...} path answered {@code 500 COMMON.INTERNAL} and logged an unhandled exception —
-     * a wrong status on the programmatic surface plus an error line per client mistake.
+     * Spring MVC raises this, not {@code NoHandlerFoundException}, once resource handling is registered; without it a
+     * typo'd path answered 500.
      */
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException ex) {
         return build(CommonError.NOT_FOUND, "No handler for " + ex.getHttpMethod() + " /" + ex.getResourcePath(), null);
     }
 
-    /**
-     * A path that exists at another verb. Same reason as the resource handler above: an integration that
-     * PUTs where the API expects POST got {@code 500 COMMON.INTERNAL} and an error log, rather than the
-     * {@code 405} that tells it what to change.
-     */
+    /** Without it a wrong verb answered 500 rather than 405. */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiResponse<Void>> handleBadMethod(HttpRequestMethodNotSupportedException ex) {
         ErrorBody body = new ErrorBody(
@@ -152,8 +139,7 @@ public class GlobalExceptionHandler {
         long maxBytes = ex.getMaxUploadSize(); // -1 if not known to the resolver
         Throwable cause = ex.getCause();
         String causeMsg = cause != null ? cause.getMessage() : null;
-        // Log loud so the configured limit + the underlying cause's byte counts
-        // are both visible without enabling DEBUG. Cheap to keep on permanently.
+        // Visible without enabling DEBUG.
         log.warn("multipart rejected: configured-max-bytes={} cause={}", maxBytes, causeMsg);
 
         String detail = causeMsg != null
@@ -166,13 +152,8 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Routes {@link ResponseStatusException} into the canonical {@link ApiResponse}
-     * envelope so the wire shape stays consistent. For 5xx, the supplied reason
-     * is discarded — if a caller wraps a service exception in
-     * {@code new ResponseStatusException(500, e.getMessage())}, the underlying
-     * message (which may include SQL fragments or internal state) must not reach
-     * the client. For 4xx, the reason is developer-supplied static text and is
-     * surfaced as-is.
+     * For 5xx the reason is discarded, since a wrapped message may carry SQL or internal state; 4xx reasons are static
+     * developer text.
      */
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiResponse<Void>> handleResponseStatus(
@@ -197,10 +178,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleFallback(Exception ex, HttpServletRequest request) {
-        // Lead with the request coordinates and the exception's own type + message so
-        // the log line is self-describing in Loki/Grafana (the body is all that's
-        // indexed there). Pass ex last so the full stack trace and cause chain are
-        // still rendered to the console and shipped as exception.* attributes.
+        // Coordinates and the exception's type and message lead because only the body is indexed in Loki; ex last keeps
+        // the stack trace.
         log.error(
                 "unhandled exception on {} {}: {}: {}",
                 request.getMethod(),

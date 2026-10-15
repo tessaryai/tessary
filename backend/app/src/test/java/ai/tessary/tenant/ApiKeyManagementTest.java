@@ -18,7 +18,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -30,25 +29,13 @@ import org.springframework.web.server.ResponseStatusException;
  * {@link ApiKeyServiceTest}, which covers the bcrypt/prefix verification surface.
  */
 @SpringBootTest
-class ApiKeyManagementTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ApiKeyService keys;
-
-    @Autowired
-    ApiKeyRepository repo;
-
-    @Autowired
-    AuditLogRepository audit;
-
-    @Autowired
-    ApiKeyController keyController;
-
-    @Autowired
-    McpTokenController mcpController;
+record ApiKeyManagementTest(
+        TenantService tenants,
+        ApiKeyService keys,
+        ApiKeyRepository repo,
+        AuditLogRepository audit,
+        ApiKeyController keyController,
+        McpTokenController mcpController) {
 
     private static TenantContext session(Principal u) {
         return new TenantContext(u.id(), u.email(), null, null, null, null);

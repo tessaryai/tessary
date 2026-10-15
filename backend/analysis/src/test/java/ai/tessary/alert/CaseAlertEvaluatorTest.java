@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.alert.AlertQueryRepository.OpenedCase;
 import ai.tessary.config.AlertProperties;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
@@ -107,8 +108,7 @@ class CaseAlertEvaluatorTest {
     }
 
     private CaseAlertEvaluator evaluator(String baseUrl) {
-        AlertProperties props = new AlertProperties();
-        props.setAppBaseUrl(baseUrl);
+        AlertProperties props = Props.of(AlertProperties.class, "app-base-url", baseUrl);
         return new CaseAlertEvaluator(queries, props, mapper);
     }
 

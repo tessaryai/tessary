@@ -13,10 +13,8 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Injects {@link TenantContext} into controller methods that declare it as a
- * parameter. Throws 401 if the filter hasn't populated one — that means the
- * request slipped past the auth filter, which is a server bug rather than a
- * user error.
+ * Throws 401 when the filter set no {@link TenantContext}, which means a request slipped past the auth filter: a server
+ * bug.
  */
 @Component
 public class TenantArgumentResolver implements HandlerMethodArgumentResolver {

@@ -10,25 +10,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpTokenView } from "../../api/types-auth";
 import { renderRoute } from "../../test/render";
 import { McpTokens } from "./McpTokens";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listMcpTokens: vi.fn(),
-  issueMcpToken: vi.fn(),
-  revokeMcpToken: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const token = (over: Partial<McpTokenView> = {}): McpTokenView => ({
-  id: "t-1",
-  name: "my-laptop",
-  token_prefix: "tsy_m_ab12",
-  created_at: "2026-09-25T11:00:00Z",
-  last_used_at: null,
-  revoked_at: null,
-  created_by_user_id: "u-1",
-  ...over,
+  id: "t-1", name: "my-laptop", token_prefix: "tsy_m_ab12", created_at: "2026-09-25T11:00:00Z", last_used_at: null,
+  revoked_at: null, created_by_user_id: "u-1", ...over,
 });
 
 const nativeConfirm = vi.fn(() => true);
@@ -146,38 +134,36 @@ describe("issuing a token", () => {
   });
 });
 
-describe("revoking", () => {
-  it("asks in the page rather than through the browser's blocking confirm, and revokes only on Revoke token", async () => {
-    let finish: (v: unknown) => void = () => {};
-    api.revokeMcpToken
-      .mockRejectedValueOnce(new Error("already revoked"))
-      .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
-    api.listMcpTokens.mockResolvedValue([token({ id: "t-0", name: "other" }), token()]);
-    renderRoute(<McpTokens />);
-    const revoke = await screen.findByRole("button", { name: "Revoke my-laptop" });
+it("revoking: asks in the page rather than through the browser's blocking confirm, and revokes only on Revoke token", async () => {
+  let finish: (v: unknown) => void = () => {};
+  api.revokeMcpToken
+    .mockRejectedValueOnce(new Error("already revoked"))
+    .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+  api.listMcpTokens.mockResolvedValue([token({ id: "t-0", name: "other" }), token()]);
+  renderRoute(<McpTokens />);
+  const revoke = await screen.findByRole("button", { name: "Revoke my-laptop" });
 
-    fireEvent.click(revoke);
-    expect(within(dialog()).getByRole("heading", { name: 'Revoke "my-laptop"?' })).toBeTruthy();
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
-    await settle();
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(api.revokeMcpToken).not.toHaveBeenCalled();
+  fireEvent.click(revoke);
+  expect(within(dialog()).getByRole("heading", { name: 'Revoke "my-laptop"?' })).toBeTruthy();
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
+  await settle();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(api.revokeMcpToken).not.toHaveBeenCalled();
 
-    fireEvent.click(revoke);
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Revoke token" }));
-    expect(await screen.findByText("Could not revoke token")).toBeTruthy();
-    expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(revoke);
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Revoke token" }));
+  expect(await screen.findByText("Could not revoke token")).toBeTruthy();
+  expect(screen.queryByRole("dialog")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Revoke my-laptop" }));
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Revoke token" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Revoke my-laptop" })).toBeNull());
-    expect(screen.getByRole("button", { name: "Revoke other" })).toBeTruthy();
-    expect(api.revokeMcpToken).toHaveBeenLastCalledWith("t-1");
+  fireEvent.click(screen.getByRole("button", { name: "Revoke my-laptop" }));
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Revoke token" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Revoke my-laptop" })).toBeNull());
+  expect(screen.getByRole("button", { name: "Revoke other" })).toBeTruthy();
+  expect(api.revokeMcpToken).toHaveBeenLastCalledWith("t-1");
 
-    finish({ revoked: true });
-    expect(await screen.findByText("Token revoked")).toBeTruthy();
-    expect(nativeConfirm).not.toHaveBeenCalled();
-  });
+  finish({ revoked: true });
+  expect(await screen.findByText("Token revoked")).toBeTruthy();
+  expect(nativeConfirm).not.toHaveBeenCalled();
 });
 
 describe("the MCP config", () => {

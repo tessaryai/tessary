@@ -23,29 +23,10 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * JdbcClient repository for the trace table and the rollup protocol that maintains it
- * (substrate-model.md §5.1, §7).
- *
- * <p>The table is {@code trace}. The {@code V2} in this class's name is history, not a distinction:
- * there is no second trace repository to tell it apart from. The type name is left alone deliberately
- * since renaming it touches dozens of files for no behavior change.
- *
- * <h2>The three write shapes, and why they are three</h2>
- *
- * <ul>
- *   <li>{@link #getOrCreateAll}: identity only, {@code ON CONFLICT DO NOTHING}. Makes {@code fk_span_trace}
- *       satisfiable regardless of arrival order (§6.1) and writes no timing or rollup column.
- *   <li>{@link #applyBatchTimers} and {@link #fillCorrelation}: the in-place updates on this row, under one
- *       lock. The first is {@code min}/{@code max} plus a monotonically-earlier deadline (§7.1); the second
- *       only ever turns a null name, user, session or thread into a value (§6.3). Both are idempotent under
- *       replay by construction.
- *   <li>{@link #claimDue} + {@link #recompute}: the worker. Every sum and count is a replacement read
- *       from the trace's spans, never a delta (§7.2). A running sum has no repair path: one double-add is
- *       permanent and undetectable, whereas a full recompute self-heals after any bug.
- * </ul>
- *
- * <p>{@link #reap} is the recovery for the one gap those three leave: a worker that dies between the claim
- * and the write leaves a trace armed for nobody.
+ * The trace table and the rollup protocol that maintains it (substrate-model.md §5.1, §7). Writes are identity-only
+ * inserts, idempotent min/max timer and correlation updates, and a worker recompute that replaces every sum from the
+ * spans rather than applying deltas, so any bug self-heals. {@link #reap} recovers traces a dead worker left armed for
+ * nobody.
  */
 @Repository
 public class TraceV2Repository {
@@ -95,48 +76,21 @@ public class TraceV2Repository {
         return source;
     }
 
-    /**
-     * Get-or-create traces, identity fields only (§6.1 step 2), as one JDBC batch in the order given (the
-     * caller sorts, see SpanBatchWriter).
-     */
     public void getOrCreateAll(List<TraceV2Row> rows) {
         int[] applied = named.batchUpdate(
                 GET_OR_CREATE_SQL, rows.stream().map(TraceV2Repository::params).toArray(SqlParameterSource[]::new));
         BatchCounts.requireReal(applied);
     }
 
-    /**
-     * One trace's contribution from one drained batch, pre-aggregated in memory by the caller.
-     *
-     * @param minStartedAt the earliest {@code started_at} among the batch's spans for this trace.
-     * @param maxEndedAt the latest {@code ended_at}, or null when no span in the batch had ended.
-     * @param hasRoot whether any span in the batch had {@code parent_span_id IS NULL}.
-     */
+    /** {@code maxEndedAt} is null when no span in the batch had ended. */
     public record TimerUpdate(
             String traceId, String minStartedAt, @Nullable String maxEndedAt, boolean hasRoot) {}
 
     /**
-     * Fold a batch into its traces' timers and re-arm the rollup deadline (§7.1).
-     *
-     * <p>The deadline only ever moves earlier, never later: {@code LEAST(COALESCE(rollup_due_at,
-     * 'infinity'), now() + …)} encodes that. A span arriving into an already-armed trace does not
-     * postpone the rollup, it only un-settles it. A root span, which means the turn is almost
-     * certainly finished, pulls the deadline in to two seconds.
-     *
-     * <p>No hard cap is needed: a trace that never goes quiet still fires at its deadline, gets
-     * re-armed by the next span, and fires again, so a long-running turn is refreshed roughly every
-     * ten seconds instead of showing nothing until it finishes. {@code is_settled} stays honest for
-     * the same reason: it can only be set by a rollup that found the deadline still clear, never by a
-     * timeout. No sums, no counts, no arithmetic beyond min/max; token and cost totals never ride the
-     * write path.
-     *
-     * <p>Sorted-key locking: the {@code FOR UPDATE} pre-pass takes the batch's trace rows in
-     * {@code (project_id, id)} order so two concurrent batches over overlapping trace sets can never
-     * deadlock. It and the update must share a transaction, and that transaction must be the same one
-     * that wrote the spans (the §6.1 atomicity invariant), or a span row could become visible without
-     * its trace re-arm and be silently excluded from a settling rollup.
-     *
-     * @return the number of trace rows updated.
+     * Fold a batch into its traces' timers and re-arm the rollup deadline (§7.1). The deadline only ever moves earlier,
+     * so a long-running turn still refreshes. The {@code FOR UPDATE} pre-pass locks in {@code (project_id, id)} order
+     * so concurrent batches cannot deadlock, and must share the transaction that wrote the spans or a settling rollup
+     * could miss a span.
      */
     public int applyBatchTimers(String projectId, Collection<TimerUpdate> updates) {
         List<TimerUpdate> sorted = updates.stream()
@@ -187,11 +141,7 @@ public class TraceV2Repository {
         return spec.update();
     }
 
-    /**
-     * The handles one batch saw for a trace, any of which may be absent.
-     *
-     * @param name the batch's root span name; a child span never names its trace.
-     */
+    /** A child span never names its trace. */
     public record CorrelationFill(
             String traceId,
             @Nullable String name,
@@ -200,18 +150,9 @@ public class TraceV2Repository {
             @Nullable String threadId) {}
 
     /**
-     * Fill a trace's {@code name}, {@code user_id}, {@code session_id} and {@code thread_id} where they are
-     * still null (§6.3).
-     *
-     * <p>The get-or-create insert takes them from whichever batch arrives first, and a batch exporter ships
-     * the root last (§6.4). A producer that sets them on the root alone would otherwise leave the trace
-     * unnamed and anonymous for good. A value already set is never replaced, so a trace cannot move between
-     * sessions and a replay changes nothing.
-     *
-     * <p>Run after {@link #applyBatchTimers} in the same transaction, which already holds these rows
-     * {@code FOR UPDATE}, so this takes no lock that statement did not.
-     *
-     * @return the ids of the traces whose session this call filled, usually none.
+     * Fill {@code name}, {@code user_id}, {@code session_id} and {@code thread_id} where still null: a batch exporter
+     * ships the root last. A set value is never replaced, so a trace cannot move between sessions. Runs under the locks
+     * {@link #applyBatchTimers} already holds.
      */
     public List<String> fillCorrelation(String projectId, Collection<CorrelationFill> fills) {
         List<CorrelationFill> sorted = fills.stream()
@@ -235,8 +176,8 @@ public class TraceV2Repository {
                     .append(i)
                     .append("::text)");
         }
-        // `o` is the same row read before this statement writes it, so RETURNING can tell a session filled
-        // here from one the trace already had.
+        // `o` is the row before this statement writes it, so RETURNING can tell a session filled here from one already
+        // set.
         var spec = jdbc.sql("""
                         UPDATE trace t SET
                             name       = COALESCE(t.name, v.name),
@@ -269,16 +210,11 @@ public class TraceV2Repository {
 
     private record Filled(String traceId, boolean sessionFilled) {}
 
-    /** A claimed trace: the key the recompute runs against. */
     public record Claim(String projectId, String traceId) {}
 
     /**
-     * Claim up to {@code limit} due traces with {@code FOR UPDATE SKIP LOCKED}, so several workers can run
-     * concurrently without coordinating (§7.3).
-     *
-     * <p>Claiming clears {@code rollup_due_at}, and that is the correctness crux, not a tidy-up: from
-     * this moment any arriving span re-arms the deadline to a non-null value, and {@link #recompute}
-     * can detect that it happened and decline to mark the trace settled.
+     * {@code FOR UPDATE SKIP LOCKED}, so workers need no coordination. Clearing {@code rollup_due_at} is the
+     * correctness crux: a span arriving afterwards re-arms it, and {@link #recompute} then declines to settle.
      */
     public List<Claim> claimDue(int limit) {
         return jdbc.sql("""
@@ -300,56 +236,14 @@ public class TraceV2Repository {
                 .list();
     }
 
-    /**
-     * The outcome of one recompute, for the worker's counters.
-     *
-     * @param settled whether this write settled the trace, i.e. whether {@code rollup_due_at} was still
-     *     null at the moment it landed. A false here on a trace the worker just claimed is a span having
-     *     arrived mid-rollup, which is the interesting event, not an error.
-     * @param spanCount the trace's span count as written, so a caller can log what the replacement said
-     *     without reading the row back.
-     */
+    /** {@code settled} is false when a span arrived mid-rollup, which is expected, not an error. */
     public record Recomputed(boolean settled, int spanCount) {}
 
     /**
-     * Recompute one claimed trace's rollups as a replacement read from its spans (§7.2/§7.3, with the
-     * root-span carry-down from §2.2).
-     *
-     * <p>The aggregate reads one trace through the span primary key prefix {@code (project_id, trace_id)},
-     * so it is an indexed scan over rows that are already physically clustered together.
-     *
-     * <p>{@code rollup_due_at} is never written here: the claim already cleared it, and if a span has
-     * re-armed it since, that value has to survive so the trace fires again with that span included.
-     * {@code t.rollup_due_at IS NULL} reads the pre-update value, so the trace settles only if nothing
-     * arrived between the claim and this write. The numbers are correct either way, since they are a
-     * replacement as of the read rather than a delta applied to a prior value, so there is no lost
-     * update and a re-fire is always safe.
-     *
-     * <p>The settle predicate is the deadline alone, deliberately saying nothing about span count: a
-     * predicate requiring a nonzero span count would leave a trace shell from a rolled-back batch stuck
-     * forever, re-armed by the reaper and recomputed by the worker every grace period with no way to
-     * settle. An empty trace is not unfinished, it is abandoned, and a settle predicate is the wrong
-     * instrument for saying so; the condition is prevented instead, since
-     * {@code SpanBatchWriter.commitBatch} creates the identity row inside the same transaction as the
-     * spans it was folded from, so a rolled-back batch leaves nothing behind to settle.
-     *
-     * <p>{@code unpriced_spans} counts spans of any kind that consumed more than zero tokens: an
-     * unpriced embedding or rerank span is spend too. The threshold is {@code > 0} rather than "usage
-     * reported at all" because producers emit placeholder spans carrying an explicit
-     * {@code input_tokens = 0} and {@code output_tokens = 0}, and zero is not null, so counting those
-     * would trip the marker on traces that represent no spend and withhold them from cost-drift scoring.
-     *
-     * <p>The previews and the call site are copied down from the spans, not stored by ingest: that
-     * is what keeps the traces list a single-table read (spec rule 1) rather than a join to find each
-     * row's entry point. The previews are the root's. The call site is the root's when the root carries
-     * one, else the earliest-starting tagged span's: instrumentation tags the span around the model call,
-     * not the handler that encloses it, so an untagged root is the normal case, not a gap. When a turn
-     * reaches several call sites, the first one it reached is the turn's, and each span keeps its own.
-     * They are a replacement like everything else here, gated on {@code has_root_span} so a trace whose
-     * root has not landed yet keeps whatever it had rather than being blanked, or attributed from a
-     * partial set of children, by a rollup that fired between a child and its parent.
-     *
-     * @return the outcome, or empty if the trace was deleted under the worker.
+     * Recompute one claimed trace's rollups as a replacement read from its spans (§7.2/§7.3). {@code rollup_due_at} is
+     * never written: the trace settles only if nothing re-armed it since the claim. {@code unpriced_spans} counts spans
+     * with more than zero tokens, since producers emit placeholder zero-token spans. Previews and call site are copied
+     * down from the root (else the earliest tagged span) only once the root has landed.
      */
     public Optional<Recomputed> recompute(String projectId, String traceId) {
         return jdbc.sql("""
@@ -425,18 +319,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * The reaper sweep (§7.4), the spec's statement, with its five minutes as a parameter.
-     *
-     * <p>A worker that died between claim and write leaves a fingerprint no legitimate state produces:
-     * {@code is_settled = false} with {@code rollup_due_at IS NULL} and no recent {@code rolled_up_at}.
-     * Such a trace is armed for nobody and would never fire again on its own.
-     *
-     * <p>The sweep is idempotent and safe at any frequency: re-arming a healthy in-flight claim costs
-     * one redundant recompute and nothing else, since every rollup is a replacement and recovery
-     * cannot corrupt totals.
-     *
-     * @param graceSeconds how long a trace may sit claimed-but-unwritten before it counts as stranded.
-     * @return the number of traces re-armed.
+     * Re-arm traces a dead worker left with {@code is_settled = false}, no deadline and no recent rollup. Safe at any
+     * frequency, since every rollup is a replacement.
      */
     public int reap(int graceSeconds) {
         return jdbc.sql("""
@@ -450,18 +334,11 @@ public class TraceV2Repository {
     }
 
     /**
-     * The rollup queue as one row: how many traces are armed, and how far past its deadline the most
-     * overdue of them has fallen.
-     *
-     * @param depth traces with a non-null {@code rollup_due_at}, due or not, served entirely by the
-     *     partial index {@code ix_trace_rollup_due}, which stays near-empty by construction.
-     * @param overdueMs the age of the oldest DUE deadline, or 0 when nothing is due yet. This is the
-     *     number the staleness alarm watches: a queue that is deep but on time is just traffic, whereas one
-     *     falling behind means every read surface is quietly serving numbers older than it claims.
+     * {@code overdueMs} is the age of the oldest DUE deadline, which the staleness alarm watches; depth alone is just
+     * traffic.
      */
     public record RollupQueue(int depth, long overdueMs) {}
 
-    /** Sample the rollup queue. One indexed statement, taken once per reaper sweep. */
     public RollupQueue queueStats() {
         return jdbc.sql("""
                         SELECT count(*) AS depth,
@@ -476,14 +353,7 @@ public class TraceV2Repository {
                 .single();
     }
 
-    /**
-     * The {@code rolled_up_through} watermark of each named trace that has one: the reference point the
-     * span-lateness histogram (§7.6) measures an arriving span against.
-     *
-     * <p>Traces that have never rolled up are simply absent from the result rather than mapped to null: a
-     * span landing into a trace with no watermark is not late, it is first, and folding those into the
-     * histogram would bury the tail the instrumentation exists to expose.
-     */
+    /** Traces that never rolled up are absent, not null: a span landing in one is first, not late. */
     public Map<String, String> rolledUpThrough(String projectId, Collection<String> traceIds) {
         Map<String, String> out = new HashMap<>();
         jdbc.sql("SELECT id, rolled_up_through FROM trace"
@@ -498,22 +368,10 @@ public class TraceV2Repository {
         return out;
     }
 
-    // ---- The list surface (substrate-model.md rule 1) ------------------------------------------
-
     /**
-     * Server-side filters for the traces list. Every field is optional; a null or blank one contributes no
-     * predicate, so they compose with AND.
-     *
-     * <p>{@code model}, {@code kind} and {@code callSite} are semi-joins, not aggregations. Each
-     * becomes {@code EXISTS (SELECT 1 FROM span …)}, keep this trace when any of its spans matches,
-     * which is a filter the planner can satisfy from an index and stop at the first hit.
-     *
-     * <p>{@code hasCallSite} is the same semi-join over any call site: {@code true} keeps a trace when some span
-     * carries one, {@code false} keeps it when none does. So the {@code true} set is every {@code callSite} set
-     * together, and a trace tagged only below its root still counts.
-     *
-     * <p>{@code detectedBy} keeps a trace a classifier flagged: a classifier id, or {@code any}
-     * ({@link TraceDetectionRepository}). {@link TraceFilters} writes the SQL for every field.
+     * Optional filters that compose with AND. {@code model}, {@code kind}, {@code callSite} and {@code hasCallSite} are
+     * {@code EXISTS} semi-joins over spans; {@code detectedBy} is a classifier id or {@code any}. {@link TraceFilters}
+     * writes the SQL.
      */
     public record TraceQuery(
             @Nullable String model,
@@ -530,14 +388,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * One trace's list row: identity, timing, and the rollup columns exactly as the worker wrote them.
-     *
-     * <p><b>Every number here was computed by {@link #recompute}, not by the statement that served this
-     * row.</b> That is the whole point of the schema: the list is a filter, a sort and a page over columns
-     * that already hold their answers. A null token or cost column means one of two different things, and
-     * the wire keeps them apart, {@code isSettled = false} says "not rolled up yet", whereas settled with
-     * a null total says "no span reported usage". {@code unpricedSpans} says the third thing: the total is
-     * real but incomplete, because some span ran a model we hold no rate for.
+     * Every number was computed by {@link #recompute}, not by the statement serving this row. A null total with
+     * {@code isSettled = false} means not rolled up yet; settled with a null total means no span reported usage.
      */
     public record Summary(
             String id,
@@ -565,7 +417,6 @@ public class TraceV2Repository {
             @Nullable String inputPreview,
             @Nullable String outputPreview) {}
 
-    /** Sort keys the list accepts. Anything else falls back to the default start-time ordering. */
     public static final class Sort {
         public static final String TOKENS = "tokens";
         public static final String COST = "cost";
@@ -575,12 +426,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * The rollup column a sort key orders on, or null for the default time ordering.
-     *
-     * <p>All three are plain indexed columns on the listed row. There is no expression to evaluate, no
-     * subquery to run per row, and, critically, no {@code COALESCE} to make the key NULL-free: a trace
-     * that has not rolled up yet has no total, and pretending it has one of zero would sort every
-     * in-flight turn to the cheapest end of the page.
+     * No {@code COALESCE}: an unrolled trace has no total, and zero would sort every in-flight turn to the cheapest
+     * end.
      */
     private static @Nullable String sortColumn(@Nullable String sort) {
         if (sort == null) return null;
@@ -593,24 +440,9 @@ public class TraceV2Repository {
     }
 
     /**
-     * A project's traces: filter, sort, page. One table, no join to {@code span} except as a semi-join
-     * filter, and not one arithmetic operation over the listed rows.
-     *
-     * <p><b>Keyset pagination.</b> The key is {@code (started_at, id)} for the default ordering, and
-     * {@code (<sort column>, started_at, id)} for the rollup sorts. The pair is unique and stable, so
-     * paging never skips or repeats a row however many traces share an instant.
-     *
-     * <p><b>NULLS LAST, and what that costs the cursor.</b> A never-rolled-up trace has no total, and it
-     * belongs at the end of a cost or token sort rather than at either extreme of it. Postgres orders
-     * {@code DESC} with nulls FIRST by default, so the ordering says {@code DESC NULLS LAST} explicitly and
-     * the keyset predicate has two branches: while the cursor still holds a value, the page continues
-     * through smaller values and then into the null tail; once the cursor is in the null tail, only the
-     * {@code (started_at, id)} tiebreak applies. Collapsing that into one branch with a sentinel is what
-     * the v1 query did ({@code COALESCE(cost, -1)}), and it made a genuinely unpriced trace indistinguishable
-     * from one priced at minus a dollar.
-     *
-     * @param beforeSort the previous page's last row's sort value, or null when that row had none (or when
-     *     the sort has no column). Only meaningful together with {@code beforeStartedAt}/{@code beforeId}.
+     * Keyset pagination on {@code (started_at, id)}, prefixed by the sort column for rollup sorts. Nulls sort LAST, so
+     * the predicate has a branch for the null tail; a sentinel like {@code COALESCE(cost, -1)} would make an unpriced
+     * trace look priced.
      */
     @Transactional(readOnly = true)
     public List<Summary> list(
@@ -675,12 +507,7 @@ public class TraceV2Repository {
         }
     }
 
-    /**
-     * One trace by producer id, the detail read.
-     *
-     * <p>Returns the same {@link Summary} shape the list serves, so the detail header and the list row can
-     * never disagree about a trace's numbers: they are literally the same projection of the same columns.
-     */
+    /** The same {@link Summary} projection the list serves, so detail and list can never disagree. */
     public Optional<Summary> findSummary(String projectId, String id) {
         return jdbc.sql("SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
                         + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens,"
@@ -695,10 +522,7 @@ public class TraceV2Repository {
                 .optional();
     }
 
-    /**
-     * A session's traces, oldest first, the read that stands in for the session rollup this schema
-     * deliberately does not have (§7.5). Served by {@code ix_trace_session}.
-     */
+    /** Stands in for the session rollup this schema deliberately does not have (§7.5). */
     public List<Summary> listBySession(String projectId, String sessionId, int limit) {
         return jdbc.sql("SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
                         + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens,"
@@ -715,10 +539,6 @@ public class TraceV2Repository {
                 .list();
     }
 
-    /**
-     * The ids of a session's traces that pass {@code filter}, oldest first: the traces of an expanded session row
-     * the traces list would show. Served by {@code ix_trace_session}.
-     */
     @Transactional(readOnly = true)
     public List<String> idsInSessionMatching(String projectId, String sessionId, TraceQuery filter, int limit) {
         var params = new HashMap<String, Object>();
@@ -738,11 +558,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * One trace of a session, with the facts the session timeline reads from the trace row.
-     *
-     * @param settled no span of the trace is on its way ({@code is_settled})
-     * @param settledEnd the latest span end of a settled trace; null while the trace is not settled, since a span may
-     *     still arrive, or when none of its spans has ended
+     * {@code settledEnd} is null while the trace is unsettled, since a span may still arrive, or when none of its spans
+     * ended.
      */
     public record SessionTrace(
             String id,
@@ -770,9 +587,8 @@ public class TraceV2Repository {
             + " ORDER BY t.ended_at DESC, t.started_at DESC, t.id DESC LIMIT :limit";
 
     /**
-     * The traces of a session with no settled end, latest start first: those not settled, since a span may still
-     * arrive, and the settled ones none of whose spans ended. Detached sub-agent traces too. Served by {@code
-     * ix_trace_session_unended}, which holds only such traces, so a long session's ended traces are not read.
+     * Served by {@code ix_trace_session_unended}, which holds only such traces, so a long session's ended traces are
+     * not read.
      */
     public List<SessionTrace> listUnendedSessionTraces(String projectId, String sessionId) {
         return jdbc.sql(UNENDED_SESSION_TRACES)
@@ -783,10 +599,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * Up to {@code limit} settled traces of a session that have an end, latest end first, then start and id
-     * descending, after {@code after} in that order, or from the latest when it is null. Detached sub-agent traces
-     * too. Served by {@code ix_trace_session_ended} in this order, so a page reads only its own rows. With {@link
-     * #listUnendedSessionTraces} before it, it lists every trace of the session latest end first.
+     * Served by {@code ix_trace_session_ended} in this order, so a page reads only its own rows. Together with
+     * {@link #listUnendedSessionTraces} it lists every trace latest end first.
      */
     public List<SessionTrace> listEndedSessionTraces(
             String projectId, String sessionId, @Nullable SessionTrace after, int limit) {
@@ -819,10 +633,7 @@ public class TraceV2Repository {
                 Timestamps.iso(rs, "settled_end"));
     }
 
-    /**
-     * A conversation's turns, oldest first. A conversation is a session and a turn is a top-level trace: the key
-     * and grain the frustration classifier scores at. Served by {@code ix_trace_session}.
-     */
+    /** A conversation is a session and a turn is a top-level trace: the grain the frustration classifier scores at. */
     public List<Summary> listByConversation(String projectId, String conversationId, int limit) {
         return jdbc.sql("SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
                         + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens,"
@@ -841,14 +652,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * A session's totals: the SUM of its traces' already-materialized rollup columns, plus the count of
-     * those that have not settled (§7.5).
-     *
-     * <p>This is the one place the spec permits a read to add numbers up, and it is permitted precisely
-     * because the addends are stored columns of up to ~1,000 indexed rows rather than a scan over spans.
-     * {@code unsettledTraces} is the honesty device that goes with it: a total summed from traces still
-     * receiving spans is a lower bound, and the wire says so rather than letting the reader assume
-     * otherwise.
+     * The one read the spec permits to add numbers up, because the addends are stored columns of indexed rows.
+     * {@code unsettledTraces} says when the total is only a lower bound.
      */
     public record SessionTotals(
             int traceCount,
@@ -859,7 +664,6 @@ public class TraceV2Repository {
             @Nullable Long errorCount,
             @Nullable Long unpricedSpans) {}
 
-    /** One indexed read over {@code ix_trace_session}. */
     public SessionTotals sessionTotals(String projectId, String sessionId) {
         return jdbc.sql("""
                         SELECT count(*)                                     AS trace_count,
@@ -885,7 +689,6 @@ public class TraceV2Repository {
                 .single();
     }
 
-    /** One session's batched totals row: the multi-session sibling of {@link SessionTotals}. */
     public record SessionTotalsRow(
             String sessionId,
             int traceCount,
@@ -903,16 +706,7 @@ public class TraceV2Repository {
             @Nullable BigDecimal inputCost,
             @Nullable BigDecimal outputCost) {}
 
-    /**
-     * {@link #sessionTotals}, for a whole page of sessions in one query instead of one per row. Still the
-     * same permitted shape, a GROUP BY over up to {@code sessionIds.size()} indexed session partitions of
-     * {@code ix_trace_session}, not a scan over spans, because the sessions being summed are already the
-     * page a recency-ordered list chose, never a sort key themselves (§7.5).
-     *
-     * <p>Sessions with no traces yet (a session row can exist via {@code getOrCreateAll} before its first trace
-     * lands) are simply absent from the GROUP BY result; the caller fills in a zeroed row rather than this
-     * method returning one, so the SQL stays a plain GROUP BY with no LEFT JOIN against the id list.
-     */
+    /** Sessions with no traces yet are absent; the caller fills a zeroed row so the SQL stays a plain GROUP BY. */
     public Map<String, SessionTotalsRow> sessionTotalsForIds(String projectId, Collection<String> sessionIds) {
         Map<String, SessionTotalsRow> out = new HashMap<>();
         jdbc.sql("""
@@ -959,13 +753,11 @@ public class TraceV2Repository {
         return out;
     }
 
-    /** One (session, call_site) pair's trace count and most-recent sighting: the input to "dominant call site". */
     public record CallSiteCount(String sessionId, String callSiteId, long n, String lastSeenAt) {}
 
     /**
-     * How often each call site appears in each of {@code sessionIds}' traces, and when it was last seen.
-     * Untagged traces ({@code call_site_id IS NULL}) don't count toward any call site. The caller picks the
-     * highest {@code n} per session (ties broken by {@code lastSeenAt}) to name the session's dominant agent.
+     * Untagged traces count toward no call site; the caller picks the highest {@code n} per session as its dominant
+     * agent.
      */
     public List<CallSiteCount> callSiteFrequencyForIds(String projectId, Collection<String> sessionIds) {
         return jdbc.sql("""
@@ -986,13 +778,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * The opening line of each of {@code sessionIds}' sessions, its first trace's own input preview,
-     * by {@code started_at}. Paired with {@link #lastOutputPreviewForIds}, this is the "first input,
-     * last output" bracket a session's Input/Output columns show: neither is a real aggregate (a
-     * session has many inputs and many outputs), but the first ask and the most recent answer are the
-     * two single values that actually mean something read alone. {@code DISTINCT ON} rides the same
-     * {@code ix_trace_session (project_id, session_id, started_at)} index the totals queries use, an
-     * index-ordered skip, not a sort of every row.
+     * Each session's first trace input preview, paired with {@link #lastOutputPreviewForIds} as the "first ask, latest
+     * answer" bracket. {@code DISTINCT ON} rides {@code ix_trace_session}, an index-ordered skip.
      */
     public Map<String, String> firstInputPreviewForIds(String projectId, Collection<String> sessionIds) {
         Map<String, String> out = new HashMap<>();
@@ -1009,7 +796,6 @@ public class TraceV2Repository {
         return out;
     }
 
-    /** The most recent trace's output preview per session, see {@link #firstInputPreviewForIds}. */
     public Map<String, String> lastOutputPreviewForIds(String projectId, Collection<String> sessionIds) {
         Map<String, String> out = new HashMap<>();
         jdbc.sql("""

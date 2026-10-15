@@ -44,11 +44,7 @@ import org.springframework.web.server.ResponseStatusException;
  * unsettled, since that sum is a lower bound. And there is no cost or token sort, with a test for its absence: it
  * would sum every session before a page could be chosen, so adding one must be an explicit decision.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class SessionsControllerTest {
 
     @Autowired

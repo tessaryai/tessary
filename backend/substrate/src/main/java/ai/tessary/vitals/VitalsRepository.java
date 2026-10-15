@@ -12,47 +12,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The single owner of the vitals SQL: two deterministic aggregations over already-ingested substrate,
- * grouped by a dimension.
- *
- * <p><b>Two, not three.</b> Tool errors used to be the third and left with the surface that showed them:
- * they are a classifier now ({@code devdocs/concepts/tool-error.md}), watched per tool against that
- * tool's own past. Nothing in this package reads {@code tool_call} any more.
- *
- * <p><b>Everything here is a read.</b> The slice writes no rows and enqueues no jobs, which is what
- * makes it structurally incapable of reaching Layer 2 — the guarantee is architectural rather than a
- * flag someone can flip back on.
- *
- * <h2>What the v2 substrate changed here</h2>
- *
- * <p>This used to ship every {@code llm} observation in the window to the application, parse each one's
- * {@code usage} jsonb in Java, and price it against a vendored price book at read time. Three things were
- * wrong with that and all three are gone:
- *
- * <ul>
- *   <li><b>Cost moved to write time.</b> {@code span.input_cost}/{@code output_cost}/{@code total_cost}
- *       are priced on arrival and never repriced (spec rule 3), so this now sums stored numerics. A figure
- *       shown here no longer changes because a rate file was refreshed under it.
- *   <li><b>Usage is typed.</b> The buckets are columns, so the database aggregates them and the wire
- *       carries one row per dimension value rather than one per generation.
- *   <li><b>Settling is a fact, not a guess.</b> The 300-second "probably complete by now" window is
- *       replaced by {@code trace.is_settled}, which means precisely "nothing has arrived since the last
- *       rollup" (spec §7.4). It is stricter than the heuristic it replaces, and honest where the
- *       heuristic was merely conservative.
- * </ul>
- *
- * <p>Duration still comes off the turn rather than the spans: {@code trace.latency_ms} is the root
- * span's own start→end, which is what Jaeger, Tempo and Datadog report as trace duration. Measured
- * against production, a min/max envelope over children inflated p95 by ~10% because async children
- * outlive their parent.
+ * Read-only: the slice writes no rows and enqueues no jobs, so it structurally cannot reach Layer 2. Costs are summed
+ * from write-time-priced columns, and settling is {@code trace.is_settled}. Duration is {@code trace.latency_ms}, the
+ * root span's own interval; an envelope over children inflated p95 by ~10%.
  */
 @Repository
 public class VitalsRepository {
 
-    /**
-     * The grouping dimension. Deliberately a closed enum mapped to a column rather than a
-     * caller-supplied string — this interpolates into SQL, so the set of legal values has to be ours.
-     */
+    /** A closed enum mapped to a column, because this interpolates into SQL. */
     public enum Dimension {
         CALL_SITE("call_site_id"),
         MODEL("provided_model_name");
@@ -75,25 +42,10 @@ public class VitalsRepository {
     }
 
     /**
-     * Spend and usage in a window, grouped by dimension — one row per dimension value, already summed.
-     *
-     * <p>Scoped to {@code kind = 'llm'} deliberately. A container span ({@code agent}, {@code chain})
-     * reports the CUMULATIVE usage of its subtree, so summing across kinds roughly doubles every figure.
-     * The v2 ingest already refuses to write typed usage on container kinds for exactly this reason, but
-     * the scope stays explicit here so the statistic does not silently change meaning if that rule ever
-     * loosens.
-     *
-     * <p><b>{@code unpriced} counts what could not be priced, and it is never folded into {@code usd}.</b>
-     * A real spend rendered as free is worse than an admitted gap, which is why {@code cost_source} exists
-     * as a written fact rather than something a reader infers from a null.
-     *
-     * <p>Only settled traces contribute. A trace still receiving spans has a partial cost, and averaging
-     * partials into a window makes spend look like it fell.
-     *
-     * <p>Served by {@code ix_span_llm_usage}, which holds every column read here, so the window is read from the
-     * index rather than from span rows. The grouping and distinct keys are compared under {@code "C"}: the database
-     * collation is deterministic, so two strings are equal under it exactly when their bytes are, and the groups
-     * are the same; sorting them byte-wise instead of by locale is what makes the aggregation cheap.
+     * Scoped to {@code kind = 'llm'}: a container span reports its subtree's cumulative usage. {@code unpriced} is
+     * never folded into {@code usd}. Only settled traces count, since averaging partial costs makes spend look like it
+     * fell. Served from {@code ix_span_llm_usage} alone; grouping keys compare under {@code "C"}, which groups exactly
+     * as the deterministic database collation does but sorts cheaply.
      */
     public List<UsageRow> usageIn(String projectId, Instant from, Instant to, Dimension by) {
         String dim = "COALESCE(s." + by.column() + ", '" + UNATTRIBUTED + "') COLLATE \"C\"";
@@ -127,18 +79,8 @@ public class VitalsRepository {
     }
 
     /**
-     * Turn durations in a window, grouped by dimension — one row per completed turn.
-     *
-     * <p>The duration is {@code trace.latency_ms}, a stored column derived from the trace's own
-     * start and end. For {@code call_site} the dimension is the trace's own {@code call_site_id}, copied
-     * down by the rollup (implementation plan §2.2) from the root span, else the earliest tagged span,
-     * which is one column read instead of a LATERAL per trace. For {@code model} it is the root
-     * span's model, which root spans do not carry — so that view buckets everything as
-     * {@code __unattributed__}, exactly as it did before, and the cost statistic is the one that
-     * discriminates by model.
-     *
-     * <p>No settle gate: {@code latency_ms} is non-null only once the trace has an end, and a trace's end
-     * is its root span's, which an exporter flushes last. Its presence IS the completion signal.
+     * For {@code model} every turn is {@code __unattributed__}, since root spans carry no model. No settle gate:
+     * {@code latency_ms} is non-null only once the root span, flushed last, has ended.
      */
     public List<DurationRow> turnDurationsIn(String projectId, Instant from, Instant to, Dimension by) {
         String dim = by == Dimension.CALL_SITE
@@ -164,19 +106,12 @@ public class VitalsRepository {
     }
 
     /**
-     * Turns that never ended, in a window — counted, never silently dropped.
-     *
-     * <p>An abandoned or still-running turn has no end, so it cannot contribute a duration. Excluding it
-     * quietly would let a rising number of stuck turns read as improving latency, which is the exact
-     * inversion that makes a metric worse than none. The count is surfaced beside the percentiles instead.
-     *
-     * <p>{@code GROUPING SETS} gives the per-dimension rows AND a grand total in one pass. The total is
-     * taken from the set rather than summed from the buckets, because a trace contributes to exactly one
-     * bucket here and the two must agree regardless.
+     * Excluding unended turns would let stuck turns read as improving latency. The total comes from the GROUPING SET
+     * rather than summing buckets.
      */
     public List<UnterminatedRow> unterminatedTurnsIn(String projectId, Instant from, Instant to, Dimension by) {
-        // The model view buckets every turn as unattributed (see turnDurationsIn). Cast, not a bare literal:
-        // Postgres refuses a non-integer constant in GROUP BY, and it reads the cast as an expression.
+        // Cast, not a bare literal: Postgres refuses a non-integer constant in GROUP BY but reads the cast as an
+        // expression.
         String dim = by == Dimension.CALL_SITE
                 ? "COALESCE(t.call_site_id, '" + UNATTRIBUTED + "')"
                 : "CAST('" + UNATTRIBUTED + "' AS text)";
@@ -196,16 +131,9 @@ public class VitalsRepository {
                 .list();
     }
 
-    /** {@code span.cost_source} for "we hold no rate for this model" — the column, not an inference. */
     private static final String UNPRICED = "unpriced";
 
-    /**
-     * Display labels for the project's call sites, keyed by id.
-     *
-     * <p>{@code use_case} is the producer-chosen label; an id with none falls back to the id itself at
-     * render time rather than being hidden, since a call site with traffic is worth showing whether or
-     * not anyone has named it.
-     */
+    /** An unnamed call site falls back to its id at render time rather than being hidden. */
     public java.util.Map<String, String> callSiteLabels(String projectId) {
         return jdbc
                 .sql("SELECT id, use_case FROM call_site WHERE project_id = :pid AND use_case IS NOT NULL")
@@ -216,7 +144,6 @@ public class VitalsRepository {
                 .collect(java.util.stream.Collectors.toMap(java.util.Map.Entry::getKey, java.util.Map.Entry::getValue));
     }
 
-    /** The bucket for traffic that resolved no dimension value — named, not dropped. */
     public static final String UNATTRIBUTED = "__unattributed__";
 
     private static OffsetDateTime at(Instant i) {
@@ -234,22 +161,13 @@ public class VitalsRepository {
     }
 
     /**
-     * One dimension value's spend in the window, already summed by the database.
-     *
-     * <p>{@code spendingTraces} is the cost denominator, and it comes from the SPENDING population rather
-     * than the root-span one. They are not the same set: an llm span tagged with a call site whose root
-     * span is not lands its cost in the call-site bucket and its turn in {@code __unattributed__}, so the
-     * bucket would read "spend, zero turns" and could never flag. For {@code by=model} the mismatch is
-     * total — root spans carry no model.
+     * {@code spendingTraces} counts the spending population, not root spans: a call-site-tagged llm span under an
+     * untagged root would otherwise read "spend, zero turns" and never flag.
      */
     public record UsageRow(
             String dimension, long tokens, BigDecimal usd, long calls, long unpricedCalls, long spendingTraces) {}
 
-    /** One completed turn's wall-clock duration, read off the trace's stored {@code latency_ms}. */
     public record DurationRow(String dimension, double millis) {}
 
-    /**
-     * Turns that never ended. {@code total} marks the grand-total row from the GROUPING SET.
-     */
     public record UnterminatedRow(String dimension, long turns, boolean total) {}
 }

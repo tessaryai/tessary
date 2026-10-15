@@ -32,23 +32,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * {@link EncoderScorer} backed by the groundedness model server's {@code POST /classify}
- * ({@code classifiers/groundedness/serve.py}). The endpoint comes from {@code
- * tessary.observer.encoder.*}. There is deliberately no fallback endpoint: one implementation, one
- * owner.
- *
- * <p>The launcher caps every request body at 8&nbsp;MB, so a sweep batch is never sent as one
- * request: {@link #scoreResponses} splits the responses into sequential sub-batches bounded by
- * {@link #MAX_RESPONSES_PER_REQUEST}, {@link #MAX_TEXT_BYTES_PER_REQUEST} of summed UTF-8 bytes and
- * {@link #MAX_RESPONSE_TOKENS_PER_REQUEST}, then concatenates the per-chunk scores in order. A single
- * response over the budget is sent alone in its own request, never dropped or truncated here.
- *
- * <p>Fails loudly by contract: unconfigured launcher, transport failure, non-2xx, a response
- * whose score count doesn't match the request, or a non-numeric score entry all throw, so the
- * encoder sweep fails loudly and is retried on subsequent heartbeats instead of silently scoring
- * everything clean. A connection that never opens is the one transport failure that is not a fault:
- * it throws {@link EncoderUnreachableException} and marks {@link EncoderAvailability} down, so the
- * sweep pauses until the model answers again rather than spending its attempts.
+ * No fallback endpoint. The launcher caps request bodies at 8 MB, so responses are sent in bounded sub-batches; one
+ * over-budget response travels alone, never truncated. Every malformed reply throws, so the sweep cannot silently score
+ * everything clean; a connection that never opens throws {@link EncoderUnreachableException} and pauses the sweep
+ * instead.
  */
 @Service
 public class LauncherEncoderScorer implements EncoderScorer {
@@ -56,44 +43,34 @@ public class LauncherEncoderScorer implements EncoderScorer {
     private static final Logger log = LoggerFactory.getLogger(LauncherEncoderScorer.class);
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
-    // Generous per-request cap: a cold head downloads + loads its model on the first call.
+    // Generous: a cold head downloads and loads its model on the first call.
     private static final Duration REQUEST_TIMEOUT = Duration.ofMinutes(5);
 
-    /**
-     * Max summed UTF-8 text bytes per {@code /classify} request — half the launcher's 8 MB body
-     * cap, leaving ample headroom for JSON escaping and envelope overhead.
-     */
+    /** Half the 8 MB cap, leaving headroom for JSON escaping. */
     static final long MAX_TEXT_BYTES_PER_REQUEST = 4L * 1024 * 1024;
 
     /**
-     * Estimated tokens per token-head request, at ~4 UTF-8 bytes per token. The head's cost is
-     * roughly quadratic in a response's length and a CPU encoder takes tens of seconds for an 8k
-     * response, so a request is sized by the work it carries, not only by count: sixteen short
-     * answers travel together, one long one travels alone, and every request finishes well inside
-     * {@link #REQUEST_TIMEOUT} and the encoder's queue timeout.
+     * The head's cost is roughly quadratic in length, so requests are sized by work, not count, to finish inside the
+     * timeouts.
      */
     static final long MAX_RESPONSE_TOKENS_PER_REQUEST = 24_000;
 
-    /** Retries of one request the encoder throttled (429/503) before the sweep fails. */
     static final int MAX_THROTTLE_RETRIES = 4;
 
     private final ObserverProperties props;
     private final ObjectMapper mapper;
-    /** Told the reason when a send finds the encoder unreachable; {@link EncoderAvailability#markUnreachable}. */
     private final Consumer<String> onUnreachable;
 
     private final HttpClient client =
             HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     /**
-     * The backend-side half of the encoder's concurrency ceiling: every sweep on every head takes a
-     * permit before it posts, so the encoder sees at most {@code encoder.max-inflight} requests at
-     * once and sheds nothing; the waiting happens here, on a virtual thread, inside the lease.
+     * Every sweep takes a permit before posting, so the encoder sees at most {@code encoder.max-inflight} requests and
+     * sheds nothing; the waiting happens here.
      */
     private final Semaphore inflight;
-    /** Waits out a throttle backoff; {@link Thread#sleep} outside tests. */
+
     private final Sleeper sleeper;
 
-    /** How the throttle backoff waits, so a test can record the waits instead of taking them. */
     @FunctionalInterface
     interface Sleeper {
         void sleep(long millis) throws InterruptedException;
@@ -129,7 +106,6 @@ public class LauncherEncoderScorer implements EncoderScorer {
         return s.getBytes(StandardCharsets.UTF_8).length;
     }
 
-    /** Max responses per token-head request: serve.py's GROUNDEDNESS_MAX_RESPONSES default. */
     static final int MAX_RESPONSES_PER_REQUEST = 16;
 
     @Override
@@ -145,10 +121,8 @@ public class LauncherEncoderScorer implements EncoderScorer {
     }
 
     /**
-     * A 400 from the encoder for one chunk: the request shape was refused, which for a token head
-     * means an answer the window cannot hold. Bisect down to the offending response rather than
-     * fail the sweep: the other responses in the chunk are scorable, and a sweep that fails on one
-     * over-long answer would re-fail on it every tick until it dead-lettered.
+     * Bisect to the offending response: one over-long answer would otherwise re-fail the sweep every tick until it
+     * dead-lettered.
      */
     private List<ResponseScore> scoreResponsesTolerant(
             String baseUrl, String head, List<Response> responses, int chunk, int chunks) {
@@ -172,7 +146,6 @@ public class LauncherEncoderScorer implements EncoderScorer {
         }
     }
 
-    /** The encoder refused the request as malformed for its head (HTTP 400): the caller's to route around. */
     static final class ClientRejection extends RuntimeException {
         private static final long serialVersionUID = 1L;
         final int status;
@@ -210,12 +183,7 @@ public class LauncherEncoderScorer implements EncoderScorer {
         return bytes;
     }
 
-    /**
-     * One {@code POST /classify} for one response chunk. The body is {@code {head, responses:[...]}} and
-     * the reply {@code {scores:[{unsupported, conflict, spans:[{start,end,unsupported,conflict}]}]}}; a
-     * missing or non-numeric score is a failure, never a silent "clean": an encoder sweep that scored
-     * everything clean on a bad reply would look healthy while watching nothing.
-     */
+    /** A missing or non-numeric score is a failure, never "clean", or a broken encoder would look healthy. */
     private List<ResponseScore> scoreResponsesChunk(
             String baseUrl, String head, List<Response> responses, int chunk, int chunks) {
         ObjectNode body = mapper.createObjectNode();
@@ -255,19 +223,11 @@ public class LauncherEncoderScorer implements EncoderScorer {
         return out;
     }
 
-    /**
-     * The host for the logs. A URL {@link URI#create} refuses throws here, which is the same exception the
-     * request's own {@code URI.create} would throw a line later.
-     */
     private static String hostOf(String baseUrl) {
         String host = URI.create(baseUrl).getHost();
         return host == null || host.isBlank() ? baseUrl : host;
     }
 
-    /**
-     * The transport and the array-shape check: POST, non-2xx and
-     * count-mismatch are failures with the same structured log; the caller reads the entries.
-     */
     private JsonNode postAndParse(
             String baseUrl, String head, String mode, int count, long bytes, int chunk, int chunks, ObjectNode body) {
         Instant start = Instant.now();
@@ -317,8 +277,7 @@ public class LauncherEncoderScorer implements EncoderScorer {
                                 : "launcher /classify returned " + (scores == null ? 0 : scores.size()) + " scores for "
                                         + count + " requested");
             }
-            // Size and duration on the success path too: this mode sends whole retrieved documents,
-            // so its cost is the one an operator most needs in Loki (backend/AGENTS.md § Logging).
+            // Logged on success too: this mode sends whole documents, so its cost is what an operator needs in Loki.
             StructuredLog.info(log, Markers.OPS, "encoder.classify.complete")
                     .field("head", head)
                     .field("mode", mode)
@@ -347,8 +306,7 @@ public class LauncherEncoderScorer implements EncoderScorer {
                     .log();
             throw new IllegalStateException("encoder scoring interrupted", e);
         } catch (JsonProcessingException e) {
-            // Jackson echoes body snippets in its message; OPS stays categorical and the throw is
-            // unchained so ClassifierWorker's .cause(e) cannot re-egress it. Detail at DEBUG.
+            // Jackson echoes body snippets in its message, so the throw is unchained and detail stays at DEBUG.
             StructuredLog.warn(log, Markers.OPS, "encoder.classify.failed")
                     .field("head", head)
                     .field("mode", mode)
@@ -361,18 +319,15 @@ public class LauncherEncoderScorer implements EncoderScorer {
                     .durationMs(start)
                     .log();
             log.debug("encoder.classify parse failure detail head={} host={}", head, host, e);
-            throw new IllegalStateException("launcher /classify parse failure"); // NOPMD PreserveStackTrace
+            throw new IllegalStateException("launcher /classify parse failure");
         } catch (IOException e) {
             throw transportFailure(e, head, mode, count, bytes, chunk, chunks, host, start);
         }
     }
 
     /**
-     * The exception for a failed send. A connection that never opened ({@link #isUnreachable}) means
-     * the model is not running: the availability is marked down at once, so the next sweep skips
-     * instead of trying again, and the throw is an {@link EncoderUnreachableException} that the worker
-     * hands back without spending an attempt. Any other transport failure is a fault and fails the
-     * sweep as before.
+     * An unreachable model marks availability down and throws {@link EncoderUnreachableException}, which costs no
+     * attempt. Any other transport failure fails the sweep.
      */
     private IllegalStateException transportFailure(
             IOException e,
@@ -416,9 +371,8 @@ public class LauncherEncoderScorer implements EncoderScorer {
     }
 
     /**
-     * Whether a send failed before a connection existed: refused, connect timeout, closed channel, or
-     * an unresolvable host. The JDK client sometimes reports a refusal as a {@code ConnectException}
-     * whose cause is the channel's, so the causes are checked too.
+     * The JDK client sometimes reports a refusal as a {@code ConnectException} whose cause is the channel's, so causes
+     * are checked too.
      */
     static boolean isUnreachable(Throwable e) {
         Throwable t = e;
@@ -434,10 +388,8 @@ public class LauncherEncoderScorer implements EncoderScorer {
     }
 
     /**
-     * One POST under the inflight permit, retried with backoff when the encoder throttles (429, 503):
-     * the encoder's queue is short by design (it bounds memory), so the wait belongs here. Honours a
-     * numeric Retry-After; otherwise 2 s doubling, capped at 30 s. After {@link #MAX_THROTTLE_RETRIES}
-     * the last response is returned and the caller fails the request as before.
+     * The encoder's queue is short by design, so the wait belongs here. Honours a numeric Retry-After, else 2 s
+     * doubling capped at 30 s.
      */
     private HttpResponse<String> sendThrottled(
             HttpRequest req,

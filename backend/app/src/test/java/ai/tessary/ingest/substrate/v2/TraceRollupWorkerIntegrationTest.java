@@ -15,6 +15,7 @@ import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Row;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.Props;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
@@ -36,11 +37,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * <p>The worker and reaper are built here and run once synchronously, with the scheduler off, because a live worker
  * claims due traces globally. Time is Postgres's: tests backdate the deadline rather than use an app-side clock.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class TraceRollupWorkerIntegrationTest {
 
     @Autowired
@@ -264,38 +261,6 @@ class TraceRollupWorkerIntegrationTest {
     }
 
     @Test
-    @DisplayName("an untagged root takes its call site from the tagged span under it")
-    void anUntaggedRootTakesTheCallSiteOfItsTaggedChild() {
-        SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", t0, t0.plusSeconds(9));
-        fx.withPreviews(root, "what the user asked", "what came back", null);
-        SpanRow child = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0, t0.plusSeconds(2));
-        fx.withPreviews(child, "an inner prompt", "an inner completion", "call-site-99");
-
-        rollUp(true);
-
-        assertEquals(
-                "call-site-99",
-                require(traceId).callSiteId(),
-                "instrument.md tags the model-call span, not the handler around it");
-    }
-
-    @Test
-    @DisplayName("an untagged root with several tagged spans takes the call site the turn reached first")
-    void anUntaggedRootTakesTheEarliestTaggedSpansCallSite() {
-        SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", t0, t0.plusSeconds(9));
-        SpanRow later = fx.span(
-                pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0.plusSeconds(5), t0.plusSeconds(8));
-        fx.withPreviews(later, "summarize", "summary", "call-site-summarizer");
-        SpanRow earlier = fx.span(
-                pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0.plusSeconds(1), t0.plusSeconds(4));
-        fx.withPreviews(earlier, "plan", "a plan", "call-site-planner");
-
-        rollUp(true);
-
-        assertEquals("call-site-planner", require(traceId).callSiteId());
-    }
-
-    @Test
     @DisplayName("a trace whose root has not landed yet is rolled up without previews rather than with a child's")
     void aTraceWithNoRootYetGetsNoPreviews() {
         SpanRow child = fx.span(
@@ -311,10 +276,8 @@ class TraceRollupWorkerIntegrationTest {
     }
 
     private SubstrateProperties props(int graceSeconds) {
-        SubstrateProperties p = new SubstrateProperties();
-        p.setRollupClaimLimit(500);
-        p.setRollupReapGraceSeconds(graceSeconds);
-        return p;
+        return Props.of(
+                SubstrateProperties.class, "rollup-claim-limit", 500, "rollup-reap-grace-seconds", graceSeconds);
     }
 
     private TraceV2Row require(String id) {

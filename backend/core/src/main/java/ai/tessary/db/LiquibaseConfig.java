@@ -7,20 +7,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * Wires Liquibase against the {@link DataSourceConfig} bean. Spring Boot 4 removed the
- * auto-configured LiquibaseAutoConfiguration, so this declares the SpringLiquibase bean directly.
- */
+/** Declares SpringLiquibase directly, since Spring Boot 4 no longer auto-configures it. */
 @Configuration
 public class LiquibaseConfig {
 
-    /**
-     * The bean name this configuration registers its {@link SpringLiquibase} under (the method name
-     * below, {@code liquibase}). Kept as a named constant, rather than restated as a string, so
-     * another bean can order itself after this one with {@code @DependsOn(BEAN_NAME)}; renaming the
-     * bean method without updating this constant is then a compile error rather than a drifted
-     * string that only breaks at boot.
-     */
+    /** For {@code @DependsOn(BEAN_NAME)}; must match the bean method name. */
     public static final String BEAN_NAME = "liquibase";
 
     @Bean

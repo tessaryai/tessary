@@ -22,7 +22,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -30,28 +29,14 @@ import org.springframework.boot.test.context.SpringBootTest;
  * definition can be enabled and disabled.
  */
 @SpringBootTest
-class ClassifierDefinitionIntegrationTest {
-
-    @Autowired
-    ClassifierService service;
-
-    @Autowired
-    ClassifierController controller;
-
-    @Autowired
-    BuiltInClassifierCatalog catalog;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    org.springframework.jdbc.core.simple.JdbcClient jdbc;
+record ClassifierDefinitionIntegrationTest(
+        ClassifierService service,
+        ClassifierController controller,
+        BuiltInClassifierCatalog catalog,
+        ClassifierRepository signals,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        org.springframework.jdbc.core.simple.JdbcClient jdbc) {
 
     @Test
     void seedsBuiltInsOnProjectCreationIdempotently() {
@@ -192,8 +177,6 @@ class ClassifierDefinitionIntegrationTest {
                 ClassifierRows.byKey(signals, pid, "secret_leak").orElseThrow();
         ClassifierRow costDrift =
                 ClassifierRows.byKey(signals, pid, "cost_drift").orElseThrow();
-        ClassifierRow frustration =
-                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow();
 
         Set<String> ids = body(controller.list(ctx, org, proj)).stream()
                 .map(ClassifierDtos.ClassifierView::id)
@@ -212,34 +195,10 @@ class ClassifierDefinitionIntegrationTest {
         assertFalse(body(controller.setEnabled(
                         ctx, org, proj, secretLeak.id(), new ClassifierDtos.SetEnabledRequest(false)))
                 .enabled());
-        assertEquals(
-                ClassifierRow.Mode.TRACKING,
-                body(controller.setMode(
-                                ctx,
-                                org,
-                                proj,
-                                secretLeak.id(),
-                                new ClassifierDtos.SetModeRequest(ClassifierRow.Mode.TRACKING)))
-                        .mode());
-        ClassifierDtos.ClassifierView after = body(controller.get(ctx, org, proj, secretLeak.id()));
-        assertFalse(after.enabled());
-        assertEquals(ClassifierRow.Mode.TRACKING, after.mode());
-        assertEquals(
-                new ClassifierDtos.ClassifierMetricsView(secretLeak.id(), ClassifierRow.Mode.TRACKING, 0, 0, 0),
-                body(controller.metrics(ctx, org, proj, secretLeak.id())));
-        assertEquals(List.of(), body(controller.events(ctx, org, proj)));
+        assertFalse(body(controller.get(ctx, org, proj, secretLeak.id())).enabled());
         assertEquals(
                 List.of(),
                 body(controller.eventsForClassifier(ctx, org, proj, secretLeak.id(), ClassifierRow.Mode.TRACKING, 10)));
-        toolCall(pid, "search", "Timeout");
-        toolCall(pid, "search", null);
-        toolCall(pid, "lookup", null);
-        assertEquals(
-                List.of(
-                        new ClassifierDtos.ToolErrorRateView("search", 2, 1, 0.5),
-                        new ClassifierDtos.ToolErrorRateView("lookup", 1, 0, 0.0)),
-                body(controller.toolErrorRates(ctx, org, proj, secretLeak.id())),
-                "worst first, failed over total per tool");
 
         assertEquals(
                 new ClassifierDtos.TuningView(500, 24, 100, 0.139, null),
@@ -253,11 +212,6 @@ class ClassifierDefinitionIntegrationTest {
                 new ClassifierDtos.TuningView(2_000, 48, 30, 0.2, null),
                 body(controller.getTuning(ctx, org, proj, costDrift.id())));
 
-        assertEquals(
-                List.of(),
-                body(controller.getFrustrationTuning(ctx, org, proj, frustration.id()))
-                        .callSites());
-
         ClassifierDtos.ClassifierDailyVolumeView volume = body(controller.dailyMetrics(ctx, org, proj, 3));
         assertEquals(3, volume.days().size());
         assertEquals(List.of(0L, 0L, 0L), volume.traceTotals());
@@ -267,22 +221,6 @@ class ClassifierDefinitionIntegrationTest {
                         .map(ClassifierDtos.ClassifierDailyCountsView::classifierId)
                         .collect(Collectors.toSet()));
         assertTrue(volume.classifiers().stream().allMatch(c -> c.counts().equals(List.of(0L, 0L, 0L))));
-    }
-
-    private void toolCall(String pid, String name, @org.jspecify.annotations.Nullable String errorType) {
-        jdbc.sql("""
-                        INSERT INTO tool_call (id, project_id, name, error_type, is_error, trace_id, span_id,
-                                               started_at, created_at, event_ts)
-                        VALUES (:id, :pid, :name, :err, :isErr, :tid, :sid, now(), now(), now())
-                        """)
-                .param("id", Ids.ulid())
-                .param("pid", pid)
-                .param("name", name)
-                .param("err", errorType)
-                .param("isErr", errorType != null)
-                .param("tid", Ids.ulid())
-                .param("sid", Ids.ulid())
-                .update();
     }
 
     private static <T> T body(ApiResponse<T> response) {

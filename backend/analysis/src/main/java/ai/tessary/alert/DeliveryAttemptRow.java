@@ -4,11 +4,8 @@ package ai.tessary.alert;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One outbound-delivery attempt of a fired alert to one channel — the audit trail and the
- * at-most-once guard. Keyed on {@code (alert_event_id, channel_id)} (UNIQUE): the row
- * is inserted {@code pending} BEFORE the HTTP call, so a listener that fires twice (Spring
- * {@code fallbackExecution=true}, a reclaim) can never double-send; it is UPDATEd to {@code delivered}
- * or {@code failed} with the outcome after the call returns.
+ * The at-most-once guard: unique on {@code (alert_event_id, channel_id)} and inserted {@code pending} before the HTTP
+ * call, so a listener firing twice can never double-send.
  */
 public record DeliveryAttemptRow(
         String id,

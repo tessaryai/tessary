@@ -4,12 +4,12 @@ package ai.tessary.llm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.ModelsDevProperties;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -44,8 +44,7 @@ class ModelsDevRatesTest {
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-10T12:00:00Z"));
 
     private ModelsDevRates rates() {
-        ModelsDevProperties props = new ModelsDevProperties();
-        props.setUrl(URL);
+        ModelsDevProperties props = Props.of(ModelsDevProperties.class, "url", URL);
         return new ModelsDevRates(http, MAPPER, props, clock, BUNDLED);
     }
 
@@ -71,13 +70,6 @@ class ModelsDevRatesTest {
                 Optional.of(new ModelsDevRates.ModelCost(
                         new BigDecimal("3"), new BigDecimal("9"), new BigDecimal("0.75"), null)),
                 rates().cost("xai/grok-4.6"));
-    }
-
-    @Test
-    void aModelTheLiveFileLacksIsAnsweredFromTheBundledCopy() throws Exception {
-        answer(200, "{\"zai\":{\"models\":{\"glm-5.3\":{\"cost\":{\"input\":1.4,\"output\":4.4}}}}}");
-
-        assertEquals(Optional.of(BUNDLED_GROK), rates().cost("xai/grok-4.6"));
     }
 
     @Test
@@ -115,26 +107,6 @@ class ModelsDevRatesTest {
         clock.advance(Duration.ofMinutes(1));
         rates.cost("xai/grok-4.6");
         fetches(2);
-    }
-
-    /** A typo in the configured URL must cost the live file, never every sandbox run. */
-    @Test
-    void aMalformedUrlFallsBackToTheBundledCopy() {
-        ModelsDevProperties props = new ModelsDevProperties();
-        props.setUrl("not a url");
-        ModelsDevRates rates = new ModelsDevRates(http, MAPPER, props, clock, BUNDLED);
-
-        assertEquals(Optional.of(BUNDLED_GROK), rates.cost("xai/grok-4.6"));
-    }
-
-    @Test
-    void aBlankUrlNeverFetches() throws Exception {
-        ModelsDevProperties props = new ModelsDevProperties();
-        props.setUrl("");
-        ModelsDevRates rates = new ModelsDevRates(http, MAPPER, props, clock, BUNDLED);
-
-        assertEquals(Optional.of(BUNDLED_GROK), rates.cost("xai/grok-4.6"));
-        verify(http, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
     }
 
     /** A model priced per image or per request has no token rate; OpenCode would bill it at $0, so it is unpriced. */

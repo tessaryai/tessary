@@ -4,10 +4,7 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 /**
- * Errors for the aggregation-first query API — the {@code /v1/query/*} surface. Bad request
- * shapes (unknown dataset / facet field / interval) are client errors; a missing project-scoped token
- * is a {@code 403}, mirroring {@link IngestError#OTLP_TOKEN_REQUIRED} on the sibling {@code /v1/traces}
- * front door.
+ * Errors for {@code /v1/query/*}. A missing project-scoped token is 403, like {@link IngestError#OTLP_TOKEN_REQUIRED}.
  */
 public enum QueryError implements ErrorCode {
     TOKEN_REQUIRED(HttpStatus.FORBIDDEN, "the query API requires a project-scoped token"),

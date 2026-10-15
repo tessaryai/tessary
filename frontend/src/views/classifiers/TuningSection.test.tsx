@@ -9,22 +9,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Classifier } from "../../api/types";
 import { pending, renderRoute } from "../../test/render";
 import { TuningSection } from "./TuningSection";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getClassifierTuning: vi.fn(),
-  setClassifierTuning: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ api }) }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const COST = { id: "clf-c", detector: "cost_drift" } as Classifier;
 const TUNING = {
-  window_target_count: 500,
-  window_max_hours: 24,
-  min_sample: 100,
-  w1_floor: 0.139,
-  implied_false_alarm_rate: 0.034,
+  window_target_count: 500, window_max_hours: 24, min_sample: 100, w1_floor: 0.139, implied_false_alarm_rate: 0.034,
 };
 
 beforeEach(() => {
@@ -71,10 +62,7 @@ describe("TuningSection", () => {
 
     await waitFor(() =>
       expect(api.setClassifierTuning).toHaveBeenCalledWith("clf-c", {
-        window_target_count: 250000,
-        window_max_hours: 48,
-        min_sample: 200,
-        w1_floor: 0.2,
+        window_target_count: 250000, window_max_hours: 48, min_sample: 200, w1_floor: 0.2,
       }),
     );
     expect(await screen.findByText("Tuning saved")).toBeTruthy();

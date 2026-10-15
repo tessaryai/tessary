@@ -10,16 +10,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentLocation, renderRoute } from "../test/render";
 import { SETTINGS_ICON } from "./nav";
 import { Sidebar } from "./Sidebar";
+import { auth } from "../test/api";
 
-const { authApi, palette, shell, cases } = vi.hoisted(() => ({
-  authApi: { listProjects: vi.fn(), logout: vi.fn() },
+const { palette, shell, cases } = vi.hoisted(() => ({
   palette: { open: vi.fn() },
   shell: { opener: null as null | (() => void) },
   cases: { open: 3 },
 }));
 
-vi.mock("../api/client", () => ({ auth: authApi }));
-vi.mock("../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../api/client", () => import("../test/api"));
+vi.mock("../tenant/TenantContext", () => import("../test/api"));
 vi.mock("../auth/AuthContext", () => ({
   useAuth: () => ({
     user: { email: "dana@example.com", orgs: [{ id: "o1", slug: "acme", name: "Acme Inc", role: "owner" }] },
@@ -56,8 +56,8 @@ const project = (slug: string, name: string) => ({ id: `p-${slug}`, slug, name }
 
 beforeEach(() => {
   cases.open = 3;
-  authApi.listProjects.mockResolvedValue([project("default", "Default"), project("support", "Support bot")]);
-  authApi.logout.mockResolvedValue({ frontendUrl: "https://tessary.example/" });
+  auth.listProjects.mockResolvedValue([project("default", "Default"), project("support", "Support bot")]);
+  auth.logout.mockResolvedValue({ frontendUrl: "https://tessary.example/" });
 });
 
 afterEach(() => {
@@ -170,7 +170,7 @@ describe("the project switcher", () => {
   it("names the current project and org, and lists the org's projects on hover", async () => {
     open();
     await waitFor(() => expect(trigger().textContent).toContain("Acme Inc"));
-    expect(authApi.listProjects).toHaveBeenCalledWith("acme");
+    expect(auth.listProjects).toHaveBeenCalledWith("acme");
 
     fireEvent.mouseEnter(trigger().parentElement!);
     expect(screen.getByText("Projects")).toBeTruthy();
@@ -223,14 +223,12 @@ describe("the project switcher", () => {
   });
 });
 
-describe("the account menu", () => {
-  it("still leaves when the server's sign-out fails", async () => {
-    authApi.logout.mockRejectedValue(new Error("offline"));
-    open();
+it("the account menu: still leaves when the server's sign-out fails", async () => {
+  auth.logout.mockRejectedValue(new Error("offline"));
+  open();
 
-    fireEvent.click(screen.getByRole("button", { name: /dana@example.com/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+  fireEvent.click(screen.getByRole("button", { name: /dana@example.com/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
-    await waitFor(() => expect(authApi.logout).toHaveBeenCalled());
-  });
+  await waitFor(() => expect(auth.logout).toHaveBeenCalled());
 });

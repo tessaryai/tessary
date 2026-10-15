@@ -10,7 +10,6 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.classifier.ClassifierDtos.ClassifierView;
 import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
-import ai.tessary.classifier.frustration.FrustrationTuning;
 import ai.tessary.detection.DetectionTable;
 import ai.tessary.detection.DetectionTable.Grain;
 import ai.tessary.detection.DetectionTableRegistry;
@@ -45,12 +44,7 @@ class ClassifierControllerTest {
                 new DetectionTable("frustration", "frustration_detection", Grain.TRACE, true, true),
                 new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN, false, false)));
         ClassifierController controller = new ClassifierController(
-                service,
-                mock(ClassifierReset.class),
-                mock(FrustrationTuning.class),
-                mock(GroundednessStatus.class),
-                resolver,
-                registry);
+                service, mock(ClassifierReset.class), mock(GroundednessStatus.class), resolver, registry);
 
         List<ClassifierView> views = Objects.requireNonNull(
                 controller.list(mock(TenantContext.class), "acme", "web").data());

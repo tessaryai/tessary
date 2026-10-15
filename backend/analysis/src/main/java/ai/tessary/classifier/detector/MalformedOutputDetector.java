@@ -28,22 +28,9 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Malformed Output built-in: a deterministic structured-output check. A call site whose code
- * declares a structured output has that JSON Schema captured during agentic synthesis
- * ({@code call_site.output_schema}); this detector validates each observation's output against its
- * call site's schema. An output that isn't JSON at all, or that violates the schema, fires — that
- * is exactly the failure the calling code's parse would hit in production.
- *
- * <p>On the native gen_ai path {@code observation.output} carries the {@code gen_ai.output.messages}
- * envelope (a role-tagged messages array), not the bare completion the schema describes — the
- * envelope is detected and the final assistant message's text content is what gets validated
- * (see {@link #assistantTextFromMessageEnvelope}). A bare payload is validated as-is.
- *
- * <p>Quiet by construction everywhere validation isn't meaningful: observations with no call site,
- * call sites with no captured schema, blank outputs, and stored schemas that don't compile (including
- * schemas whose {@code $ref}s can't be resolved) are all skipped. All firings are HIGH confidence —
- * schema validation is a fact, not a judgment. {@link #detectBatch} loads the batch's schemas in one
- * read and compiles each distinct schema once per batch, caching compile failures too.
+ * Validates each output against its call site's captured schema; non-JSON or a violation fires, which is what the
+ * calling code's parse would hit. A gen_ai message envelope is unwrapped to the final assistant text. Quiet wherever
+ * validation isn't meaningful. Schema validation is a fact, so all firings are HIGH.
  */
 public final class MalformedOutputDetector implements BuiltInDetector {
 
@@ -51,12 +38,8 @@ public final class MalformedOutputDetector implements BuiltInDetector {
 
     private final CallSiteSchemaReads schemas;
     private final ObjectMapper mapper;
-    // 2020-12 is the dialect default; a schema declaring its own $schema is honored by the registry.
-    // Schema retrieval is disallowed outright: the stored schema is agent-authored from customer repo
-    // content, so a remote $ref would be an SSRF vector, and a file: $ref would read the host. Every
-    // IRI is blocked; standard-dialect meta-schemas are built in and never go through the loader. A
-    // schema whose $ref can't be resolved without a fetch fails compile() and is treated as none.
-    // MalformedOutputDetectorTest#refSchemasAreNeverFetched_treatedAsNoneDeclared proves it.
+    // Schema retrieval is blocked outright: the schema is agent-authored from customer repo content, so a remote $ref
+    // would be SSRF and a file: $ref would read the host. An unresolvable $ref fails compile() and is treated as none.
     private final SchemaRegistry schemaRegistry = SchemaRegistry.withDefaultDialect(
             SpecificationVersion.DRAFT_2020_12,
             builder -> builder.schemaLoader(
@@ -73,9 +56,8 @@ public final class MalformedOutputDetector implements BuiltInDetector {
     }
 
     /**
-     * Gated on the captured schema: with none, every observation of that call site is skipped. A
-     * schema arriving (or changing) therefore invalidates everything already swept — see {@link
-     * BuiltInDetector#callSiteFactsRead}.
+     * A schema arriving or changing invalidates everything already swept; see
+     * {@link BuiltInDetector#callSiteFactsRead}.
      */
     @Override
     public Set<CallSiteFact> callSiteFactsRead() {
@@ -104,8 +86,7 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         Map<String, String> schemaJsonBySite =
                 schemas.callSiteOutputSchemas(batch.get(0).projectId(), siteIds);
         if (schemaJsonBySite.isEmpty()) return out;
-        // Optional-valued so a compile failure is cached too: one compile attempt per distinct
-        // schema per batch (computeIfAbsent alone would retry a null result per observation).
+        // Optional-valued so a compile failure is cached too; computeIfAbsent would retry a null per observation.
         Map<String, Optional<Schema>> compiled = new HashMap<>();
 
         for (int i = 0; i < batch.size(); i++) {
@@ -121,11 +102,6 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         return out;
     }
 
-    /**
-     * Validate one output against the call site's schema: not-JSON and schema violations fire. When
-     * the output is a gen_ai message envelope, the final assistant message's text content is the
-     * document validated — that is the completion the calling code's parse sees.
-     */
     private Detection validate(Schema schema, String output) {
         JsonNode node;
         try {
@@ -135,8 +111,7 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         }
         String assistantText = assistantTextFromMessageEnvelope(node);
         if (assistantText != null) {
-            // An envelope with no assistant text carries no completion to validate — quiet, like
-            // a blank bare output.
+            // No assistant text means no completion to validate.
             if (assistantText.isBlank()) return Detection.none();
             try {
                 node = mapper.readTree(assistantText);
@@ -146,12 +121,11 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         }
         List<Error> violations;
         try {
-            // networknt reads through Jackson 3; the Jackson 2 node crosses over as the JSON text it
-            // was parsed from, so both libraries judge the same document.
+            // networknt reads through Jackson 3; the Jackson 2 node crosses over as its JSON text, so both libraries
+            // judge the same document.
             violations = schema.validate(node.toString(), InputFormat.JSON);
         } catch (RuntimeException e) {
-            // Schema pathology surfacing at validate despite preload: same discipline as compile() —
-            // treated as none declared, never failing the whole sweep on one poisoned schema.
+            // Treated as none declared rather than failing the sweep on one poisoned schema.
             return Detection.none();
         }
         if (violations.isEmpty()) return Detection.none();
@@ -163,19 +137,12 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         return Detection.fired(Detection.Severity.WARN, violationEvidence(ordered));
     }
 
-    /**
-     * One schema violation, in the vocabulary the finding and case pages read back: {@code field}
-     * collapses every array index to {@code []} so a violation on {@code items[2].sku} and one on
-     * {@code items[5].sku} count against the same declared field, matching how {@code call_site.output_schema}
-     * is flattened for display. {@code path} is the same field, spelled as a JSON path for a reader who wants
-     * to paste it somewhere.
-     */
+    /** {@code field} collapses array indices so violations on different items count against one declared field. */
     private record Violation(String path, String field, String keyword, String message) {}
 
     /**
-     * {@code required}'s own instance location is the object missing the property, not the property
-     * itself — {@link Error#getProperty()} carries the missing name instead, so it is appended
-     * to the parent's collapsed path here rather than read off the location.
+     * {@code required}'s instance location is the parent object; the missing name comes from
+     * {@link Error#getProperty()}.
      */
     private static Violation toViolation(Error vm) {
         String field = collapsedPath(vm.getInstanceLocation());
@@ -188,7 +155,6 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         return new Violation(path, field, keyword, vm.getMessage());
     }
 
-    /** {@code items[2].sku} → {@code items[].sku}: every array index collapses to an empty pair of brackets. */
     private static String collapsedPath(NodePath location) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < location.getNameCount(); i++) {
@@ -204,20 +170,9 @@ public final class MalformedOutputDetector implements BuiltInDetector {
     }
 
     /**
-     * The final assistant message's text content when {@code node} is a gen_ai message envelope —
-     * the shape {@code observation.output} carries on the native gen_ai OTLP path:
-     * {@code [{"role":"assistant","parts":[{"type":"text","content":"…"}],"finish_reason":"stop"}]}
-     * (role-tagged messages with {@code parts[]} or {@code content}). Returns {@code null} when the
-     * node is not a message envelope, i.e. a bare payload to validate as-is; returns {@code ""} for
-     * an envelope with no assistant text (nothing to validate). Envelope detection mirrors
-     * {@link ContentExtractor}'s shape-aware navigation, and text flattening is delegated to
-     * {@link ContentExtractor#flattenContentText} so the detector and the judge agree on how a
-     * message's content collapses to text. Only a role-tagged <em>array</em> counts as an envelope —
-     * a bare object payload that happens to have a {@code role} property is validated verbatim.
-     *
-     * <p>Public so the finding page's failing-outputs read ({@code MalformedOutputDetailService}) unwraps
-     * a stored output the identical way before re-validating and rendering it — the document a reader
-     * sees must be the one this detector actually judged, not the envelope around it.
+     * Null for a bare payload (validate as-is), {@code ""} for an envelope with no assistant text. Only a role-tagged
+     * array counts as an envelope. Public so {@code MalformedOutputDetailService} shows the document this detector
+     * actually judged.
      */
     public static @Nullable String assistantTextFromMessageEnvelope(JsonNode node) {
         if (!ContentExtractor.isMessageEnvelope(node)) return null;
@@ -233,9 +188,8 @@ public final class MalformedOutputDetector implements BuiltInDetector {
     private @Nullable Schema compile(String schemaJson) {
         try {
             Schema schema = schemaRegistry.getSchema(schemaJson);
-            // $ref resolution is lazy in networknt: force it here so an unresolvable (or blocked)
-            // ref fails at compile — cached as none-declared — instead of throwing out of
-            // validate() once per observation.
+            // $ref resolution is lazy in networknt; force it so a bad ref fails at compile instead of on every
+            // validate().
             schema.initializeValidators();
             return schema;
         } catch (RuntimeException e) {

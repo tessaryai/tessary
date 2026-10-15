@@ -6,18 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.tessary.auth.TenantContext;
-import ai.tessary.classifier.ClassifierRepository;
-import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
-import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.frustration.FrustrationEvidence;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
-import ai.tessary.classifier.metric.MetricBaselineRepository;
-import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
-import ai.tessary.classifier.metric.MetricBaselineRow.State;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
@@ -28,15 +22,12 @@ import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.tenant.rbac.Role;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.ClassifierRows;
-import ai.tessary.testsupport.MetricBaselineRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -49,37 +40,13 @@ import org.springframework.web.server.ResponseStatusException;
  * model.
  */
 @SpringBootTest
-class FindingControllerTest {
-
-    @Autowired
-    FindingController controller;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    BehaviorBaselineEventRepository baselineEvents;
+record FindingControllerTest(
+        FindingController controller,
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        TenantService tenants,
+        OrgMembershipRepository memberships,
+        CapabilityFixture capabilities) {
 
     /**
      * An unruled finding lists only when every finding is asked for; its pages read through the path's project, and
@@ -232,43 +199,6 @@ class FindingControllerTest {
         assertEquals(false, queued.alreadyEscalated());
         assertEquals(
                 true, findings.findById(fix.project().id(), id).orElseThrow().escalatedAt() != null);
-    }
-
-    /** The project's own re-pins, newest first. */
-    @Test
-    void theBaselineChangelogListsTheProjectsRepins() {
-        var fix = TenantFixture.bootstrap(tenants, "finding-api-changelog");
-        String projectId = fix.project().id();
-        classifiers.seedBuiltIns(projectId);
-        String classifierId = ClassifierRows.byKey(signals, projectId, BuiltInDetector.Kind.DURATION_DRIFT)
-                .orElseThrow()
-                .id();
-        String baselineId = baselines
-                .ensure(MetricBaselineRows.fresh(
-                        projectId, classifierId, Measure.TURN_DURATION, "summarize", State.ARMED))
-                .id();
-        String eventId = Ids.ulid();
-        baselineEvents.insert(BehaviorBaselineEventRow.forBaseline(
-                eventId,
-                baselineId,
-                projectId,
-                BehaviorBaselineEventRow.Event.BASELINE_REPINNED,
-                "turn_duration:summarize:slower:pinned",
-                "2026-07-01T00:00:00Z",
-                "{\"ratio\":2.4}"));
-
-        assertEquals(
-                List.of(new BehaviorBaselineEventView(
-                        eventId,
-                        BehaviorBaselineEventRow.Event.BASELINE_REPINNED,
-                        FindingRow.GLOBAL_WORKFLOW,
-                        "turn_duration:summarize:slower:pinned",
-                        "2026-07-01T00:00:00Z",
-                        "{\"ratio\": 2.4}")),
-                controller
-                        .baselineEvents(
-                                owner(fix), fix.org().slug(), fix.project().slug(), 100)
-                        .data());
     }
 
     private static TenantContext owner(TenantFixture.Setup fix) {

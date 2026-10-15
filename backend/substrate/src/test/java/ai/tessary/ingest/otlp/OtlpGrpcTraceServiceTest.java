@@ -22,6 +22,7 @@ import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.KeyScope;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.RetryInfo;
@@ -74,10 +75,10 @@ class OtlpGrpcTraceServiceTest {
 
     @BeforeEach
     void startServer() throws IOException {
-        OtlpReceiverProperties props = new OtlpReceiverProperties();
+        OtlpReceiverProperties props = Props.of(OtlpReceiverProperties.class);
         OtlpSpanMapper mapper = new OtlpSpanMapper(new ObjectMapper());
-        OtlpIngestService ingest =
-                new OtlpIngestService(props, new SubstrateProperties(), substrateWriter, mapper, projectId -> {
+        OtlpIngestService ingest = new OtlpIngestService(
+                props, Props.of(SubstrateProperties.class), substrateWriter, mapper, projectId -> {
                     TessaryException failure = quotaFailure;
                     if (failure != null) {
                         throw failure;
@@ -109,6 +110,14 @@ class OtlpGrpcTraceServiceTest {
         return TraceServiceGrpc.newBlockingStub(intercepted);
     }
 
+    /** The status an export with {@code bearerToken} is refused with. */
+    private io.grpc.Status.Code refusal(String bearerToken) {
+        return assertThrows(
+                        StatusRuntimeException.class, () -> stub(bearerToken).export(request()))
+                .getStatus()
+                .getCode();
+    }
+
     private static ExportTraceServiceRequest request() {
         return OtlpRequests.request(
                 OtlpRequests.chatSpan((byte) 0x01).toBuilder().setName("chat").build());
@@ -138,9 +147,7 @@ class OtlpGrpcTraceServiceTest {
     void unresolvableToken_rejectedUnauthenticated_andNeverTouchesSubstrate() {
         when(bearerAuth.authenticate(anyString())).thenReturn(Optional.empty());
 
-        StatusRuntimeException ex = assertThrows(
-                StatusRuntimeException.class, () -> stub("badtoken").export(request()));
-        assertEquals(io.grpc.Status.Code.UNAUTHENTICATED, ex.getStatus().getCode());
+        assertEquals(io.grpc.Status.Code.UNAUTHENTICATED, refusal("badtoken"));
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 
@@ -150,9 +157,7 @@ class OtlpGrpcTraceServiceTest {
         when(bearerAuth.authenticate(anyString()))
                 .thenReturn(Optional.of(new TenantContext("user-1", null, "org-1", null, "owner", null)));
 
-        StatusRuntimeException ex = assertThrows(
-                StatusRuntimeException.class, () -> stub(VALID_TOKEN).export(request()));
-        assertEquals(io.grpc.Status.Code.UNAUTHENTICATED, ex.getStatus().getCode());
+        assertEquals(io.grpc.Status.Code.UNAUTHENTICATED, refusal(VALID_TOKEN));
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 
@@ -164,9 +169,7 @@ class OtlpGrpcTraceServiceTest {
                 .thenReturn(Optional.of(
                         new TenantContext("user-1", null, "org-1", "proj-grpc", "member", "tok-1", KeyScope.QUERY)));
 
-        StatusRuntimeException ex = assertThrows(
-                StatusRuntimeException.class, () -> stub(VALID_TOKEN).export(request()));
-        assertEquals(io.grpc.Status.Code.PERMISSION_DENIED, ex.getStatus().getCode());
+        assertEquals(io.grpc.Status.Code.PERMISSION_DENIED, refusal(VALID_TOKEN));
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 
@@ -179,10 +182,7 @@ class OtlpGrpcTraceServiceTest {
         when(bearerAuth.authenticate(eq("Bearer " + VALID_TOKEN))).thenReturn(Optional.of(projectToken("proj-grpc")));
         when(substrateWriter.queueBytesUsedFraction()).thenReturn(0.9);
 
-        StatusRuntimeException ex = assertThrows(
-                StatusRuntimeException.class, () -> stub(VALID_TOKEN).export(request()));
-
-        assertEquals(io.grpc.Status.Code.UNAVAILABLE, ex.getStatus().getCode());
+        assertEquals(io.grpc.Status.Code.UNAVAILABLE, refusal(VALID_TOKEN));
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 
@@ -193,10 +193,7 @@ class OtlpGrpcTraceServiceTest {
         when(bearerAuth.authenticate(eq("Bearer " + VALID_TOKEN))).thenReturn(Optional.of(projectToken("proj-grpc")));
         quotaFailure = new TessaryException(CapabilityError.QUOTA_EXCEEDED, "ingested_spans_monthly", 9130L, 0L);
 
-        StatusRuntimeException ex = assertThrows(
-                StatusRuntimeException.class, () -> stub(VALID_TOKEN).export(request()));
-
-        assertEquals(io.grpc.Status.Code.RESOURCE_EXHAUSTED, ex.getStatus().getCode());
+        assertEquals(io.grpc.Status.Code.RESOURCE_EXHAUSTED, refusal(VALID_TOKEN));
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 
@@ -209,10 +206,7 @@ class OtlpGrpcTraceServiceTest {
         when(bearerAuth.authenticate(eq("Bearer " + VALID_TOKEN))).thenReturn(Optional.of(projectToken("proj-grpc")));
         when(substrateWriter.enqueue(eq("proj-grpc"), any())).thenReturn(false);
 
-        StatusRuntimeException ex = assertThrows(
-                StatusRuntimeException.class, () -> stub(VALID_TOKEN).export(request()));
-
-        assertEquals(io.grpc.Status.Code.UNAVAILABLE, ex.getStatus().getCode());
+        assertEquals(io.grpc.Status.Code.UNAVAILABLE, refusal(VALID_TOKEN));
     }
 
     /**
@@ -224,10 +218,7 @@ class OtlpGrpcTraceServiceTest {
         when(bearerAuth.authenticate(eq("Bearer " + VALID_TOKEN))).thenReturn(Optional.of(projectToken("proj-grpc")));
         quotaFailure = new TessaryException(ai.tessary.open.errors.IngestError.OTLP_DISABLED);
 
-        StatusRuntimeException ex = assertThrows(
-                StatusRuntimeException.class, () -> stub(VALID_TOKEN).export(request()));
-
-        assertEquals(io.grpc.Status.Code.UNKNOWN, ex.getStatus().getCode());
+        assertEquals(io.grpc.Status.Code.UNKNOWN, refusal(VALID_TOKEN));
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 
@@ -238,8 +229,8 @@ class OtlpGrpcTraceServiceTest {
     @Test
     void anExportWithNoResolvedProject_rejectedUnauthenticated_evenWithoutTheInterceptor() {
         OtlpGrpcTraceService bare = new OtlpGrpcTraceService(new OtlpIngestService(
-                new OtlpReceiverProperties(),
-                new SubstrateProperties(),
+                Props.of(OtlpReceiverProperties.class),
+                Props.of(SubstrateProperties.class),
                 substrateWriter,
                 new OtlpSpanMapper(new ObjectMapper()),
                 projectId -> {}));

@@ -2,21 +2,24 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingRowBuilder;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
- * A malformed-output finding shaped into the case it opens. The case keys on the call site and quotes the
- * finding's flat rate payload, so the bugs are a case keyed off the wrong field, a basis quoting the wrong
- * counts, and a severity that disagrees with tool_error's squash for the same criticality.
+ * A rate finding shaped into the case it opens. The case keys on the call site and quotes the finding's flat
+ * rate payload, so the bugs are a case keyed off the wrong field, a basis quoting the wrong counts, and a
+ * severity that disagrees with tool_error's squash for the same criticality.
  */
-class MalformedOutputCaseSourceTest {
+class RateCaseSourceTest {
 
-    private final MalformedOutputCaseSource source = new MalformedOutputCaseSource();
+    private final RateCaseSource source = new RateCaseSource();
 
     @Test
     void theCaseKeysOnTheCallSiteAndQuotesTheFindingsOwnRate() {
@@ -65,5 +68,26 @@ class MalformedOutputCaseSourceTest {
 
         assertEquals(0.0, detection.severity());
         assertEquals(null, detection.onsetAt());
+    }
+
+    /**
+     * A case's onset is stamped once, at open, from the finding's own {@code onset_at} text column. An onset the
+     * parser cannot read must leave the case unbracketed; throwing there fails the whole case open, and a
+     * confirmed regression never reaches Triage.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        BuiltInDetector.Kind.FRUSTRATION + ", ''",
+        BuiltInDetector.Kind.FRUSTRATION + ", 2026-09-01 00:00:00+00",
+        BuiltInDetector.Kind.GROUNDEDNESS + ", ''",
+        BuiltInDetector.Kind.GROUNDEDNESS + ", 2026-09-01 00:00:00+00"
+    })
+    void anOnsetThatIsNotAnInstantOpensTheCaseUnbracketed(String classifierKey, String onsetAt) {
+        var finding = FindingRowBuilder.of(classifierKey)
+                .callSiteId("checkout-agent")
+                .onsetAt(onsetAt)
+                .build();
+
+        assertNull(source.shape(finding).onsetAt());
     }
 }

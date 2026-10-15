@@ -2,14 +2,23 @@
 # @SpringBootTest(properties) or @TestPropertySource, and outside the context cache key, so it adds no
 # Spring context.
 #
-# Parks the two background sweeps that act on test data while a test is still seeding it. A test that
-# needs either calls it directly (ClassifierWorker#tick, TraceRollupReaper#sweepOnce). Left on a timer,
-# the classifier heartbeat swept a test's project mid-seed and advanced the cursor the test then read,
-# and the reaper re-armed traces a fixture had claimed but not yet recomputed, so they never settled.
+# Parks the background timers that act on test data while a test is still seeding it. A test that
+# needs one calls it directly (ClassifierWorker#tick, TraceRollupWorker#runOnce, TraceRollupReaper#sweepOnce,
+# EncoderAvailability#refresh). Left on a timer, the classifier heartbeat swept a test's project mid-seed and
+# advanced the cursor the test then read, the rollup worker claimed due traces globally, and the reaper re-armed
+# traces a fixture had claimed but not yet recomputed, so they never settled.
 tessary:
   classifier:
     heartbeat-ms: 86400000
     initial-delay-ms: 86400000
   ingest:
     substrate:
+      rollup-interval-ms: 86400000
       rollup-reap-interval-ms: 86400000
+  observer:
+    encoder:
+      probe-interval-ms: 86400000
+# The Kafka client logs every rebootstrap at INFO.
+logging:
+  level:
+    org.apache.kafka: WARN

@@ -4,15 +4,9 @@ package ai.tessary.classifier.frustration;
 import java.util.List;
 
 /**
- * A scored user turn and the dialogue before it, one message per speaker turn, oldest first: what
- * {@link ConversationThreadAssembler#assembleStructured} reads off the substrate before any caps or
- * eligibility rule is applied. Tool spans and tool parts are not messages here; only whether an
- * assistant turn ended on a tool call survives, as {@link Message#endsInToolCall()}.
- *
- * @param earlier the messages before the scored turn, oldest first; consecutive assistant messages are
- *     already joined into one turn
- * @param current the scored turn's user message
- * @param turn the scored turn's 1-based position among its conversation's turns
+ * A scored user turn and the dialogue before it, one message per speaker turn, before caps or eligibility rules. Tool
+ * spans are not messages; only {@link Message#endsInToolCall()} survives. @param earlier oldest first; consecutive
+ * assistant messages already joined @param turn 1-based position among the conversation's turns
  */
 record StructuredThread(List<Message> earlier, Message current, int turn) {
 
@@ -21,12 +15,9 @@ record StructuredThread(List<Message> earlier, Message current, int turn) {
     }
 
     /**
-     * One speaker turn.
-     *
-     * @param role {@code user} or {@code assistant}
-     * @param text the rendered text, media parts as their {@code [image]} / {@code [file: x]} placeholders
-     * @param hasText whether a real text part is present; a turn of placeholders alone has none
-     * @param endsInToolCall an assistant turn whose last part is a tool call with no text after it
+     * @param text media parts rendered as {@code [image]} / {@code [file: x]} placeholders @param hasText false for a
+     * turn of placeholders alone @param endsInToolCall an assistant turn whose last part is a tool call with no text
+     * after it
      */
     public record Message(String role, String text, boolean hasText, boolean endsInToolCall) {}
 }

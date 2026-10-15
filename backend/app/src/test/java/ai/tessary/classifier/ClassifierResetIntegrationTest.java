@@ -18,7 +18,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -27,31 +26,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * state, leaves ruled findings and other classifiers alone, and puts the sweep back at the start.
  */
 @SpringBootTest
-class ClassifierResetIntegrationTest {
+record ClassifierResetIntegrationTest(
+        ClassifierReset reset,
+        ClassifierService classifiers,
+        ClassifierJobRepository jobs,
+        ClassifierDetectionWriteRepository detections,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        JdbcClient jdbc) {
 
     private static final String SWEPT_AT = "2026-01-01T00:00:00Z";
     private static final String SWEPT_ID = "obs-swept";
-
-    @Autowired
-    ClassifierReset reset;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    ClassifierDetectionWriteRepository detections;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    JdbcClient jdbc;
 
     private String sweptProject(String name) {
         String pid = TenantFixture.bootstrap(tenants, name, org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
@@ -105,12 +90,12 @@ class ClassifierResetIntegrationTest {
         String id = Ids.ulid();
         String now = Instant.now().toString();
         jdbc.sql("""
-                        INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
-                                             status, onset_at, last_seen_at, created_at, updated_at,
-                                             triage_verdict, triage_action)
-                        VALUES (:id, :pid, :key, :cause, 'classifier', :cause, 'open', :now, :now, :now, :now,
-                                :verdict, :action)
-                        """)
+            INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
+                                 status, onset_at, last_seen_at, created_at, updated_at,
+                                 triage_verdict, triage_action)
+            VALUES (:id, :pid, :key, :cause, 'classifier', :cause, 'open', :now, :now, :now, :now,
+                    :verdict, :action)
+            """)
                 .param("id", id)
                 .param("pid", pid)
                 .param("key", classifierKey)
@@ -149,10 +134,10 @@ class ClassifierResetIntegrationTest {
     private void metricBaseline(String pid, ClassifierRow row) {
         String now = Instant.now().toString();
         jdbc.sql("""
-                        INSERT INTO metric_baseline (id, project_id, classifier_id, measure, bucket_kind, bucket_key,
-                                                     created_at, updated_at)
-                        VALUES (:id, :pid, :sid, 'cost', 'call_site', 'cs-1', :now, :now)
-                        """)
+            INSERT INTO metric_baseline (id, project_id, classifier_id, measure, bucket_kind, bucket_key,
+                                         created_at, updated_at)
+            VALUES (:id, :pid, :sid, 'cost', 'call_site', 'cs-1', :now, :now)
+            """)
                 .param("id", Ids.ulid())
                 .param("pid", pid)
                 .param("sid", row.id())
@@ -252,11 +237,11 @@ class ClassifierResetIntegrationTest {
                 .param("now", now)
                 .update();
         jdbc.sql("""
-                        INSERT INTO groundedness_assessment (id, project_id, classifier_id, subject_trace_id,
-                            subject_span_id, call_site_id, unsupported, flagged, scorer_version,
-                            observation_started_at)
-                        VALUES (:id, :pid, :sid, 't-1', 's-1', 'cs-1', 0.4, true, 'v1', now())
-                        """)
+            INSERT INTO groundedness_assessment (id, project_id, classifier_id, subject_trace_id,
+                subject_span_id, call_site_id, unsupported, flagged, scorer_version,
+                observation_started_at)
+            VALUES (:id, :pid, :sid, 't-1', 's-1', 'cs-1', 0.4, true, 'v1', now())
+            """)
                 .param("id", Ids.ulid())
                 .param("pid", pid)
                 .param("sid", groundedness.id())

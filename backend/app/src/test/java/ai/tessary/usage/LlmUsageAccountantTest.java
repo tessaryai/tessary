@@ -15,7 +15,6 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -24,27 +23,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * book it names, and that a row the ledger cannot take never fails the run that spent the money.
  */
 @SpringBootTest
-class LlmUsageAccountantTest {
+record LlmUsageAccountantTest(
+        LlmUsageAccountant accountant,
+        ModelResolver models,
+        PriceBookRepository books,
+        JdbcClient jdbc,
+        TenantService tenants) {
 
     // The llm_call subject kind a triage run is booked under, as E2bTriageSandbox writes it.
     private static final String SUBJECT_KIND = "behavior_finding";
 
     private static final String PRICED_MODEL = "claude-haiku-4-5";
-
-    @Autowired
-    LlmUsageAccountant accountant;
-
-    @Autowired
-    ModelResolver models;
-
-    @Autowired
-    PriceBookRepository books;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    TenantService tenants;
 
     /**
      * A sandbox run is billed at the cost OpenCode reported, from models.dev rates. Pricing a run that reported none

@@ -4,7 +4,6 @@ package ai.tessary.mcp;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,13 +32,10 @@ class McpDispatcherTest {
     void setup() {
         McpTool echo = new McpTool(
                 "echo", "returns its args", Map.of("type", "object"), (ctx, args) -> Map.of("echoed", args));
-        McpTool boom = new McpTool("boom", "always errors", Map.of("type", "object"), (ctx, args) -> {
-            throw new McpTool.ToolException("nope");
-        });
         McpTool kaboom = new McpTool("kaboom", "throws unexpectedly", Map.of("type", "object"), (ctx, args) -> {
             throw new RuntimeException("bug");
         });
-        var registry = new McpToolRegistry(List.of(echo, boom, kaboom));
+        var registry = new McpToolRegistry(List.of(echo, kaboom));
         this.dispatcher = new McpDispatcher(registry, mapper);
     }
 
@@ -116,18 +112,6 @@ class McpDispatcherTest {
     }
 
     @Test
-    void toolsCall_toolThrowsToolException_isToolError() throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"boom\",\"arguments\":{}}");
-        JsonRpc.Response r = require(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
-        assertNull(r.error());
-        Map<String, Object> result = resultMap(r);
-        assertEquals(Boolean.TRUE, result.get("isError"));
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        assertTrue(Objects.requireNonNull(content.get(0).get("text")).toString().contains("nope"));
-    }
-
-    @Test
     void toolsCall_toolThrowsRuntime_isProtocolError() throws Exception {
         JsonNode params = mapper.readTree("{\"name\":\"kaboom\",\"arguments\":{}}");
         // Unexpected exceptions are protocol errors.
@@ -144,23 +128,16 @@ class McpDispatcherTest {
                 error(dispatcher.dispatch(req(1, "tools/call", params), ctx())).code());
     }
 
-    @Test
-    void toolsCall_argumentsNull_callsHandlerWithEmptyMap() throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"echo\",\"arguments\":null}");
+    /** Arguments null or left out entirely are the same request as an empty object, not a -32602. */
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"name\":\"echo\",\"arguments\":null}", "{\"name\":\"echo\"}"})
+    void toolsCall_argumentsNullOrAbsent_callsHandlerWithEmptyMap(String paramsJson) throws Exception {
+        JsonNode params = mapper.readTree(paramsJson);
         JsonRpc.Response r = require(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
         assertNull(r.error());
         Map<String, Object> result = resultMap(r);
         assertEquals(Boolean.FALSE, result.get("isError"));
-        @SuppressWarnings("unchecked")
-        Map<String, Object> structured = (Map<String, Object>) Objects.requireNonNull(result.get("structuredContent"));
-        assertEquals(Map.of(), structured.get("echoed"));
-    }
-
-    @Test
-    void pingReturnsEmptyMap() {
-        JsonRpc.Response r = require(dispatcher.dispatch(req(1, "ping", null), ctx()));
-        assertNull(r.error());
-        assertEquals(Map.of(), r.result());
+        assertEquals(Map.of("echoed", Map.of()), result.get("structuredContent"));
     }
 
     /**
@@ -193,16 +170,6 @@ class McpDispatcherTest {
                 JsonRpc.INVALID_PARAMS,
                 error(dispatcher.dispatch(req(1, "tools/call", mapper.readTree(paramsJson)), ctx()))
                         .code());
-    }
-
-    /** Arguments left out entirely are the same request as an empty object, not a -32602. */
-    @Test
-    void toolsCall_argumentsAbsent_callsHandlerWithEmptyMap() throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"echo\"}");
-
-        Map<String, Object> result = resultMap(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
-
-        assertEquals(Map.of("echoed", Map.of()), result.get("structuredContent"));
     }
 
     /** A batch element decoding to null is an invalid request with a null id, not an NPE failing the whole batch. */

@@ -26,7 +26,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -37,28 +36,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * rules and a custom rule, and confirms repository round-trips + built-in seeding.
  */
 @SpringBootTest
-class RedactionGuardIntegrationTest {
-
-    @Autowired
-    SubstrateWriter writer;
-
-    @Autowired
-    RedactionService redaction;
-
-    @Autowired
-    RedactionRuleRepository repo;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    RedactionController controller;
-
-    @Autowired
-    CapabilityFixture capabilities;
+record RedactionGuardIntegrationTest(
+        SubstrateWriter writer,
+        RedactionService redaction,
+        RedactionRuleRepository repo,
+        TenantService tenants,
+        JdbcClient jdbc,
+        RedactionController controller,
+        CapabilityFixture capabilities) {
 
     /** The persisted span input — the thing the guard exists to keep clean. */
     private String persistedInput(String pid) {

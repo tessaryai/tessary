@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -27,16 +26,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  * SubstrateReadRepository#spansReceived}, {@link SubstrateReadRepository#taggedSpans}) on the same fixtures.
  */
 @SpringBootTest
-class SubstrateLivenessIntegrationTest {
-
-    @Autowired
-    SubstrateReadRepository substrate;
-
-    @Autowired
-    SubstrateWriter writer;
-
-    @Autowired
-    TenantService tenants;
+record SubstrateLivenessIntegrationTest(
+        SubstrateReadRepository substrate, SubstrateWriter writer, TenantService tenants) {
 
     private static List<RawEntry> oneTrace(String traceId) {
         return oneTrace(traceId, null);

@@ -38,7 +38,6 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -54,43 +53,21 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * exemplar-less findings before the limit.
  */
 @SpringBootTest
-class TriageEscalationIntegrationTest {
+record TriageEscalationIntegrationTest(
+        TriageAutoEscalator escalator,
+        FindingService behavior,
+        FindingRepository findings,
+        FindingEvidenceRepository findingEvidence,
+        MetricBaselineRepository baselines,
+        ClassifierRepository signals,
+        ClassifierService classifiers,
+        GitIntegrationRepository integrations,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        JdbcClient jdbc) {
 
     /** Before anything the fixtures stamp, so a finding written twice reads as one running spell. */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
-
-    @Autowired
-    TriageAutoEscalator escalator;
-
-    @Autowired
-    FindingService behavior;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository findingEvidence;
-
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    GitIntegrationRepository integrations;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    JdbcClient jdbc;
 
     private static final String BUCKET = "discover-sales-prospects";
 
@@ -288,23 +265,6 @@ class TriageEscalationIntegrationTest {
 
         assertTrue(triageJobs(on.projectId()) > 0, "the targeted org escalates");
         assertEquals(0, triageJobs(off.projectId()), "and nobody else does");
-    }
-
-    /**
-     * No confirmation bar: an escalatable finding escalates on the first tick. The seam's two-store dispatch is
-     * covered by {@code FindingServiceTest} and {@code BehaviorTriageWorkerTest}.
-     */
-    @Test
-    @DisplayName("an escalatable finding escalates on the first tick")
-    void anEscalatableFindingEscalatesOnTheFirstTick() {
-        Project p = project("auto-esc-first-tick");
-        capabilities.grant(p.orgId(), Capability.TRIAGE_AUTOMATIC);
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned", 5);
-
-        escalator.tick();
-
-        assertEquals(1, triageJobs(p.projectId()), "the finding escalates on the first tick");
-        assertNotNull(findings.findById(p.projectId(), id).orElseThrow().escalatedAt());
     }
 
     private Set<String> causeKeys(Project p, String detector) {

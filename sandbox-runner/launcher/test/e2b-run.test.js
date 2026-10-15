@@ -76,7 +76,7 @@ test('a successful E2B run keeps the credential off the microVM disk, returns th
   assert.equal(calls[1].path, '/home/user/input.json');
   assert.ok(!calls[1].content.includes('test-secret'), 'the credential must never be written to the sandbox filesystem');
   assert.equal(JSON.parse(calls[1].content).credential, undefined);
-  assert.equal(calls[2].cmd, 'node /home/user/rca.js /home/user/input.json');
+  assert.equal(calls[2].cmd, 'node /home/user/lane.js rca /home/user/input.json');
   assert.ok(Object.values(calls[2].envs).includes('test-secret'), 'the credential reaches the agent through its env');
 });
 
@@ -89,9 +89,9 @@ test('a script that exits non-zero answers script_exit with its spend and sandbo
     kind: 'script_exit',
     timeout: false,
     error_class: 'CommandExitError',
-    detail: 'rca.js exited 1 (output withheld; see launcher logs)',
+    detail: 'rca exited 1 (output withheld; see launcher logs)',
     exit_code: 1,
-    script: 'rca.js',
+    script: 'rca',
     timeout_ms: 10000,
     sandbox_id: 'sbx-fake-1',
     usage: { input_tokens: 120, output_tokens: 7 },
@@ -99,7 +99,7 @@ test('a script that exits non-zero answers script_exit with its spend and sandbo
   assert.deepEqual(calls.map((c) => c.op), ['create', 'write', 'run', 'getInfo', 'kill']);
 });
 
-test('POST /runs runs run.js with the clone fields and system prompt on the VM disk, and the credential off it', async () => {
+test('POST /runs runs the run lane with the clone fields and system prompt on the VM disk, and the credential off it', async () => {
   const payload = {
     ...PAYLOAD,
     clone_url: 'https://x-access-token:t@github.com/acme/app.git',
@@ -111,7 +111,7 @@ test('POST /runs runs run.js with the clone fields and system prompt on the VM d
   const { status, body, calls } = await runOnce('ok', '/runs', {}, payload);
 
   assert.deepEqual({ status, body }, { status: 200, body: { verdict: 'supported' } });
-  assert.equal(calls[2].cmd, 'node /home/user/run.js /home/user/input.json');
+  assert.equal(calls[2].cmd, 'node /home/user/lane.js run /home/user/input.json');
   const written = JSON.parse(calls[1].content);
   assert.equal(written.clone_url, 'https://x-access-token:t@github.com/acme/app.git');
   assert.equal(written.head_sha, 'abc123');
@@ -131,7 +131,7 @@ test('a severed command stream still books the spend the launcher captured off t
     timeout: false,
     error_class: 'SandboxError',
     detail: '[unknown] terminated',
-    script: 'triage.js',
+    script: 'triage',
     timeout_ms: 10000,
     sandbox_id: 'sbx-fake-1',
     usage: { input_tokens: 120, output_tokens: 7 },
@@ -157,7 +157,7 @@ test('a sandbox that is never created is an orchestration failure with no sandbo
     timeout: false,
     error_class: 'NotFoundError',
     detail: 'template not found',
-    script: 'rca.js',
+    script: 'rca',
     timeout_ms: 10000,
   });
   assert.deepEqual(calls.map((c) => c.op), ['create']);

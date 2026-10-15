@@ -17,45 +17,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * The trace rollup worker (substrate-model.md §7.2/§7.3): claims traces whose deadline has come and
- * rewrites their counters, sums and previews from their spans.
- *
- * <h2>Claim, then write, and the order is the whole protocol</h2>
- *
- * <p>The claim clears {@code rollup_due_at} and that is not tidy-up — it is the correctness crux. From the
- * instant a trace is claimed, any arriving span re-arms the deadline to a non-null value in the same
- * transaction as its own row (§6.1), so the write that follows can detect that it happened by testing
- * whether the deadline is STILL clear. If it is not, the trace does not settle and fires again with that
- * span included. Both outcomes write correct numbers, because the numbers are a replacement as of the
- * aggregate's read rather than a delta applied to a prior value: there is no lost update to lose.
- *
- * <p>That is also why {@code is_settled} can be believed. It means precisely "nothing has arrived since
- * the last rollup" and never "we stopped waiting" — no timeout in this class can set it.
- *
- * <h2>No hard cap, deliberately</h2>
- *
- * <p>A trace that never goes quiet is not a problem to be capped. It fires at its deadline, the next span
- * re-arms it, and it fires again — so a long-running turn is refreshed with current numbers roughly every
- * ten seconds instead of showing nothing at all until it ends. The deadline only ever moves earlier
- * (§7.1), which is what makes that terminate.
- *
- * <h2>Failure is the reaper's problem, not a lease's</h2>
- *
- * <p>There is no lease and no job row. A claim is a committed {@code UPDATE}, so a worker that dies after
- * it leaves a trace with a fingerprint no legitimate state produces — unsettled, unarmed, not recently
- * rolled up — which {@link TraceRollupReaper} sweeps back into the queue. A job table could not express
- * this protocol at all: the null-and-check on {@code rollup_due_at} has to live on the same row the
- * counters do, or a span arriving mid-rollup would have nothing to race against.
- *
- * <p>Per-trace failures are caught per trace, which is safe HERE and forbidden in the batch writer: each
- * recompute is its own autocommit statement, so catching one does not leave a transaction rollback-only,
- * and one poison trace must not strand the other 499 the round claimed.
- *
- * <p>{@code tessary.ingest.substrate.rollup-enabled} is the ops kill switch for this worker and its reaper.
- * Switching it off stops every trace's counters advancing — {@code is_settled} stays false and the list
- * surfaces keep showing whatever the last rollup wrote. Nothing is lost by it: the deadlines stay armed on
- * the rows, so turning it back on drains the backlog. It is for an operator who needs the connections
- * back, not for a rollout.
+ * The claim clears {@code rollup_due_at}, and a span arriving after it re-arms the deadline in its own transaction, so
+ * the write settles only if the deadline is still clear. Rollups are replacements, not deltas, so there is no lost
+ * update; {@code is_settled} never means "stopped waiting". No lease or job row: a crashed claim leaves a fingerprint
+ * {@link TraceRollupReaper} sweeps back. Per-trace failures are caught per trace, safe here because each recompute
+ * autocommits. {@code rollup-enabled} is an ops kill switch; deadlines stay armed while it is off.
  */
 @Component
 @ConditionalOnProperty(
@@ -67,10 +33,7 @@ public class TraceRollupWorker {
 
     private static final Logger log = LoggerFactory.getLogger(TraceRollupWorker.class);
 
-    /**
-     * Upper bound on claim rounds per tick, so one tick can drain a burst but never spins unbounded on a
-     * queue being refilled as fast as it is drained.
-     */
+    /** Drains a burst without spinning on a queue refilled as fast as it drains. */
     private static final int MAX_CLAIM_ROUNDS = 100;
 
     private final TraceV2Repository traces;
@@ -84,14 +47,8 @@ public class TraceRollupWorker {
     }
 
     /**
-     * One tick's work.
-     *
-     * @param claimed traces claimed, which is also how many deadlines this tick cleared.
-     * @param recomputed traces whose replacement landed.
-     * @param settled of those, the ones nothing arrived under. The shortfall is spans landing mid-rollup.
-     * @param vanished claimed traces the write could not find — deleted under the worker, normal at a
-     *     retention boundary and worth seeing anywhere else.
-     * @param failed recomputes that threw. Each leaves the reaper's fingerprint and is recovered by it.
+     * @param settled the shortfall from recomputed is spans landing mid-rollup @param vanished deleted under the
+     * worker; normal at a retention boundary @param failed each leaves the reaper's fingerprint
      */
     public record Pass(int claimed, int recomputed, int settled, int vanished, int failed) {}
 
@@ -102,9 +59,7 @@ public class TraceRollupWorker {
         try {
             runOnce();
         } catch (RuntimeException e) {
-            // Categorical only: a Postgres error message can echo span content, and OPS WARN egresses.
-            // The rows are durable and unchanged, and anything this tick claimed carries the reaper's
-            // fingerprint, so the next tick or the next sweep picks the work back up.
+            // Categorical only: a Postgres error can echo span content, and OPS WARN egresses.
             log.warn(
                     Markers.OPS,
                     "trace rollup pass failed error={}",
@@ -114,19 +69,12 @@ public class TraceRollupWorker {
     }
 
     /**
-     * Run one pass synchronously and report what it did.
-     *
-     * <p>Synchronous on the scheduler's own (virtual) thread rather than dispatched to an executor, and
-     * that is a choice: {@code fixedDelay} guarantees no two passes overlap only while the tick is the
-     * work. Handing the batch to an executor would buy concurrency the recompute does not need — it is one
-     * indexed statement per trace — at the cost of ticks racing each other over the same queue.
-     *
-     * <p>Public so a test can drive it without a scheduler, which is what makes the settle assertions
-     * deterministic rather than a sleep long enough to usually work.
+     * Synchronous on the scheduler thread so {@code fixedDelay} guarantees passes never overlap. Public so tests can
+     * assert deterministically.
      */
     public Pass runOnce() {
         Instant started = Instant.now();
-        int limit = props.getRollupClaimLimit();
+        int limit = props.rollupClaimLimit();
         int claimed = 0;
         int recomputed = 0;
         int settled = 0;
@@ -156,7 +104,7 @@ public class TraceRollupWorker {
                     log.debug("trace rollup recompute failure detail", e);
                 }
             }
-            // A short round means the queue is drained; claiming again would only cost a statement.
+            // A short round means the queue is drained.
             if (batch.size() < limit) break;
         }
 

@@ -4,7 +4,6 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 public enum IngestError implements ErrorCode {
-    SOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "No source with id '%s'"),
     UNSUPPORTED_PROVIDER(HttpStatus.BAD_REQUEST, "Unsupported provider '%s'"),
     DUPLICATE_NAME(HttpStatus.CONFLICT, "Source name '%s' already in use"),
     INVALID_BASE_URL(HttpStatus.BAD_REQUEST, "Invalid baseUrl: %s"),

@@ -8,11 +8,6 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/**
- * Persistence for {@link Principal} — the unified identity table. Lookups by WorkOS id / email
- * serve the human sign-in path; agent/service principals are created directly with their kind. Profile
- * updates and WorkOS re-binding live here too.
- */
 @Repository
 public class PrincipalRepository {
 
@@ -23,11 +18,8 @@ public class PrincipalRepository {
     }
 
     /**
-     * Whether this deployment has any human account at all — the first-run signal {@code
-     * GET /auth/mode} reports and {@code GET /auth/login}'s degrade branch redirects on, so a
-     * stranger meeting an empty instance lands on the signup screen rather than a sign-in form no
-     * account can satisfy. Agent and service principals are excluded deliberately: neither can sign
-     * in, so neither ends first run.
+     * The first-run signal for {@code GET /auth/mode} and the login degrade branch. Agent and service principals are
+     * excluded: neither can sign in.
      */
     public boolean anyHumanExists() {
         return jdbc.sql("SELECT 1 FROM principal WHERE kind = :kind LIMIT 1")
@@ -79,13 +71,8 @@ public class PrincipalRepository {
     }
 
     /**
-     * Insert a principal minted by {@code PasswordAuthProvider} (backend/tenancy's
-     * {@code ai.tessary.auth} package), alongside its bcrypt password hash. Mirrors
-     * {@link #insert}'s column list plus {@code password_hash} — {@link #insert} itself is
-     * untouched and still writes {@code NULL} into that column for every WorkOS-backed row.
-     *
-     * <p>The hash never lives on the {@link Principal} record (see that record's Javadoc, and
-     * {@code 0013-principal-password-hash.sql}), so this is the one write path that sees it.
+     * {@link #insert} plus {@code password_hash}. The hash never lives on {@link Principal}, so this is the one write
+     * path that sees it.
      */
     public void insertWithPassword(Principal p, String passwordHash) {
         jdbc.sql("""
@@ -109,15 +96,10 @@ public class PrincipalRepository {
                 .update();
     }
 
-    /**
-     * The three fields {@code PasswordAuthProvider} needs to verify a login, and nothing else — in
-     * particular never the full {@link Principal}, so a credential check can't accidentally end up
-     * serializing a hash onto the wire the way a hash living on {@link Principal} itself could.
-     */
+    /** Never the full {@link Principal}, so a credential check cannot serialize a hash onto the wire. */
     public record Credential(String principalId, @Nullable String workosUserId, String passwordHash) {}
 
-    /** Look up the stored credential for an email, for {@code PasswordAuthProvider.authenticateWithCredentials}.
-     *  Empty when the email is unknown, or known but has no local password (a WorkOS-only row). */
+    /** Empty when the email is unknown or has no local password (a WorkOS-only row). */
     public Optional<Credential> findCredentialByEmail(String email) {
         return jdbc.sql("SELECT id, workos_user_id, password_hash FROM principal WHERE email = :email AND "
                         + "password_hash IS NOT NULL")
@@ -141,9 +123,8 @@ public class PrincipalRepository {
     }
 
     /**
-     * Point an existing row at a new WorkOS user id (and refresh its profile). Used when a known email
-     * re-appears under a different WorkOS id — e.g. after a WorkOS environment switch — so the row is
-     * re-bound instead of a duplicate insert tripping the {@code UNIQUE(email)} constraint.
+     * For a known email under a new WorkOS id (e.g. an environment switch), so the row is re-bound instead of tripping
+     * {@code UNIQUE(email)}.
      */
     public void rebindWorkosId(
             String id, String workosUserId, String displayName, String avatarUrl, String lastSeenAt) {

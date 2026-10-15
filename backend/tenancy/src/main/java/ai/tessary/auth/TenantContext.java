@@ -5,21 +5,9 @@ import ai.tessary.tenant.KeyScope;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Per-request authentication + tenancy. Populated by {@link AuthFilter} and
- * available to controllers via {@link TenantArgumentResolver}.
- *
- * <p>Two valid shapes:</p>
- * <ul>
- *   <li><b>User session</b> — {@code userId} set; {@code orgId} / {@code projectId} /
- *       {@code role} resolved later from the URL path. {@code mcpTokenId} is null.</li>
- *   <li><b>API key (bearer)</b> — {@code userId} is the key creator; {@code projectId} is
- *       set (key scope); {@code orgId} is set (the project's org); {@code role} is
- *       always {@code "member"}; {@code mcpTokenId} is non-null. {@code keyScope} carries the
- *       key family (write / query / mcp), and is null on user sessions.</li>
- * </ul>
- *
- * <p>{@code projectId} is null on user sessions until a controller helper resolves
- * it from the {orgSlug, projectSlug} path variables.</p>
+ * Per-request authentication and tenancy, from {@link AuthFilter}. A user session has {@code userId} and resolves org
+ * and project from the path; an API key context has {@code projectId}, {@code orgId}, role {@code "member"}, a non-null
+ * {@code mcpTokenId} and a {@code keyScope}.
  */
 public record TenantContext(
         String userId,
@@ -31,10 +19,7 @@ public record TenantContext(
         @Nullable KeyScope keyScope) {
     public static final String ATTRIBUTE = "tessary.tenant";
 
-    /**
-     * Backwards-compatible constructor for the non-key shapes (user sessions) and any caller that does
-     * not carry a key scope. Leaves {@code keyScope} null.
-     */
+    /** For non-key shapes; {@code keyScope} is null. */
     public TenantContext(
             String userId,
             @Nullable String userEmail,
@@ -53,12 +38,7 @@ public record TenantContext(
         return mcpTokenId != null;
     }
 
-    /**
-     * Whether this context (when it is a bearer-key context) is allowed to act on the surface that
-     * {@code required} guards. User sessions are not key-scoped, so they always pass — surface-level RBAC
-     * gates them elsewhere. A key context passes only when its family {@link KeyScope#permits} the
-     * required family.
-     */
+    /** User sessions always pass; surface RBAC gates them elsewhere. */
     public boolean keyPermits(KeyScope required) {
         return keyScope == null || keyScope.permits(required);
     }

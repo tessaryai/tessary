@@ -1,23 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The population behind a finding, as a table of the spans it was measured over.
- *
- * <h2>Why spans and not traces</h2>
- * A `member` IS a span. Tool error enumerates one ref per CALL, so several refs routinely name the
- * same trace — and the list this replaced rendered each of them as its own link reading "Window member
- * trace →", which on one real finding printed the same trace id four times in a row and then did it
- * 688 times. Span rows say what actually differs between them: which call, when, how long, and whether
- * it errored.
- *
- * <h2>Empty cells are not missing data</h2>
- * Tokens and cost are properties of an LLM span. A tool span has neither, so those columns are blank
- * on every tool-error row by construction: a duration-drift finding fills them and a tool-error one
- * never will.
- *
- * <h2>Ten rows, then more on demand</h2>
- * The set behind this can be 27,000 rows. The page reads ten, states the total beside them, and pages
- * on when asked — the count is what stops ten rows from reading as the whole population.
- */
+// A member is a span: tool error has one ref per call, so several rows can share a trace. Tokens and
+// cost are blank on tool spans by construction. The set can be 27,000 rows, so it pages and states
+// the total.
 import { useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -29,7 +13,6 @@ import { VerbButton } from "./shared";
 
 const PAGE = 10;
 
-/** The detector's own vocabulary, spelled for a reader. */
 const ROLE_LABEL: Record<string, string> = {
   exemplar: "Exemplar",
   member: "Member",
@@ -38,10 +21,6 @@ const ROLE_LABEL: Record<string, string> = {
   changepoint: "Changepoint",
 };
 
-/**
- * What each role means, in one line, on hover. The words are load-bearing and not obvious: a reader
- * seeing 688 members and 3 witnesses should not have to guess which side of the comparison is which.
- */
 const ROLE_HINT: Record<string, string> = {
   exemplar: "One instance the classifier surfaced as representative.",
   member: "The flagged population, enumerated: every row the claim was measured over.",
@@ -66,7 +45,6 @@ type ColumnKey =
   | "trace";
 type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean };
 
-/** Declaration order is display order. */
 const COLUMNS: ColumnDef[] = [
   { key: "role", label: "Role" },
   { key: "name", label: "Name" },
@@ -83,15 +61,12 @@ const COLUMNS: ColumnDef[] = [
   { key: "trace", label: "Trace" },
 ];
 
-/** A whole-run row's rollup caveats, spelled for a reader. Never set on a single-step row. */
 const FLAG_LABEL: Record<"notRolledUp" | "partialCost" | "staleTotals", string> = {
   notRolledUp: "not rolled up yet",
   partialCost: "partial cost",
   staleTotals: "stale totals",
 };
 
-/** How a masked-key value is read out. Only "raw" is ever coloured — a stored credential is the one
- *  fact on this table worth a reader's alarm. */
 const STORED_AS_LABEL: Record<string, string> = {
   redacted: "Redacted",
   raw: "Unredacted",
@@ -113,9 +88,7 @@ export function EvidenceTable({ findingId, basePath }: { findingId: string; base
 
   const pages = q.data?.pages ?? [];
   const rows = pages.flatMap((p) => p.rows ?? []);
-  // Forward-only per decision #2: a secret-leak finding armed before the masked-key rework carries
-  // no secretKey on any row, and the two columns would be a header over an empty column. Same for a
-  // malformed-output finding armed before the structured-violation rework and its Violation column.
+  // Findings armed before the masked-key and structured-violation reworks carry no such fields.
   const hasSecretKeys = useMemo(() => rows.some((r) => r.secretKey != null), [rows]);
   const hasViolations = useMemo(() => rows.some((r) => r.violation != null), [rows]);
   const columns = useMemo(
@@ -127,8 +100,7 @@ export function EvidenceTable({ findingId, basePath }: { findingId: string; base
       }),
     [hasSecretKeys, hasViolations],
   );
-  // Recorded counts, not live ones: the question a footer answers is "how big is the claim", and a
-  // ref whose substrate aged out was still part of what the detector measured.
+  // Recorded counts: an aged-out ref was still part of what the detector measured.
   const recorded = pages[0]?.recordedCounts ?? {};
   const roles = Object.entries(recorded).filter(([, n]) => (n ?? 0) > 0);
   const total = roles.reduce((sum, [, n]) => sum + (n ?? 0), 0);
@@ -147,9 +119,6 @@ export function EvidenceTable({ findingId, basePath }: { findingId: string; base
 
   return (
     <div className="mt-2 gap-2.5" style={{ display: "flex", flexDirection: "column" }}>
-      {/* The role filter IS the reading. On a tool-error finding the three witnesses are the whole
-          story and the 688 members are the denominator they are read against, and a reader who
-          cannot separate them scrolls past the story. */}
       <div className="flex flex-wrap items-center gap-1.5">
         <RoleChip label={`All (${total.toLocaleString()})`} on={role === null} onClick={() => setRole(null)} />
         {roles.map(([r, n]) => (
@@ -230,7 +199,6 @@ function RoleChip({
   );
 }
 
-/** A dash, not an empty cell: "this span has no tokens" and "this column failed to render" must differ. */
 const NONE = <span className="text-subtle">—</span>;
 
 function Cell({ col, row, basePath }: { col: ColumnKey; row: EvidenceSpan; basePath: string }) {
@@ -265,12 +233,8 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
       ) : (
         NONE
       );
-    // A schema violation is the anomaly this row exists to report, so it is always coloured, not just
-    // on a status mismatch — every row here failed.
     case "violation":
       return row.violation ? <span className="font-mono text-error">{row.violation}</span> : NONE;
-    // Status carries the one bit a reader scans for on a tool-error finding, so it is coloured rather
-    // than printed: three error rows in a page of successes should be findable without reading.
     case "status":
       return row.status ? (
         <span className={row.status === "error" || row.level === "ERROR" ? "text-error" : "text-muted"}>
@@ -297,7 +261,6 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
         NONE
       );
     }
-    // A session-grain row (a frustrated conversation) has no trace: it links to the conversation.
     case "trace":
       return row.traceId ? (
         <Link

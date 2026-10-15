@@ -5,12 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
 /**
- * The {@code tool_error} shape — {@code ToolErrorEvidence.toJson}'s blob already groups
- * failure instances by error SIGNATURE with a per-signature count (the {@code patterns[]} array), so
- * this is a faithful re-rendering of that structure into prose, not a fresh aggregation. What it adds
- * over shipping the raw JSON: population totals stated in words, and an explicit, honest statement of
- * what {@code failing_traces} actually is — a flat, NOT per-signature, sample — rather than leaving an
- * agent to assume a mapping the data does not carry.
+ * Renders {@code ToolErrorEvidence.toJson}'s per-signature {@code patterns[]} as prose, and states plainly that
+ * {@code failing_traces} is a flat sample, not per signature.
  */
 final class ToolErrorDossier {
 

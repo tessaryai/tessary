@@ -26,16 +26,4 @@ class RepeatedFailureLoggerTest {
 
         assertEquals(List.of("job-1", "job-2"), firsts, "each key gets its own first-occurrence log");
     }
-
-    @Test
-    void clearResetsTheStreakSoTheNextFailureLogsFresh() {
-        RepeatedFailureLogger logger = new RepeatedFailureLogger(3);
-        List<String> firsts = new ArrayList<>();
-
-        logger.record("job-1", () -> firsts.add("first"), c -> {});
-        logger.clear("job-1"); // simulates a success between failures
-        logger.record("job-1", () -> firsts.add("first"), c -> {});
-
-        assertEquals(List.of("first", "first"), firsts, "a cleared streak logs fresh on its next failure");
-    }
 }

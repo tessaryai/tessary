@@ -10,7 +10,7 @@ import { currentLocation, renderRoute } from "../test/render";
 import { readRecents } from "./recents";
 import { ShellChrome } from "./ShellChrome";
 
-vi.mock("../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../tenant/TenantContext", () => import("../test/api"));
 vi.mock("./Sidebar", () => ({ Sidebar: () => null }));
 vi.mock("./CommandPalette", () => ({ CommandPaletteDock: () => null }));
 

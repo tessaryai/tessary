@@ -8,27 +8,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * What one of the PLATFORM's own LLM calls cost, priced from the same {@code price_book} an ingested span
- * is priced from.
- *
- * <p><b>Why this exists at all.</b> The platform used to price its own spend from a hand-maintained table
- * compiled into the jar, while producer telemetry priced from the versioned book — two rate sources, one
- * of which no row could point at. A rate change to the jar table silently restated every historical
- * figure derived from it, and the two sources had drifted: measured at the flip, the mantle GPT-5.6 line
- * resolved through the book to OpenAI-DIRECT rates about 4.5x its real bill, and three more models
- * disagreed outright. Both lanes now read one book, and every row the platform prices names the version
- * that priced it.
- *
- * <p><b>Buckets are priced independently and summed, so they must not overlap.</b> Bedrock and Anthropic
- * satisfy that natively — their reported input count already excludes both cache buckets. OpenAI's does
- * not: its {@code prompt_tokens} INCLUDES the cached-prompt tokens, so a caller must carve the cache-read
- * tokens out of the input count before calling in, or those tokens are billed twice (full input rate plus
- * the discounted cache-read rate). That carve-out stays with the caller, where the provider's token
- * semantics are known; this class is a pure per-bucket table read.
- *
- * <p><b>Empty is a first-class answer, and it is not zero.</b> No model resolved, or no book in force
- * carrying a rate, yields empty, and the caller writes NULL. A wrong
- * cost is worse than a missing one, because only the missing one is visible as missing.
+ * Prices the platform's own LLM calls from the same {@code price_book} as ingested spans, naming the version. Buckets
+ * are summed, so they must not overlap: OpenAI's {@code prompt_tokens} includes cached tokens, and the caller must
+ * carve them out. Empty is not zero: a wrong cost is worse than a missing one.
  */
 @Component
 public class PlatformCallPricer {
@@ -36,7 +18,7 @@ public class PlatformCallPricer {
     /** Per-MTok rates divided by this to reach per-token. */
     private static final BigDecimal MILLION = new BigDecimal("1000000");
 
-    /** USD is fractional to the cent, but a cache-read of a few tokens is sub-micro-dollar; keep 10dp so nothing rounds to $0. */
+    /** A cache-read of a few tokens is sub-micro-dollar; 10dp so nothing rounds to $0. */
     private static final int COST_SCALE = 10;
 
     private final ModelResolver models;
@@ -47,13 +29,7 @@ public class PlatformCallPricer {
         this.books = books;
     }
 
-    /**
-     * One call's USD cost split by bucket, plus the summed {@code total} and the book that produced it.
-     *
-     * <p>The version travels with the numbers because a cost is only auditable if the book behind it is
-     * named — with a manual correction book layered over the vendored snapshot, which one priced a given
-     * model is not deducible from the model id alone.
-     */
+    /** The version travels with the numbers so the cost stays auditable. */
     public record PricedCall(
             String priceBookVersion,
             BigDecimal input,
@@ -63,13 +39,8 @@ public class PlatformCallPricer {
             BigDecimal total) {}
 
     /**
-     * Price one completed call, or empty when it cannot be priced honestly.
-     *
-     * @param modelName the model string as the caller resolved it (a Bedrock inference-profile id, a bare
-     *     OpenAI id, …) — resolved to a {@code model.id} by {@link ModelResolver}'s exact → region-strip →
-     *     vendor-strip precedence, the same one ingest uses
-     * @param inputTokens the BILLABLE input count — cache-read tokens already carved out where the
-     *     provider folds them in (see the class javadoc)
+     * @param modelName resolved through {@link ModelResolver}, the same precedence ingest uses @param inputTokens the
+     * BILLABLE input count, cache-read tokens already carved out where the provider folds them in
      */
     public Optional<PricedCall> price(
             @Nullable String modelName,
@@ -95,11 +66,7 @@ public class PlatformCallPricer {
                 in.add(out).add(cacheRead).add(cacheWrite)));
     }
 
-    /**
-     * One bucket's USD cost. Zero when the model is never billed for that bucket (a null rate) or nothing
-     * was consumed — which is a different statement from the empty {@link #price} above, where no rate for
-     * the MODEL exists at all and the whole call is unpriced.
-     */
+    /** Zero for a null rate or no tokens, unlike an empty {@link #price}, where the model has no rate at all. */
     private static BigDecimal cost(@Nullable BigDecimal perMtok, @Nullable Integer tokens) {
         if (perMtok == null || tokens == null || tokens <= 0) return BigDecimal.ZERO;
         return perMtok.multiply(BigDecimal.valueOf(tokens)).divide(MILLION, COST_SCALE, RoundingMode.HALF_UP);

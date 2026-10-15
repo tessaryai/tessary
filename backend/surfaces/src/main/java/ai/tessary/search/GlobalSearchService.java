@@ -10,39 +10,20 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 
 /**
- * The global-search read service: fan out one tenant-scoped query per content entity
- * ({@link GlobalSearchRepository}) — graders, datasets, traces (substrate observations) — then merge and
- * re-rank the small per-leg result sets into one best-first list for the ⌘K palette. A fixed fan-out (not
- * per-row) — latency is bounded by {@link #PER_ENTITY_LIMIT} per leg and {@link #RESULT_CAP} overall.
- *
- * <p>Tenant scoping is the load-bearing property and lives entirely in the read legs: every lexical leg
- * filters {@code WHERE project_id = :pid} against the same
- * {@code projectId} the controller resolved via {@link ai.tessary.auth.TenantPathResolver#requireProject}.
- * This service never sees an org/project slug — only the already-authorized id.
- *
- * <p><b>Lexical-only, deduplicated and re-ranked.</b> The lexical legs (graders, datasets, traces) each
- * rank by Postgres {@code ts_rank} (+ a small trigram term) and arrive best-first; concatenated they form
- * one ranked list that may name the same (type, id) more than once across legs. The merge still runs
- * through <em>reciprocal-rank fusion</em> (RRF) — each hit contributes {@code 1/(k + rank)}, summed across
- * occurrences — which for a single input list is exactly a stable dedup-and-resort by rank, not a scoring
- * change. This platform previously also blended in a semantic (vector) leg here by the same RRF merge;
- * that leg was removed with the rest of the embedding substrate, and lexical was always what the
- * merge degenerated to whenever the semantic leg had nothing to contribute, so this is that same output,
- * now the only path rather than the default one.
+ * Global search: one tenant-scoped lexical query per entity, merged and re-ranked for the palette. Tenant scoping lives
+ * in the legs, each filtering on the already-authorized {@code projectId}. Reciprocal-rank fusion over one list is just
+ * a stable dedup-and-resort.
  */
 @Service
 public class GlobalSearchService {
 
-    /** Per-entity ranked-scan cap — ample for the short name/identifier entities, bounds the entry scan. */
     static final int PER_ENTITY_LIMIT = 10;
 
-    /** Overall cap on the merged list returned to the palette (keeps the payload small). */
     static final int RESULT_CAP = 20;
 
     /**
-     * Reciprocal-rank-fusion damping constant: a hit at rank {@code r} (0-based) in a list contributes
-     * {@code 1/(RRF_K + r)}. The standard 60 keeps the top handful of each list dominant while still letting
-     * a strong agreement across lists outrank a single-list top hit.
+     * The standard 60 keeps each list's top handful dominant while letting agreement across lists outrank a single-list
+     * top hit.
      */
     static final int RRF_K = 60;
 
@@ -52,19 +33,13 @@ public class GlobalSearchService {
         this.repo = repo;
     }
 
-    /**
-     * Ranked content matches for {@code query} within {@code projectId}, best-first across all entity types,
-     * deduplicated and re-ranked by reciprocal-rank fusion over the lexical legs. A blank query
-     * returns no hits (the palette only calls this on typed input); the fan-out is skipped so an empty
-     * search never scans.
-     */
+    /** A blank query returns nothing without scanning. */
     public List<SearchHit> search(String projectId, String query) {
         if (query == null || query.isBlank()) {
             return List.of();
         }
         String q = query.strip();
 
-        // Lexical legs already arrive best-first per leg; concatenated they form one lexical ranked list.
         List<SearchHit> lexical = new ArrayList<>(repo.searchLexical(projectId, q, PER_ENTITY_LIMIT));
         lexical.sort(Comparator.comparingDouble(SearchHit::score).reversed().thenComparing(SearchHit::title));
 

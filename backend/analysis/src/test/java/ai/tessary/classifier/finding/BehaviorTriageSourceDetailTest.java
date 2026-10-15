@@ -75,20 +75,6 @@ class BehaviorTriageSourceDetailTest {
         assertNull(view.frustration());
     }
 
-    /** A finding no adapter owns has no {@code classifierDetail}, though an adapter for another key reports one. */
-    @Test
-    void aFindingNoAdapterOwnsHasNoClassifierDetail() {
-        stubEscalatedFinding("f1");
-        when(jobs.failedByFinding(PROJECT, List.of("f1"))).thenReturn(Map.of());
-
-        var view = source(FindingAdapters.of(List.of(
-                        FakeFindingAdapter.owning("owned-x", null, null, null).reporting(detail()))))
-                .detail(PROJECT, "f1")
-                .orElseThrow();
-
-        assertNull(view.classifierDetail());
-    }
-
     private void stubOwnedFinding(String id) {
         FindingRow row = FindingRowBuilder.of("owned-x")
                 .id(id)

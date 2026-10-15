@@ -1,22 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The product's information architecture: the single source of truth for the
- * sidebar and the command palette.
- *
- * Navigation is organized around usage modes, not data types:
- *
- *   Triage            ← above the groups; the front door; badge = open cases only
- *   MONITOR             Traces · Classifiers · Vitals
- *   ─────────────
- *   Ask Tessary ⌘J      (sidebar footer)
- *   Settings · project switcher · account
- *
- * Old surface names live on here as palette keywords so a bookmark or habit
- * still finds the current one.
- *
- * Icons are lucide-react components: `icon` holds the component itself, not
- * a rendered element, so callers can size/style it consistently at each call site.
- */
+// The IA: the single source for the sidebar and the palette. Old surface names live on as palette
+// keywords so a bookmark or habit still finds the current one.
 import {
   Activity,
   Bell,
@@ -42,47 +26,29 @@ import type { CapabilityWire } from "../api/types-auth";
 
 export type SurfaceState = "live" | "reserved";
 
-/** One navigable area of the product. Sidebar + palette both derive from these. */
 export type NavItem = {
-  /** Route segment under the project base, and the item's stable key. */
   id: string;
   label: string;
-  /** Sidebar/palette icon: a lucide-react component, instantiated at each call site. */
   icon: LucideIcon;
-  /** Short description shown as the palette result subtitle. */
   description?: string;
-  /** Extra terms the palette matches on, including each surface's old name as an alias. */
   keywords?: string[];
-  /**
-   * Routes that should also light this item up in the sidebar (e.g. detail pages). A route named here wins over
-   * another item whose own route it sits under.
-   */
+  /** A route named here wins over another item whose own route it sits under. */
   match?: string[];
-  /**
-   * The capability that has to be on for this surface to exist at all. Absent means ungated.
-   *
-   * It lives here rather than in a side map because the IA is what gets derived from it: the
-   * sidebar, the ⌘K palette and the route table all read the same filtered list, so a surface can
-   * never be offered in one of the three and be a dead end in the other two.
-   */
+  /** Here, not in a side map, so the sidebar, palette and route table read one filtered list. */
   capability?: CapabilityWire;
 };
 
-/** A labeled sidebar group (the mono-caps `Monitor` / `Calibrate` headings). */
 export type NavGroup = { label: string; items: NavItem[] };
 
-/** Triage, above the groups; the only nav item that ever carries a badge. */
 export const TRIAGE_NAV: NavItem = {
   id: "triage",
   label: "Triage",
   description: "Open cases, worst first, and the findings that are not a case yet.",
   keywords: ["cases", "findings", "inbox", "home", "overview", "worklist", "triage"],
-  // A finding page lives under classifiers/, but Triage lists findings and the page's breadcrumb leads back here.
   match: ["cases", "classifiers/findings"],
   icon: Inbox,
 };
 
-/** The grouped IA below Triage. Order is the sidebar order. */
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Monitor",
@@ -92,8 +58,6 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Traces",
         description: "Every trace, span, and conversation Tessary has received.",
         keywords: ["explore", "telemetry", "spans", "otel", "conversation", "session", "logs"],
-        // An execution path, not a waveform: Vitals already owns the pulse
-        // silhouette, and a route reads as "the path the agent took."
         icon: RouteIcon,
       },
       {
@@ -111,7 +75,6 @@ export const NAV_GROUPS: NavGroup[] = [
           "baseline",
           "monitoring",
         ],
-        // Sorting/detecting traces against a criterion: a filter, not a guard.
         icon: Filter,
       },
       {
@@ -125,40 +88,26 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** The surfaces that own a route and render in the sidebar: Triage, then every grouped surface. */
 export const LIVE_NAV: NavItem[] = [TRIAGE_NAV, ...NAV_GROUPS.flatMap((g) => g.items)];
 
 export const SETTINGS_ICON: LucideIcon = SettingsIcon;
 
-/** One Settings sub-section: a routed tab under `settings/`. */
 export type SettingsSection = {
-  /** Route segment under `settings/`, and the section's stable key. */
   id: string;
   label: string;
   icon: LucideIcon;
-  /** The capability that has to be on for this section to exist. Absent means ungated. */
   capability?: CapabilityWire;
 };
 
-/** A titled band of the Settings rail. */
 export type SettingsGroup = { title: string; items: SettingsSection[] };
 
-/**
- * Settings sub-sections: second-level IA, reachable in ≤2 clicks via Settings → tab.
- * Administration only: anything that tunes a living concept lives with the concept
- * (Signal tuning → Classifiers).
- *
- * One source, read by both the Settings rail and the ⌘K palette, so the two can never drift
- * apart and offer a destination in one but not the other.
- */
+/** Administration only: anything that tunes a living concept lives with the concept. */
 export const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     title: "Organization",
     items: [
       { id: "organization", label: "Organization", icon: Building2 },
       { id: "members", label: "Members", icon: Users },
-      // Capabilities an operator decides for the whole org. Today only automatic triage, which starts
-      // unattended LLM spend on the org's provider.
       { id: "features", label: "Features", icon: ToggleRight },
     ],
   },
@@ -166,44 +115,26 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: "Data & ingestion",
     items: [
       { id: "sources", label: "Sources", icon: Database },
-      // A `.tessary/` bundle is the pipeline the plugin publishes: call sites, chains, failure
-      // modes. Ungated.
       { id: "import", label: "Import bundle", icon: FileUp },
-      // The keys an org brings: every lane runs on the org's own credential, so an org without
-      // this page cannot triage a finding at all. Still capability-gated, because an org can be
-      // targeted off; the default is on (see Capability.BYO_PROVIDER_KEYS).
+      // Every lane runs on the org's own credential, so without this page an org cannot triage at all.
       { id: "providers", label: "Providers", icon: Zap, capability: "byo_provider_keys_enabled" },
-      // Next to Providers on purpose: that page is which keys the org has stored, this one is
-      // which model each job spends them on.
       { id: "models", label: "Models", icon: Boxes },
-      // The repo Observer and RCA require, and that upgrades Layer-2 triage from ruling on
-      // trace evidence to ruling against the committed spec. Ungated: a repo is an optional
-      // upgrade for every org, never a setup step.
       { id: "git", label: "Git integration", icon: GitBranch },
     ],
   },
   {
     title: "Alerting",
     items: [
-      // How a case reaches a human when nobody is watching the app: the destination, the cadence,
-      // and the quiet hours. Gated on the capability that owns the whole surface, so an org
-      // without alerting sees the section disappear rather than a 403.
       { id: "notifications", label: "Notifications", icon: Bell, capability: "alerts_enabled" },
     ],
   },
   {
     title: "Security & access",
     items: [
-      // Plug (not KeyRound) so it's distinct from API keys right below it in the same list.
       { id: "mcp-tokens", label: "MCP tokens", icon: Plug, capability: "api_access_enabled" },
       { id: "api-keys", label: "API keys", icon: KeyRound, capability: "api_access_enabled" },
-      // Deliberately ungated even though `custom_redaction_enabled` is off by default: this page
-      // also states the built-in defaults, which is exactly what a partner's security review
-      // reads. The capability gates authoring a custom rule, inside the page, not the page itself.
+      // Ungated: it states the built-in defaults a security review reads; the capability gates authoring.
       { id: "pii-redaction", label: "PII redaction", icon: Shield },
-      // How long this project keeps traces and detections; the install default comes from the
-      // deployment's environment, and this page is the per-project override, read-only when another
-      // build fixes the project's retention.
       { id: "retention", label: "Data retention", icon: Hourglass },
     ],
   },

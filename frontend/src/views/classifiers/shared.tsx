@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The pieces the Classifiers surface shares: Triage's findings list, the charts page, a classifier's configure page
- * and a finding's own page. The verbs, the labels and the chain sentence are the things genuinely common to them.
- */
 import type { BehaviorFinding } from "../../api/types";
 import { cn } from "../../ui";
 
 export const CONTAINER: React.CSSProperties = { padding: "36px 40px 56px" };
 
-/**
- * `ClassifierView.readiness` while a classifier that calls a provider is paused: the short label beside the switch
- * and the sentence in Status. A paused sweep sends nothing until the provider works again.
- */
 export const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
   provider_rejected: {
     label: "Provider rejected the key",
@@ -35,7 +27,6 @@ export const PROVIDER_PAUSES: Record<string, { label: string; explained: string 
   },
 };
 
-/** One label/value fact in a fact grid; the `<dl>` wrapper supplies the columns. */
 export function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <>
@@ -49,13 +40,7 @@ export function Fact({ label, children }: { label: string; children: React.React
   );
 }
 
-/**
- * A verb on a finding. `filled` is the move the row is asking for; `outline` is everything else.
- *
- * <p>Which verb gets the fill is not decoration: absorbing re-pins the reference a whole
- * population is compared against and closes the finding, the most consequential thing on this
- * surface, so it is deliberately never the one styled as the default.
- */
+/** Absorbing re-pins a population's reference and closes the finding, so it is never the filled default. */
 export function VerbButton({
   kind,
   onClick,
@@ -83,12 +68,7 @@ export function VerbButton({
   );
 }
 
-/**
- * The triage verb a finding's own page offers before there is a ruling.
- *
- * <p>A run that gave up says so beside the button, in the label and tone the findings list uses, and
- * the button offers the run again rather than staying on "Triaging…" for a job nothing is running.
- */
+/** A run that gave up says so and offers the run again rather than staying on "Triaging…". */
 export function RunTriageButton({
   finding,
   busy,
@@ -115,14 +95,8 @@ export function RunTriageButton({
 }
 
 /**
- * The human verdicts on one finding. Both are `outline` for the reason VerbButton's own note
- * gives.
- *
- * <p>A ruling freezes the finding by construction (decision 1): the first one to land, triage's or
- * a person's, leaves it outside `ux_finding_live` and every verb on it after that 409s. So a
- * caller renders this only while the finding is still unruled (`!triaged`) — there is no override
- * of a standing ruling any more, machine or human; a cause that disagrees with the traffic again
- * simply opens a fresh finding, which is triaged like any other.
+ * Rendered only while the finding is unruled: the first ruling, triage's or a person's, freezes it and
+ * every later verb 409s.
  */
 export function ResolveVerbs({
   busy,
@@ -144,28 +118,16 @@ export function ResolveVerbs({
 }
 
 /**
- * Where one finding stands with triage, in the words the queue and the finding's own page both use.
- *
- * <p>`positive` is the only state that puts a finding in front of a person, so it is the only one
- * that gets the emphatic tone; the two closures read the same weight as each other because they
- * are the same act (triage ended, nobody was paged) and differ only in why. `pending` is not a
- * failure and not a waiting room: it is a finding whose one run has not been scheduled yet.
- *
- * <p>A `done` status with no verdict cannot happen: the ruling and its action are written in one
- * statement, and a run that did not happen leaves the whole set null. But the fallback is here
- * rather than a cast, because the alternative to a word is a blank cell.
+ * `positive` is the only state that pages a person, so it alone is emphatic. A `done` status with no
+ * verdict cannot happen; the fallback avoids a blank cell.
  */
 export type TriageState = { label: string; tone: "positive" | "closed" | "waiting" | "failed" };
 
 export function triageState(finding: BehaviorFinding): TriageState {
   if (finding.triageStatus === "pending") return { label: "Pending", tone: "waiting" };
   if (finding.triageStatus === "in_flight") return { label: "Triaging", tone: "waiting" };
-  // Without this branch, a run that gave up is indistinguishable from one in flight and sits on
-  // "Triaging" forever, the row looking busy while nothing is happening to it.
   if (finding.triageStatus === "failed") return { label: "Triage failed", tone: "failed" };
-  // `humanVerdictAt` set means a PERSON's ruling won the race to land first, not triage's — say so
-  // in the verb they actually pressed rather than in triage's own words, which would claim a run
-  // that never happened.
+  // `humanVerdictAt` means a person's ruling landed first, so name the verb they pressed.
   const byPerson = finding.humanVerdictAt != null;
   if (finding.triageVerdict === "positive") {
     return byPerson ? { label: "Real deviation", tone: "positive" } : { label: "Positive", tone: "positive" };
@@ -178,17 +140,10 @@ export function triageState(finding: BehaviorFinding): TriageState {
   return { label: "Closed", tone: "closed" };
 }
 
-/** Whether triage ended this finding rather than handing it on. The queue's one split. */
 export function isClosedByTriage(finding: BehaviorFinding): boolean {
   return finding.triageAction === "closed";
 }
 
-/**
- * The chain on one line: how much traffic, and what triage made of it.
- *
- * <p>No recurrence count any more: a ruling freezes the finding, so a cause that fires again after
- * one opens a fresh finding rather than reopening this one — there is nothing left to count here.
- */
 export function chainWords(finding: BehaviorFinding): string {
   return [
     `seen ${finding.traceCount}×`,
@@ -204,14 +159,7 @@ export function chainWords(finding: BehaviorFinding): string {
     .join(" · ");
 }
 
-/**
- * A detector key as a person would say it: `cost_drift` → `Cost drift`.
- *
- * <p>The key itself comes from the server on `finding.detector` and is never re-derived here. Three
- * classifiers share one findings table with no column saying which wrote a row, so the mapping is
- * reconstructed from the cause kind and the cause key, and its own javadoc says the two copies that
- * already exist must not drift. A third copy in TypeScript is exactly the drift it warns about.
- */
+/** The server sends the key; this only words it. Never re-derive it from the cause. */
 export function detectorLabel(key: string): string {
   return key
     .split("_")
@@ -219,7 +167,6 @@ export function detectorLabel(key: string): string {
     .join(" ");
 }
 
-/** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. A window is a story's spine, so it reads as a clock. */
 export function stamp(iso: string): string {
   const d = new Date(iso);
   return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${d.toLocaleTimeString(
@@ -228,7 +175,6 @@ export function stamp(iso: string): string {
   )}`;
 }
 
-/** Coarse age: an exact second never changes what you do next. */
 export function ago(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   if (ms < 0) return absoluteDate(iso);
@@ -241,7 +187,6 @@ export function ago(iso: string): string {
   return days < 30 ? `${days}d ago` : absoluteDate(iso);
 }
 
-/** An unambiguous date ("July 1, 2026"), never the locale's all-numeric form. */
 function absoluteDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
 }

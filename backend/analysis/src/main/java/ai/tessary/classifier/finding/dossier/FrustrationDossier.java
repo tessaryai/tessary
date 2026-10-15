@@ -5,13 +5,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
 /**
- * The {@code frustration_rate} shape: a call site's share of frustrated sessions against the rate it
- * learned as its normal. Restates the rate in conversations and says what the two witness grains mean, since a
- * session row beside a trace row is not something the other shapes teach an agent to read.
+ * The {@code frustration_rate} shape. Explains the two witness grains, since a session row beside a trace row is unlike
+ * other shapes.
  */
 final class FrustrationDossier {
 
-    /** The cause kind the finding writer records in the payload, which is what this shape dispatches on. */
+    /** Dispatched on from the payload. */
     static final String CAUSE_KIND = "frustration_rate";
 
     private FrustrationDossier() {}

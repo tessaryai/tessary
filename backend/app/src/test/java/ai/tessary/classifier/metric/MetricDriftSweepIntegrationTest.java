@@ -21,11 +21,8 @@ import ai.tessary.classifier.metric.MetricBaselineRow.State;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
@@ -40,10 +37,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -57,25 +52,40 @@ import org.springframework.boot.test.context.SpringBootTest;
  * being enabled.
  */
 @SpringBootTest
-class MetricDriftSweepIntegrationTest {
+record MetricDriftSweepIntegrationTest(
+        SubstrateV2Fixtures fx,
+        MetricDriftSweep sweep,
+        MetricBaselineRepository baselines,
+        FindingRepository findings,
+        ClassifierJobRepository jobs,
+        ClassifierRepository signals,
+        ClassifierService classifiers,
+        FindingService drift,
+        SpanRepository spans,
+        org.springframework.jdbc.core.simple.JdbcClient jdbc,
+        TenantService tenants,
+        ai.tessary.pricing.PlatformCallPricer prices) {
 
     /**
      * The shipped shape at the smallest sizes the clamps allow, so a window closes within a fixture; everything else
      * stays default, because that is what the sweep reads.
      */
     private static final String CONFIG = """
-            {"measures": ["turn_duration"], "window_target_count": 50, "min_sample": 30}""";
+        {"measures": ["turn_duration"], "window_target_count": 50, "min_sample": 30}\
+        """;
 
     /** Both grains of one switch, for the two §6.1 suppression tests. */
     private static final String CONFIG_BOTH_GRAINS = """
-            {"measures": ["turn_duration", "tool_duration"], "window_target_count": 50, "min_sample": 30}""";
+        {"measures": ["turn_duration", "tool_duration"], "window_target_count": 50, "min_sample": 30}\
+        """;
 
     /**
      * {@code cost} is the only measure under this switch that can open a finding; the token buckets ride along as
      * evidence (metric-drift.md §6.1).
      */
     private static final String CONFIG_COST = """
-            {"measures": ["cost"], "window_target_count": 50, "min_sample": 30}""";
+        {"measures": ["cost"], "window_target_count": 50, "min_sample": 30}\
+        """;
 
     private static final String CALL_SITE = "cs-research";
 
@@ -91,58 +101,9 @@ class MetricDriftSweepIntegrationTest {
     /** Old enough that the head read's settle window has passed for every seeded trace. */
     private static final Instant T0 = Instant.now().minus(2, ChronoUnit.HOURS);
 
-    @Autowired
-    MetricDriftSweep sweep;
-
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    FindingService drift;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    org.springframework.jdbc.core.simple.JdbcClient jdbc;
-
-    @Autowired
-    TenantService tenants;
-
     /** Prices the cost fixture's generations from the imported book, the one {@code IngestPricer} reads. */
-    @Autowired
-    ai.tessary.pricing.PlatformCallPricer prices;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
-
     @Test
     @DisplayName("a rewound cursor re-reads the page and the watermark refuses to count it twice")
     void aReplayedPageIsNotFoldedInTwice() {
@@ -599,12 +560,12 @@ class MetricDriftSweepIntegrationTest {
         String baselineId = baseline(pid, signal).id();
         // Blobs a newer or broken build could leave; throwing would dead-letter the job and stop watching the bucket.
         jdbc.sql("""
-                        UPDATE metric_baseline
-                        SET current_workload_json = '{not json', current_tokens_json = '{not json',
-                            pinned_sketch_json = '{not json', pinned_workload_json = '{not json',
-                            pinned_tokens_json = '{not json'
-                        WHERE id = :id
-                        """).param("id", baselineId).update();
+            UPDATE metric_baseline
+            SET current_workload_json = '{not json', current_tokens_json = '{not json',
+                pinned_sketch_json = '{not json', pinned_workload_json = '{not json',
+                pinned_tokens_json = '{not json'
+            WHERE id = :id
+            """).param("id", baselineId).update();
 
         seedTurns(pid, 40, 20, 2_000, null);
         MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);

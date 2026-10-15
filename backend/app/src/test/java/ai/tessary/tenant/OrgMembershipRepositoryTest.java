@@ -6,17 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class OrgMembershipRepositoryTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    OrgMembershipRepository memberships;
+record OrgMembershipRepositoryTest(TenantService tenants, OrgMembershipRepository memberships) {
 
     /**
      * The bug: a membership column, the narrowing {@code scopes} or the {@code attributes} bag above all,

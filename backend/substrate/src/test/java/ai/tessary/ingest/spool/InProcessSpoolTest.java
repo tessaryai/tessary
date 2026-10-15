@@ -4,6 +4,7 @@ package ai.tessary.ingest.spool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.tessary.config.SubstrateProperties;
+import ai.tessary.testsupport.Props;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -22,8 +23,7 @@ class InProcessSpoolTest {
     private final AtomicLong nanos = new AtomicLong(1_000_000_000L);
 
     private InProcessSpool spool() {
-        SubstrateProperties props = new SubstrateProperties();
-        props.setQueueMaxBytes(MAX_BYTES);
+        SubstrateProperties props = Props.of(SubstrateProperties.class, "queue-max-bytes", MAX_BYTES);
         return new InProcessSpool(props, nanos::get);
     }
 

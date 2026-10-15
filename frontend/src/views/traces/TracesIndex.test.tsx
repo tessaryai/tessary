@@ -9,114 +9,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
-  Classifier,
-  SessionDetailView,
-  SessionListItemView,
-  TraceListItemView,
-  TracesPageView,
+  Classifier, SessionDetailView, SessionListItemView, TraceListItemView, TracesPageView,
 } from "../../api/types";
 import { currentParams, pending, renderRoute } from "../../test/render";
 import { TracesIndex } from "./TracesIndex";
+import { api } from "../../test/api";
+import { classifier as baseClassifier, traceItem } from "../../test/fixtures";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listTraces: vi.fn(),
-  listSessions: vi.fn(),
-  getSession: vi.fn(),
-  getTrace: vi.fn(),
-  getSessionSpans: vi.fn(),
-  listClassifiers: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-}));
-
-function trace(over: Partial<TraceListItemView> = {}): TraceListItemView {
-  return {
-    id: "tr-1",
-    name: "checkout-agent",
-    started_at: "2026-09-25T10:00:00Z",
-    ended_at: "2026-09-25T10:00:02Z",
-    status: "ok",
-    is_settled: true,
-    latency_ms: 2_000,
-    input_preview: "where is my order",
-    output_preview: "it ships today",
-    total_cost: 0.0123,
-    input_cost: 0.01,
-    output_cost: 0.0023,
-    span_count: 4,
-    error_count: 0,
-    input_tokens: 1_200,
-    output_tokens: 300,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    reasoning_tokens: null,
-    total_tokens: 1_500,
-    call_site_id: "checkout",
-    session: "sess-1",
-    thread_id: null,
-    user_id: null,
-    unpriced_spans: 0,
-    detected_by: [],
-    ...over,
-  };
-}
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 function session(over: Partial<SessionListItemView> = {}): SessionListItemView {
   return {
-    id: "sess-1",
-    started_at: "2026-09-25T10:00:00Z",
-    last_activity_at: "2026-09-25T10:05:00Z",
-    dominant_call_site_id: "checkout",
-    call_site_count: 3,
-    first_input_preview: "hi",
-    last_output_preview: "bye",
-    error_count: 1,
-    unsettled_traces: 1,
-    trace_count: 2,
-    span_count: 9,
-    total_cost: 0.5,
-    input_cost: 0.3,
-    output_cost: 0.2,
-    input_tokens: 10,
-    output_tokens: 20,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    reasoning_tokens: 0,
-    total_tokens: 30,
-    unpriced_spans: 0,
-    user_id: null,
-    detected_by: [],
-    ...over,
+    id: "sess-1", started_at: "2026-09-25T10:00:00Z", last_activity_at: "2026-09-25T10:05:00Z",
+    dominant_call_site_id: "checkout", call_site_count: 3, first_input_preview: "hi", last_output_preview: "bye",
+    error_count: 1, unsettled_traces: 1, trace_count: 2, span_count: 9, total_cost: 0.5, input_cost: 0.3,
+    output_cost: 0.2, input_tokens: 10, output_tokens: 20, cache_read_tokens: 0, cache_write_tokens: 0,
+    reasoning_tokens: 0, total_tokens: 30, unpriced_spans: 0, user_id: null, detected_by: [], ...over,
   };
 }
 
 const page = (traces: TraceListItemView[], next_cursor: string | null = null): TracesPageView => ({ traces, next_cursor });
 
-function classifier(over: Partial<Classifier> = {}): Classifier {
-  return {
-    id: "cls-fr",
-    classifier_key: "frustration",
-    name: "Frustration",
-    detector: "frustration",
-    enabled: true,
-    built_in: true,
-    call_site_ids: null,
-    config_json: null,
-    created_at: "2026-09-01T00:00:00Z",
-    updated_at: "2026-09-01T00:00:00Z",
-    description: null,
-    mode: "discovery",
-    readiness: null,
-    shown_in_trace_views: true,
-    version: 1,
-    ...over,
-  };
-}
-
+const trace = (over: Partial<TraceListItemView> = {}) =>
+  traceItem({
+    input_preview: "where is my order", output_preview: "it ships today", total_cost: 0.0123, input_cost: 0.01,
+    output_cost: 0.0023, span_count: 4, input_tokens: 1_200, output_tokens: 300, cache_read_tokens: 0,
+    cache_write_tokens: 0, total_tokens: 1_500, call_site_id: "checkout", session: "sess-1", ...over,
+  });
+const classifier = (over: Partial<Classifier> = {}) => baseClassifier({ id: "cls-fr", ...over });
 const FRUSTRATED = [{ classifier_id: "cls-fr", name: "Frustration" }];
 
 beforeEach(() => {
@@ -128,10 +48,7 @@ beforeEach(() => {
   api.listClassifiers.mockResolvedValue([
     classifier(),
     classifier({
-      id: "cls-leak",
-      classifier_key: "secret_leak",
-      name: "Secret leak",
-      detector: "secret_leak",
+      id: "cls-leak", classifier_key: "secret_leak", name: "Secret leak", detector: "secret_leak",
       shown_in_trace_views: false,
     }),
   ]);
@@ -363,18 +280,11 @@ describe("detected by", () => {
     api.listClassifiers.mockResolvedValue([
       classifier(),
       classifier({
-        id: "cls-leak",
-        classifier_key: "secret_leak",
-        name: "Secret leak",
-        detector: "secret_leak",
+        id: "cls-leak", classifier_key: "secret_leak", name: "Secret leak", detector: "secret_leak",
         shown_in_trace_views: false,
       }),
       classifier({
-        id: "cls-item",
-        classifier_key: "item_check",
-        name: "Item check",
-        detector: "item_check",
-        built_in: false,
+        id: "cls-item", classifier_key: "item_check", name: "Item check", detector: "item_check", built_in: false,
       }),
     ]);
     renderRoute(<TracesIndex />);
@@ -639,44 +549,42 @@ describe("time range", () => {
   });
 });
 
-describe("refresh", () => {
-  it("auto-refreshes every 30s only while the reader is at the top, and remembers the choice", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const main = document.createElement("main");
-    document.body.appendChild(main);
-    try {
-      renderRoute(<TracesIndex />);
-      await screen.findByText("checkout-agent");
+it("refresh: auto-refreshes every 30s only while the reader is at the top, and remembers the choice", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const main = document.createElement("main");
+  document.body.appendChild(main);
+  try {
+    renderRoute(<TracesIndex />);
+    await screen.findByText("checkout-agent");
 
-      fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
-      fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
-      expect(window.localStorage.getItem("tessary:traces:auto-refresh")).toBe("on");
-      expect(screen.getByTitle("Refresh now · auto-refreshing every 30s")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
+    fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
+    expect(window.localStorage.getItem("tessary:traces:auto-refresh")).toBe("on");
+    expect(screen.getByTitle("Refresh now · auto-refreshing every 30s")).toBeTruthy();
 
-      const before = api.listTraces.mock.calls.length;
-      await act(async () => {
-        vi.advanceTimersByTime(30_000);
-      });
-      await waitFor(() => expect(api.listTraces.mock.calls.length).toBe(before + 1));
+    const before = api.listTraces.mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    await waitFor(() => expect(api.listTraces.mock.calls.length).toBe(before + 1));
 
-      main.scrollTop = 500;
-      fireEvent.scroll(main);
-      expect(screen.getByTitle("Refresh now · auto-refresh held while you are scrolled down")).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
-      expect(screen.getByText("Held while you are scrolled down.")).toBeTruthy();
-      const held = api.listTraces.mock.calls.length;
-      await act(async () => {
-        vi.advanceTimersByTime(30_000);
-      });
-      expect(api.listTraces.mock.calls.length).toBe(held);
+    main.scrollTop = 500;
+    fireEvent.scroll(main);
+    expect(screen.getByTitle("Refresh now · auto-refresh held while you are scrolled down")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
+    expect(screen.getByText("Held while you are scrolled down.")).toBeTruthy();
+    const held = api.listTraces.mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(api.listTraces.mock.calls.length).toBe(held);
 
-      fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
-      expect(window.localStorage.getItem("tessary:traces:auto-refresh")).toBe("off");
-      expect(screen.getByTitle("Refresh now · auto-refresh is off")).toBeTruthy();
-    } finally {
-      main.remove();
-    }
-  });
+    fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
+    expect(window.localStorage.getItem("tessary:traces:auto-refresh")).toBe("off");
+    expect(screen.getByTitle("Refresh now · auto-refresh is off")).toBeTruthy();
+  } finally {
+    main.remove();
+  }
 });
 
 describe("the rails and keyboard paths", () => {
@@ -707,29 +615,27 @@ describe("the rails and keyboard paths", () => {
   });
 });
 
-describe("infinite scroll", () => {
-  it("loads the next page when the sentinel comes into view", async () => {
-    const original = window.IntersectionObserver;
-    class Intersecting {
-      constructor(private cb: IntersectionObserverCallback) {}
-      observe() {
-        this.cb([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
-      }
-      disconnect() {}
+it("infinite scroll: loads the next page when the sentinel comes into view", async () => {
+  const original = window.IntersectionObserver;
+  class Intersecting {
+    constructor(private cb: IntersectionObserverCallback) {}
+    observe() {
+      this.cb([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
     }
-    window.IntersectionObserver = Intersecting as unknown as typeof IntersectionObserver;
-    try {
-      api.listTraces
-        .mockResolvedValueOnce(page([trace({ id: "tr-1", name: "first" })], "c-2"))
-        .mockResolvedValueOnce(page([trace({ id: "tr-2", name: "second" })], null));
-      renderRoute(<TracesIndex />);
+    disconnect() {}
+  }
+  window.IntersectionObserver = Intersecting as unknown as typeof IntersectionObserver;
+  try {
+    api.listTraces
+      .mockResolvedValueOnce(page([trace({ id: "tr-1", name: "first" })], "c-2"))
+      .mockResolvedValueOnce(page([trace({ id: "tr-2", name: "second" })], null));
+    renderRoute(<TracesIndex />);
 
-      expect(await screen.findByText("second")).toBeTruthy();
-      expect(lastListCall().cursor).toBe("c-2");
-    } finally {
-      window.IntersectionObserver = original;
-    }
-  });
+    expect(await screen.findByText("second")).toBeTruthy();
+    expect(lastListCall().cursor).toBe("c-2");
+  } finally {
+    window.IntersectionObserver = original;
+  }
 });
 
 describe("dropdowns and stored choices", () => {

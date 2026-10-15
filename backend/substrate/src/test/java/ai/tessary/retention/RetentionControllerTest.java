@@ -18,6 +18,7 @@ import ai.tessary.ops.RetentionPolicyRepository;
 import ai.tessary.retention.RetentionController.RetentionUpdateRequest;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.Project;
+import ai.tessary.testsupport.Props;
 import java.util.Objects;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +55,7 @@ class RetentionControllerTest {
         when(tenants.requireProject(OWNER, "acme", "app"))
                 .thenReturn(new TenantPathResolver.Resolved(org, project, "owner"));
         RetentionResolver resolver =
-                new RetentionResolver(policies, new RetentionProperties(), (projectId, dataClass) -> 21);
+                new RetentionResolver(policies, Props.of(RetentionProperties.class), (projectId, dataClass) -> 21);
         controller = new RetentionController(resolver, policies, tenants);
     }
 

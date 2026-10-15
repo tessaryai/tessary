@@ -10,21 +10,14 @@ import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Wire DTOs for the usage-metering read API. Snake_case on the wire, camelCase in Java (the
- * {@code QueryDtos} convention). Every usage view carries an {@code as_of} freshness instant so a caller
- * can tell "no usage yet this period" apart from "the rollup hasn't run yet": usage lags by up to one
- * bucket grain because only closed buckets are metered.
- */
+/** Every view carries {@code as_of}, so "no usage yet" is distinguishable from "rollup not run yet". */
 public final class MeteringDtos {
 
     private MeteringDtos() {}
 
-    /** One {@code (bucket_start, value)} point of usage. */
     public record UsageBucketView(
             @JsonProperty("bucket_start") String bucketStart, long value) {}
 
-    /** The project-scoped usage timeseries for one unit. */
     public record UsageTimeseriesView(
             String unit, @JsonProperty("as_of") String asOf, List<UsageBucketView> buckets) {
 
@@ -39,17 +32,8 @@ public final class MeteringDtos {
     }
 
     /**
-     * One group of LLM usage: a lane, a project, a model, or the whole org, with the token buckets
-     * kept apart rather than collapsed to a total, because they are priced apart.
-     *
-     * <p>{@code key} is the group's stable identifier ({@code lane} wire value, project id, model id;
-     * empty string for calls that reported no model) and is empty for the org total. {@code label} is
-     * its display name where the server knows one the client cannot derive (a project's name).
-     *
-     * <p>{@code costUsd} covers only the calls the pricing catalog held a rate for; {@code
-     * unpricedCalls} is how many it did not, so a reader can see the size of the gap instead of
-     * mistaking it for free usage. {@code byoCostUsd} is the part of {@code costUsd} the customer's own
-     * provider keys paid for.
+     * Token buckets are kept apart because they are priced apart. {@code unpricedCalls} is the size of the gap behind
+     * {@code costUsd}. {@code byoCostUsd} is the part of {@code costUsd} the customer's own provider keys paid for.
      */
     public record LlmUsageSliceView(
             String key,
@@ -64,7 +48,6 @@ public final class MeteringDtos {
             @JsonProperty("byo_cost_usd") BigDecimal byoCostUsd,
             @JsonProperty("unpriced_calls") long unpricedCalls) {
 
-        /** Project the repository slice onto the wire, with the display label the caller resolved. */
         public static LlmUsageSliceView of(UsageSlice s, @Nullable String label) {
             return new LlmUsageSliceView(
                     s.key() == null ? "" : s.key(),
@@ -81,28 +64,14 @@ public final class MeteringDtos {
         }
     }
 
-    /**
-     * The org's platform LLM consumption over {@code [from, to)} as one total. Unlike {@link UsageTimeseriesView} this is
-     * read live off the per-call ledger rather than off closed rollup buckets, so {@code asOf} is
-     * genuinely now: it includes the call that finished a second ago.
-     *
-     * <p>A null {@code from}/{@code to} is an open bound: the org's whole history on that side.
-     */
+    /** Read live off the ledger, so {@code asOf} is genuinely now. A null bound is open. */
     public record LlmUsageView(
             @Nullable String from,
             @Nullable String to,
             @JsonProperty("as_of") String asOf,
             LlmUsageSliceView total) {}
 
-    /**
-     * One {@code (bucket, series)} cell of the LLM usage timeseries: the value of one bar segment.
-     *
-     * <p>{@code bucketStart} is the bucket's inclusive start as a UTC instant and joins to an entry of
-     * {@link LlmUsageSeriesView#buckets}. {@code key} identifies the series within the requested
-     * grouping (a lane wire value, a project id, a model id; the empty string both for the ungrouped
-     * series and for calls that reported no lane/model), and {@code label} is its display name where the
-     * server knows one the client cannot derive.
-     */
+    /** {@code key} is the empty string both for the ungrouped series and for calls that reported no lane or model. */
     public record LlmUsageCellView(
             @JsonProperty("bucket_start") String bucketStart,
             String key,
@@ -131,15 +100,8 @@ public final class MeteringDtos {
     }
 
     /**
-     * The org's LLM consumption over {@code [from, to)} as a bucketed timeseries: what the usage chart
-     * draws. Same live per-call ledger as {@link LlmUsageView}, cut on two more axes: {@code grain} (the
-     * bucket width) and {@code grouping} (the series axis), with an optional lane / project / model
-     * narrowing already applied.
-     *
-     * <p>{@code buckets} is the complete x-axis, ascending, including buckets with no calls;
-     * {@code cells} only carries the non-empty ones, so a client renders a gap for a quiet bucket
-     * instead of silently compressing the time axis. {@code total} is the whole window under the same
-     * filter, so the headline figures and the bars can never disagree.
+     * {@code buckets} is the full axis, so a quiet bucket renders as a gap. {@code total} uses the same filter, so
+     * headline and bars cannot disagree.
      */
     public record LlmUsageSeriesView(
             String from,
@@ -151,14 +113,7 @@ public final class MeteringDtos {
             List<String> buckets,
             List<LlmUsageCellView> cells) {}
 
-    /**
-     * What one Layer-2 ruling cost: one row of {@link TriageSpendView}.
-     *
-     * @param findingId the {@code behavior_finding} the ruling was about, so the spend and the verdict
-     *     can be put side by side
-     * @param runs sandbox runs booked against it, normally 1; above 1 means it was re-triaged
-     * @param unpricedRuns runs the pricing catalog held no rate for: the gap behind {@code cost_usd}
-     */
+    /** @param runs above 1 means it was re-triaged */
     public record TriageSpendRowView(
             @JsonProperty("finding_id") String findingId,
             long runs,
@@ -167,15 +122,7 @@ public final class MeteringDtos {
             @JsonProperty("unpriced_runs") long unpricedRuns,
             @JsonProperty("last_at") String lastAt) {}
 
-    /**
-     * The org's triage spend, per ruling, costliest first.
-     *
-     * <p>{@code costPerRulingUsd} is the whole point. The lane total already says the triage
-     * agent cost this org $X; only dividing it by the number of rulings answers whether an agent
-     * session per distinct cause is the right price for a filter. Null when nothing was priced:
-     * an absent number rather than a misleading zero, the same convention
-     * {@code llm_call.cost_usd} carries.
-     */
+    /** Null when nothing was priced: absent rather than a misleading zero. */
     public record TriageSpendView(
             @Nullable String from,
             @Nullable String to,

@@ -4,24 +4,8 @@ package ai.tessary.storage;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A first-class {@code retrieved_doc} row — one retrieved passage hung off the RETRIEVAL/RERANKER span
- * that produced it (a RAG step). Append-only and project-scoped.
- *
- * <p>Carries a {@code listRole} (candidate|result), 1-based {@code rank}, {@code title},
- * {@code sourceUri} and {@code dataSourceId}; {@code metadata} is jsonb and {@code created_at}
- * timestamptz. {@code seq} is the 0-based order within the retrieval result.
- *
- * <p><b>The two media ref columns are gone (0001)</b>, for the reason {@link ToolCallRow} gives: declared
- * with FKs into {@code media_object}, NULL on every row ever written, and replaced by {@code media_ref}.
- *
- * <p><b>One key namespace</b>, exactly as {@link ToolCallRow}: {@code traceId}/{@code spanId} are the
- * producer keys every read joins on, and the surrogate pair they replaced was dropped with the v1
- * substrate in 0083.
- *
- * @param seq 0-based order within the retrieval result — part of the row's derived identity.
- * @param docId the source document/chunk id, when the retriever supplies one; nullable.
- * @param content the retrieved passage text, preserved whole (never truncated).
- * @param score the relevance/similarity score the retriever assigned; nullable.
+ * A {@code retrieved_doc} row hung off a retrieval or reranker span; append-only. Keys as {@link ToolCallRow}. @param
+ * seq part of the row's derived identity @param content preserved whole, never truncated
  */
 public record RetrievedDocRow(
         String id,
@@ -43,12 +27,7 @@ public record RetrievedDocRow(
         @Nullable String traceId,
         @Nullable String spanId) {
 
-    /**
-     * The ingest shape: a retrieved {@code result} (or {@code candidate}) keyed on the producer's own
-     * {@code (project, trace, span)}, with 1-based {@code rank} and {@code sourceUri}/
-     * {@code dataSourceId} off OpenInference. {@code id} is derived from the producer keys plus
-     * {@code seq}, so a redelivery collides on the primary key.
-     */
+    /** {@code id} derives from the producer keys plus {@code seq}, so a redelivery collides on the primary key. */
     public static RetrievedDocRow retrieved(
             String id,
             String projectId,
@@ -85,10 +64,7 @@ public record RetrievedDocRow(
                 spanId);
     }
 
-    /**
-     * The {@code retrieved_doc.list_role} value ingest writes. The schema also allows {@code 'candidate'},
-     * which the grounding read filters on.
-     */
+    /** The schema also allows {@code 'candidate'}, which the grounding read filters on. */
     public static final class ListRole {
         private ListRole() {}
 

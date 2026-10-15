@@ -20,6 +20,7 @@ import ai.tessary.config.ObserverProperties;
 import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.OrgMembershipRepository;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,7 +54,7 @@ class BehaviorTriagePromptTest {
             + " saw no support in the retrieved documents, not proof that the sentence is wrong.\n\n";
 
     private static BehaviorTriageEngine engine() {
-        return engine(new ObserverProperties());
+        return engine(Props.of(ObserverProperties.class));
     }
 
     private static BehaviorTriageEngine engine(ObserverProperties observerProps) {
@@ -73,7 +74,7 @@ class BehaviorTriagePromptTest {
             ObserverProperties observerProps, ClassifierDetectionWriteRepository detections, FindingAdapters adapters) {
         return new BehaviorTriageEngine(
                 List.of(),
-                new ClassifierProperties(),
+                Props.of(ClassifierProperties.class),
                 observerProps,
                 mock(ApiKeyService.class),
                 mock(ProjectRepository.class),
@@ -160,7 +161,7 @@ class BehaviorTriagePromptTest {
                 null);
 
         Map<String, String> dossier =
-                engine(new ObserverProperties(), detections).dossier(JOB, row);
+                engine(Props.of(ObserverProperties.class), detections).dossier(JOB, row);
 
         assertEquals(Set.of("finding.md", "method.md", "detections.md"), dossier.keySet());
         String md = dossier.get("detections.md");
@@ -191,8 +192,9 @@ class BehaviorTriagePromptTest {
                 .payload("{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}")
                 .build();
 
-        String md =
-                engine(new ObserverProperties(), detections).dossier(JOB, row).get("detections.md");
+        String md = engine(Props.of(ObserverProperties.class), detections)
+                .dossier(JOB, row)
+                .get("detections.md");
 
         assertEquals(
                 DETECTIONS_HEADER
@@ -234,8 +236,9 @@ class BehaviorTriagePromptTest {
                 "{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}",
                 null);
 
-        String md =
-                engine(new ObserverProperties(), detections).dossier(JOB, row).get("detections.md");
+        String md = engine(Props.of(ObserverProperties.class), detections)
+                .dossier(JOB, row)
+                .get("detections.md");
 
         assertEquals(
                 DETECTIONS_HEADER + listed + "\nThe newest 50 shown; page the rest through `get_finding_evidence`.\n",
@@ -333,9 +336,8 @@ class BehaviorTriagePromptTest {
 
     @Test
     void theUserMessageStatesTheEffectiveTurnCapAndNotTheTimeout() {
-        ObserverProperties props = new ObserverProperties();
-        props.getAgentic().setMaxTurns(12);
-        props.getAgentic().setTimeoutMs(600_000);
+        ObserverProperties props =
+                Props.of(ObserverProperties.class, "agentic.max-turns", 12, "agentic.timeout-ms", 600_000);
         FindingRow row = finding(BuiltInDetector.Kind.TOOL_ERROR, "k", null, null, null);
 
         String prompt = engine(props).buildPrompt(JOB, row);
@@ -362,7 +364,7 @@ class BehaviorTriagePromptTest {
     /** An engine with one adapter that owns {@code custom-x} and writes {@code # Method x}. */
     private static BehaviorTriageEngine engineOwningCustomX() {
         return engine(
-                new ObserverProperties(),
+                Props.of(ObserverProperties.class),
                 FindingAdapters.of(
                         List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n", "# Method x\n", null))));
     }
@@ -395,7 +397,7 @@ class BehaviorTriagePromptTest {
     void theTriageDossierCarriesTheOwnersTriageMethod() {
         FindingRow row = finding("owned-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"ext_rate\"}", null);
         BehaviorTriageEngine engine = engine(
-                new ObserverProperties(),
+                Props.of(ObserverProperties.class),
                 FindingAdapters.of(List.of(
                         FakeFindingAdapter.owning("owned-x", "# Triage method\n", "# RCA method\n", "# Evidence\n"))));
 
@@ -411,8 +413,7 @@ class BehaviorTriagePromptTest {
     void anOwnedFindingsPromptListsTheMethodFile() {
         FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"ext_rate\"}", null);
 
-        ObserverProperties props = new ObserverProperties();
-        props.getAgentic().setMaxTurns(12);
+        ObserverProperties props = Props.of(ObserverProperties.class, "agentic.max-turns", 12);
         BehaviorTriageEngine engine = engine(
                 props,
                 FindingAdapters.of(
@@ -436,7 +437,7 @@ class BehaviorTriagePromptTest {
         FindingRow row =
                 finding(BuiltInDetector.Kind.TOOL_ERROR, "tool_error_rate:tool:search_docs:up", null, null, null);
         BehaviorTriageEngine engine = engine(
-                new ObserverProperties(),
+                Props.of(ObserverProperties.class),
                 FindingAdapters.of(List.of(FakeFindingAdapter.owning(
                         BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n", "# Method x\n", null))));
 

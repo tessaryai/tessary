@@ -21,6 +21,7 @@ import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.Props;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.api.OpenTelemetry;
@@ -40,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -63,16 +65,16 @@ class E2bTriageSandboxTest {
     private static final ModelsDevRates RATES = bundledRates();
 
     private static ModelsDevRates bundledRates() {
-        ModelsDevProperties p = new ModelsDevProperties();
-        p.setUrl("");
+        ModelsDevProperties p = Props.of(ModelsDevProperties.class, "url", "");
         return new ModelsDevRates(new ObjectMapper(), p);
     }
 
     private static ObserverProperties props() {
-        ObserverProperties p = new ObserverProperties();
-        p.getAgentic().setLauncherUrl("http://launcher");
-        p.getAgentic().setLauncherApiKey("k");
-        return p;
+        return launcherAt("http://launcher");
+    }
+
+    private static ObserverProperties launcherAt(@Nullable String url) {
+        return Props.of(ObserverProperties.class, "agentic.launcher-url", url, "agentic.launcher-api-key", "k");
     }
 
     /** A project that has not pinned the TRIAGE lane — the sandbox falls back to the observer's model. */
@@ -277,8 +279,7 @@ class E2bTriageSandboxTest {
     @NullSource
     @ValueSource(strings = {"  "})
     void anUnsetLauncherThrowsLauncherUnavailableBeforeAnyCall(String launcherUrl) {
-        ObserverProperties bare = props();
-        bare.getAgentic().setLauncherUrl(launcherUrl);
+        ObserverProperties bare = launcherAt(launcherUrl);
         E2bTriageSandbox sandbox = new E2bTriageSandbox(
                 bare,
                 noLaneSetting(),
@@ -308,8 +309,7 @@ class E2bTriageSandboxTest {
                 Map.of("input_tokens", 100, "output_tokens", 20, "cost_usd", 0.5)));
         try (ServerSocket launcher =
                 launcherAnswering(200, MAPPER.writeValueAsString(Map.of("raw", raw, "startMs", 0)))) {
-            ObserverProperties live = props();
-            live.getAgentic().setLauncherUrl("http://127.0.0.1:" + launcher.getLocalPort());
+            ObserverProperties live = launcherAt("http://127.0.0.1:" + launcher.getLocalPort());
             E2bTriageSandbox sandbox = new E2bTriageSandbox(
                     live, noLaneSetting(), credentials(), usage, RATES, OpenTelemetry.noop(), MAPPER);
 

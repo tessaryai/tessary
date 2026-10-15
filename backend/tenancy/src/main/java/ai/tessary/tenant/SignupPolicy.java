@@ -14,10 +14,8 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Who may create an account on this install. Lives under the {@code signupPolicy} key of
- * {@link Organization#settings()}; this build is one organization per install, so the org's
- * policy is the instance's. {@link Mode#OPEN} is the default, so an install that never touches
- * the setting behaves as before. A pending invitation admits in every mode.
+ * Who may create an account on this install, stored under {@code signupPolicy} in {@link Organization#settings()}.
+ * {@link Mode#OPEN} is the default. A pending invitation admits in every mode.
  */
 public record SignupPolicy(Mode mode, List<String> domains) {
 
@@ -53,7 +51,7 @@ public record SignupPolicy(Mode mode, List<String> domains) {
         domains = List.copyOf(domains);
     }
 
-    /** Normalises and validates operator input: lower-cases and de-duplicates domains, requires at least one in domain mode. */
+    /** Lower-cases and de-duplicates domains; domain mode requires at least one. */
     public static SignupPolicy of(@Nullable String mode, @Nullable List<String> domains) {
         Mode m = Mode.parse(mode);
         Set<String> clean = new LinkedHashSet<>();
@@ -75,7 +73,7 @@ public record SignupPolicy(Mode mode, List<String> domains) {
         return new SignupPolicy(m, new ArrayList<>(clean));
     }
 
-    /** The policy stored in an organization's settings blob; {@link #OPEN} when absent or unreadable. */
+    /** {@link #OPEN} when absent or unreadable. */
     public static SignupPolicy fromSettings(@Nullable String settingsJson) {
         if (settingsJson == null || settingsJson.isBlank()) return OPEN;
         try {
@@ -87,17 +85,16 @@ public record SignupPolicy(Mode mode, List<String> domains) {
             }
             return of(node.path("mode").asText("open"), domains);
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
-            // Fail open rather than lock the install: a policy nobody can read must not refuse the
-            // owner who would fix it. Loud, because open is not what the operator asked for.
+            // Fail open: an unreadable policy must not refuse the owner who would fix it. Loud, because open is not
+            // what the operator asked for.
             log.warn("organization settings carry an unreadable signupPolicy; treating it as open");
             return OPEN;
         }
     }
 
     /**
-     * True when {@code proposed} would change the stored {@code signupPolicy}: it carries a different
-     * one, or omits it while one is stored (a whole-blob write would drop it). A caller that wants to
-     * write the rest of the blob keeps the policy with {@link #carryInto}.
+     * True when {@code proposed} carries a different policy, or omits one while one is stored (a whole-blob write would
+     * drop it). {@link #carryInto} keeps it.
      */
     public static boolean changesPolicy(@Nullable String current, @Nullable String proposed) {
         if (proposed == null || proposed.isBlank()) return false;
@@ -117,7 +114,7 @@ public record SignupPolicy(Mode mode, List<String> domains) {
         }
     }
 
-    /** The settings blob with this policy written under {@link #SETTINGS_KEY}; every other key is kept. */
+    /** Every other key is kept. */
     public String intoSettings(@Nullable String settingsJson) {
         ObjectNode root;
         try {
@@ -133,7 +130,6 @@ public record SignupPolicy(Mode mode, List<String> domains) {
         return root.toString();
     }
 
-    /** True when the blob parses and carries no {@code signupPolicy} key at all. */
     public static boolean omitsPolicy(String settingsJson) {
         try {
             return MAPPER.readTree(settingsJson).path(SETTINGS_KEY).isMissingNode();
@@ -142,7 +138,7 @@ public record SignupPolicy(Mode mode, List<String> domains) {
         }
     }
 
-    /** {@code proposed} with the policy stored in {@code current} written into it, so a rename cannot drop it. */
+    /** So a rename cannot drop the policy. */
     public static String carryInto(@Nullable String current, String proposed) {
         if (current == null || current.isBlank() || omitsPolicy(current)) return proposed;
         return fromSettings(current).intoSettings(proposed);

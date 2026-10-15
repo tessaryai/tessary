@@ -26,7 +26,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -38,31 +37,15 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * into the substrate.
  */
 @SpringBootTest
-class SecretLeakRedactionSeamIntegrationTest {
-
-    @Autowired
-    OtlpIngestService otlp;
-
-    @Autowired
-    SubstrateWriter writer;
-
-    @Autowired
-    RedactionService redaction;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    ClassifierWorker worker;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    JdbcClient jdbc;
+record SecretLeakRedactionSeamIntegrationTest(
+        OtlpIngestService otlp,
+        SubstrateWriter writer,
+        RedactionService redaction,
+        ClassifierService classifiers,
+        ClassifierWorker worker,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        JdbcClient jdbc) {
 
     /** A FAKE key in AWS's real format, which the corpus recognises; exempted from the repo scan in .gitleaks.toml. */
     private static final String CANARY = "AKIA" + "QYLPMN5HHHFPZAM2";
@@ -115,7 +98,8 @@ class SecretLeakRedactionSeamIntegrationTest {
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "the ingest write path drained");
 
         Map<String, Object> payload = jdbc.sql(
-                        "SELECT output, redactions::text AS redactions FROM span_payload WHERE project_id = :pid LIMIT 1")
+                        "SELECT output, redactions::text AS redactions FROM span_payload WHERE project_id = :pid LIMIT"
+                                + " 1")
                 .param("pid", pid)
                 .query()
                 .singleRow();
@@ -156,9 +140,9 @@ class SecretLeakRedactionSeamIntegrationTest {
         long witnesses = 0;
         for (int i = 0; i < 100 && witnesses == 0; i++) {
             witnesses = jdbc.sql("""
-                    SELECT COALESCE(SUM((evidence_counts ->> 'witness')::bigint), 0) FROM finding
-                    WHERE project_id = :pid AND classifier_key = 'secret_leak'
-                    """).param("pid", pid).query(Long.class).single();
+                SELECT COALESCE(SUM((evidence_counts ->> 'witness')::bigint), 0) FROM finding
+                WHERE project_id = :pid AND classifier_key = 'secret_leak'
+                """).param("pid", pid).query(Long.class).single();
             if (witnesses == 0) sleep(100);
         }
         assertEquals(1, witnesses, "one leak opens a finding with its span as the witness");

@@ -9,11 +9,12 @@ import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectDeleteJobRepository;
 import ai.tessary.tenant.ProjectRepository;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.SeedRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,22 +25,12 @@ import org.springframework.transaction.annotation.Transactional;
  * dropping {@code project} last), so a repository-only test would pass while the worker was wrong.
  */
 @SpringBootTest
-class ProjectPurgeIntegrationTest {
-
-    @Autowired
-    ProjectPurgeWorker worker;
-
-    @Autowired
-    ProjectDeleteJobRepository jobs;
-
-    @Autowired
-    ProjectRepository projects;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record ProjectPurgeIntegrationTest(
+        ProjectPurgeWorker worker,
+        ProjectDeleteJobRepository jobs,
+        ProjectRepository projects,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     @Test
     @DisplayName("a marked project's rows and the project itself are gone; a neighbour project is untouched")
@@ -73,14 +64,10 @@ class ProjectPurgeIntegrationTest {
         Project p = project("purge-selfref");
         traffic(p, 3);
         // A sibling job the purge should take with it.
-        jdbc.sql("""
-                        INSERT INTO job (id, project_id, kind, status, attempts, payload, created_at, updated_at)
-                        VALUES (:id, :pid, 'classifier', 'pending', 0, '{}', :now, :now)
-                        """)
-                .param("id", "sibling-" + p.id())
-                .param("pid", p.id())
-                .param("now", Instant.now().toString())
-                .update();
+        SeedRows.insert(jdbc, """
+            job | id         | project_id | kind       | status  | attempts | payload | created_at | updated_at
+                | sibling-$1 | $1         | classifier | pending | 0        | {}      | $2         | $2
+            """, p.id(), Instant.now());
 
         accept(p);
         worker.tick();
@@ -141,14 +128,11 @@ class ProjectPurgeIntegrationTest {
         assertEquals(0, rows("trace", p));
     }
 
-    private void insertTrace(Project p, String id, String parentTraceId, String at) {
-        jdbc.sql("INSERT INTO trace (project_id, id, parent_trace_id, started_at, event_ts)"
-                        + " VALUES (:pid, :id, :parent, :at::timestamptz, :at::timestamptz)")
-                .param("pid", p.id())
-                .param("id", id)
-                .param("parent", parentTraceId)
-                .param("at", at)
-                .update();
+    private void insertTrace(Project p, String id, @Nullable String parentTraceId, String at) {
+        SeedRows.insert(jdbc, """
+            trace | project_id | id | parent_trace_id | started_at | event_ts
+                  | $1         | $2 | $3              | $4         | $4
+            """, p.id(), id, parentTraceId, at);
     }
 
     /**
@@ -162,10 +146,10 @@ class ProjectPurgeIntegrationTest {
         accept(p);
         // A purge hung mid-run: claimed, lease expired, attempts past any cap.
         jdbc.sql("""
-                        UPDATE job SET status = 'claimed', lease_owner = 'stuck-worker',
-                                       lease_expires_at = :past, attempts = 99
-                         WHERE kind = 'project_delete' AND dedupe_key = :pid
-                        """)
+            UPDATE job SET status = 'claimed', lease_owner = 'stuck-worker',
+                           lease_expires_at = :past, attempts = 99
+             WHERE kind = 'project_delete' AND dedupe_key = :pid
+            """)
                 .param("past", Instant.now().minusSeconds(3600).toString())
                 .param("pid", p.id())
                 .update();
@@ -279,50 +263,20 @@ class ProjectPurgeIntegrationTest {
     private void traffic(Project p, int n) {
         String at = Instant.now().toString();
         for (int i = 0; i < n; i++) {
-            String traceId = "t-" + p.id() + "-" + i;
-            String spanId = "s-" + p.id() + "-" + i;
-            String mediaId = "m-" + p.id() + "-" + i;
-            jdbc.sql("INSERT INTO trace (project_id, id, started_at, event_ts)"
-                            + " VALUES (:pid, :id, :at::timestamptz, :at::timestamptz)")
-                    .param("pid", p.id())
-                    .param("id", traceId)
-                    .param("at", at)
-                    .update();
-            jdbc.sql("INSERT INTO span (project_id, trace_id, id, kind, started_at, event_ts)"
-                            + " VALUES (:pid, :tid, :id, 'llm', :at::timestamptz, :at::timestamptz)")
-                    .param("pid", p.id())
-                    .param("tid", traceId)
-                    .param("id", spanId)
-                    .param("at", at)
-                    .update();
-            jdbc.sql("INSERT INTO span_payload (project_id, trace_id, span_id, event_ts)"
-                            + " VALUES (:pid, :tid, :sid, :at::timestamptz)")
-                    .param("pid", p.id())
-                    .param("tid", traceId)
-                    .param("sid", spanId)
-                    .param("at", at)
-                    .update();
-            jdbc.sql("INSERT INTO media_object (id, project_id, digest, media_type, bytes, size_bytes, created_at)"
-                            + " VALUES (:id, :pid, :digest, 'image/png', :bytes, 3, :at)")
-                    .param("id", mediaId)
-                    .param("pid", p.id())
-                    .param("digest", "sha256:" + mediaId)
-                    .param("bytes", new byte[] {1, 2, 3})
-                    .param("at", at)
-                    .update();
-            jdbc.sql("INSERT INTO media_ref (project_id, media_id, trace_id, span_id)"
-                            + " VALUES (:pid, :media, :tid, :sid)")
-                    .param("pid", p.id())
-                    .param("media", mediaId)
-                    .param("tid", traceId)
-                    .param("sid", spanId)
-                    .update();
-            jdbc.sql("INSERT INTO tool_call (id, project_id, created_at, event_ts)"
-                            + " VALUES (:id, :pid, :at::timestamptz, :at::timestamptz)")
-                    .param("id", "tc-" + p.id() + "-" + i)
-                    .param("pid", p.id())
-                    .param("at", at)
-                    .update();
+            SeedRows.insert(jdbc, """
+                trace        | project_id | id       | started_at | event_ts
+                             | $1         | t-$2     | $3         | $3
+                span         | project_id | trace_id | id         | kind | started_at | event_ts
+                             | $1         | t-$2     | s-$2       | llm  | $3         | $3
+                span_payload | project_id | trace_id | span_id    | event_ts
+                             | $1         | t-$2     | s-$2       | $3
+                media_object | id         | project_id | digest      | media_type | bytes | size_bytes | created_at
+                             | m-$2       | $1         | sha256:m-$2 | image/png  | $4    | 3          | $3
+                media_ref    | project_id | media_id   | trace_id    | span_id
+                             | $1         | m-$2       | t-$2        | s-$2
+                tool_call    | id         | project_id | created_at  | event_ts
+                             | tc-$2      | $1         | $3          | $3
+                """, p.id(), p.id() + "-" + i, at, new byte[] {1, 2, 3});
         }
     }
 

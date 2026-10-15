@@ -11,9 +11,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Outbound delivery-attempt log. {@link #claim} inserts a {@code pending} row idempotently
- * on {@code (alert_event_id, channel_id)} — first write wins, so a re-fired event never sends twice;
- * {@link #markDelivered}/{@link #markFailed} record the outcome.
+ * Delivery-attempt log. {@link #claim} inserts idempotently on {@code (alert_event_id, channel_id)}, so a re-fired
+ * event never sends twice.
  */
 @Repository
 public class DeliveryAttemptRepository {
@@ -27,11 +26,7 @@ public class DeliveryAttemptRepository {
         this.jdbc = jdbc;
     }
 
-    /**
-     * Reserve the (event, channel) slot. Returns {@code true} when this attempt is the first — the caller
-     * should send. {@code false} means a prior attempt already claimed it (in-flight or done): the caller
-     * must NOT send.
-     */
+    /** {@code false} means a prior attempt claimed it: the caller must not send. */
     public boolean claim(String id, String alertEventId, String channelId, String projectId) {
         return jdbc.sql("""
             INSERT INTO alert_delivery_attempt (id, alert_event_id, channel_id, project_id, status, attempted_at)

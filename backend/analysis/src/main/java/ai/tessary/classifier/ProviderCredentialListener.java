@@ -10,9 +10,8 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Lifts a provider pause when the org saves the key it was waiting on ({@link
- * ClassifierService#unpauseForProvider}). Failures are logged and swallowed: the key is stored either
- * way, and the paused sweep re-checks it on its own after the credential retry interval.
+ * Lifts a provider pause when the org saves the key ({@link ClassifierService#unpauseForProvider}). Failures are
+ * logged: the paused sweep re-checks on its own.
  */
 @Component
 public class ProviderCredentialListener {

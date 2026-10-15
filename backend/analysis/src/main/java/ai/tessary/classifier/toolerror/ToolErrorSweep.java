@@ -11,20 +11,9 @@ import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
- * The tool-error classifier's own sweep: one scheduled pass that replays the hourly aggregate and
- * writes the findings, on the worker's cadence and nobody else's.
- *
- * <p><b>Why this exists at all.</b> The recompute used to run inside {@code ToolErrorCaseSource} — the
- * case reconciler's read path. That made this the one classifier whose findings only advanced while
- * something was looking at Triage: a read that wrote, a rail on the Classifiers page showing whatever
- * the last case pass happened to leave, and no way to ask a project what its tool-error findings were
- * without changing them. The work is unchanged; where it is driven from is not.
- *
- * <p><b>No cursor, deliberately.</b> Every other sweep pages over substrate and advances
- * {@code (cursor_at, cursor_id)} so it never re-reads a trace. This one re-derives every number from an
- * hourly aggregate over a fixed replay window on every pass ({@link ToolErrorService#REPLAY_WINDOW}), so
- * there is no position to remember and the job is marked swept with a null cursor. Idempotence comes
- * from the recompute itself — counts are assigned rather than added — not from a watermark.
+ * The tool-error classifier's own sweep, so findings advance on the worker's cadence rather than when someone reads
+ * Triage. No cursor: every pass re-derives from the hourly aggregate over {@link ToolErrorService#REPLAY_WINDOW}, and
+ * idempotence comes from assigning counts rather than adding them.
  */
 @Component
 public class ToolErrorSweep implements ClassifierSweep {
@@ -37,21 +26,13 @@ public class ToolErrorSweep implements ClassifierSweep {
         this.service = service;
     }
 
-    /**
-     * Run one tool-error pass for a claimed job.
-     *
-     * <p>The job is marked swept whatever the recompute found, including when the classifier is disabled
-     * or the project has no tool traffic: an unfinished job would be re-claimed forever and burn the
-     * dead-letter budget on a classifier that is working exactly as configured.
-     */
+    /** Marked swept whatever it found, or the job would be re-claimed forever and burn the dead-letter budget. */
     @Override
     public SweepOutcome sweep(SweepContext ctx) {
         ClassifierJobRow job = ctx.job();
         int spells = service.refresh(job.projectId());
         jobs.markSwept(job.id(), null, null);
-        // `scanned` is 0 and `fired` counts TOOLS IN A SPELL, never failing calls: this sweep reads an
-        // hourly aggregate rather than a page of rows, so there is no unit it can honestly report having
-        // scanned.
+        // `scanned` is 0 and `fired` counts tools in a spell: an aggregate has no unit to report as scanned.
         return new SweepOutcome(0, spells);
     }
 

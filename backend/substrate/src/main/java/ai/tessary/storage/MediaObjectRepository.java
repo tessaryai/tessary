@@ -8,9 +8,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * JdbcClient repository for the {@code media_object} table — externalized,
- * per-project content-addressed media bytes. Same named-parameter pattern as the other substrate repos.
- * The {@code (project_id, digest)} unique key makes {@link #insert} first-write-wins for identical bytes.
+ * Repository for {@code media_object}. The {@code (project_id, digest)} unique key makes {@link #insert}
+ * first-write-wins.
  */
 @Repository
 public class MediaObjectRepository {
@@ -21,7 +20,6 @@ public class MediaObjectRepository {
         this.jdbc = jdbc;
     }
 
-    /** The existing row id for {@code (projectId, digest)}, or empty — the dedup lookup. */
     public Optional<String> findIdByDigest(String projectId, String digest) {
         return jdbc.sql("SELECT id FROM media_object WHERE project_id = :pid AND digest = :digest")
                 .param("pid", projectId)
@@ -30,7 +28,6 @@ public class MediaObjectRepository {
                 .optional();
     }
 
-    /** Insert; a concurrent duplicate {@code (project_id, digest)} is a first-write-wins no-op. */
     public void insert(
             String id,
             String projectId,
@@ -54,7 +51,6 @@ public class MediaObjectRepository {
                 .update();
     }
 
-    /** Fetch stored media (type + bytes) by id within a project. */
     public Optional<StoredMedia> findById(String projectId, String id) {
         return jdbc.sql("SELECT id, media_type, bytes FROM media_object WHERE project_id = :pid AND id = :id")
                 .param("pid", projectId)

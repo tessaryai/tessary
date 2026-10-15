@@ -1,65 +1,12 @@
 name: Check
 
-# Runs `bash scripts/check.sh`, the CI-callable entrypoint documented in that script's own header.
-# The Docker-backed boot checks live separately in boot-checks.yml.
-#
-# Everything before the final step assembles the toolchains that script needs in one job:
-# Java (backend, and check-backend.sh hard-fails on the wrong JDK first), pnpm + node (frontend, sandbox-runner and mcp-bridge),
-# uv (the groundedness gates), and caddy on PATH (the caddy gate). The gates that shell out to
-# python3 use only its standard library, so the runner image's own python3 serves them. Order
-# matters once: pnpm/action-setup must run before actions/setup-node, since setup-node's pnpm
-# cache shells out to pnpm to resolve the store path.
-#
-# This repo's GitHub plan doesn't support branch protection or rulesets, so nothing enforces
-# this workflow as a required check yet beyond convention: treat a red run as blocking even
-# though GitHub won't stop a merge past it. Wire it into branch protection for real once the
-# plan or visibility changes.
+# scripts/check.sh split into three parallel jobs: backend tests, backend lint, and everything else.
+# `task check` still runs all of it locally. Nothing is merge-blocking: this repo's plan offers no
+# branch protection, so a red run is blocking by convention only.
 on:
-  # Armed per PR. scripts/check.sh is a superset of what the old drift-checks.yml's fourteen jobs ran, so one
-  # job here buys more coverage per PR than that weekly cron ever did, and it is the gate this file
-  # was always written to be. If the minutes bill bites, the revert is deleting the `pull_request:`
-  # line; nothing else in this file depends on it.
   pull_request:
-    # DOC-ONLY PRS DO NOT RUN THIS. Safe because scripts/check.sh's own header carries a standing
-    # rule that no gate in that pipeline is keyed on prose, and the four that were are deleted. Prose is checked by Mintlify's own PR check over docs/, which is where
-    # that job belongs; nothing here duplicates it. The two named exceptions in that header read
-    # machine text, not prose: check-blob-links.sh's link paths in docs/ and README.md are skipped
-    # by a docs-only PR and read by the next PR that runs, since it scans the tree; the groundedness
-    # setup MDs live under classifiers/, which this filter does not ignore.
-    # secret-scan.yml deliberately keeps no filter: a credential can land in a README.
-    #
-    # `.github/**` IS ON THE LIST TOO. Broken YAML in a workflow-only PR is still caught, by GitHub
-    # itself, which reports an unparseable workflow on the PR without running anything.
-    #
-    # ONE KNOWN GAP THEN, ACCEPTED ON PURPOSE, so nobody re-derives it as a bug later:
-    # check-version-consistency.sh does not read prose, but it does scan every path `git ls-files`
-    # returns, .md and .mdx included, for a `tessaryai/tessary:<service>-<semver>` literal, the
-    # shape an install block pastes.
-    #
-    # THE GAP LOSES NO COVERAGE, AND THAT IS THE WHOLE REASON IT IS ACCEPTABLE. The gate scans the
-    # tree, not the diff, so the next PR that touches code re-reads the file the skipped PR changed
-    # and fails there. What the trade actually costs is blame: the failure surfaces on a diff that
-    # does not contain the offending file. `git log -S` on the literal is the way back. If that
-    # bites more than once, the answer is a workflow triggered on these paths running that gate,
-    # not deleting the filter below.
-    #
-    # A DENYLIST, NOT AN ALLOWLIST, on purpose. With `paths:` a new top-level code directory would
-    # be silently ungated until someone remembered to add it; with `paths-ignore:` it is gated by
-    # default and only prose has to be named. Filters apply to `pull_request:` only — a
-    # workflow_dispatch run is never filtered, so the manual escape hatch below still runs the gate
-    # over any diff.
-    #
-    # NOT `**/*.md`, and that is the whole subtlety. Eight markdown files in this repo are build
-    # inputs rather than prose: backend/analysis/src/main/resources/prompt-craft/**/*.md are loaded
-    # by PromptCraft.text() and asserted by PromptResourceParityTest inside `mvn verify`. A blanket
-    # markdown ignore would skip the gate on exactly the prompt edit it should catch. Every glob
-    # below is anchored so those keep triggering: `*.md` is root-level only, and the two `**` globs
-    # name files no gate reads.
-    #
-    # Branch protection is plan-gated here (see the top of this file), so a skipped run costs
-    # nothing today. Once it is armed, a required check that never reports blocks the merge
-    # forever, and the fix is a second workflow of the same name with the inverse filter that does
-    # nothing but pass.
+    # Doc-only PRs skip this; no gate reads prose (see scripts/check.sh). A denylist so a new code
+    # directory is gated by default. Not `**/*.md`: prompt-craft/**/*.md are build inputs.
     paths-ignore:
       - '*.md'
       - '**/README.md'
@@ -68,60 +15,62 @@ on:
       - 'devdocs/**'
       - 'handbook/**'
       - '.github/**'
-    # THE DEFAULT SET IS opened + synchronize + reopened. Naming it explicitly costs the two below,
-    # and both are load-bearing:
-    #
-    #   ready_for_review — the other half of the draft guard on the job. A PR opened as a draft and
-    #     later marked ready fires ONLY this event; without it that PR sits with no run until
-    #     somebody pushes again, which is the failure mode where a green tick never appears and
-    #     nobody notices the gate did not run.
-    #   closed — not because anything should run on a close. The run it starts skips every job (see
-    #     the job's `if:`); what it is for is entering this workflow's concurrency group, which
-    #     cancels whatever is still in flight for the same PR. Merging with the gate half-finished
-    #     used to leave a ten-minute job running against a ref nobody will act on.
+    # ready_for_review runs a PR opened as a draft. closed runs nothing but enters the concurrency
+    # group, which cancels the in-flight run on merge.
     types: [opened, synchronize, reopened, ready_for_review, closed]
   workflow_dispatch:
 
-# One run per PR at a time. Without this, every push to an open PR starts a fresh run while the
-# previous one keeps going to completion; on a stacked branch that is most of the minutes bill.
-# cancel-in-progress is the opposite of release.yml's setting, deliberately: a superseded check is
-# waste, a superseded release is a half-published registry.
-#
-# THIS IS ALSO WHAT KILLS A RUN ON MERGE. `github.ref` is refs/pull/<n>/merge for every
-# pull_request activity type, close included, so the do-nothing run that a close starts lands in
-# this same group and cancels the in-flight one. Nothing polls and nothing needs `actions: write`.
-# The consequence of it ever breaking is a wasted job, not a missed check, so it fails safe.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Each job's `if:` skips drafts and closes. The event_name clause is required: on workflow_dispatch
+# `github.event.pull_request.draft` is null, and `null == false` is false.
 jobs:
-  open-edition:
-    name: check.sh (the full gate manifest)
-    runs-on: ubuntu-latest
-
-    # DRAFT PRS DO NOT RUN THE GATE, and a close runs nothing at all.
-    #
-    # A draft is work in progress by declaration; running a ten-minute gate on every push to one
-    # is the single largest avoidable line on the bill. Marking it ready fires ready_for_review,
-    # which is in the types list above, so the gate runs before anybody can review it and nothing
-    # reaches a mergeable state ungated.
-    #
-    # THE FIRST CLAUSE IS NOT DECORATION. On workflow_dispatch there is no pull_request payload, so
-    # `github.event.pull_request.draft` is null, and `null == false` is false: without the guard
-    # around it, the manual escape hatch this file advertises would silently skip every job.
+  backend-tests:
+    name: Backend tests and coverage
     if: >-
       github.event_name != 'pull_request'
       || (github.event.action != 'closed' && github.event.pull_request.draft == false)
-
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
           cache: maven
+      - run: bash scripts/check-backend.sh tests
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: backend-jacoco-coverage
+          path: backend/*/target/site/jacoco*/**
+          if-no-files-found: warn
+
+  backend-lint:
+    name: Backend lint (Spotless, forbidden-apis, SpotBugs, Error Prone)
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.event.action != 'closed' && github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - run: bash scripts/check-backend.sh lint
+
+  gates:
+    name: Frontend and repo gates
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.event.action != 'closed' && github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
 
       # Must precede setup-node: its `cache: pnpm` shells out to pnpm to resolve the store path.
       - uses: pnpm/action-setup@v6
@@ -135,32 +84,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
 
-      # check-groundedness-serve.sh runs serve.py's tests with `uv run --no-project --with pytest`, and
-      # check-groundedness-setup.sh runs `uvx cfn-lint` on the AWS template. Neither syncs
-      # classifiers/uv.lock, so there is nothing to cache.
+      # The groundedness gates use uv without syncing classifiers/uv.lock, so there is nothing to
+      # cache. The python3 gates need only the standard library, which the runner image provides.
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: false
 
       - name: Install Caddy
-        # A pinned release tarball, not the Cloudsmith apt repo. The apt route cost 41 seconds of
-        # this job, and almost none of it was the download: it ran `apt-get update` TWICE (once to
-        # be able to install the keyring packages, once more after writing the new sources list),
-        # and installed debian-keyring, debian-archive-keyring and apt-transport-https purely so
-        # apt could be taught to trust a third-party repo. All of that machinery existed to deliver
-        # one statically linked binary.
-        #
-        # Nothing here needs the apt package's extras. scripts/check-caddy.sh only ever runs
-        # `caddy validate` — no systemd unit, no `caddy` user, no /etc/caddy, no service that has
-        # to survive a reboot. A binary on PATH is the entire toolchain that gate wants.
-        #
-        # PINNED ON PURPOSE. An unpinned `apt-get install caddy` meant this gate's result depended
-        # on which Caddy was current the day it ran, so a Caddyfile that validated on Monday could
-        # red on Friday with nothing in the diff. Bumping is a two-line edit: CADDY_VERSION and
-        # CADDY_SHA512 move together, and the hash is copied verbatim out of the release's own
-        # caddy_<version>_checksums.txt. Note that file is SHA-512, not SHA-256 — hence
-        # `sha512sum` below; feeding a 64-char SHA-256 to it fails with a format error, which is
-        # the correct outcome but an easy one to misread as a corrupted download.
+        # A pinned release binary is all check-caddy.sh needs (`caddy validate`). The release's
+        # checksums file is SHA-512, so bump CADDY_VERSION and CADDY_SHA512 together.
         env:
           CADDY_VERSION: 2.11.4
           CADDY_SHA512: 8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9
@@ -169,45 +101,13 @@ jobs:
           tarball="caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
           workdir="$(mktemp -d)"
           cd "$workdir"
-
-          # --fail matters more than it looks: without it curl happily writes a 404 page to the
-          # output file and exits 0, and the failure then surfaces one line later as a checksum
-          # mismatch, which reads like a supply-chain event rather than a wrong version string.
-          # --retry covers a flaky release CDN without papering over a genuinely absent asset,
-          # since a 404 is not retried into success.
-          curl --fail --location --silent --show-error \
-               --retry 3 --retry-all-errors \
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
                --output "$tarball" \
                "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/${tarball}"
-
-          # The gate. `set -e` plus a non-zero sha512sum is what stops the job; there is no
-          # fallback path and deliberately no `|| true` anywhere in this step. If this line fails,
-          # the run must die here rather than continue to `check.sh` and fail there with
-          # "caddy: command not found", which points at the wrong thing.
           echo "${CADDY_SHA512}  ${tarball}" | sha512sum --check --strict -
-
-          # Extract only the binary; the tarball also carries LICENSE and README.md, which have no
-          # business in /usr/local/bin.
           sudo tar -xzf "$tarball" -C /usr/local/bin caddy
           sudo chmod 0755 /usr/local/bin/caddy
           cd / && rm -rf "$workdir"
-
-          # Prove it before check-caddy.sh has to. A binary that unpacked but will not execute
-          # (wrong arch, missing loader) fails here with a legible message instead of surfacing as
-          # that gate's "the dev Caddyfile does not validate".
           caddy version
 
-      # CI never loads the Taskfile, so this calls the script directly.
-      - run: bash scripts/check.sh
-
-      # Coverage baseline. The JaCoCo report is a build-time side effect of the
-      # `mvn verify` inside check-backend.sh; this step only captures it. It lived in the old
-      # drift-checks.yml `backend` job and moved here with that file's trim, so the artifact keeps being
-      # produced, on every PR now rather than weekly. `if: always()` so a red run still leaves a
-      # baseline to look at.
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: backend-jacoco-coverage
-          path: backend/*/target/site/jacoco*/**
-          if-no-files-found: warn
+      - run: bash scripts/check.sh --skip-backend

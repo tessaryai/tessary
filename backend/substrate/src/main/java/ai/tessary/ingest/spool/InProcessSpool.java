@@ -17,24 +17,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The default spool: an in-memory queue bounded by payload bytes. Accepted means queued; a
- * full queue sheds, and the edge answers the producer with a retryable status so a stock exporter
- * re-sends into the idempotent write path. A restart loses what is queued, which is the contract the
- * runbook publishes for this mode; the Kafka-API spool is the opt-in for "accepted means persisted".
- *
- * <p>Bytes are the only ceiling: a batch holds its entries' payloads inline and can span an ~80x size
- * range, so a count bounds nothing that matters, and the per-entry allowance in {@link #measure}
- * already caps how many batches the byte budget can hold (fewer than 140k at 64 MiB), so the queue's
- * own node chain needs no guard of its own.
+ * The default spool: in memory, bounded by payload bytes; a restart loses what is queued. Bytes are the only ceiling
+ * because batches span an ~80x size range, and the per-entry allowance in {@link #measure} already bounds the batch
+ * count.
  */
 public final class InProcessSpool implements IngestSpool {
 
     private static final Logger log = LoggerFactory.getLogger(InProcessSpool.class);
 
-    /**
-     * Fixed allowance per entry for the object graph around its payload — the record itself, its field
-     * references, the boxed strings' headers. 512 bytes is generous for a record of fifteen references.
-     */
+    /** Generous for a record of fifteen references. */
     private static final long ENTRY_OVERHEAD_BYTES = 512;
 
     private static final long METADATA_VALUE_BYTES = 32;
@@ -44,10 +35,9 @@ public final class InProcessSpool implements IngestSpool {
     private final AtomicLong queuedBytes = new AtomicLong();
     private final AtomicLong dropped = new AtomicLong();
 
-    /** Nanotime the batch a drainer is holding was enqueued, 0 when none: the in-flight half of the oldest age. */
+    /** 0 when none: the in-flight half of the oldest age. */
     private final AtomicLong inFlightEnqueuedAtNanos = new AtomicLong();
 
-    /** The monotonic clock batch ages are read from: {@link System#nanoTime} outside tests. */
     private final LongSupplier nanoTime;
 
     public InProcessSpool(SubstrateProperties props) {
@@ -55,7 +45,7 @@ public final class InProcessSpool implements IngestSpool {
     }
 
     InProcessSpool(SubstrateProperties props, LongSupplier nanoTime) {
-        this.maxQueueBytes = Math.max(1L, props.getQueueMaxBytes());
+        this.maxQueueBytes = Math.max(1L, props.queueMaxBytes());
         this.nanoTime = nanoTime;
     }
 
@@ -63,10 +53,8 @@ public final class InProcessSpool implements IngestSpool {
     public Admission append(String projectId, List<RawEntry> entries) {
         long bytes = measure(entries);
         if (bytes > maxQueueBytes) {
-            // Never park a batch that cannot fit even an empty queue: its reservation could only be
-            // satisfied by a drain that will never come, so it would hold the admission gate shut against
-            // every other producer until something restarted the process. Answering OVERSIZE makes it
-            // retryable, and the producer's resend can only succeed if it splits.
+            // A batch that cannot fit an empty queue would hold the admission gate shut forever; OVERSIZE tells the
+            // producer to split.
             log.warn(
                     "substrate batch exceeds the whole write budget — refused project={} spans={} bytes={} budget={}",
                     projectId,
@@ -104,7 +92,7 @@ public final class InProcessSpool implements IngestSpool {
 
     @Override
     public void nack(Claimed claimed) {
-        // Nothing durable to keep it in: the batch is gone, and the counter is the only trace of it.
+        // The counter is the only trace of the dropped batch.
         inFlightEnqueuedAtNanos.set(0);
         dropped.incrementAndGet();
         queuedBytes.addAndGet(-claimed.bytes());
@@ -112,8 +100,7 @@ public final class InProcessSpool implements IngestSpool {
 
     @Override
     public Stats stats() {
-        // The oldest unprocessed batch is the one a drainer is holding, if any, else the queue head: a
-        // hung write with an empty queue must read as a growing age, not as idle.
+        // A hung write with an empty queue must read as a growing age, not as idle.
         long now = nanoTime.getAsLong();
         long inFlight = inFlightEnqueuedAtNanos.get();
         Claimed head = queue.peek();
@@ -127,21 +114,15 @@ public final class InProcessSpool implements IngestSpool {
         return (double) queuedBytes.get() / maxQueueBytes;
     }
 
-    /**
-     * Take {@code bytes} out of the budget, or refuse. One atomic update rather than a read-then-add: two
-     * producers reading the same headroom and both adding would both be admitted, and the queue would
-     * settle above its ceiling by however much the losing thread reserved.
-     */
+    /** One atomic update: a read-then-add lets two producers both be admitted over the ceiling. */
     private boolean reserve(long bytes) {
         long before = queuedBytes.getAndUpdate(current -> current + bytes > maxQueueBytes ? current : current + bytes);
         return before + bytes <= maxQueueBytes;
     }
 
     /**
-     * A batch's payload size — the character content it carries plus {@link #ENTRY_OVERHEAD_BYTES} per
-     * entry. Summing lengths is cheap because the strings are already in hand. Character count, not
-     * encoded length: for the ASCII-dominant JSON on this path they agree, and where they do not the
-     * count under-reads by less than the per-entry allowance covers.
+     * Character count, not encoded length: for this ASCII-dominant JSON they agree, and any under-read is within the
+     * per-entry allowance.
      */
     static long measure(List<RawEntry> entries) {
         long total = 0;

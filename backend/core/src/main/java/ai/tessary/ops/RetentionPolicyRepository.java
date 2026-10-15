@@ -7,10 +7,7 @@ import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/**
- * Persistence for retention policies (P6.8a). {@link #upsert} is keyed on {@code (project_id,
- * data_class)} so setting a class's TTL is idempotent (one policy per class).
- */
+/** {@link #upsert} is keyed on {@code (project_id, data_class)}, one policy per class. */
 @Repository
 public class RetentionPolicyRepository {
 
@@ -41,7 +38,7 @@ public class RetentionPolicyRepository {
                 .update();
     }
 
-    /** Removes a project's override for one data class, so the platform default applies again. */
+    /** The platform default applies again. */
     public boolean delete(String projectId, String dataClass) {
         return jdbc.sql("DELETE FROM retention_policy WHERE project_id = :pid AND data_class = :dataClass")
                         .param("pid", projectId)

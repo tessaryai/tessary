@@ -1,32 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * What Triage says when the queue is empty.
- *
- * An empty queue is not one state, it is four, and the screen this replaced could tell apart only
- * two of them — it branched on `traces_last_day === 0` and swapped the whole headline to "Nothing is
- * arriving." Neither branch offered anywhere to go, and the silent one told a project with months of
- * history that nothing had ever arrived.
- *
- * The four are ordered by how far a project has got, and the FIRST match wins: a project with no
- * classifiers has no findings either, and saying "nothing to review" to it would be true and useless.
- * Whichever stage is the first one not satisfied is the stage the screen is about, and the primary
- * action goes there — so the branch table and the pipeline drawn above it are the same fact twice,
- * and neither can drift from the other.
- *
- * Traces stopping is deliberately NOT a fifth state. It can be true underneath any of the four, so
- * it modifies the traces node and adds a line; it never takes the headline. That is what keeps the
- * headline from contradicting the trace count sitting beside it.
- *
- * A missing model provider key is the SECOND modifier, and it is the one exception to the sentence
- * above: at the FOURTH state it does take the headline. It earns that, and only there. Everywhere
- * else a stage still owns the screen and has its own next step, so the key gets the note line and
- * nothing more — there is no point asking for a key before a finding exists to be blocked by it.
- * At the fourth state a finding IS blocked, nothing else is the subject, and the old headline was
- * describing a judgment triage never made.
- *
- * Pure on purpose — two payloads in, a description out, no rendering and no clock beyond the one
- * `relativeTime` reads. That is what makes the whole table cheap to test.
- */
+// What Triage says when the queue is empty: four states ordered by how far a project has got, first
+// match wins. Stopped traces and a missing provider key are modifiers, not states; only at the fourth
+// state does the provider gap take the headline. Pure, so the whole table is cheap to test.
 import type { TriageView } from "../../api/types";
 import type { Onboarding } from "../onboarding/useOnboarding";
 import { relativeTime } from "../../lib/relativeTime";
@@ -68,15 +43,9 @@ export interface EmptyState {
 }
 
 /**
- * What the screen knows about the org's model provider keys.
- *
- * `configured` is nullable on purpose. `null` means the read has not settled, and an unsettled read
- * must never fire the modifier: telling a project that has a key it has none, for the half second
- * before the read lands, is a worse failure than being a beat late to say it.
- *
- * `canConfigure` is the `byo_provider_keys_enabled` capability, and it decides whether this screen
- * offers the fix or only names it. The capability gates the Providers route itself — without it,
- * that route redirects straight back to this one — so a CTA pointing there would be a loop.
+ * What the screen knows about the org's provider keys. `configured` is null while the read is in flight,
+ * which must never fire the modifier. Without `canConfigure` the Providers route redirects back here, so
+ * the screen names the fix instead of linking to it.
  */
 export interface ProviderFacts {
   /** How many providers the ORG holds a key for, or null while the read is in flight. */
@@ -106,8 +75,7 @@ export function resolveState(
   const classifiers = watching.classifiers;
   const callSites = watching.call_sites;
 
-  // Traces stopping is the modifier. It reads the 24h window — the one number on this payload that
-  // exists to answer "is the exporter alive", and the one this screen must never print on its own.
+  // Reads the 24h window, the one number here that answers "is the exporter alive".
   const stale = watching.traces_last_day === 0;
   const tracesTo = `${basePath}/traces`;
   const classifiersTo = `${basePath}/classifiers`;
@@ -116,10 +84,7 @@ export function resolveState(
   const tracesNode = (tone: NodeTone): PipelineNode => ({
     label: "Traces",
     value: count(traces),
-    // Under the modifier the sub-label carries the recency, since that is the fact the reader needs
-    // and the one the value deliberately does not encode. With no trace ever recorded there is no
-    // recency to state — the sample project reaches this screen without the connect gate — so say
-    // that instead of rendering "last trace —".
+    // With no trace ever recorded (the sample project skips the connect gate) there is no recency to state.
     sub: stale
       ? lastTrace
         ? `last trace ${relativeTime(lastTrace)}`
@@ -135,9 +100,7 @@ export function resolveState(
   };
 
   const state = ((): EmptyState => {
-    // 1. Nothing is evaluating the traffic. First, because every stage after it is downstream of a
-    //    classifier existing — and a classifier can be disabled and forgotten, so zero is a real
-    //    thing to say out loud rather than an impossible state.
+    // 1. Nothing is evaluating the traffic. A classifier can be disabled and forgotten, so zero is real.
     if (classifiers === 0) {
       return {
         key: "no-classifiers",
@@ -158,9 +121,7 @@ export function resolveState(
       };
     }
 
-    // 2. Classifiers exist but cannot compare yet. Not an absence of findings — an absence of the
-    //    baseline a finding would be measured against, which is a different sentence and the whole
-    //    reason a new project is not told that all is well.
+    // 2. Classifiers exist but have no baseline yet, which is why a new project is not told all is well.
     if (onboarding.stage === "fitting") {
       const armed = onboarding.data?.baseline_buckets_armed ?? 0;
       const buckets = onboarding.data?.baseline_buckets ?? 0;
@@ -187,8 +148,7 @@ export function resolveState(
       };
     }
 
-    // 3. Watching, and nothing has moved. The only one of the four that is genuinely an all-clear,
-    //    and it earns the claim by naming what did the watching.
+    // 3. Watching, and nothing has moved: the only genuine all-clear.
     if (live === 0) {
       return {
         key: "no-findings",
@@ -204,9 +164,7 @@ export function resolveState(
       };
     }
 
-    // 4. Findings exist and none of them became a case. The distinction the glossary turns on:
-    //    triage is what decides a finding is a real issue, and it has not. The findings themselves are
-    //    listed in the Findings section below Cases on this page, so there is no "review" link to offer.
+    // 4. Findings exist and none became a case. They are listed below Cases, so there is no "review" link.
     return {
       key: "no-cases",
       title: "No open cases",
@@ -228,13 +186,8 @@ export function resolveState(
   const withProviders = applyProviderGap(state, providers, live, basePath, tracesTo);
 
   if (!stale) return withProviders;
-  // The modifier, applied last so it cannot be forgotten in a branch. It replaces the secondary
-  // rather than adding a third action: the reader is being asked to go and check one thing, and a
-  // screen offering three ways out is not asking anything.
-  //
-  // Applied last also settles what happens when BOTH modifiers are live: there is one note slot and
-  // the exporter takes it, because a stopped exporter is the thing to go and check first. The
-  // provider gap keeps its headline, its cases node and its primary action, so neither fact is lost.
+  // The staleness modifier, applied last so no branch forgets it, replaces the secondary action. With both
+  // modifiers live the exporter takes the one note slot; the provider gap keeps its headline and action.
   return {
     ...withProviders,
     note: "No traces have arrived in the last 24 hours. Check that your exporter is still sending.",
@@ -243,24 +196,9 @@ export function resolveState(
 }
 
 /**
- * The second modifier: the org holds no model provider key, so triage has nothing to run on.
- *
- * It applies at three strengths, and which one fires is decided by how far the project has got —
- * the same ordering the branch table above uses, for the same reason.
- *
- *   1-2. `no-classifiers` / `fitting` — a stage still owns the screen and has its own next step, and
- *        a key cannot block anything yet because no finding exists. The note line, and nothing else.
- *   3.   `no-findings` — still nothing blocked, so the all-clear headline stands. But this is the
- *        last moment before a finding arrives, so the screen offers the key and warns the cases node.
- *   4.   `no-cases` — a finding IS blocked. Here the gap TAKES the headline, the one place in this
- *        file where a modifier does. It earns it twice over: nothing else is the subject, and the
- *        headline it replaces was describing a judgment triage never made. The old body said triage
- *        "hasn't determined that it is a real issue", which reads as a verdict. Triage never ran —
- *        the run throws on the missing credential before it reaches a model.
- *
- * Every strength splits on the capability. With it the screen offers the fix; without it the org
- * cannot hold a key at all, so the screen states the fact and leaves the existing action alone
- * rather than pointing at a route that would redirect straight back here.
+ * The org holds no provider key, so triage has nothing to run on. At `no-classifiers`/`fitting` it is a
+ * note; at `no-findings` the screen offers the key; at `no-cases` it takes the headline, because triage
+ * never ran. Without the capability the screen states the fact and leaves the existing action alone.
  */
 function applyProviderGap(
   state: EmptyState,
@@ -272,8 +210,6 @@ function applyProviderGap(
   if (providers.configured !== 0) return state;
 
   const addKey: Action = { kind: "link", label: "Add a provider key", to: `${basePath}/settings/providers` };
-  // Where the key lives, which no button label has room to say. It is also the answer to the
-  // question an engineer who cannot add one asks next: this is not a setting on their project.
   const shared = "Provider keys are shared by every project in this organization.";
   const blocked: PipelineNode = { label: "Cases open", value: "0", sub: "triage cannot run", tone: "warn" };
 
@@ -315,12 +251,8 @@ function applyProviderGap(
 }
 
 /**
- * Whether the empty queue needs the setup screen rather than one "Nothing needs you." line.
- *
- * Only findings that no case came from can be a line, because Triage lists those right below Cases. With no
- * finding open there is no list to show, so the pipeline stays: it is the proof that traces are arriving and
- * being watched. Every other state has a step for the reader to take, and so does any state carrying a note
- * (a stopped exporter, a missing provider key).
+ * Whether the empty queue needs the setup screen rather than one "Nothing needs you." line. Only findings no
+ * case came from can be a line, since Triage lists them below Cases; any note also needs the screen.
  */
 export function needsSetupScreen(state: EmptyState): boolean {
   return state.key !== "no-cases" || state.note != null;

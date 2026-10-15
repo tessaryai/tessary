@@ -10,29 +10,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiKey, ApiKeyAudit } from "../../api/types-auth";
 import { renderRoute } from "../../test/render";
 import { ApiKeys } from "./ApiKeys";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listApiKeys: vi.fn(),
-  listApiKeyAudit: vi.fn(),
-  createApiKey: vi.fn(),
-  rotateApiKey: vi.fn(),
-  revokeApiKey: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const NOW = new Date("2026-09-25T12:00:00Z");
 const key = (over: Partial<ApiKey>): ApiKey => ({
-  id: "k-1",
-  name: "ingest-prod",
-  scope: "write",
-  token_prefix: "tsy_w_ab12",
-  created_at: "2026-09-25T11:55:00Z",
-  last_used_at: null,
-  revoked_at: null,
-  created_by_user_id: "u-1",
-  ...over,
+  id: "k-1", name: "ingest-prod", scope: "write", token_prefix: "tsy_w_ab12", created_at: "2026-09-25T11:55:00Z",
+  last_used_at: null, revoked_at: null, created_by_user_id: "u-1", ...over,
 });
 const issued = (k: ApiKey, plaintext: string) => ({ key: k, plaintext, warning: "shown once" });
 
@@ -181,27 +166,25 @@ describe("rotating and revoking", () => {
   });
 });
 
-describe("the audit trail", () => {
-  it("names each action's key, and says when there is none or it could not load", async () => {
-    const entry = (over: Partial<ApiKeyAudit>): ApiKeyAudit => ({ id: "a", project_id: "p", api_key_id: null, actor_user_id: null, action: "created", details: null, created_at: "2026-09-25T11:00:00Z", ...over });
-    api.listApiKeyAudit.mockResolvedValue([
-      entry({ id: "1", action: "created", details: "created ingest-prod" }),
-      entry({ id: "2", action: "rotated", api_key_id: "0123456789abcdef" }),
-      entry({ id: "3", action: "revoked" }),
-    ]);
-    renderRoute(<ApiKeys />);
-    expect(await screen.findByText("created ingest-prod")).toBeTruthy();
-    expect(screen.getByText("Key 01234567…")).toBeTruthy();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-    cleanup();
+it("the audit trail: names each action's key, and says when there is none or it could not load", async () => {
+  const entry = (over: Partial<ApiKeyAudit>): ApiKeyAudit => ({ id: "a", project_id: "p", api_key_id: null, actor_user_id: null, action: "created", details: null, created_at: "2026-09-25T11:00:00Z", ...over });
+  api.listApiKeyAudit.mockResolvedValue([
+    entry({ id: "1", action: "created", details: "created ingest-prod" }),
+    entry({ id: "2", action: "rotated", api_key_id: "0123456789abcdef" }),
+    entry({ id: "3", action: "revoked" }),
+  ]);
+  renderRoute(<ApiKeys />);
+  expect(await screen.findByText("created ingest-prod")).toBeTruthy();
+  expect(screen.getByText("Key 01234567…")).toBeTruthy();
+  expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  cleanup();
 
-    api.listApiKeyAudit.mockResolvedValue([]);
-    renderRoute(<ApiKeys />);
-    expect(await screen.findByText("No activity yet.")).toBeTruthy();
-    cleanup();
+  api.listApiKeyAudit.mockResolvedValue([]);
+  renderRoute(<ApiKeys />);
+  expect(await screen.findByText("No activity yet.")).toBeTruthy();
+  cleanup();
 
-    api.listApiKeyAudit.mockRejectedValue(new Error("audit unavailable"));
-    renderRoute(<ApiKeys />);
-    expect(await screen.findByText("audit unavailable")).toBeTruthy();
-  });
+  api.listApiKeyAudit.mockRejectedValue(new Error("audit unavailable"));
+  renderRoute(<ApiKeys />);
+  expect(await screen.findByText("audit unavailable")).toBeTruthy();
 });

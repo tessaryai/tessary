@@ -2,7 +2,6 @@
 import type { ReactNode } from "react";
 import { cn } from "./cn";
 
-/** A bordered `<details>` disclosure with a title row and optional inline meta. */
 export function Collapsible({
   title,
   meta,
@@ -11,7 +10,6 @@ export function Collapsible({
 }: {
   title: string;
   meta?: ReactNode;
-  /** Fires with the open state on every expand/collapse (e.g. to gate lazy queries). */
   onToggle?: (open: boolean) => void;
   children: ReactNode;
 }) {

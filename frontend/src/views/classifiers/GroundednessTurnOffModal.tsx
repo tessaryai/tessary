@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Turning Groundedness off stops the sweeps, not the model. On a Mac that costs nothing, but in
- * production the GPU instance keeps waking on its schedule, so the confirmation says where to stop it.
- */
+// Turning it off stops the sweeps, not the model: a production GPU instance keeps waking on schedule.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Info } from "lucide-react";
 import type { GroundednessMode } from "../../api/types";

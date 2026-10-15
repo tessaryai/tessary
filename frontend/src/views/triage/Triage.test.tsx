@@ -11,20 +11,9 @@ import type { BehaviorFinding, Case, TriageView, Vitals } from "../../api/types"
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_CASE_DETAIL } from "../../test/groundednessFixtures";
 import { Triage } from "./Triage";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getTriage: vi.fn(),
-  getVitals: vi.fn(),
-  getModelSettings: vi.fn(),
-  onboarding: vi.fn(),
-  listBehaviorFindings: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-  useProjectApi: () => api,
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../capabilities/useCapabilities", () => ({ useCapabilities: () => ({ isEnabled: () => true }) }));
 
 const kase = (id: string, over: Partial<Case> = {}): Case => ({
@@ -49,10 +38,7 @@ const triage = (over: Partial<TriageView> = {}): TriageView => ({
 });
 const vitals = (usd: number, p95: number | null, spendDelta: number | null, p95Delta: number | null) =>
   ({
-    total: {
-      cost: { usd, delta_pct_per_turn: spendDelta },
-      duration: { p95_ms: p95, delta_pct: p95Delta },
-    },
+    total: { cost: { usd, delta_pct_per_turn: spendDelta }, duration: { p95_ms: p95, delta_pct: p95Delta } },
   }) as unknown as Vitals;
 
 beforeEach(() => {
@@ -67,19 +53,17 @@ const renderPage = () => renderRoute(<Triage />, { route: "/orgs/acme/projects/d
 const lens = (name: RegExp) => screen.getByRole("button", { name }) as HTMLButtonElement;
 const section = (title: string) => screen.getByRole("heading", { level: 2, name: title }).closest("section")!;
 
-describe("the page", () => {
-  // Bug: the page still titled "Cases", or the lens buttons left in the page header where they read as
-  // filters for the findings too.
-  it("is titled Triage, with the case lenses in the Cases section and Findings below it", async () => {
-    renderPage();
+// Bug: the page still titled "Cases", or the lens buttons left in the page header where they read as
+// filters for the findings too.
+it("the page: is titled Triage, with the case lenses in the Cases section and Findings below it", async () => {
+  renderPage();
 
-    await screen.findByText("Case a");
-    expect(screen.getByRole("heading", { level: 1, name: "Triage" })).toBeTruthy();
-    const cases = section("Cases");
-    expect(within(cases).getByRole("button", { name: /Closed 7d · 1/ })).toBeTruthy();
-    expect(within(section("Findings")).queryByRole("button", { name: /Closed/ })).toBeNull();
-    expect(cases.compareDocumentPosition(section("Findings")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
+  await screen.findByText("Case a");
+  expect(screen.getByRole("heading", { level: 1, name: "Triage" })).toBeTruthy();
+  const cases = section("Cases");
+  expect(within(cases).getByRole("button", { name: /Closed 7d · 1/ })).toBeTruthy();
+  expect(within(section("Findings")).queryByRole("button", { name: /Closed/ })).toBeNull();
+  expect(cases.compareDocumentPosition(section("Findings")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 describe("the open cases", () => {
@@ -261,12 +245,7 @@ const finding = (id: string, over: Partial<BehaviorFinding> = {}) =>
     detector: "cost_drift",
     callSiteId: "support-agent",
     firstSeenAt: new Date(Date.now() - 3 * 60_000).toISOString(),
-    triageStatus: "pending",
-    triageAction: null,
-    triageVerdict: null,
-    humanVerdictAt: null,
-    caseId: null,
-    ...over,
+    triageStatus: "pending", triageAction: null, triageVerdict: null, humanVerdictAt: null, caseId: null, ...over,
   }) as BehaviorFinding;
 
 describe("the findings", () => {

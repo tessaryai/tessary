@@ -9,44 +9,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EvidenceSpan } from "../../api/types";
 import { pending, renderRoute } from "../../test/render";
 import { EvidenceTable } from "./EvidenceTable";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getBehaviorFindingEvidence: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ api }) }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const span = (over: Partial<EvidenceSpan>) =>
   ({
-    role: "witness",
-    name: "search_docs",
-    status: "ok",
-    level: null,
-    errorType: null,
-    secretKey: null,
-    storedAs: null,
-    violation: null,
-    startedAt: null,
-    latencyMs: null,
-    totalTokens: null,
-    totalCost: null,
-    models: null,
-    notRolledUp: false,
-    partialCost: false,
-    staleTotals: false,
-    traceId: null,
-    sessionId: null,
-    spanId: null,
-    ...over,
+    role: "witness", name: "search_docs", status: "ok", level: null, errorType: null, secretKey: null, storedAs: null,
+    violation: null, startedAt: null, latencyMs: null, totalTokens: null, totalCost: null, models: null,
+    notRolledUp: false, partialCost: false, staleTotals: false, traceId: null, sessionId: null, spanId: null, ...over,
   }) as EvidenceSpan;
 const page = (
   rows: EvidenceSpan[],
   nextCursor: string | null = null,
   recordedCounts: Record<string, number> = { witness: 3, member: 40, baseline: 0 },
-) => ({
-  rows,
-  nextCursor,
-  counts: recordedCounts,
-  recordedCounts,
-});
+) => ({ rows, nextCursor, counts: recordedCounts, recordedCounts });
 
 beforeEach(() => {
   api.getBehaviorFindingEvidence.mockImplementation(
@@ -57,15 +34,8 @@ beforeEach(() => {
         : page(
             [
               span({
-                name: null as never,
-                status: "error",
-                errorType: "Timeout",
-                latencyMs: 1234,
-                totalTokens: 5600,
-                totalCost: 0.01234,
-                models: ["gpt-5", "haiku"],
-                notRolledUp: true,
-                staleTotals: true,
+                name: null as never, status: "error", errorType: "Timeout", latencyMs: 1234, totalTokens: 5600,
+                totalCost: 0.01234, models: ["gpt-5", "haiku"], notRolledUp: true, staleTotals: true,
                 traceId: "trace-1111111111",
               }),
               span({ role: "custom", level: "ERROR", sessionId: "sess-2222222222", startedAt: "2026-09-25T10:00:00Z" }),

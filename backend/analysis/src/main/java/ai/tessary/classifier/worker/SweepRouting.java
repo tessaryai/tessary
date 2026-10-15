@@ -8,24 +8,19 @@ import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
- * The grain a detector kind sweeps at, and where that answer came from: the one place that combines
- * {@link BuiltInClassifierCatalog} and {@link ClassifierSweepRegistry}. {@link ClassifierWorker}
- * dispatches on it, and {@code ClassifierService} reads it to decide whether widening a classifier's
- * call sites rewinds its cursor, so the two never disagree about a kind's grain.
- *
- * <p>The catalog answers for a kind it declares, even when a sweep also claims it, so a jar on the
- * classpath never changes a shipped classifier's grain. A kind no module declares runs at window
- * grain when a sweep claims it; with no sweep it keeps the catalog's default.
+ * A detector kind's sweep grain: the one place combining {@link BuiltInClassifierCatalog} and
+ * {@link ClassifierSweepRegistry}, so {@link ClassifierWorker} and {@code ClassifierService} never disagree. A
+ * catalog-declared kind keeps its grain even when a sweep claims it, so a jar never changes a shipped classifier. An
+ * undeclared kind runs at window grain when a sweep claims it.
  */
 @Component
 public class SweepRouting {
 
-    /** Where a kind's grain came from: the catalog's manifest or default, or a sweep in the registry. */
     public enum Route {
         CATALOG,
         REGISTRY;
 
-        /** The value of the {@code route} log field. */
+        /** The {@code route} log field. */
         public String field() {
             return name().toLowerCase(Locale.ROOT);
         }
@@ -55,10 +50,7 @@ public class SweepRouting {
         return routeFor(detectorKind).grain();
     }
 
-    /**
-     * The sweep that runs {@code detectorKind}'s jobs: the registered one when the kind sweeps at window grain,
-     * the only grain {@link ClassifierWorker} hands to a sweep; empty otherwise.
-     */
+    /** Empty unless the kind sweeps at window grain, the only grain {@link ClassifierWorker} hands to a sweep. */
     public Optional<ClassifierSweep> sweepFor(String detectorKind) {
         return grainFor(detectorKind) == Grain.WINDOW ? sweeps.forKind(detectorKind) : Optional.empty();
     }

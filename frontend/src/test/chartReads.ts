@@ -8,10 +8,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 const BASE = "/api/orgs/acme/projects/default";
-const KEYS = [
-  ["classifier-chart-scopes", BASE, 7],
-  ["classifier-charts", BASE, "call_site", "cs-answer", 7],
-];
+const KEYS = [["classifier-chart-scopes", BASE, 7], ["classifier-charts", BASE, "call_site", "cs-answer", 7]];
 
 export function seedChartReads(qc: QueryClient) {
   for (const key of KEYS) qc.setQueryData(key, {});

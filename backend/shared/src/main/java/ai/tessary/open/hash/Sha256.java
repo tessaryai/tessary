@@ -15,7 +15,7 @@ public final class Sha256 {
         return newDigest().digest(bytes);
     }
 
-    /** SHA-256 of the UTF-8 bytes of {@code text}. */
+    /** Of the UTF-8 bytes. */
     public static byte[] digest(String text) {
         return digest(text.getBytes(StandardCharsets.UTF_8));
     }

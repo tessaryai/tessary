@@ -17,7 +17,6 @@ import ai.tessary.classifier.metric.MetricSource.TurnMetrics;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository.TraceHead;
 import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
@@ -29,12 +28,10 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -50,41 +47,16 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * model read as $0 turns a price-book gap into a cost improvement.
  */
 @SpringBootTest
-class MetricSourceTest {
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    MetricSource source;
-
-    @Autowired
-    BehaviorSubstrateRepository substrate;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    MetricSourceRepository sourceRows;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
+record MetricSourceTest(
+        SubstrateV2Fixtures fx,
+        SessionRepository sessions,
+        TraceV2Repository traces,
+        SpanRepository spans,
+        TenantService tenants,
+        MetricSource source,
+        BehaviorSubstrateRepository substrate,
+        JdbcClient jdbc,
+        MetricSourceRepository sourceRows) {
 
     private static final Instant T0 = Instant.now().minus(2, ChronoUnit.HOURS);
 

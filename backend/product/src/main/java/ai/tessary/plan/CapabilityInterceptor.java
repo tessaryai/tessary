@@ -13,19 +13,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.HandlerMapping;
 
 /**
- * Enforces {@link RequiresCapability} on the way in, so the API cannot serve a capability the SPA has
- * already hidden.
- *
- * <p><b>Resolution, and what it deliberately does not do.</b> The org comes from the {@code orgSlug} path
- * variable, looked up by slug. When there is no such variable, or no such org, this does <em>nothing</em>
- * and lets the request through to the handler — whose own {@code TenantPathResolver} call produces the
- * correct 404/403. Answering here would mean this interceptor inventing tenancy errors in a codebase where
- * exactly one class is allowed to, and getting a 403 where a 404 belongs tells an outsider that an org
- * exists.
- *
- * <p>It runs before the handler's membership check, so a member of another org probing a gated path sees
- * {@code CAPABILITY_DISABLED} rather than {@code forbidden}. Both are 403 and neither reveals anything the
- * capability payload does not already state for the requester's own org.
+ * Enforces {@link RequiresCapability}. The org comes from the {@code orgSlug} path variable; with no variable or no
+ * such org this lets the request through, so the handler's {@code TenantPathResolver} produces the right 404/403 and an
+ * outsider can't learn an org exists. A non-member probing a gated path sees {@code CAPABILITY_DISABLED}; both are 403.
  */
 @Component
 public class CapabilityInterceptor implements HandlerInterceptor {
@@ -49,7 +39,7 @@ public class CapabilityInterceptor implements HandlerInterceptor {
         return true;
     }
 
-    /** Method-level wins over class-level, so one handler can be gated differently from its controller. */
+    /** Method-level wins over class-level. */
     private static @Nullable RequiresCapability required(HandlerMethod method) {
         RequiresCapability onMethod =
                 AnnotatedElementUtils.findMergedAnnotation(method.getMethod(), RequiresCapability.class);

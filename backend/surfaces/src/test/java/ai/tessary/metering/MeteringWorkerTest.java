@@ -15,6 +15,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.config.MeteringProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.testsupport.Props;
 import ai.tessary.usage.MetricRollupJobRepository;
 import ai.tessary.usage.MetricRollupJobRow;
 import ai.tessary.usage.MetricRollupRepository;
@@ -45,7 +46,7 @@ class MeteringWorkerTest {
     MetricRollupRepository rollups;
 
     private MeteringWorker worker() {
-        return new MeteringWorker(jobs, rollups, new MeteringProperties(), new TraceMdcBridge(Tracer.NOOP));
+        return new MeteringWorker(jobs, rollups, Props.of(MeteringProperties.class), new TraceMdcBridge(Tracer.NOOP));
     }
 
     private static MetricRollupJobRow job(String id, String projectId) {

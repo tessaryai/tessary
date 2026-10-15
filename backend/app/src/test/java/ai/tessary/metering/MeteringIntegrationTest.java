@@ -14,11 +14,8 @@ import ai.tessary.metering.MeteringDtos.LlmUsageSliceView;
 import ai.tessary.metering.MeteringDtos.LlmUsageView;
 import ai.tessary.metering.MeteringDtos.TriageSpendRowView;
 import ai.tessary.metering.MeteringDtos.TriageSpendView;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
@@ -37,9 +34,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -51,53 +46,20 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * through {@code BillingController}.
  */
 @SpringBootTest
-class MeteringIntegrationTest {
+record MeteringIntegrationTest(
+        SubstrateV2Fixtures fx,
+        TenantService tenants,
+        SpanRepository spans,
+        MetricRollupJobRepository jobs,
+        MetricRollupRepository rollups,
+        MeteringService meteringService,
+        MeteringWorker worker,
+        JdbcClient jdbc,
+        LlmCallWriteRepository llmCalls,
+        BillingController billing) {
 
     // The subject kind E2bTriageSandbox books a triage run under.
     private static final String SUBJECT_KIND = "behavior_finding";
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    MetricRollupJobRepository jobs;
-
-    @Autowired
-    MetricRollupRepository rollups;
-
-    @Autowired
-    MeteringService meteringService;
-
-    @Autowired
-    MeteringWorker worker;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    LlmCallWriteRepository llmCalls;
-
-    @Autowired
-    BillingController billing;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
 
     @Test
     void metersEachUnitForAClosedBucket_idempotently_andExposesBothReadSurfaces() {
@@ -213,9 +175,9 @@ class MeteringIntegrationTest {
 
     private long rollupRowCount(String pid, String unit, String bucketStart) {
         Long n = jdbc.sql("""
-                SELECT COUNT(*) FROM metric_rollup
-                WHERE project_id = :pid AND metric = :unit AND bucket_start = :bstart
-                """)
+            SELECT COUNT(*) FROM metric_rollup
+            WHERE project_id = :pid AND metric = :unit AND bucket_start = :bstart
+            """)
                 .param("pid", pid)
                 .param("unit", unit)
                 .param("bstart", bucketStart)

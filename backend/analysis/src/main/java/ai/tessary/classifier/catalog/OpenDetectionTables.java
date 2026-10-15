@@ -7,15 +7,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Registers this build's classifiers' {@link DetectionTable}s with {@code DetectionTableRegistry}.
- *
- * <p>{@code REGEX} claims {@code user_classifier_detection}: "this text matched a user-authored
- * rule," parameterized by a classifier row. {@code DetectionTableRegistry} keys on
- * {@code detectorKind}, not {@code table}, so more than one kind can share a table.
- *
- * <p>{@code FRUSTRATION} is trace grain: its subject is a user turn, and a turn is a trace. It is the one table the
- * trace and session views show. It and {@code GROUNDEDNESS} are clearable: a case closed as a false alarm sets
- * {@code cleared_at} on the flags it cites.
+ * Registers this build's {@link DetectionTable}s. The registry keys on {@code detectorKind}, so kinds can share a
+ * table. {@code FRUSTRATION} is trace grain (a turn is a trace) and the one table the trace and session views show. It
+ * and {@code GROUNDEDNESS} are clearable by a false-alarm close.
  */
 @Configuration
 public class OpenDetectionTables {

@@ -6,11 +6,7 @@ import ai.tessary.classifier.catalog.ClassifierModelModule.Deps;
 import ai.tessary.classifier.catalog.DetectorSupplier;
 import org.springframework.stereotype.Component;
 
-/**
- * Hands the catalog the Groundedness detector. It is built here rather than in the catalog's module
- * list because it writes its own {@code groundedness_assessment} rows, a repository the catalog's
- * shared {@link Deps} do not carry, the way Frustration's detector arrives with its own.
- */
+/** Built here because it writes {@code groundedness_assessment} rows, which the catalog's {@link Deps} do not carry. */
 @Component
 public class GroundednessDetectorSupplier implements DetectorSupplier {
 

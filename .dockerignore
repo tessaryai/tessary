@@ -40,10 +40,9 @@ hs_err_pid*.log
 # Compose files (not needed inside images)
 docker-compose*.yml
 
-# Python bytecode, and the classifier tree's gitignored local data (emit_local.py's ledger).
+# Python bytecode
 **/__pycache__/
 **/*.pyc
-classifiers/**/data/
 
 # Misc
 .DS_Store

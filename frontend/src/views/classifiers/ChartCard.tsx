@@ -34,7 +34,6 @@ import {
   yAxis,
 } from "./chartRules";
 
-/** The chart's width before the card is measured, and where it cannot be (a test's DOM has no layout). */
 const FALLBACK_W = 520;
 const ML = 48;
 const MR = 8;
@@ -51,7 +50,6 @@ const STRIP_TEXT = "absolute -translate-y-1/2 text-small leading-none whitespace
 
 const rateOf = (p: ChartPoint): number | null => (p.checked ? (p.flagged ?? 0) / p.checked : null);
 
-/** The width of the element `ref` lands on, in CSS pixels, kept current as it resizes. */
 function useWidth() {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(FALLBACK_W);
@@ -455,7 +453,6 @@ export function ChartCard({
   );
 }
 
-/** A step series: the closed points solid, the open one dashed. */
 function StepLine({ paths, stroke, width }: { paths: { solid: string; dashed: string }; stroke: string; width: number }) {
   return (
     <>

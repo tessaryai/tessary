@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
@@ -16,9 +14,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -28,35 +24,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * (including a classifier that never fired), and the {@code days} clamp.
  */
 @SpringBootTest
-class ClassifierDailyVolumeIntegrationTest {
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    ClassifierService service;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
+record ClassifierDailyVolumeIntegrationTest(
+        SubstrateV2Fixtures fx,
+        TraceV2Repository traces,
+        SpanRepository spans,
+        ClassifierService service,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     @Test
     void dailyVolumeCountsDistinctTracesPerUtcDayAgainstNonDeletedTotals() {
@@ -193,9 +167,9 @@ class ClassifierDailyVolumeIntegrationTest {
 
     private String insertClassifier(String pid, String key, String name) {
         String id = Ids.ulid();
-        jdbc.sql(
-                        "INSERT INTO classifier (id, project_id, classifier_key, name, detector, built_in, version, enabled, "
-                                + "created_at, updated_at) VALUES (:id, :pid, :key, :name, 'keyword', true, 1, true, :now, :now)")
+        jdbc.sql("INSERT INTO classifier (id, project_id, classifier_key, name, detector, built_in, version,"
+                        + " enabled, created_at, updated_at) VALUES (:id, :pid, :key, :name, 'keyword', true, 1,"
+                        + " true, :now, :now)")
                 .param("id", id)
                 .param("pid", pid)
                 .param("key", key)

@@ -7,9 +7,9 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentLocation, renderRoute } from "../test/render";
 import { NewProject } from "./NewProject";
+import { auth } from "../test/api";
 
-const auth = vi.hoisted(() => ({ createProject: vi.fn() }));
-vi.mock("../api/client", () => ({ auth }));
+vi.mock("../api/client", () => import("../test/api"));
 
 beforeEach(() => {
   auth.createProject.mockResolvedValue({ slug: "support-agent" });

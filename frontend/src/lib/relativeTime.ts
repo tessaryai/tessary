@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * How long ago, in the coarsest unit that still says something: `40s ago`, `9h ago`, `3d ago`.
- *
- * Distinct from `timeAgo` in `views/triage/bits.tsx`, which switches to an absolute clock past the
- * hour (`Sep 4 14:22`). Both are correct for their surface: a case row is a thing you look up, so a
- * timestamp you can match against a deploy log wins; a staleness signal is a duration, and "the last
- * trace arrived Sep 4 14:22" makes the reader do the subtraction that is the entire point.
+ * A staleness signal, so always a duration, unlike `timeAgo` in views/triage/bits.tsx, which switches
+ * to a clock time to match against deploy logs.
  */
 export function relativeTime(iso: string | null): string {
   if (!iso) return "—";

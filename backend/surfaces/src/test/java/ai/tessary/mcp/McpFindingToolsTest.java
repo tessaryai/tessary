@@ -167,24 +167,12 @@ class McpFindingToolsTest {
         assertTrue(finding.get("triageSummary").isNull(), "triageSummary reached an agent");
         assertTrue(finding.get("triageAction").isNull(), "triageAction reached an agent");
         assertTrue(finding.get("triagedAt").isNull(), "triagedAt reached an agent");
+        // A person's ruling uses the same columns, so humanVerdictAt would still tell RCA that a person decided.
+        assertTrue(finding.get("humanVerdictAt").isNull(), "humanVerdictAt reached an agent");
         assertEquals(0, finding.get("triageCitations").size(), "triage citations reached an agent");
         assertFalse(
                 finding.toString().contains("the claim is sound"),
                 "the triage summary's text is still somewhere on the wire");
-    }
-
-    /**
-     * A person's ruling uses the same columns as triage's, so leaving {@code humanVerdictAt} would still tell RCA
-     * that a person decided.
-     */
-    @Test
-    void getFinding_neverReturnsWhoRuled() throws Exception {
-        when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(triagedFinding());
-
-        JsonNode finding =
-                structured(mcp.callTool("get_finding", "{\"id\":\"find-1\"}")).get("finding");
-
-        assertTrue(finding.get("humanVerdictAt").isNull(), "humanVerdictAt reached an agent");
     }
 
     private static ClassifierDetail classifierDetail(List<String> failingTraces) {

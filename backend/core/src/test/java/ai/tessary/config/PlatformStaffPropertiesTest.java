@@ -4,6 +4,7 @@ package ai.tessary.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -26,8 +27,8 @@ class PlatformStaffPropertiesTest {
                 "'  ', false"
             })
     void matchesConfiguredStaffIgnoringCaseAndWhitespace(@Nullable String email, boolean expected) {
-        PlatformStaffProperties p = new PlatformStaffProperties();
-        p.setStaffEmails(Arrays.asList(" Ops@Tessary.ai ", null, "  "));
+        PlatformStaffProperties p =
+                new PlatformStaffProperties(new HashSet<>(Arrays.asList(" Ops@Tessary.ai ", null, "  ")));
 
         assertEquals(expected, p.isStaffEmail(email));
     }

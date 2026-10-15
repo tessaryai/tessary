@@ -28,37 +28,15 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
- * Parses a sharded {@code .tessary/} bundle into a {@link Pipeline} for the multipart upload path
- * ({@code ImportController}), which feeds the classify/apply logic {@code (relativePath -> body)}
- * pairs.
- *
- * <p>Expected layout (the leading {@code .tessary/} is optional — browsers may
- * strip it from {@code webkitRelativePath}, and a repo tree carries it):
- * <pre>
- *   .tessary/
- *     pipeline/{meta,packs,product_profile,invariants,chains,taxonomy,capabilities}.yaml
- *     pipeline/call_sites/&lt;id&gt;.yaml, failure_modes/&lt;id&gt;.yaml
- *     graders/, quality_dimensions/, knowledge/, datasets/, report.md,
- *     .synth-lock.yaml — ignored here
- * </pre>
- * Shard filenames nest the canonical {@code ::}-delimited id as folders ({@code ::} → {@code /}).
- * Nesting is transparent here because {@link #classify} matches by substring and the canonical {@code id}
- * is read from the file body, not the path.
- *
- * <p><b>The grader and quality-dimension shards are IGNORED, not rejected.</b> This platform has no
- * grading, and the vendored plugin contract still publishes both shards — a bundle written by
- * any current plugin carries them. Failing the import on a shard we no longer store would break every
- * existing repo; skipping it lets an unchanged producer keep uploading and simply drops what has no
- * home. See {@link Shard#IGNORE}.
- * <p>{@code pipeline/meta.yaml} is the only required shard. Unknown YAML fields drop
- * silently so a newer plugin field doesn't break import while the model catches up.
+ * Parses a sharded {@code .tessary/} bundle into a {@link Pipeline}. The leading {@code .tessary/} is optional since
+ * browsers may strip it. Grader and quality-dimension shards are ignored, not rejected: current plugins still write
+ * them. Only {@code pipeline/meta.yaml} is required.
  */
 @Component
 public class BundleAssembler {
 
-    // Derived from the shared YAML bean with a lenient copy: unknown shard fields drop silently
-    // so a newer plugin field doesn't break import while the model catches up. copy() keeps the
-    // bean's YAMLFactory and registered modules; only this mapper carries the relaxed feature.
+    // Unknown shard fields drop silently so a newer plugin field doesn't break import. copy() keeps the bean's
+    // YAMLFactory and modules.
     private final ObjectMapper yamlMapper;
 
     public BundleAssembler(@Qualifier("yamlObjectMapper") ObjectMapper yamlObjectMapper) {
@@ -72,7 +50,6 @@ public class BundleAssembler {
             @Nullable String repoOwner,
             @Nullable String repoName) {}
 
-    /** A single bundle file: {@code relativePath} (pre-normalisation) and its decoded text body. */
     public record NamedBody(String relativePath, String body) {}
 
     public AssembledBundle assemble(List<NamedBody> files) {
@@ -190,8 +167,6 @@ public class BundleAssembler {
         return tree == null ? MissingNode.getInstance() : tree;
     }
 
-    // ------------------------------------------------------------------ classifier
-
     private enum Shard {
         META,
         PACKS,
@@ -205,7 +180,6 @@ public class BundleAssembler {
         IGNORE
     }
 
-    /** Strip a leading {@code .tessary/} so matching is layout-agnostic. */
     private static String normalisePath(String name) {
         String p = name.replace('\\', '/');
         while (p.startsWith("/")) p = p.substring(1);
@@ -223,8 +197,7 @@ public class BundleAssembler {
             return Shard.IGNORE;
         }
         if (lower.startsWith("datasets/") || lower.contains("/datasets/")) return Shard.IGNORE;
-        // Grading is gone from the platform; the plugin still writes these two shards, so they are
-        // skipped here rather than rejected — see the class javadoc.
+        // The plugin still writes these shards; skip rather than reject.
         if (lower.contains("graders/")) return Shard.IGNORE;
         if (lower.contains("pipeline/quality_dimensions/")) return Shard.IGNORE;
         if (lower.startsWith("knowledge/") || lower.contains("/knowledge/")) return Shard.IGNORE;
@@ -252,8 +225,6 @@ public class BundleAssembler {
         int slash = path.lastIndexOf('/');
         return slash < 0 ? path : path.substring(slash + 1);
     }
-
-    // ------------------------------------------------------------------ collector
 
     private final class ShardCollector {
         @Nullable
@@ -296,9 +267,7 @@ public class BundleAssembler {
                     taxonomy,
                     readProgress(meta.path("progress")),
                     capabilities);
-            // Repo identity / commit are forward-compatible: the plugin stamps them
-            // into meta.yaml so an uploaded bundle knows which commit
-            // it was synthesized against. Accept either commit_sha or source_commit_sha.
+            // Accept either commit_sha or source_commit_sha.
             String commitSha =
                     firstNonBlank(textOrNull(meta.path("commit_sha")), textOrNull(meta.path("source_commit_sha")));
             JsonNode repo = meta.path("repo");

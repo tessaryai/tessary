@@ -10,42 +10,24 @@ import { ApiError } from "../../api/types";
 import type { AlertChannel, AlertRule } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Notifications } from "./Notifications";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listAlertRules: vi.fn(),
-  listAlertChannels: vi.fn(),
-  upsertAlertRule: vi.fn(),
-  setAlertRuleEnabled: vi.fn(),
-  createAlertChannel: vi.fn(),
-  deleteAlertChannel: vi.fn(),
-}));
 const caps = vi.hoisted(() => new Set<string>());
 
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../capabilities/useCapabilities", () => ({
   useCapabilities: () => ({ isEnabled: (c: string) => caps.has(c) }),
 }));
 
 const rule = (over: Partial<AlertRule> = {}) =>
   ({
-    id: "r-1",
-    name: "A case opens",
-    rule_type: "case_opened",
-    enabled: true,
-    created_at: "2026-09-01T00:00:00Z",
+    id: "r-1", name: "A case opens", rule_type: "case_opened", enabled: true, created_at: "2026-09-01T00:00:00Z",
     policy: { cadence_seconds: 3600, quiet_from: "22:00", quiet_to: "06:00", quiet_zone: "Europe/London" },
     ...over,
   }) as AlertRule;
 const channel = (over: Partial<AlertChannel> = {}): AlertChannel => ({
-  id: "ch-1",
-  name: "Webhook",
-  kind: "webhook",
-  enabled: true,
-  credentialsSet: true,
-  createdAt: "2026-09-01T00:00:00Z",
-  updatedAt: "2026-09-01T00:00:00Z",
-  ...over,
+  id: "ch-1", name: "Webhook", kind: "webhook", enabled: true, credentialsSet: true, createdAt: "2026-09-01T00:00:00Z",
+  updatedAt: "2026-09-01T00:00:00Z", ...over,
 });
 
 beforeEach(() => {
@@ -178,10 +160,7 @@ describe("the delivery channels", () => {
 
     await waitFor(() =>
       expect(api.createAlertChannel).toHaveBeenCalledWith({
-        kind: "webhook",
-        name: "Webhook",
-        enabled: true,
-        config: { url: "https://example.com/hook" },
+        kind: "webhook", name: "Webhook", enabled: true, config: { url: "https://example.com/hook" },
       }),
     );
     expect(await screen.findByText("Webhook added")).toBeTruthy();
@@ -237,10 +216,7 @@ describe("the delivery channels", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Slack channel" }));
     await waitFor(() =>
       expect(api.createAlertChannel).toHaveBeenLastCalledWith({
-        kind: "slack",
-        name: "Slack",
-        enabled: true,
-        config: { url: "https://hooks.slack.com/x" },
+        kind: "slack", name: "Slack", enabled: true, config: { url: "https://hooks.slack.com/x" },
       }),
     );
     expect(await screen.findByText("Slack channel added")).toBeTruthy();

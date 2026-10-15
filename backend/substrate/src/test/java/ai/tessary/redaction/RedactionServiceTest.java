@@ -11,6 +11,7 @@ import ai.tessary.ingest.RawEntry;
 import ai.tessary.open.errors.RedactionError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.redaction.RedactionService.PreviewResult;
+import ai.tessary.testsupport.Props;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -50,9 +51,7 @@ class RedactionServiceTest {
     }
 
     private static RedactionProperties parallel(int n) {
-        RedactionProperties p = new RedactionProperties();
-        p.setParallelism(n);
-        return p;
+        return Props.of(RedactionProperties.class, "parallelism", n);
     }
 
     /** The rule table, held in memory: the service's contract is what it does with what the store returns. */

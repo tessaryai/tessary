@@ -4,16 +4,8 @@ import { useAuth } from "../../auth/AuthContext";
 import { useProjectApi, useTenant } from "../../tenant/TenantContext";
 
 /**
- * Whether to offer "Connect repository" on a surface that is not Settings.
- *
- * Two conditions, and both have to be known rather than assumed. Connecting is owner-gated
- * server-side, so a reader who cannot act on the offer is not shown it. And the offer is only
- * honest while the project genuinely has no repository: a pending or failed read of the
- * integration claims nothing, because prompting someone to connect a repo they already connected
- * reads as the product having lost it.
- *
- * The integration query shares its key with Settings → Git integration, so opening a case after
- * connecting one costs no extra request and the button disappears on the same cache entry.
+ * Shown only to a reader who can connect (owner-gated server-side), and only while the integration read
+ * says there is no repository: a pending or failed read claims nothing.
  */
 export function useRepoPrompt(): { canPrompt: boolean } {
   const api = useProjectApi();

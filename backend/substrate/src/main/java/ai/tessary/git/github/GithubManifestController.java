@@ -28,29 +28,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * The BYO GitHub App setup wizard: a self-hoster registers their OWN App via GitHub's
- * manifest flow instead of Tessary handing them one, closing the last Tessary-owned-cloud-credential
- * gap in {@code substrate}. Two endpoints:
- *
- * <ul>
- *   <li>{@code GET .../git/github/manifest-url} (authenticated, owner-gated, under {@code /api}) —
- *       builds the App manifest + a signed state, for the frontend to auto-POST as a
- *       {@code manifest} form field to {@code github.com/settings/apps/new}.
- *   <li>{@code GET /git/github/manifest/callback} (unauthenticated, outside {@code /api}, mirroring
- *       {@link GithubCallbackController}) — GitHub lands the browser here with a one-shot {@code code};
- *       exchanged via {@code POST /app-manifests/{code}/conversions} for the new App's own credentials,
- *       persisted by {@link GithubAppConfigService}, then redirected back to Setup.
- * </ul>
- *
- * <p>This mints a deployment-wide (singleton) App, not a per-project one.
- * The {@code orgSlug}/{@code projectSlug} in the
- * URL are only where the wizard was launched from and where it redirects back to; they say nothing
- * about which projects the resulting App can be used by (all of them, same as env-configured App
- * credentials always have).
- *
- * <p>The outbound conversion call is behind {@link GithubManifestExchange} — a one-method seam
- * so this controller's redirect/error logic is testable without an HTTP call to {@code
- * api.github.com} (which {@code UrlGuard} would refuse to aim at a local test server anyway).
+ * The BYO GitHub App wizard over GitHub's manifest flow. The callback is unauthenticated and outside {@code /api}, like
+ * {@link GithubCallbackController}. The App is deployment-wide; the org and project slugs are only where to redirect
+ * back to. {@link GithubManifestExchange} is a seam so tests need no call to {@code api.github.com}.
  */
 @RestController
 public class GithubManifestController {
@@ -83,23 +63,16 @@ public class GithubManifestController {
     public ApiResponse<ManifestStartView> manifestUrl(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
         Resolved r = requireOwner(ctx, orgSlug, projectSlug);
-        // github_app_config is a deployment-wide singleton, not scoped to this org/project (see class
-        // javadoc): fail fast here, before minting state or sending the browser to GitHub, rather than
-        // letting any owner of ANY org overwrite an App every other org on this deployment already
-        // depends on. requireOwner() above only proves ownership of the CALLING org — it says nothing
-        // about whether an App is already configured, which is the actual gate this wizard needs.
+        // The App is a deployment-wide singleton and requireOwner() only proves ownership of the calling org, so fail
+        // before minting state rather than let any org owner overwrite it.
         if (appConfig.isAppConfigured()) {
             throw new TessaryException(GitError.APP_ALREADY_CONFIGURED);
         }
         String s = state.mint(orgSlug, projectSlug, r.project().id());
         String base = frontendBase();
 
-        // hook_attributes.active = false: the platform has no push-webhook endpoint any more. It had
-        // one — GitWebhookController — and it was removed along with the observer, so an App minted with
-        // a live hook would tell GitHub to POST every push at a URL that 404s. Declaring the hook
-        // inactive says the same thing to GitHub honestly, and leaves the block in place for whoever
-        // brings a push-driven feature back. The `url` key is omitted rather than pointed at a dead
-        // path, so nothing has to be un-lied-about later.
+        // Inactive: the platform has no push-webhook endpoint, and a live hook would POST every push to a 404.
+        // {@code url} is omitted rather than pointed at a dead path.
         Map<String, Object> hookAttributes = new LinkedHashMap<>();
         hookAttributes.put("active", false);
 
@@ -124,12 +97,8 @@ public class GithubManifestController {
     }
 
     /**
-     * GitHub's manifest-flow redirect target. Outside {@code /api}, allowlisted in {@code AuthFilter}
-     * next to {@code /git/github/callback} — the signed {@code state} IS the credential, same
-     * reasoning as that endpoint. The manifest {@code code} GitHub hands back is one-shot: a
-     * resubmitted callback (double-click, back-button) fails the SECOND conversion call with GitHub's
-     * own rejection, surfaced here as {@link GitError#MANIFEST_CONVERSION_FAILED} rather than a
-     * generic app-not-configured error.
+     * The signed {@code state} is the credential. The {@code code} is one-shot, so a resubmitted callback surfaces
+     * GitHub's rejection as {@link GitError#MANIFEST_CONVERSION_FAILED}.
      */
     @GetMapping("/git/github/manifest/callback")
     public ResponseEntity<Void> callback(
@@ -154,8 +123,7 @@ public class GithubManifestController {
         }
     }
 
-    // Settings -> Git integration, not the retired Setup page: it already handles both of these
-    // params, and it is the surface a freshly-registered App has to be installed from next.
+    // Settings -> Git integration handles these params, and the new App is installed from there.
     private String setupConnected(StatePayload p) {
         return settingsGit(p) + "?github_app_connected=1";
     }

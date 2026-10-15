@@ -146,7 +146,7 @@ done
 # columns on `finding` and deleted every `job.kind = 'behavior_adjudication'` row, so both names now
 # resolve to nothing, the same shape as the dropped relations above. The other two are name gates:
 # `BehaviorAdjudication*` was the renamed class prefix, and `adjudicate.js` was the launcher script
-# before `triage.js` replaced it. A surviving spelling of either is a caller that will 404 at the
+# before the `triage` lane replaced it. A surviving spelling of either is a caller that will 404 at the
 # launcher or a class that no longer exists.
 #
 # This scan is wider than the one above: it reaches `sandbox-runner/` (the launcher is JavaScript)
@@ -156,7 +156,7 @@ TRIAGE_FORBIDDEN=(
     "adjudication_verdict|'triage_verdict' — 0009 dropped the column and its five siblings"
     "behavior_adjudication|job.kind = 'triage'"
     "BehaviorAdjudication|the BehaviorTriage* classes"
-    "adjudicate\\.js|'triage.js' — the launcher script the sandbox posts to"
+    "adjudicate\\.js|the 'triage' lane of lane.js — the launcher route the sandbox posts to"
 )
 
 _scan_triage() {

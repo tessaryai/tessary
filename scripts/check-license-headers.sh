@@ -19,7 +19,7 @@
 #                     splitting "this .sql is a changelog, that one is a fixture" file-by-file inside
 #                     one extension is exactly the kind of judgment call a future file addition would
 #                     silently fall through, so the whole extension stays out rather than risk it.
-#   .xml              build/tool configuration (pom.xml, the PMD/SpotBugs rulesets, logback config),
+#   .xml              build/tool configuration (pom.xml, the SpotBugs rules, logback config),
 #                     not application source, the same distinction Apache's own release policy draws
 #                     between a package's content and its build tooling.
 #

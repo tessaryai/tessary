@@ -14,23 +14,9 @@ import { GROUNDEDNESS_DETAIL, GROUNDEDNESS_FINDING_DETAIL } from "../../test/gro
 import { FindingPage } from "./FindingPage";
 import { dateTime } from "./groundedness";
 import { stamp } from "./shared";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getBehaviorFinding: vi.fn(),
-  getBehaviorFindingEvidence: vi.fn(),
-  analyzeBehaviorFinding: vi.fn(),
-  resolveBehaviorFinding: vi.fn(),
-  getFrustratedSessions: vi.fn(),
-  getMalformedOutputs: vi.fn(),
-  getFlaggedAnswers: vi.fn(),
-  getTrace: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return { ...actual, useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }) };
-});
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const BASE = GROUNDEDNESS_FINDING_DETAIL;
 type Finding = BehaviorFindingDetail["finding"];
@@ -38,37 +24,18 @@ type Finding = BehaviorFindingDetail["finding"];
 /** A finding whose detector draws no figure: the generic layout. */
 function plain(over: Partial<Finding> = {}, detail: Partial<BehaviorFindingDetail> = {}): BehaviorFindingDetail {
   return {
-    ...BASE,
-    groundedness: null,
-    ...detail,
+    ...BASE, groundedness: null, ...detail,
     finding: { ...BASE.finding, detector: "loop", title: "The agent loops on refunds", callSiteId: "refunds", ...over },
   };
 }
 
 const RATE = { ...GROUNDEDNESS_DETAIL.rate, bucketKey: "search_tool", failingTraces: ["0123456789abcdef"] };
 const SHIFT = {
-  bucketKey: "cost|checkout",
-  bucketKind: "call_site",
-  nCur: 400,
-  nRef: 1200,
-  sinceVersionId: null,
-  windowClosedAt: "2026-09-23T00:00:00Z",
-  windowKind: null,
-  windowOpenedAt: "2026-09-16T00:00:00Z",
-  w1Log: 0.4,
-  control: null,
-  direction: "up",
-  explains: [],
-  floor: 0,
-  measure: "cost",
-  quantiles: [
-    { key: "p50", then: 1, now: 2.5 },
-    { key: "p95", then: 10, now: 40 },
-  ],
-  ratio: 2.5,
-  reference: "previous",
-  tokens: [],
-  workload: [],
+  bucketKey: "cost|checkout", bucketKind: "call_site", nCur: 400, nRef: 1200, sinceVersionId: null,
+  windowClosedAt: "2026-09-23T00:00:00Z", windowKind: null, windowOpenedAt: "2026-09-16T00:00:00Z", w1Log: 0.4,
+  control: null, direction: "up", explains: [], floor: 0, measure: "cost",
+  quantiles: [{ key: "p50", then: 1, now: 2.5 }, { key: "p95", then: 10, now: 40 }],
+  ratio: 2.5, reference: "previous", tokens: [], workload: [],
 } as unknown as NonNullable<BehaviorFindingDetail["metric"]>;
 
 beforeEach(() => {
@@ -93,9 +60,14 @@ const button = (name: string) => screen.getByRole("button", { name }) as HTMLBut
 
 describe("a finding with no figure", () => {
   // Bug: the breadcrumb leads to Classifiers, which charts and lists no findings, not back to Triage, which does.
-  it("leads back to Triage from its breadcrumb", async () => {
+  // Bug: a story header keeps its own breadcrumb, so it can still lead to Classifiers after the generic one moved.
+  it.each([
+    ["its", plain(), "The agent loops on refunds"],
+    ["the groundedness story's", GROUNDEDNESS_FINDING_DETAIL, "Answers on support-agent became less grounded"],
+  ])("leads back to Triage from %s breadcrumb", async (_kind, finding, title) => {
+    api.getBehaviorFinding.mockResolvedValue(finding);
     renderPage();
-    await screen.findByRole("heading", { name: "The agent loops on refunds" });
+    await screen.findByText(title);
 
     fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Triage" }));
 
@@ -139,20 +111,14 @@ describe("a finding with no figure", () => {
     fireEvent.click(button("Confirm and open a case"));
 
     await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default"));
-    expect(api.resolveBehaviorFinding.mock.calls).toEqual([
-      ["fnd-1", "expected"],
-      ["fnd-1", "not_expected"],
-    ]);
+    expect(api.resolveBehaviorFinding.mock.calls).toEqual([["fnd-1", "expected"], ["fnd-1", "not_expected"]]);
   });
 
   it("shows triage's ruling with what it read and the scripts it ran, and offers no verbs", async () => {
     api.getBehaviorFinding.mockResolvedValue(
       plain({
-        triageStatus: "done",
-        triageAction: "closed",
-        triageVerdict: "positive",
-        triageSummary: "Refund retries doubled after the prompt change.",
-        triagedAt: "2026-09-23T15:00:00Z",
+        triageStatus: "done", triageAction: "closed", triageVerdict: "positive",
+        triageSummary: "Refund retries doubled after the prompt change.", triagedAt: "2026-09-23T15:00:00Z",
         caseId: "case-7",
         triageCitations: [
           { path: "window.n_cur", reason: "the current window's size", stdout: null },
@@ -285,19 +251,11 @@ describe("the triage verbs in each story's header", () => {
       "secret leak",
       {
         secretLeak: {
-          basis: "Any high-confidence match opens a case.",
-          confidence: "high",
-          firstAt: T0,
-          lastAt: T0,
+          basis: "Any high-confidence match opens a case.", confidence: "high", firstAt: T0, lastAt: T0,
           keys: [{ lastAt: T0, leaks: 1, masked: "sk-a…9f2c", storedRaw: true, traces: 1 }],
           leakCount: 1,
           leaks: [{ at: T0, masked: "sk-a…9f2c", spanId: "span-1", stored: "raw", traceId: "trace-1" }],
-          rule: "openai_api_key",
-          threshold: 1,
-          traceCount: 1,
-          windowEnd: T0,
-          windowSeconds: 86400,
-          windowStart: T0,
+          rule: "openai_api_key", threshold: 1, traceCount: 1, windowEnd: T0, windowSeconds: 86400, windowStart: T0,
         },
       },
     ],
@@ -330,11 +288,7 @@ describe("a frustration finding", () => {
         { detector: "frustration" },
         {
           frustration: {
-            rate: RATE,
-            arlTarget: 50000,
-            baselineFrustrated: 10,
-            jevThreshold: 0.5,
-            minDecisionInterval: 3600,
+            rate: RATE, arlTarget: 50000, baselineFrustrated: 10, jevThreshold: 0.5, minDecisionInterval: 3600,
             scorerVersion: "v1",
             conversations: [cleared],
             conversationsNextCursor: null,
@@ -354,14 +308,8 @@ describe("a frustration finding", () => {
         { detector: "frustration" },
         {
           frustration: {
-            rate: RATE,
-            arlTarget: 50000,
-            baselineFrustrated: 10,
-            jevThreshold: 0.5,
-            minDecisionInterval: 3600,
-            scorerVersion: "v1",
-            conversations: [],
-            conversationsNextCursor: null,
+            rate: RATE, arlTarget: 50000, baselineFrustrated: 10, jevThreshold: 0.5, minDecisionInterval: 3600,
+            scorerVersion: "v1", conversations: [], conversationsNextCursor: null,
           } as unknown as FrustrationDetail,
         },
       ),
@@ -378,14 +326,8 @@ describe("a frustration finding", () => {
         { detector: "frustration" },
         {
           frustration: {
-            rate: RATE,
-            arlTarget: 50000,
-            baselineFrustrated: 10,
-            jevThreshold: 0.5,
-            minDecisionInterval: 3600,
-            scorerVersion: "v1",
-            conversations: [],
-            conversationsNextCursor: null,
+            rate: RATE, arlTarget: 50000, baselineFrustrated: 10, jevThreshold: 0.5, minDecisionInterval: 3600,
+            scorerVersion: "v1", conversations: [], conversationsNextCursor: null,
           } as unknown as FrustrationDetail,
         },
       ),
@@ -413,23 +355,14 @@ const sinceWords = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 
 const WORDS: ClassifierDetail["words"] = {
-  unitOne: "item",
-  unitMany: "items",
-  figureNote: "Share of items the check flagged",
-  referenceLabel: "is the reference",
-  referenceDetail: "Set from the first 1,000 items.",
+  unitOne: "item", unitMany: "items", figureNote: "Share of items the check flagged",
+  referenceLabel: "is the reference", referenceDetail: "Set from the first 1,000 items.",
   thresholdLine: "An item counts when its score is 0.80 or higher.",
 };
 
 const CLASSIFIER_DETAIL: ClassifierDetail = {
-  rate: RATE,
-  baselineFlagged: 21,
-  flagLabel: "Yes",
-  flagThreshold: 0.8,
-  arlTarget: 50000,
-  minDecisionInterval: null,
-  learningUntil: null,
-  words: WORDS,
+  rate: RATE, baselineFlagged: 21, flagLabel: "Yes", flagThreshold: 0.8, arlTarget: 50000, minDecisionInterval: null,
+  learningUntil: null, words: WORDS,
 };
 
 /** A finding its owning adapter details: a title it stored, on a call site. */
@@ -471,12 +404,8 @@ describe("a finding with a classifier detail", () => {
   it("shows the ruling and its case once triaged", async () => {
     api.getBehaviorFinding.mockResolvedValue(
       owned({
-        caseId: "case-9",
-        triageStatus: "done",
-        triageVerdict: "positive",
-        triageAction: "opened_case",
-        triageSummary: "The flagged share rose on one prompt change.",
-        triagedAt: "2026-09-23T13:52:00Z",
+        caseId: "case-9", triageStatus: "done", triageVerdict: "positive", triageAction: "opened_case",
+        triageSummary: "The flagged share rose on one prompt change.", triagedAt: "2026-09-23T13:52:00Z",
       }),
     );
     renderPage();
@@ -508,12 +437,8 @@ describe("a finding with a classifier detail", () => {
         ...CLASSIFIER_DETAIL,
         rate: fell,
         words: {
-          unitOne: "widget",
-          unitMany: "widgets",
-          figureNote: "Share of widgets the check marked",
-          referenceLabel: "is the agreed limit",
-          referenceDetail: null,
-          thresholdLine: null,
+          unitOne: "widget", unitMany: "widgets", figureNote: "Share of widgets the check marked",
+          referenceLabel: "is the agreed limit", referenceDetail: null, thresholdLine: null,
         },
       }),
     );
@@ -534,24 +459,12 @@ describe("a finding with a classifier detail", () => {
 describe("FindingPage, groundedness", () => {
   beforeEach(() => api.getBehaviorFinding.mockResolvedValue(GROUNDEDNESS_FINDING_DETAIL));
 
-  // Bug: a story header keeps its own breadcrumb, so it can still lead to Classifiers after the generic one moved.
-  it("leads back to Triage from the story's breadcrumb", async () => {
-    renderPage();
-    await screen.findByText("Answers on support-agent became less grounded");
-
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Triage" }));
-
-    expect(currentLocation()).toBe("/orgs/acme/projects/default/triage");
-  });
-
   it("tells the rate and shows the flagged answers instead of the evidence table", async () => {
     renderPage();
 
     await screen.findByText("Answers on support-agent became less grounded");
     const since = dateTime("2026-09-23T09:12:00Z");
-    expect(
-      screen.getByText(`since ${since} vs the rate it learned from its first 1,000 traces`),
-    ).toBeTruthy();
+    expect(screen.getByText(`since ${since} vs the rate it learned from its first 1,000 traces`)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Run triage" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Absorb as legitimate" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm and open a case" })).toBeTruthy();
@@ -583,12 +496,8 @@ describe("FindingPage, groundedness", () => {
       ...GROUNDEDNESS_FINDING_DETAIL,
       finding: {
         ...GROUNDEDNESS_FINDING_DETAIL.finding,
-        caseId: "case-1",
-        status: "closed",
-        triageStatus: "done",
-        triageVerdict: "positive",
-        triageAction: "opened_case",
-        triagedAt: "2026-09-23T13:52:00Z",
+        caseId: "case-1", status: "closed", triageStatus: "done", triageVerdict: "positive",
+        triageAction: "opened_case", triagedAt: "2026-09-23T13:52:00Z",
       },
     });
     renderPage();

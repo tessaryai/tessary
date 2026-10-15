@@ -14,21 +14,17 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The reference a drift bucket is judged against, as a reader outside the sweep sees it: the pinned sketch while it is
- * on the live grid, else the rolling control resolved for a day. The same two references {@link MetricDriftSweep}
- * compares a closing window against, read the same way.
+ * The reference a drift bucket is judged against, read the same way {@link MetricDriftSweep} reads it: the pinned
+ * sketch while on the live grid, else the rolling control.
  */
 public final class MetricBaselineReference {
 
     private MetricBaselineReference() {}
 
-    /** A reference's median and 95th percentile, in the measure's own unit (ms or USD). */
+    /** In the measure's own unit (ms or USD). */
     public record Quantiles(double p50, double p95) {}
 
-    /**
-     * {@code row}'s reference on {@code grid}, judged on {@code eventDay}: the pinned sketch when it is on that grid,
-     * else the control resolved without {@code excludedDays}. Empty when neither has a sketch on the grid.
-     */
+    /** Empty when neither has a sketch on {@code grid}. */
     public static Optional<Quantiles> quantiles(
             MetricBaselineRow row, Grid grid, String eventDay, Set<String> excludedDays) {
         MetricReading reference = pinnedOnGrid(row.pinnedSketchJson(), grid);
@@ -55,12 +51,7 @@ public final class MetricBaselineReference {
     }
 
     /**
-     * The UTC days a confirmed regression on this bucket ran through — the days the rolling control must
-     * leave out.
-     *
-     * <p>Every day the spell touched, not just the day it opened. A regression that ran for a week was
-     * not normal on any of those days, and excluding only its first would let the rest of it become the
-     * bar it is being measured against.
+     * Every day a confirmed regression touched, not just its first: a week-long regression must not become its own bar.
      */
     public static Set<String> excludedDays(@Nullable List<ConfirmedSpan> spans) {
         if (spans == null || spans.isEmpty()) return Set.of();
@@ -69,8 +60,7 @@ public final class MetricBaselineReference {
             LocalDate from = LocalDate.ofInstant(Instant.parse(span.fromAt()), ZoneOffset.UTC);
             LocalDate to = LocalDate.ofInstant(Instant.parse(span.toAt()), ZoneOffset.UTC);
             if (to.isBefore(from)) continue;
-            // Bounded by the ring's own retention: a spell running for a year would otherwise walk a year
-            // of dates to exclude days the control stopped holding weeks ago.
+            // Bounded by the ring's retention, so a year-long spell doesn't walk a year of dates.
             LocalDate floor = to.minusDays(MetricControl.RETAIN_DAYS);
             for (LocalDate d = from.isBefore(floor) ? floor : from; !d.isAfter(to); d = d.plusDays(1)) {
                 out.add(d.toString());

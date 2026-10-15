@@ -10,11 +10,8 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 /**
- * Mints and verifies the {@code state} carried through the GitHub App install redirect.
- * Because the callback lands outside the cookie session ({@link
- * ai.tessary.auth.AuthFilter} bypasses it), the SecretBox-sealed (AES-GCM) state
- * IS the credential: it proves the install was initiated for this project and hasn't
- * expired. Tamper/forge fails the AEAD open; an old token fails the expiry check.
+ * Mints and verifies the install redirect's {@code state}. The callback bypasses the cookie session, so the
+ * SecretBox-sealed state is the credential: forgery fails the AEAD open, and an old token fails the expiry check.
  */
 @Service
 public class GithubInstallStateService {
@@ -32,11 +29,8 @@ public class GithubInstallStateService {
     public record StatePayload(String orgSlug, String projectSlug, String projectId, long exp) {}
 
     /**
-     * The sealed blob carried to the multi-repo picker when "connect an existing installation"
-     * resolves more than one candidate. {@code installationIds} are the installations the
-     * authorizing user was just proven to administer (via {@code GET /user/installations}); the
-     * select endpoint re-opens this to bound the user's pick to that verified set — so the IDOR
-     * defense survives even though the picker runs on a later, separate request.
+     * Carried to the multi-repo picker. {@code installationIds} are those the user was just proven to administer; the
+     * select endpoint bounds the pick to that set, so the IDOR defense survives the separate request.
      */
     public record SelectionPayload(
             String orgSlug, String projectSlug, String projectId, List<Long> installationIds, long exp) {}

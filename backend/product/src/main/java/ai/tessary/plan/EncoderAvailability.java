@@ -25,29 +25,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Whether the groundedness model answers right now: what its {@code GET /healthz} said the last time
- * it was asked, or what the last request to it found.
- *
- * <p>This gates sweeping and nothing else. While it says no, {@code ClassifierService} enqueues no
- * groundedness sweep and {@code ClassifierWorker} hands a claimed one back without spending an
- * attempt, so a model that is asleep or stopped pauses scoring and resumes from the cursor when it
- * answers again. The classifier, its findings and the org's switch stay as they are: capability
- * resolution never reads this. Before, a model that went away hid the classifier and its findings,
- * and a fresh install that had never run it failed the sweep five times a tick and dead-lettered.
- *
- * <p>Up means a 200 whose JSON body lists {@code groundedness} in {@code heads}. A bare 200 is not
- * enough: a server with no groundedness model loaded answers one with an empty {@code heads}, and
- * it does not serve this head.
- *
- * <p>Probed on boot and every {@code tessary.observer.encoder.probe-interval-ms}, never on a request
- * thread: {@link #available()} is a field read. {@link #markUnreachable} flips it down at once when a
- * request finds the model gone, rather than waiting out the interval. The same answer is served as
- * the {@code classifyService} health contributor in the {@code encoder} group, so {@code
- * /actuator/health/encoder} says why when it is no; see {@link #health()} for why that is never
- * {@code DOWN}.
- *
- * <p>A blank URL is "not configured", and reads exactly like an unreachable one to the sweep gate;
- * the reason differs only in the detail.
+ * Whether the groundedness model answers. Gates sweeping only: a down model pauses scoring and resumes from the cursor;
+ * capability resolution never reads this. Up means a 200 whose {@code heads} lists {@code groundedness}, since a server
+ * with no model loaded also answers 200. Probed off the request thread; {@link #markUnreachable} flips it down
+ * immediately.
  */
 @Component("classifyService")
 public class EncoderAvailability implements HealthIndicator {
@@ -62,7 +43,6 @@ public class EncoderAvailability implements HealthIndicator {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** What the last probe found, and when. */
     public record Snapshot(
             boolean available, String reason, @Nullable Instant checkedAt) {}
 
@@ -82,7 +62,7 @@ public class EncoderAvailability implements HealthIndicator {
         this.client = client;
     }
 
-    /** The last probe's verdict; false until the first probe has run. */
+    /** False until the first probe has run. */
     public boolean available() {
         return snapshot.available();
     }
@@ -91,7 +71,7 @@ public class EncoderAvailability implements HealthIndicator {
         return snapshot;
     }
 
-    /** On boot, never fatally: a diagnostic that can stop the platform starting is the worse bug. */
+    /** Never fatally: a diagnostic that can stop the platform starting is the worse bug. */
     @EventListener(ApplicationReadyEvent.class)
     public void probeOnBoot() {
         try {
@@ -109,10 +89,7 @@ public class EncoderAvailability implements HealthIndicator {
         refresh();
     }
 
-    /**
-     * Ask the encoder now and record the answer. Public so a configuration change can take effect
-     * without waiting out the interval; the sweep gate reads the result, it never calls this.
-     */
+    /** Public so a configuration change can take effect without waiting out the interval. */
     public Snapshot refresh() {
         Snapshot before = snapshot;
         Snapshot after = probe();
@@ -121,11 +98,7 @@ public class EncoderAvailability implements HealthIndicator {
         return after;
     }
 
-    /**
-     * Record that a request to the model just found it gone, so the next sweep skips at once instead
-     * of waiting for the next probe. The encoder scorer calls this on a refused or timed-out connect;
-     * the next probe that finds it up flips it back.
-     */
+    /** The encoder scorer calls this on a refused or timed-out connect. */
     public void markUnreachable(String reason) {
         Snapshot before = snapshot;
         Snapshot after = new Snapshot(false, reason, Instant.now());
@@ -174,7 +147,6 @@ public class EncoderAvailability implements HealthIndicator {
         }
     }
 
-    /** Whether a healthz body is a JSON object whose {@code heads} array holds {@link #HEAD}. */
     private static boolean listsHead(@Nullable String body) {
         if (body == null || body.isBlank()) return false;
         try {
@@ -190,11 +162,7 @@ public class EncoderAvailability implements HealthIndicator {
     }
 
     /**
-     * {@code UP} while the encoder answers, {@code UNKNOWN} with the reason otherwise — never {@code
-     * DOWN}. The classifiers this gates are optional, and the top-level health document is what a
-     * container health check and a load balancer read: an instance that chose not to run the
-     * groundedness model must not report itself unhealthy for it. The reason is in the {@code encoder}
-     * group's details for whoever is asking about the classifier specifically.
+     * Never {@code DOWN}: the gated classifiers are optional, and container health checks read the top-level document.
      */
     @Override
     public Health health() {

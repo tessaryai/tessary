@@ -1,25 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Sync the gitleaks credential rule corpus into the redaction resources.
-#
-# Usage:
-#   scripts/sync-gitleaks.sh            # the pinned GITLEAKS_VERSION below
-#   GITLEAKS_VERSION=v8.31.0 scripts/sync-gitleaks.sh
-#
-# gitleaks (MIT) is the upstream source of truth for what a leaked credential looks like. This script
-# fetches its default config at a release tag, converts it to JSON, and writes it beside its licence.
-# Nothing at runtime parses TOML: the backend reads the JSON with the Jackson it already carries, so a
-# rule bump is a reviewed diff to one resource file rather than a new dependency.
-#
-# The JSON is a structural conversion, not a rewrite. Rule regexes are copied as gitleaks wrote them, in
-# Go RE2 syntax; GitleaksCorpus translates the few constructs Java spells differently when it loads them.
-# Path-only rules are dropped, because redaction scans content and has no file path to match.
-#
-# The product's own credential formats are merged in from scripts/lib/gitleaks-self-minted.toml, the same
-# ruleset .gitleaks.toml extends for this repo's secret scan. No vendor list carries `tsy_w_...`, and a
-# platform token an agent leaks is as much a leak as an AWS key. Re-run this after editing that file.
-#
-# Needs python3 >= 3.11 (tomllib is in its standard library).
+# Converts gitleaks' default config (MIT, pinned GITLEAKS_VERSION) to JSON for the redaction corpus,
+# merging in scripts/lib/gitleaks-self-minted.toml; re-run after editing that file. Regexes stay RE2
+# (GitleaksCorpus translates); path-only rules are dropped. Needs python3 >= 3.11.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"

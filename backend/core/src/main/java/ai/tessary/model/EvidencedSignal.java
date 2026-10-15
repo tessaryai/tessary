@@ -5,11 +5,7 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-/**
- * A label + supporting file-path evidence. The label field has multiple
- * accepted aliases because different sections of the product_profile use
- * different names for it (kind / regime / signal).
- */
+/** The label accepts several aliases because product_profile sections name it differently (kind, regime, signal). */
 public record EvidencedSignal(String label, String evidence) {
 
     public EvidencedSignal {

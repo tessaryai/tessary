@@ -28,7 +28,8 @@ import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -37,31 +38,15 @@ import org.springframework.context.ApplicationEventPublisher;
  * the classifier stopped, and either an enable or saving the key it was waiting on lifts it.
  */
 @SpringBootTest
-class FrustrationEnableIntegrationTest {
-
-    @Autowired
-    ClassifierService classifierService;
-
-    @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    ProviderCredentialRepository credentials;
-
-    @Autowired
-    ProjectModelSettings modelSettings;
-
-    @Autowired
-    SecretBox secretBox;
-
-    @Autowired
-    ApplicationEventPublisher events;
+record FrustrationEnableIntegrationTest(
+        ClassifierService classifierService,
+        ClassifierRepository classifiers,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        ProviderCredentialRepository credentials,
+        ProjectModelSettings modelSettings,
+        SecretBox secretBox,
+        ApplicationEventPublisher events) {
 
     @Test
     void aFreshProjectSeedsFrustrationOffAndEnablingWithoutAProviderKeyIsRefused() {
@@ -95,32 +80,20 @@ class FrustrationEnableIntegrationTest {
         assertNull(classifierService.readiness(pid, enabled));
     }
 
-    @Test
-    void readinessNamesThePauseOnAnEnabledFrustration() {
-        TenantFixture.Setup t = tenant("fr-readiness");
-        String pid = t.project().id();
-        ClassifierRow signal = frustration(t);
-        classifiers.setEnabled(pid, signal.id(), true);
-        classifiers.pause(pid, signal.id(), ClassifierPause.NO_PROVIDER, Instant.now());
-
-        ClassifierRow row =
-                ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
-        assertEquals(ClassifierPause.NO_PROVIDER, classifierService.readiness(pid, row));
-    }
-
     /** The column's check constraint lists the reasons it accepts; a reason missing there fails the sweep's write. */
-    @Test
-    void aNoCreditPauseIsStoredAndNamedByReadiness() {
-        TenantFixture.Setup t = tenant("fr-no-credit");
+    @ParameterizedTest
+    @ValueSource(strings = {ClassifierPause.NO_PROVIDER, ClassifierPause.NO_CREDIT})
+    void aPauseIsStoredAndNamedByReadinessOnAnEnabledFrustration(String reason) {
+        TenantFixture.Setup t = tenant("fr-pause-" + reason.replace('_', '-'));
         String pid = t.project().id();
         ClassifierRow signal = frustration(t);
         classifiers.setEnabled(pid, signal.id(), true);
 
-        classifiers.pause(pid, signal.id(), ClassifierPause.NO_CREDIT, Instant.now());
+        classifiers.pause(pid, signal.id(), reason, Instant.now());
 
         ClassifierRow row =
                 ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
-        assertEquals(ClassifierPause.NO_CREDIT, classifierService.readiness(pid, row));
+        assertEquals(reason, classifierService.readiness(pid, row));
     }
 
     @Test

@@ -7,17 +7,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Replaces pasted code and logs in a message with {@code [PASTE: n lines, k chars]}, so the budget is
- * spent on what the user wrote rather than what they pasted, and emotion inside a paste is not read as
- * the user's. Two shapes are pastes: a fenced block ({@code ```} or {@code ~~~}), and a run of at least
- * {@value #MIN_RUN_LINES} consecutive code-like lines. A port of the research formatter's
- * {@code mark_pastes}; the two must agree character for character, which {@code PasteMarkerTest} pins.
+ * Replaces pasted code and logs with {@code [PASTE: n lines, k chars]}, so the budget goes to what the user wrote and
+ * emotion in a paste is not read as theirs. A port of the research formatter's {@code mark_pastes}; the two must agree
+ * character for character, which {@code PasteMarkerTest} pins.
  */
 public final class PasteMarker {
 
     static final int MIN_RUN_LINES = 8;
 
-    // UNICODE_CHARACTER_CLASS makes \s the full Unicode whitespace set, as Python's re does on a str.
+    // Makes \s the full Unicode whitespace set, as Python's re does on a str.
     private static final Pattern FENCE = Pattern.compile("```.*?```|~~~.*?~~~", Pattern.DOTALL);
     private static final Pattern INDENTED = Pattern.compile("\\s{2,}\\S", Pattern.UNICODE_CHARACTER_CLASS);
     private static final Pattern CODE_OR_LOG =

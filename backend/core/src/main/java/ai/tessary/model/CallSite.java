@@ -8,37 +8,9 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One LLM call site (evals plugin schema v0.3).
- *
- * <p>{@code shape} is one of: {@code summarize | extract | rag_answer |
- * classify | draft | route | tool_call | agent_step | conversational_turn |
- * embedding | rerank | guardrail | moderation | ensemble_vote | other}.
- * Held as an open string so future shapes don't require a model change.
- *
- * <p>{@code invocation} (schema v0.9.0) records how the model is reached:
- * {@code sdk | cli_agent | http | sandbox_agent}. Absent on the wire means
- * {@code sdk} (the only value pre-0.9.0), normalized in the constructor.
- *
- * <p>Trace-derived fields (populated only on Path A — traces provided):
- * <ul>
- *   <li>{@code sourceSpans} — representative spans (up to ~10, stratified
- *       across time buckets) that contributed to this call-site identity.
- *   <li>{@code datasetPath} — relative path under {@code evals/} to a
- *       captured-inputs JSONL for replay.
- *   <li>{@code observed} — production stats across the full sample.
- * </ul>
- *
- * <p>Code-tracked facts — {@code outputSchema} (the declared structured-output JSON Schema) and
- * {@code tools} (the declared tool schemas). These describe the call site's CODE rather than its
- * traffic, so the {@code .tessary/} bundle carries them and the platform keeps them in sync as the
- * code changes. {@code outputSchema} also has a platform-side writer (agentic synthesis reads it out
- * of the repo), which is why it persists to its own column rather than riding along in JSON.
- *
- * <p>{@code expectedSpans} (contract v8) — code-derived telemetry nomenclature:
- * the span/trace names the plugin's discovery step observed the instrumentation
- * emit for this call site (OTel {@code start_span}, the enclosing function name,
- * etc.), expressed as proto-mapping rules. Orchestrator-owned (the plugin emits
- * them); empty when discovery found no instrumentation hint.
+ * One LLM call site (evals plugin schema v0.3). {@code shape} is an open string so new shapes need no model change.
+ * Absent {@code invocation} means {@code sdk}, normalized in the constructor. {@code outputSchema} and {@code tools}
+ * describe the code, not the traffic; {@code outputSchema} has its own column because the platform writes it too.
  */
 public record CallSite(
         String id,
@@ -96,15 +68,8 @@ public record CallSite(
     }
 
     /**
-     * One tool the call site declares to the model, as the bundle carries it.
-     *
-     * <p>{@code inputSchema} is the tool's argument JSON Schema — arbitrary by nature, so it stays a
-     * {@link JsonNode} rather than being modelled. {@code source} is a {@code file:line} pointer back
-     * to the declaration, mirroring {@code fileHint}/{@code lineHint} on the call site itself.
-     *
-     * <p>An empty list is NOT "this call site has no tools" — it is "the bundle declares none", which
-     * is also what a bundle written before this field existed produces. Only a consumer that can tell
-     * the two apart should treat absence as a fact.
+     * {@code inputSchema} stays a {@link JsonNode} since it is arbitrary. An empty list means "the bundle declares
+     * none", which is also what an older bundle produces, not "no tools".
      */
     public record ToolSpec(
             String name,
@@ -113,15 +78,8 @@ public record CallSite(
             @Nullable String source) {}
 
     /**
-     * One code-derived proto-mapping rule (contract v8). {@code matchField} is one
-     * of {@code name | model | trace_id | metadata.<key>}; {@code matchPattern} is an exact string or glob
-     * ({@code * } / {@code ?}); {@code kind} is {@code span | trace}; {@code
-     * confidence} is {@code high | medium | low}.
-     *
-     * <p>{@code source} (contract v9) is {@code observed | inferred} (default {@code inferred}).
-     * {@code observed} means the rule was read from real OTel/trace telemetry and is a verified
-     * fact the platform trusts unconditionally (its {@code confidence} is moot); {@code inferred}
-     * is the v8 best-effort guess from the call site's code, where {@code confidence} still ranks.
+     * One code-derived proto-mapping rule (contract v8). {@code source} {@code observed} is verified telemetry trusted
+     * regardless of {@code confidence}; {@code inferred}, the default, is a guess from code.
      */
     public record ExpectedSpan(
             @JsonProperty("match_field") String matchField,

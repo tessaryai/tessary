@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -25,18 +24,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * below zero, and a dead-lettered run the findings page cannot tell from one still going.
  */
 @SpringBootTest
-class BehaviorTriageJobRepositoryTest {
+record BehaviorTriageJobRepositoryTest(BehaviorTriageJobRepository jobs, TenantService tenants, JdbcClient jdbc) {
 
     private static final int MAX_ATTEMPTS = 5;
-
-    @Autowired
-    BehaviorTriageJobRepository jobs;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
 
     /**
      * A claim reads back every column as the queue wrote it. A failed run goes back leased for its backoff

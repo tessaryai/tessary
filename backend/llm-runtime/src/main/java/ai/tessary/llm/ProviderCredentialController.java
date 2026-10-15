@@ -40,28 +40,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Provider credentials: one stored credential per {@code (org, provider)} (moved off
- * {@code (project, provider)}; see {@link ProviderCredential}'s class javadoc). An org adds a key for
- * a provider once; every project in it then offers every {@link ModelCatalog} model that provider
- * hosts. Secrets are sealed via {@link SecretBox} and never returned; the {@link View} exposes only
- * boolean {@code has_*} flags.
- *
- * <p><b>Gated on {@link Capability#BYO_PROVIDER_KEYS}, which is now on by default</b>; see that
- * constant's javadoc for why it flipped: every agentic lane resolves the org's own credential, so an
- * org that cannot reach this controller cannot triage a finding at all. The gate itself is unchanged
- * and still correct, because it was never about hiding a tab: a partner with the URL, or an
- * integration written against the API, would still be able to store a key, so every verb here
- * requires the capability, including the reads: a credential roster an org may not populate is a page
- * about a thing it cannot do. What changed is which answer the capability gives by default, not what
- * it protects. The catalog read is the exception and stays open, because {@code /catalog} is the list
- * of models the platform offers and is read by surfaces that have nothing to do with BYO keys.
- *
- * <p>The route drops {@code /projects/{projectSlug}}: there is no project in scope any more, only an
- * org membership check ({@link TenantPathResolver#requireOrg}). The Settings → Providers page keeps
- * its own URL unchanged (still nested under a project, in the React router); renesting Settings' IA is
- * out of scope here, and the page simply calls this org-scoped API from wherever it is mounted. See
- * {@code frontend/src/tenant/TenantContext.tsx}'s {@code useOrgApi} and
- * {@code frontend/src/views/Settings/Providers.tsx}.
+ * Secrets are sealed via {@link SecretBox} and never returned. Every verb is gated on
+ * {@link Capability#BYO_PROVIDER_KEYS}, including reads, because an API caller could otherwise store a key;
+ * {@code /catalog} stays open since other surfaces read it.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/providers")
@@ -74,15 +55,12 @@ public class ProviderCredentialController {
     private final TenantPathResolver resolver;
     private final CapabilityService capabilities;
 
-    /** The live, per-(org, provider) model catalog; see {@link #catalog}. */
     private final ModelCatalogFetchService catalogFetchService;
 
     private final ApplicationEventPublisher events;
 
-    /** Whether and how {@link #catalog} lists {@link ModelProvider#PLATFORM}. */
     private final PlatformProviderSupplier platformSupplier;
 
-    /** How long {@link #catalog} waits on one provider; {@link #PER_PROVIDER_FETCH_DEADLINE} in production. */
     private final Duration fetchDeadline;
 
     @Autowired
@@ -105,7 +83,6 @@ public class ProviderCredentialController {
                 PER_PROVIDER_FETCH_DEADLINE);
     }
 
-    /** Test seam: a short deadline, so a test can hang one provider without waiting ten seconds. */
     ProviderCredentialController(
             ProviderCredentialRepository repo,
             SecretBox secretBox,
@@ -125,12 +102,7 @@ public class ProviderCredentialController {
         this.platformSupplier = platformSupplier;
     }
 
-    /**
-     * A partial-update upsert: every field is optional. A null field means "leave the stored
-     * value untouched"; a non-blank secret field ({@code api_key} / AWS keys) replaces and
-     * re-seals it. There are therefore no Jakarta {@code @NotBlank} constraints to apply; the
-     * blank-checks in {@link #upsert} drive that keep-vs-replace semantics, not validation.
-     */
+    /** Every field is optional: null leaves the stored value; a non-blank secret replaces and re-seals it. */
     public record UpsertRequest(
             @JsonProperty("base_url_override") String baseUrlOverride,
             @JsonProperty("api_key") String apiKey,
@@ -138,13 +110,8 @@ public class ProviderCredentialController {
             @JsonProperty("aws_access_key") String awsAccessKey,
             @JsonProperty("aws_secret_key") String awsSecretKey,
             @JsonProperty("bedrock_model_arn") String bedrockModelArn,
-            /** {@link ModelProvider#CUSTOM} only: the free-text model id to actually call. */
             @JsonProperty("custom_model_name") String customModelName,
-            /**
-             * {@code "api_key"} or {@code "iam_role"}, Bedrock/{@code BEDROCK_MANTLE} only. Null means
-             * "leave the stored value untouched", like every other field here; a fresh credential with
-             * no auth_mode sent defaults to {@code api_key} (see {@link #validateAuth}).
-             */
+            /** A fresh credential with no auth_mode defaults to {@code api_key}. */
             @JsonProperty("auth_mode") String authMode) {}
 
     public record View(
@@ -160,42 +127,19 @@ public class ProviderCredentialController {
             @JsonProperty("created_at") String createdAt,
             @JsonProperty("updated_at") String updatedAt) {}
 
-    /** Typed catalog envelope (was a raw {@code Map<String,Object>}; see the strong-typing rule). */
     public record CatalogView(
             List<PlatformCatalog.PlatformDescriptor> platforms, List<ModelCatalog.CatalogEntry> models) {}
 
-    /** Typed credential-list envelope. */
     public record CredentialListView(List<View> credentials) {}
 
-    /** Typed delete ack. */
     public record DeleteResponse(boolean deleted) {}
 
-    /**
-     * Hard ceiling on how long {@link #catalog} waits for any ONE provider's fetch before giving up on
-     * it and falling back to that provider's static entries. Deliberately generous over a single
-     * lister's own request timeout (each {@code ProviderModelLister} already bounds its own HTTP/AWS
-     * call via {@code tessary.model-catalog.fetch-timeout}, 5s by default) rather than tied to it 1:1:
-     * this is a belt-and-suspenders bound against a hang the per-request timeout does not cover (e.g.
-     * DNS resolution), not the primary latency control.
-     */
+    /** A backstop for hangs the per-request timeout does not cover (e.g. DNS), not the primary latency control. */
     private static final Duration PER_PROVIDER_FETCH_DEADLINE = Duration.ofSeconds(10);
 
     /**
-     * {@code models} is built per-org, live: for each provider, the org's own fetched listing
-     * ({@link ModelCatalogFetchService#refreshingRead}, the settings-page path, which may block
-     * briefly on a cold or expired cache entry) merged onto {@link ModelCatalog}'s static capability
-     * rows. A provider the org has not configured (or whose fetch just failed with nothing cached)
-     * contributes its static representative entries unchanged, so an unconfigured or erroring
-     * provider still shows up in the picker as the disabled option it already renders as, rather than
-     * vanishing.
-     *
-     * <p>The ten {@code refreshingRead} calls run concurrently on virtual threads rather than in a
-     * sequential loop on the request thread: an org's configured providers typically warm together
-     * during onboarding, so their cache entries expire in near lock-step, and a sequential loop would
-     * make this endpoint's wall time the sum of up to ten blocking fetches (each up to the fetch
-     * timeout) rather than the max of one. {@link #PER_PROVIDER_FETCH_DEADLINE} additionally bounds any
-     * one call so a single stuck provider cannot hold the whole response open indefinitely, degrading
-     * that provider to its static entries, exactly like a fetch failure already does.
+     * An unconfigured or failing provider contributes its static entries, so it still shows as a disabled option.
+     * Fetches run concurrently because providers configured together expire together.
      */
     @GetMapping("/catalog")
     public ApiResponse<CatalogView> catalog(TenantContext ctx, @PathVariable String orgSlug) {
@@ -217,10 +161,6 @@ public class ProviderCredentialController {
         return ApiResponse.ok(new CatalogView(platforms(supplied), List.copyOf(models)));
     }
 
-    /**
-     * {@link PlatformCatalog#platforms()} with {@link ModelProvider#PLATFORM}'s placeholder replaced by
-     * the supplier's label and detail, or dropped when the supplier does not offer it to this org.
-     */
     private static List<PlatformCatalog.PlatformDescriptor> platforms(
             Optional<PlatformProviderSupplier.SuppliedProvider> supplied) {
         List<PlatformCatalog.PlatformDescriptor> out = new ArrayList<>();
@@ -236,18 +176,13 @@ public class ProviderCredentialController {
     }
 
     /**
-     * Fans {@link ModelCatalogFetchService#refreshingRead} out across one virtual thread per provider
-     * instead of running the ten calls sequentially on the request thread; see {@link #catalog}'s
-     * javadoc. A provider whose fetch does not finish within {@link #PER_PROVIDER_FETCH_DEADLINE}, or
-     * that fails outright, is simply absent from the returned map; the caller already treats "no live
-     * listing" as "fall back to static entries", the same degrade path a vendor outage takes inside
-     * {@code ModelCatalogFetchService} itself.
+     * A provider that misses the deadline or fails is absent from the map, which the caller treats as "fall back to
+     * static entries".
      */
     private Map<ModelProvider, List<ProviderModel>> fetchAllProviders(String orgId) {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Map<ModelProvider, Future<List<ProviderModel>>> futures = new EnumMap<>(ModelProvider.class);
             for (ModelProvider provider : ModelProvider.values()) {
-                // No org credential and no listing: the supplier, not a vendor, answers for PLATFORM.
                 if (provider == ModelProvider.PLATFORM) continue;
                 futures.put(provider, executor.submit(() -> catalogFetchService.refreshingRead(orgId, provider)));
             }
@@ -258,9 +193,8 @@ public class ProviderCredentialController {
                 } catch (TimeoutException e) {
                     entry.getValue().cancel(true);
                 } catch (ExecutionException e) {
-                    // refreshingRead already catches ModelListingException internally and degrades to
-                    // List.of()/stale cache; reaching here means an unexpected runtime failure, which
-                    // gets the same "fall back to static entries" treatment as every other failure mode.
+                    // refreshingRead already degrades ModelListingException; reaching here is unexpected, but gets the
+                    // same fallback.
                     log.warn(
                             "catalog fetch for provider={} failed unexpectedly: {}",
                             entry.getKey(),
@@ -294,11 +228,8 @@ public class ProviderCredentialController {
         requireEditable(provider);
         capabilities.require(r.org().id(), Capability.BYO_PROVIDER_KEYS);
 
-        // SSRF guard: a user-supplied base-URL override becomes a server-side outbound target (the
-        // model-catalog fetch, the decision call and the sandbox agent), so reject
-        // loopback/link-local/RFC1918/CGNAT/IMDS hosts at the write boundary, exactly as the
-        // ingestion-source URL is guarded. This is the only credentialed outbound caller that was
-        // skipping the guard.
+        // SSRF guard: a base-URL override becomes a server-side outbound target, so reject
+        // loopback/link-local/RFC1918/CGNAT/IMDS hosts at write time.
         if (req.baseUrlOverride() != null && !req.baseUrlOverride().isBlank()) {
             UrlGuard.requirePublicHttp(req.baseUrlOverride());
         }
@@ -318,8 +249,7 @@ public class ProviderCredentialController {
         ProviderCredential row = new ProviderCredential(
                 existing != null ? existing.id() : Ids.ulid(),
                 r.org().id(),
-                // project_id is historical only: a fresh row written through this org-scoped route
-                // names no project at all (see ProviderCredential's class javadoc).
+                // project_id is historical only; a fresh row names no project.
                 existing != null ? existing.projectId() : null,
                 provider,
                 req.baseUrlOverride() != null
@@ -366,10 +296,7 @@ public class ProviderCredentialController {
         return ApiResponse.ok(new DeleteResponse(deleted));
     }
 
-    /**
-     * {@link ModelProvider#PLATFORM} takes no org credential: a stored row would be a key nothing reads,
-     * and {@link ProjectModelSettings#configuredProviders} ignores one anyway.
-     */
+    /** A stored PLATFORM row would be a key nothing reads. */
     private static void requireEditable(ModelProvider provider) {
         if (provider == ModelProvider.PLATFORM) {
             throw new TessaryException(ModelConfigError.PROVIDER_NOT_EDITABLE, provider);
@@ -381,13 +308,8 @@ public class ProviderCredentialController {
     }
 
     /**
-     * Bedrock needs a region (AWS auth). {@code api_key}/{@code none} platforms are not
-     * checked; a credential may be saved without a key, and the platform then fails at run time
-     * with {@code MISSING_CREDENTIALS}.
-     *
-     * <p>{@code auth_mode} is meaningful only for {@code AUTH_AWS} platforms (Bedrock/mantle): a
-     * non-AWS platform saving {@code iam_role} would be a setting that can never take effect, since
-     * {@link ProviderCredential#usesIamRole()} is only ever read on the AWS paths.
+     * A credential may be saved without a key and fail at run time with {@code MISSING_CREDENTIALS}. {@code iam_role}
+     * is rejected off AWS platforms, where it could never take effect.
      */
     private static void validateAuth(ProviderCredential row) {
         boolean awsAuth = PlatformCatalog.AUTH_AWS.equals(PlatformCatalog.authOf(row.provider()));
@@ -412,9 +334,7 @@ public class ProviderCredentialController {
                 c.baseUrlOverride(),
                 c.apiKeySealed() != null,
                 c.awsRegion(),
-                // An IAM-role credential has no sealed keys and needs none; it is still a fully
-                // configured credential, so it must read as one to the settings page rather than as
-                // "missing".
+                // An IAM-role credential has no sealed keys but is fully configured, so it must not read as "missing".
                 c.usesIamRole() || (c.awsAccessKeySealed() != null && c.awsSecretKeySealed() != null),
                 c.bedrockModelArn(),
                 c.customModelName(),

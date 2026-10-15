@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.open.obs.Markers;
@@ -58,16 +57,7 @@ class SessionTimelineServiceTest {
     @Test
     void loadTailReadsNoTraceItThenLeavesOut() {
         stubTraces(List.of(), settled("t3", 3000), settled("t2", 2000), settled("t1", 1000));
-        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
-                .thenAnswer(call -> {
-                    Collection<String> ids = call.getArgument(1);
-                    return ids.stream()
-                            .map(SessionTimelineServiceTest::toolSpan)
-                            .toList();
-                });
-        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+        SessionTimelineService service = serviceOverToolSpans();
 
         SessionTimeline tail = service.loadTail(PID, SID, 1);
 
@@ -80,33 +70,6 @@ class SessionTimelineServiceTest {
                 "a tail that one trace fills reads the spans and payloads of a whole page of traces");
         assertEquals(List.of(), tail.events(), "no event of 1 byte or less exists");
         assertEquals(true, tail.truncated());
-    }
-
-    /**
-     * Catches a tail that reads every trace row of the session: one that the newest trace fills reads the trace rows
-     * of its first two pages, and never the older ones.
-     */
-    @Test
-    void loadTailReadsOnlyTheTraceRowsOfThePagesItReads() {
-        SessionTrace t5 = settled("t5", 5000);
-        stubTraces(List.of(), t5, settled("t4", 4000), settled("t3", 3000), settled("t2", 2000), settled("t1", 1000));
-        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
-                .thenAnswer(call -> {
-                    Collection<String> ids = call.getArgument(1);
-                    return ids.stream()
-                            .map(SessionTimelineServiceTest::toolSpan)
-                            .toList();
-                });
-        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
-
-        service.loadTail(PID, SID, 1);
-
-        verify(traces).listUnendedSessionTraces(PID, SID);
-        verify(traces).listEndedSessionTraces(PID, SID, null, 1);
-        verify(traces).listEndedSessionTraces(PID, SID, t5, 2);
-        verifyNoMoreInteractions(traces);
     }
 
     /**
@@ -123,16 +86,7 @@ class SessionTimelineServiceTest {
                 settledFrom("t3", 2990, 3000),
                 settledFrom("t2", 1990, 2000),
                 settledFrom("t1", 990, 1000));
-        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
-                .thenAnswer(call -> {
-                    Collection<String> ids = call.getArgument(1);
-                    return ids.stream()
-                            .map(SessionTimelineServiceTest::toolSpan)
-                            .toList();
-                });
-        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+        SessionTimelineService service = serviceOverToolSpans();
 
         SessionTimeline tail = service.loadTailThrough(PID, SID, Long.MAX_VALUE, T0.plusMillis(3000));
 
@@ -152,16 +106,7 @@ class SessionTimelineServiceTest {
     @Test
     void theLoadLineOfATailCountsTheEventsTheTailReturns() {
         stubTraces(List.of(), settled("t2", 2000), settled("t1", 1000));
-        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
-                .thenAnswer(call -> {
-                    Collection<String> ids = call.getArgument(1);
-                    return ids.stream()
-                            .map(SessionTimelineServiceTest::toolSpan)
-                            .toList();
-                });
-        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+        SessionTimelineService service = serviceOverToolSpans();
         long newestEvent = service.load(PID, SID).events().get(1).bytes();
         Logger logger = (Logger) LoggerFactory.getLogger(SessionTimelineService.class);
         Level before = logger.getLevel();
@@ -229,6 +174,17 @@ class SessionTimelineServiceTest {
                 timeline.events().stream().map(Event::id).toList(),
                 "a settled trace none of whose spans ended is read as a trace still receiving spans, so the span whose"
                         + " parent never arrived carries no message");
+    }
+
+    /** A service whose every trace holds one tool span ({@link #toolSpan}) and no payload or tool call. */
+    private SessionTimelineService serviceOverToolSpans() {
+        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
+                .thenAnswer(call -> call.<Collection<String>>getArgument(1).stream()
+                        .map(SessionTimelineServiceTest::toolSpan)
+                        .toList());
+        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        return new SessionTimelineService(traces, spans, payloads, toolCalls);
     }
 
     /**

@@ -52,31 +52,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The opt-in spool: a Kafka-API broker (Kafka, Redpanda, or any compatible) holds every
- * accepted batch. {@link #append} publishes with {@code acks=all} and waits for the broker's
- * acknowledgement before answering, so a 200 means the batch is on the broker's log (and on its
- * disk: write caching is turned off on the topics where the broker accepts it); a publish that fails
- * or times out is a
- * shed, and the edge tells the producer to retry. The drainer {@link #claim}s one record at a time
- * and {@link #ack}s by committing its offset only after the substrate write committed, so a crash
- * between the two replays the record into the idempotent write path rather than losing it. A batch
- * that exhausts its retries is {@link #nack}ed to the dead-letter topic and committed, so nothing is
- * dropped and nothing blocks the partition; if even that publish fails the consumer seeks back to
- * the record and it is redelivered. Neither settlement throws.
- *
- * <p>Messages are keyed by project, so one project's batches land on one partition in order, which
- * is what lets parallel consumers (M3) never contend on the same trace rows. Serialisation is the
- * decoded {@link RawEntry} list as JSON, the same shape the in-process spool holds, so the drain is
- * identical in both modes.
- *
- * <p>Each drainer thread owns a consumer of its own in the same group (a {@code KafkaConsumer} is not
- * thread-safe), so the broker spreads the partitions across the drainers and a project's partition is
- * drained by exactly one of them at a time. {@link #stats} reads lag through the admin client instead,
- * so any thread may ask.
+ * A 200 means the batch is on the broker's log ({@code acks=all}). The offset is committed only after the substrate
+ * write, so a crash replays into the idempotent write path. Keyed by project for per-partition order. A
+ * {@code KafkaConsumer} is not thread-safe, so each drainer owns one.
  */
 // CloseResource: the consumer handed around below lives as long as the spool and is closed by close()
 // or by the owning thread on reset; the locals are references to it, not resources of their own.
-@SuppressWarnings("PMD.CloseResource")
 public final class KafkaSpool implements IngestSpool, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaSpool.class);
@@ -85,13 +66,10 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     private static final long ADMIN_TIMEOUT_MS = 3_000;
     private static final long MIN_PUBLISH_TIMEOUT_MS = 1_000;
 
-    /** The wire shape of one message. */
     record Envelope(String projectId, List<RawEntry> entries) {}
 
-    /** The broker record behind a claim, so ack and nack know what to commit. */
     record KafkaReceipt(ConsumerRecord<String, byte[]> record) implements Receipt {}
 
-    /** A drainer thread's consumer and the record it is holding; only that thread touches the consumer. */
     private static final class Slot {
         final KafkaConsumer<String, byte[]> consumer;
         final Thread owner;
@@ -108,7 +86,6 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     private final long publishTimeoutMs;
     private final KafkaProducer<String, byte[]> producer;
     private final Admin admin;
-    /** One consumer per drainer thread, in the same group, so the broker spreads the partitions (M3). */
     private final Map<Thread, Slot> slots = new ConcurrentHashMap<>();
 
     private volatile boolean closing;
@@ -124,9 +101,9 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     public KafkaSpool(IngestSpoolProperties.Kafka props, ObjectMapper mapper) {
         this.props = props;
         this.mapper = mapper;
-        this.publishTimeoutMs = Math.max(MIN_PUBLISH_TIMEOUT_MS, props.getPublishTimeoutMs());
+        this.publishTimeoutMs = Math.max(MIN_PUBLISH_TIMEOUT_MS, props.publishTimeoutMs());
         Properties p = new Properties();
-        p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, props.getBootstrapServers());
+        p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
         p.put(ProducerConfig.ACKS_CONFIG, "all");
         p.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
         p.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
@@ -139,63 +116,53 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         p.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, String.valueOf(publishTimeoutMs));
         this.producer = new KafkaProducer<>(p, new StringSerializer(), new ByteArraySerializer());
         Properties a = new Properties();
-        a.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, props.getBootstrapServers());
+        a.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
         a.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, String.valueOf(ADMIN_TIMEOUT_MS));
         a.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, String.valueOf(ADMIN_TIMEOUT_MS));
         this.admin = Admin.create(a);
         ensureTopics();
     }
 
-    /** The largest frame a batch can need: the message cap plus headers, key and envelope slack. */
     private long frameBytes() {
-        return props.getMaxMessageBytes() + 64 * 1024;
+        return props.maxMessageBytes() + 64 * 1024;
     }
 
-    /**
-     * Creates the two topics with the settings the contract needs: enough partitions to spread projects,
-     * a message cap matching the app's; write caching is then turned off where the broker accepts it. Retried
-     * lazily until it succeeds, because with no compose dependency the backend often boots first.
-     */
+    /** Retried lazily: with no compose dependency the backend often boots before the broker. */
     private boolean ensureTopics() {
         if (topicsReady.get()) return true;
-        // At most one attempt per admin timeout window, so a broker that is down does not cost every
-        // push three seconds on top of the shed.
+        // At most one attempt per admin timeout, so a down broker does not add seconds to every push.
         long now = System.nanoTime();
         if (now - topicsTriedAtNanos < ADMIN_TIMEOUT_MS * 1_000_000L) return false;
         topicsTriedAtNanos = now;
         Map<String, String> configs = Map.of(
                 "max.message.bytes",
                 String.valueOf(frameBytes()),
-                // Set on CREATE, alongside the replication factor, because the two only mean anything
-                // together: replicas the leader never waits for do not make an acknowledged publish
-                // durable. See IngestSpoolProperties.Kafka.minInSyncReplicas.
+                // Set with the replication factor, since replicas the leader never waits for do not make a publish
+                // durable.
                 "min.insync.replicas",
                 String.valueOf(props.minInSyncReplicas()));
-        for (String topic : List.of(props.getTopic(), props.getDeadLetterTopic())) {
+        for (String topic : List.of(props.topic(), props.deadLetterTopic())) {
             try {
-                admin.createTopics(List.of(new NewTopic(topic, props.getPartitions(), props.getReplicationFactor())
-                                .configs(configs)))
+                admin.createTopics(List.of(
+                                new NewTopic(topic, props.partitions(), props.replicationFactor()).configs(configs)))
                         .all()
                         .get(ADMIN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 log.info(
                         "ingest spool topic created topic={} partitions={} replication={} min-isr={}",
                         topic,
-                        props.getPartitions(),
-                        props.getReplicationFactor(),
+                        props.partitions(),
+                        props.replicationFactor(),
                         props.minInSyncReplicas());
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause();
                 if (cause instanceof TopicExistsException) {
-                    // The settings above apply at CREATE only, so an operator who raises
-                    // replication-factor after the first boot would otherwise get silence from a topic
-                    // that kept the value it was made with. Say what was asked for; the broker holds
-                    // what is actually in force.
+                    // These apply at CREATE only, so log what was asked; the broker holds what is in force.
                     log.info(
                             "ingest spool topic exists topic={}; it keeps the settings it was created with,"
                                     + " not the requested partitions={} replication={} min-isr={}",
                             topic,
-                            props.getPartitions(),
-                            props.getReplicationFactor(),
+                            props.partitions(),
+                            props.replicationFactor(),
                             props.minInSyncReplicas());
                 } else {
                     log.warn(
@@ -210,8 +177,8 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
             } catch (TimeoutException | KafkaException e) {
                 log.warn(
                         "ingest spool broker not reachable bootstrap={}; publishes shed until it is",
-                        props.getBootstrapServers());
-                publishFailure = "broker not reachable at " + props.getBootstrapServers();
+                        props.bootstrapServers());
+                publishFailure = "broker not reachable at " + props.bootstrapServers();
                 publishFailedAtNanos = System.nanoTime();
                 return false;
             } catch (InterruptedException e) {
@@ -224,13 +191,9 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         return true;
     }
 
-    /**
-     * {@code write.caching=false} is Redpanda's per-topic switch and Apache Kafka rejects the key, so
-     * it is applied after creation and a refusal is informational: on Kafka, the durability of an
-     * acknowledged write is the broker's own flush and replication policy.
-     */
+    /** Redpanda's switch; Apache Kafka rejects the key, so a refusal is informational. */
     private void disableWriteCaching() {
-        for (String topic : List.of(props.getTopic(), props.getDeadLetterTopic())) {
+        for (String topic : List.of(props.topic(), props.deadLetterTopic())) {
             ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topic);
             try {
                 admin.incrementalAlterConfigs(Map.of(
@@ -257,10 +220,9 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         }
     }
 
-    /** One drainer per configured consumer: messages are keyed by project, so a project stays on one of them. */
     @Override
     public int drainers() {
-        return Math.max(1, props.getConsumers());
+        return Math.max(1, props.consumers());
     }
 
     @Override
@@ -272,23 +234,23 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
             log.warn("ingest spool could not encode a batch project={} spans={}", projectId, entries.size());
             return Admission.SHED;
         }
-        if (body.length > props.getMaxMessageBytes()) {
+        if (body.length > props.maxMessageBytes()) {
             log.warn(
                     "ingest spool batch exceeds max-message-bytes — refused project={} spans={} bytes={} max={}",
                     projectId,
                     entries.size(),
                     body.length,
-                    props.getMaxMessageBytes());
+                    props.maxMessageBytes());
             return Admission.OVERSIZE;
         }
         if (!ensureTopics()) return Admission.SHED;
         try {
-            producer.send(new ProducerRecord<>(props.getTopic(), projectId, body))
+            producer.send(new ProducerRecord<>(props.topic(), projectId, body))
                     .get(publishTimeoutMs, TimeUnit.MILLISECONDS);
             publishFailure = null;
             return Admission.ACCEPTED;
         } catch (ExecutionException | TimeoutException | KafkaException e) {
-            // Not persisted, so not accepted: the edge answers 503 + Retry-After and the exporter re-sends.
+            // Not persisted, so not accepted: the edge answers 503 + Retry-After.
             Throwable cause = e instanceof ExecutionException ee && ee.getCause() != null ? ee.getCause() : e;
             publishFailure = "publish failed: " + cause.getClass().getSimpleName();
             publishFailedAtNanos = System.nanoTime();
@@ -336,7 +298,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         try {
             envelope = mapper.readValue(record.value(), Envelope.class);
         } catch (IOException e) {
-            // Undecodable: park it on the dead-letter topic rather than block the partition forever.
+            // Park it on the dead-letter topic rather than block the partition forever.
             log.warn("ingest spool record undecodable partition={} offset={}", record.partition(), record.offset());
             settle(c, record, true);
             return Optional.empty();
@@ -360,10 +322,8 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     }
 
     /**
-     * Commit past the record, parking it on the dead-letter topic first when asked. Never throws: a
-     * dead-letter publish that fails leaves the offset uncommitted and seeks back, so the record is
-     * redelivered; a commit that fails (a rebalance took the partition) is logged, and the record is
-     * redelivered to whoever now holds the partition. Either way the drainer keeps draining.
+     * Never throws: a failed dead-letter publish seeks back for redelivery, and a failed commit after a rebalance is
+     * redelivered to the new owner.
      */
     private void settle(KafkaConsumer<String, byte[]> c, ConsumerRecord<String, byte[]> record, boolean deadLetter) {
         Slot mine = slots.get(Thread.currentThread());
@@ -396,7 +356,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
 
     private boolean deadLetter(ConsumerRecord<String, byte[]> record) {
         try {
-            producer.send(new ProducerRecord<>(props.getDeadLetterTopic(), record.key(), record.value()))
+            producer.send(new ProducerRecord<>(props.deadLetterTopic(), record.key(), record.value()))
                     .get(publishTimeoutMs, TimeUnit.MILLISECONDS);
             deadLettered.incrementAndGet();
             log.warn(
@@ -416,7 +376,6 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         }
     }
 
-    /** The calling thread's own consumer, created on first use; a thread arriving after close releases its own. */
     private Slot slot() {
         Thread me = Thread.currentThread();
         if (closing) {
@@ -428,21 +387,21 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         if (existing != null) return existing;
         ensureTopics();
         Properties p = new Properties();
-        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, props.getBootstrapServers());
-        p.put(ConsumerConfig.GROUP_ID_CONFIG, props.getGroupId());
+        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
+        p.put(ConsumerConfig.GROUP_ID_CONFIG, props.groupId());
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "1");
         p.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, String.valueOf(frameBytes()));
         p.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, String.valueOf(frameBytes()));
         KafkaConsumer<String, byte[]> c = new KafkaConsumer<>(p, new StringDeserializer(), new ByteArrayDeserializer());
-        c.subscribe(List.of(props.getTopic()));
+        c.subscribe(List.of(props.topic()));
         Slot fresh = new Slot(c, me);
         slots.put(me, fresh);
         return fresh;
     }
 
-    /** A consumer whose drainer thread died cannot be raced by it, so any thread may close it; the group rebalances. */
+    /** A consumer whose thread died cannot be raced by it, so any thread may close it. */
     private void closeStaleSlots() {
         for (Map.Entry<Thread, Slot> e : slots.entrySet()) {
             if (e.getKey().isAlive()) continue;
@@ -450,10 +409,6 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         }
     }
 
-    /**
-     * Test seam: drop the calling thread's consumer without committing, the way a crashed process
-     * would; the next claim on that thread gets a fresh one and the broker redelivers.
-     */
     public void resetConsumerForTest() {
         Slot mine = slots.remove(Thread.currentThread());
         if (mine != null) mine.consumer.close(Duration.ofSeconds(5));
@@ -467,16 +422,16 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
             return withAge(snapshot);
         }
         try {
-            Map<TopicPartition, OffsetAndMetadata> committed = admin.listConsumerGroupOffsets(props.getGroupId())
+            Map<TopicPartition, OffsetAndMetadata> committed = admin.listConsumerGroupOffsets(props.groupId())
                     .partitionsToOffsetAndMetadata()
                     .get(ADMIN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            TopicDescription description = admin.describeTopics(List.of(props.getTopic()))
+            TopicDescription description = admin.describeTopics(List.of(props.topic()))
                     .allTopicNames()
                     .get(ADMIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                    .get(props.getTopic());
+                    .get(props.topic());
             if (description == null) return withAge(snapshot);
             Set<TopicPartition> partitions = description.partitions().stream()
-                    .map(info -> new TopicPartition(props.getTopic(), info.partition()))
+                    .map(info -> new TopicPartition(props.topic(), info.partition()))
                     .collect(Collectors.toSet());
             Map<TopicPartition, OffsetSpec> latest = new HashMap<>();
             Map<TopicPartition, OffsetSpec> earliest = new HashMap<>();
@@ -494,18 +449,15 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                 ListOffsetsResult.ListOffsetsResultInfo start = starts.get(tp);
                 if (end == null) continue;
                 OffsetAndMetadata c = committed.get(tp);
-                // From the committed offset, or from the log's beginning (not 0) for a partition never
-                // committed, so retention that already trimmed the log is not counted as lag.
+                // From the log's beginning, not 0, so retention-trimmed records are not counted as lag.
                 long from = c != null ? c.offset() : start == null ? 0 : start.offset();
                 lag += Math.max(0, end.offset() - from);
             }
             snapshot = new Stats("kafka", true, lag, 0, 0, 0, deadLettered.get());
             lagFailure = null;
-            // The broker answers again and no push has failed for a while: an idle instance recovers.
             if (publishFailure != null && now - publishFailedAtNanos > RECOVERY_QUIET.toNanos()) publishFailure = null;
         } catch (ExecutionException | TimeoutException | KafkaException e) {
-            // Keep the last known depth and say the broker could not be asked; health reads that.
-            lagFailure = "broker not reachable at " + props.getBootstrapServers() + ": "
+            lagFailure = "broker not reachable at " + props.bootstrapServers() + ": "
                     + e.getClass().getSimpleName();
             log.warn("ingest spool lag read failed error={}", e.getClass().getSimpleName());
         } catch (InterruptedException e) {
@@ -516,10 +468,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         return withAge(snapshot);
     }
 
-    /**
-     * The broker has no in-process budget to report: admission is bounded by the broker's own storage,
-     * and the pre-decode gate is inert in this mode. The OTLP body cap still bounds one request's heap.
-     */
+    /** Admission is bounded by the broker's own storage, so the pre-decode gate is inert here. */
     @Override
     public double pressure() {
         return 0;
@@ -527,12 +476,11 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
 
     @Override
     public Optional<String> unavailable() {
-        // The publish path's verdict wins: a lag read that succeeds says nothing about whether pushes land.
+        // A successful lag read says nothing about whether pushes land.
         String publish = publishFailure;
         return Optional.ofNullable(publish != null ? publish : lagFailure);
     }
 
-    /** The age of the oldest record any drainer is holding, from its broker timestamp; 0 when none is in flight. */
     private Stats withAge(Stats s) {
         long oldest = 0;
         for (Slot slot : slots.values()) {
@@ -557,12 +505,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         }
     }
 
-    /**
-     * Every consumer leaves the group on shutdown so the partitions rebalance at once rather than after
-     * the session timeout. The calling thread closes its own directly; the others are woken and given a
-     * moment to be closed by their owners on the next claim, and closed here if the owner is already
-     * gone (a dead thread cannot race).
-     */
+    /** Consumers leave the group so partitions rebalance at once rather than after the session timeout. */
     private void closeConsumers() {
         closing = true;
         Slot mine = slots.remove(Thread.currentThread());

@@ -1,27 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * A distribution shift told as a story: what moved, then what is behind it.
- *
- * <h2>What replaced what</h2>
- * The page used to open with three stacked tables of paired readings, each with a caption explaining
- * how to read it. Every finding therefore looked identical, and the one fact a reader needed — which
- * way did this go, and by how much — was somewhere in the third column of the first table.
- *
- * Here the measure's two windows are drawn once, as a range from median to 95th percentile on a log
- * axis, and the two observations worth naming hang off it as numbered pins. The tables stay, below,
- * for the reader who wants the decomposition; they are no longer the argument.
- *
- * <h2>Colour is direction and nothing else</h2>
- * A shift against the reader is `--color-error`, a shift for them is `--color-success`, and every
- * annotation is neutral. Pins carry no tone because a pin marks where to look rather than what to
- * think, and the workload block carries none because workload is the context for the drift, not the
- * drift — tinting it counted the same signal twice.
- *
- * <h2>Log axis, and why there is no alternative</h2>
- * A single cost finding here runs $0.59 at the median against $18.11 at the tail. On a linear axis
- * the median of both windows collapses onto the left edge and the picture says only "the tail is
- * big", which is true of every finding this detector produces.
- */
+// The two windows drawn as median-to-p95 ranges on a log axis: a cost finding can run $0.59 at the median
+// and $18.11 at the tail, which a linear axis collapses. Colour is direction only; pins and the
+// workload block carry none.
 import type { components } from "../../api/generated/schema";
 import { cn } from "../../ui";
 import { PairBlock } from "./findingCharts";
@@ -29,7 +9,6 @@ import { PairBlock } from "./findingCharts";
 type Shift = components["schemas"]["ShiftDetail"];
 type Pair = components["schemas"]["Pair"];
 
-/** A shift that moved against the reader, or for them. Both measures here are lower-is-better. */
 export type Tone = "negative" | "positive";
 
 export function toneOf(shift: Shift): Tone {
@@ -48,12 +27,7 @@ function pairOf(pairs: Pair[], key: string): Pair | null {
   return pairs.find((p) => p.key === key) ?? null;
 }
 
-/**
- * The measure at the precision a reader can hold, in the unit it is actually in.
- *
- * <p>Durations arrive in milliseconds and span five orders of magnitude across the findings this
- * detector opens, so a fixed unit prints either `0.02s` or `4502356ms`. The unit is chosen per value.
- */
+/** Durations span five orders of magnitude, so the unit is chosen per value. */
 export function formatMeasure(measure: string, v: number | null | undefined): string {
   if (v == null) return "–";
   if (measure === "cost") return `$${v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toPrecision(2)}`;
@@ -62,25 +36,18 @@ export function formatMeasure(measure: string, v: number | null | undefined): st
   return `${Math.round(v)}ms`;
 }
 
-/** `1.00` → `1`. Axis ticks land on round numbers and should not print as though they did not. */
 function trimZeros(s: string): string {
   return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
 }
 
 /**
- * What the left-hand window IS, in words rather than in the wire value.
- *
- * <p>`previous` has to be spelled out rather than passed through. It has not meant "the window before
- * this one" since a rolling control replaced that: it is a weighted merge of the last three weeks of
- * closed windows with confirmed-regression days left out. The wire word stayed `previous` because it
- * is the last segment of every cause key ever written and renaming it would split one bucket's history
- * in two, which is exactly why a reader must not be shown it raw.
+ * The wire word `previous` is a weighted merge of the last three weeks of closed windows with confirmed
+ * regression days left out; it stays in every cause key, so it is never shown raw.
  */
 export function referenceWords(reference: string): string {
   return reference === "previous" ? "its recent normal" : "the pinned baseline";
 }
 
-/** The measure as a person names it. `tool_duration` is a duration; the bucket says whose. */
 export function measureNoun(measure: string): string {
   if (measure === "cost") return "Cost per turn";
   if (measure === "tool_duration") return "Time per call";
@@ -92,7 +59,6 @@ function pctChange(then: number, now: number): number {
   return ((now - then) / Math.abs(then)) * 100;
 }
 
-/** `+67%` / `96% faster` / `6.8× more`, whichever states the size of this move most plainly. */
 function moveWords(then: number, now: number, measure: string): string {
   const ratio = now / then;
   if (ratio >= 2) return `${ratio.toFixed(1)}× more`;
@@ -106,13 +72,8 @@ function moveWords(then: number, now: number, measure: string): string {
 }
 
 /**
- * The two observations worth pinning on the chart, in the order a reader meets them.
- *
- * <p>The pair is normally the median and the tail, because those are the two numbers the chart draws.
- * The exception is a reference window whose median and tail sit within a few percent of each other:
- * real work does not distribute like that, so the flat window is the observation and it displaces the
- * tail. That is the only special case, and it earns its place — it is how a timeout reads in this data,
- * and no other view in the product would ever say so.
+ * Normally the median and the tail. A reference window whose two sit within a few percent is flat, which
+ * is how a timeout reads, so it displaces the tail.
  */
 type Pin = { label: string; detail: string; at: "before-p50" | "after-p50" | "after-p95" };
 
@@ -170,7 +131,6 @@ const PLOT_RIGHT = 770;
 const VIEW_W = 800;
 const VIEW_H = 196;
 
-/** 1/2/5 × 10^k ticks inside the domain, which is what a log axis reads well at. */
 function logTicks(lo: number, hi: number): number[] {
   const out: number[] = [];
   const startExp = Math.floor(Math.log10(lo));
@@ -183,13 +143,7 @@ function logTicks(lo: number, hi: number): number[] {
   return out.length >= 2 ? out : [lo, hi];
 }
 
-/**
- * Both windows as a range from median to 95th percentile, on one shared log axis.
- *
- * <p>Two rows, not two series: these are not samples of a trajectory, they are the reference window
- * and the one that just closed. Drawing them as a line would imply a path between them that nobody
- * measured.
- */
+/** Two rows, not a series: a line would imply a path between windows that nobody measured. */
 export function ShiftChart({ shift }: { shift: Shift }) {
   const p50 = pairOf(shift.quantiles, "p50");
   const p95 = pairOf(shift.quantiles, "p95");
@@ -329,7 +283,6 @@ export function ShiftChart({ shift }: { shift: Shift }) {
   );
 }
 
-/** What each pin means, in the order the chart numbers them. */
 export function ShiftPins({ shift }: { shift: Shift }) {
   const pins = pinsFor(shift);
   if (pins.length === 0) return null;
@@ -367,21 +320,11 @@ function hasReadings(pairs: Pair[]): boolean {
   return pairs.some((p) => p.then != null || p.now != null);
 }
 
-/**
- * The decomposition, when there is one.
- *
- * <p>A tool-duration shift has neither tokens nor a user message, so this renders the window instead
- * of two empty tables under a heading that promises an explanation. An empty section is worse than no
- * section: it reads as a bug rather than as the absence of a measurement.
- */
+/** A tool-duration shift has no tokens or user message, so this renders the window instead of empty tables. */
 export function ShiftBehind({ shift }: { shift: Shift }) {
   const tokens = hasReadings(shift.tokens);
   const workload = hasReadings(shift.workload);
 
-  // Neither block has a reading, which is not a gap: a tool call carries no tokens and no user
-  // message, so there is nothing to decompose. The window and its sample sizes already say themselves
-  // in the line under the heading, so this renders nothing rather than an empty section, or a strip
-  // repeating what the reader just read.
   if (!tokens && !workload) return null;
 
   return (
@@ -414,12 +357,8 @@ export function ShiftBehind({ shift }: { shift: Shift }) {
 }
 
 /**
- * The reading that carries the shift: the largest move in ABSOLUTE terms, not in percent.
- *
- * <p>Percent picks the wrong row every time on a token block. Input tokens going 30 → 91 is +203% and
- * costs nothing; cache reads going 1.21M → 2.39M is +98% and is the entire finding. The reader wants
- * the row that moved the money, and on a block whose rows share a unit that is simply the biggest
- * delta.
+ * Absolute, not percent: input tokens 30 → 91 is +203% and costs nothing; cache reads 1.21M → 2.39M is
+ * +98% and is the whole finding.
  */
 function dominantKey(pairs: Pair[]): string | undefined {
   let best: { key: string; size: number } | null = null;

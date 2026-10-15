@@ -39,41 +39,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Read API for ingested traces — the Traces UI's source of truth, one item per producer trace id.
- *
- * <h2>Every number on this wire was written before the request arrived</h2>
- *
- * <p>The list is a filter, a sort and a page over {@code trace}'s rollup columns, and nothing else. Span
- * counts, token buckets and costs are read off the listed row exactly as the rollup worker
- * (substrate-model.md §7.2) wrote them; the request performs no {@code GROUP BY}, no pricing arithmetic
- * and no payload read. The previous implementation aggregated every observation in the project through an
- * unscoped {@code GROUP BY o2.trace_id}, priced the result against an inlined catalogue CTE, and reached
- * into {@code message_block} twice per row for previews — that query is what this endpoint was named for
- * and it is gone.
- *
- * <p>The row and page shapes live in {@link TraceDtos}, and the keyset cursor plus the over-fetch-by-one
- * next-page detection in {@link TracePageCodec}. MCP's {@code list_traces} serves the same page from the same
- * repository seam, and one encoder is the only thing that keeps the two surfaces' cursors interchangeable.
- *
- * <h2>Three ways a number can be absent, and the wire keeps them apart</h2>
- *
- * <ul>
- *   <li>{@code is_settled = false} — the trace is still receiving spans (or has never rolled up). Its
- *       totals are provisional, and a UI that renders them as final is lying about a live turn.
- *   <li>settled with a null total — every span reported, and none of them consumed tokens. Genuinely
- *       nothing, not unknown.
- *   <li>{@code unpriced_spans > 0} — the total is real but incomplete: some span ran a model we hold no
- *       rate for, so a low figure must not be read as a cheap turn.
- * </ul>
- *
- * <p>All three used to render as the same em dash.
- *
- * <h2>Identity</h2>
- *
- * <p>Path ids are the producer's trace id, and only that. The transitional shim that resolved a legacy v1
- * ULID through {@code substrate_v2_id_map} retired with the map in the teardown release: a deep link
- * minted before the cutover now reaches the 404 rather than being translated. That is the end of the
- * transition the shim existed to cover, not a gap in it.
+ * Every number on this wire was written by the rollup worker before the request; the list does no GROUP BY, pricing or
+ * payload read. Unsettled, settled-null and {@code unpriced_spans > 0} are three distinct absences the wire keeps
+ * apart. Path ids are the producer's trace id only. Cursors share {@link TracePageCodec} with MCP's
+ * {@code list_traces}.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/traces")
@@ -112,7 +81,6 @@ public class TracesController {
         this.media = media;
     }
 
-    /** A tool invocation on a tool span: structured args/result, plus error/retries/latency. */
     public record ToolCallView(
             @Nullable String name,
             @Nullable String args,
@@ -121,7 +89,6 @@ public class TracesController {
             @Nullable Integer retries,
             @JsonProperty("latency_ms") @Nullable Long latencyMs) {}
 
-    /** One retrieved passage of a RAG (retrieval) span. */
     public record RetrievalDocumentView(
             @Nullable Integer seq,
             @JsonProperty("doc_id") @Nullable String docId,
@@ -129,19 +96,8 @@ public class TracesController {
             @Nullable Double score) {}
 
     /**
-     * One step inside a trace — the v2 {@code span}, with its typed usage and cost buckets.
-     *
-     * <p>{@code cost_source} is the only correct way to read a null cost, and it ships with every span for
-     * exactly that reason: {@code provided} means the producer sent the figure, {@code inferred} means we
-     * priced it under {@code price_book_version}, {@code unpriced} means we hold no rate and the columns
-     * are null rather than zero.
-     *
-     * <p>{@code path} is materialized ancestry and {@code depth} derives from it. <b>A null path means
-     * unresolved, never root</b> — root is {@code parent_span_id == null}, the producer's own statement.
-     *
-     * <p>{@code payload_available} tells a viewer whether {@code input}/{@code output}/{@code attributes}
-     * are absent because the span carried none or because retention purged the payload row ahead of the
-     * span, which it deliberately does (§10).
+     * {@code cost_source} is the only correct way to read a null cost. A null {@code path} means unresolved, never
+     * root. {@code payload_available} distinguishes "carried none" from "purged by retention".
      */
     public record SpanView(
             @JsonProperty("trace_id") String traceId,
@@ -181,13 +137,8 @@ public class TracesController {
             @JsonProperty("retrieval_documents") List<RetrievalDocumentView> retrievalDocuments) {}
 
     /**
-     * Full trace detail: the same rollup row the list serves, plus the trace's spans.
-     *
-     * <p>The rollups ride along deliberately. Without them the detail view would have to sum its spans to
-     * put a total on the header, which is the read-time arithmetic this schema exists to delete — and it
-     * would disagree with the list row for any trace whose spans are still arriving.
-     *
-     * <p>{@code detections} names each span a classifier flagged, so the views can mark where it occurred.
+     * The rollups ride along so the header need not sum spans, which would disagree with the list row while spans
+     * arrive.
      */
     public record TraceDetail(
             TraceDtos.TraceListItem trace, List<SpanView> spans, List<TraceDtos.DetectionMark> detections) {}
@@ -248,8 +199,7 @@ public class TracesController {
         TraceV2Repository.Summary trace = traces.findSummary(projectId, traceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "trace not found"));
 
-        // Three reads for the whole trace, then grouped in memory — never an N+1 per span. The payload
-        // join is the ONE place this API touches span_payload; no list surface does.
+        // Three reads, grouped in memory, never an N+1. The only place this API touches span_payload.
         Map<String, SpanPayloadRow> payloadBySpan = new HashMap<>();
         for (SpanPayloadRow p : payloads.listByTrace(projectId, traceId)) {
             payloadBySpan.put(p.spanId(), p);
@@ -280,21 +230,8 @@ public class TracesController {
     }
 
     /**
-     * Real binary preservation for a trace's export — one OTel GenAI span per
-     * JSONL line, in the shape the evals plugin's Path A consumes ({@link TraceSpanMapper}). This is a
-     * caller {@code TraceSpanMapper.toSpan}/{@code toSpanLine} had none of before: those
-     * methods existed only for {@code OpenInferenceNormalizerTest}/{@code TraceSpanMapperTest} to call.
-     *
-     * <p>Deliberately the existing, already-authenticated per-project route (this class's own
-     * convention for a per-trace read), not a new public/token-scoped endpoint — that would be new
-     * auth/DoS surface this endpoint does not need. Deliberately not a referenced {@code /media/{id}}
-     * export either: media is inlined as a base64 {@code data:} URI inside the
-     * existing plain-string {@code content} field ({@link TraceSpanMapper#toSpan}), so this response
-     * carries no separate media URLs and needs no org/project-slug-to-URL plumbing.
-     *
-     * <p>Reuses the exact two reads {@link #detail} already performs ({@code SpanRepository} +
-     * {@code SpanPayloadRepository}, no {@code span_payload} touch beyond what a single-trace open
-     * already costs) rather than adding a third query shape for the same rows.
+     * The existing authenticated per-project route, not a new public endpoint. Media is inlined as base64 {@code data:}
+     * URIs, so no media URLs are needed.
      */
     @GetMapping(value = "/{traceId}/export", produces = "application/x-ndjson")
     public ResponseEntity<String> export(
@@ -326,11 +263,7 @@ public class TracesController {
                 .body(ndjson.toString());
     }
 
-    /**
-     * Package-visible, not private: {@link SessionsController}'s spans read shares this exact assembly
-     * rather than a second one that could quietly drift from it (the payload-availability/cost-source
-     * honesty fields especially — see the class javadoc).
-     */
+    /** Package-visible so {@link SessionsController} shares this assembly rather than one that could drift. */
     static SpanView toSpan(
             SpanRow s,
             @Nullable SpanPayloadRow payload,
@@ -378,8 +311,7 @@ public class TracesController {
         return numeric == null ? null : new BigDecimal(numeric);
     }
 
-    /** The parsed attribute bag as a plain {@code Map} for the JSON response, or null when absent. */
-    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null = no bag → the field is omitted
+    // null = no bag → the field is omitted
     private static @Nullable Map<String, Object> attributesMap(@Nullable JsonNode attrs) {
         if (attrs == null || !attrs.isObject() || attrs.isEmpty()) return null;
         return MAPPER.convertValue(attrs, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
@@ -395,14 +327,11 @@ public class TracesController {
         }
     }
 
-    /** Package-visible alongside {@link #toSpan} — {@link SessionsController}'s spans read shares it. */
     static RetrievalDocumentView toRetrievalDocument(RetrievedDocRow d) {
         return new RetrievalDocumentView(d.seq(), d.docId(), d.content(), d.score());
     }
 
-    /** Package-visible alongside {@link #toSpan} — {@link SessionsController}'s spans read shares it. */
     static ToolCallView toToolCall(ToolCallRow t) {
-        // Prefer the structured jsonb args/result; fall back to the verbatim arguments_raw.
         String args = t.arguments() != null ? t.arguments() : t.argumentsRaw();
         return new ToolCallView(t.name(), args, t.result(), t.errorType(), t.retries(), t.latencyMs());
     }

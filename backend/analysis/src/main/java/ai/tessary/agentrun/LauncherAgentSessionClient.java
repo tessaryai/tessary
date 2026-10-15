@@ -53,14 +53,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * The launcher-backed {@link AgentSessionClient}: the launcher's {@code /sessions} routes over HTTP/1.1,
- * with the bearer key and the launcher URL every agent lane rides ({@link E2bAgentRunSandbox}).
- *
- * <p>The credential, the launcher key and every MCP token travel to the launcher and nowhere else:
- * never a log line, never an exception message. A refusal maps to {@link AgentRunError} as a one-shot
- * run's does ({@link E2bAgentRunSandbox#classify}), plus {@code CAPACITY} for the launcher's session
- * cap and {@code LAUNCHER_MISCONFIGURED} for a 404 that does not name an unknown session (a launcher
- * with no session routes).
+ * The launcher-backed {@link AgentSessionClient}. The credential, launcher key and MCP tokens never reach a log line or
+ * exception message. A 404 not naming an unknown session maps to {@code LAUNCHER_MISCONFIGURED}.
  */
 @Component
 public class LauncherAgentSessionClient implements AgentSessionClient {
@@ -122,18 +116,15 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
     }
 
     /**
-     * What the client keeps per session: what its spend is booked on, the reply that holds a
-     * credential, and the last sequence booked. A session leaves the map only when its stream yields
-     * {@code closed} or the launcher no longer knows it on {@code events}, so the caller keeps a reader
-     * on every session it started; a 404 on a message, an abort or a stop only marks it gone, because
-     * a reconnected stream may still hold the last reply's {@code message_end}.
+     * A session leaves the map only when its stream yields {@code closed} or the launcher no longer knows it; a 404
+     * elsewhere only marks it gone, since a reconnected stream may still hold the last reply's {@code message_end}.
      */
     private static final class SessionState {
         final String projectId;
         final ModelLane lane;
         final String model;
         final ModelProvider provider;
-        /** From the start credential: the provider, and so whose bill it is, is fixed per session. */
+        /** Fixed per session from the start credential. */
         final boolean platformFunded;
 
         final LlmUsageAccountant.Subject subject;
@@ -160,14 +151,13 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
             this.subject = subject;
         }
 
-        /** Frees the open reply's credential, if one is open, and forgets the reply. */
         void releaseOpen() {
             Reply reply = open.getAndSet(null);
             if (reply != null) reply.release();
         }
     }
 
-    /** One reply's credential claim; released exactly once whichever of its endings comes first. */
+    /** Released exactly once, whichever ending comes first. */
     private final class Reply {
         final AgenticCredentialResolver.Credential credential;
         final AtomicBoolean released = new AtomicBoolean();
@@ -357,7 +347,6 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         throw refusal("stop", resp.statusCode(), resp.body(), launcherUrl, lane, STOP_TIMEOUT);
     }
 
-    /** One line per abort or stop the launcher answered: aborted, stopped or closed (unknown to it). */
     private void logAnswered(String op, String sessionId, String outcome, Instant began) {
         StructuredLog.info(log, Markers.OPS, "abort".equals(op) ? "agentsession.aborted" : "agentsession.stopped")
                 .message("session %s %s: %s", sessionId, op, outcome)
@@ -404,7 +393,6 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         throw refusal("events", resp.statusCode(), body, launcherUrl, lane, Duration.ZERO);
     }
 
-    /** A session that ended: its open reply is freed and the client forgets it. */
     private void closed(String sessionId, @Nullable SessionState state) {
         if (state == null) return;
         state.releaseOpen();
@@ -419,11 +407,9 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
     }
 
     /**
-     * Books a {@code message_end} the session has not booked yet, then frees its reply. Booking comes
-     * first, so a ledger write that throws ends the stream and the reconnect books it again. A replay
-     * at or below the last booked sequence books and frees nothing: the open reply may be a newer one.
-     * With no state (a session this client did not start, as after a backend restart) nothing can be
-     * booked, so the spend is a warning with its usage, never a silent loss.
+     * Booking comes first, so a ledger write that throws ends the stream and the reconnect books it again. A replay at
+     * or below the last booked sequence does nothing. With no state (after a backend restart) the spend is logged as a
+     * warning, never silently lost.
      */
     private void ended(String sessionId, @Nullable SessionState state, SessionEvent.MessageEnd end) {
         AgentSpanTelemetry.AgentUsage u = end.usage();
@@ -478,11 +464,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 .log();
     }
 
-    /**
-     * Reads the launcher's event frames one at a time, as they arrive, and runs each event's side
-     * effects before handing it out. A severed connection ends the stream with no exception; only a
-     * frame that does not parse is thrown.
-     */
+    /** A severed connection ends the stream with no exception; only an unparseable frame throws. */
     private final class EventReader implements Iterator<SessionEvent> {
         private final String sessionId;
         private final @Nullable SessionState state;
@@ -573,7 +555,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
             return event.orElse(null);
         }
 
-        /** The next frame, or null at the end of the body. Field rules are the server-sent events ones. */
+        /** Null at the end of the body; server-sent-events field rules. */
         private @Nullable Frame frame() throws IOException {
             String id = null;
             String type = "message";
@@ -678,7 +660,6 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 .header("Authorization", "Bearer " + E2bAgentRunSandbox.launcherApiKey(props, observerProps));
     }
 
-    /** One request with a string answer; a transport failure or an interrupt is thrown as its {@link AgentRunError}. */
     private HttpResponse<String> exchange(
             String op, HttpRequest request, String launcherUrl, @Nullable String lane, Duration timeout) {
         try {
@@ -711,7 +692,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 "unreachable at " + launcherUrl + " (" + e.getClass().getSimpleName() + ")");
     }
 
-    /** A non-2xx answer as its {@link AgentRunError}, logged without the body. */
+    /** Logged without the body. */
     private static TessaryException refusal(
             String op, int status, String body, String launcherUrl, @Nullable String lane, Duration timeout) {
         AgentRunError failure = status == 429 && "capacity".equals(E2bAgentRunSandbox.kindOf(body))

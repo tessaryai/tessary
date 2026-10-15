@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import ai.tessary.auth.AuthFilter;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.model.Pipeline;
 import ai.tessary.open.errors.PipelineError;
@@ -27,19 +26,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -49,40 +44,16 @@ import org.springframework.web.server.ResponseStatusException;
  * sidecars are ignored, and both the {@code .tessary/} prefix and root-relative paths are accepted.
  */
 @AuthEnforcedContext
-class ImportControllerTest {
+record ImportControllerTest(
+        MockMvc mvc,
+        TenantService tenants,
+        ApiKeyService mcpTokens,
+        PipelineService pipelineService,
+        ImportController controller,
+        OrgMembershipRepository memberships,
+        JdbcClient jdbc) {
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ApiKeyService mcpTokens;
-
-    @Autowired
-    PipelineService pipelineService;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    @Autowired
-    ImportController controller;
-
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    final ObjectMapper mapper = new ObjectMapper();
-    MockMvc mvc;
-
-    @BeforeEach
-    void setup() {
-        this.mvc =
-                MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final String META_YAML = """
         version: "0.8.0"
@@ -352,7 +323,7 @@ class ImportControllerTest {
         var req = multipart(u).header("Authorization", "Bearer " + token);
         for (MockMultipartFile f : files) req = req.file(f);
         MvcResult res = mvc.perform(req).andExpect(status().isOk()).andReturn();
-        return mapper.readTree(res.getResponse().getContentAsString()).get("data");
+        return MAPPER.readTree(res.getResponse().getContentAsString()).get("data");
     }
 
     private static MockMultipartFile file(String path, String body) {

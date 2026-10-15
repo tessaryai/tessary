@@ -41,7 +41,7 @@ E2B; nothing in this tree can delete it.
 
 - `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below and the
   [launcher sessions](#launcher-sessions).
-- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `run.js`, the long-lived agent
+- `agent-sandbox/` — the agent sandbox: `lane.js` (the rca, triage and run lanes), the long-lived agent
   session `session.js` (see [Agent sessions](#agent-sessions-sessionjs)), the shared
   `agent-stream.js` OpenCode runner and `mcp-relay.js`, and TWO INDEPENDENTLY MAINTAINED RECIPES for
   one runtime — `template.ts` (the E2B template, published by `build.ts`) and `Dockerfile` (the
@@ -471,18 +471,10 @@ removal of the work dirs a dead launcher left.
 (`test/fixtures/fake-e2b`) relays each SDK call to the test, which runs a fake `session.js` per
 sandbox, and the tests also cover the create, the file, the command, the kill on every way out and
 the egress rule.
-`check-open-boot.sh` (the open-edition boot gate's dev leg) does not
-probe this path — it's HTTP-only against backend/frontend/caddy, and docker-compose.dev.yml's
-`sandbox-runner` service is profile-gated off there. The gate's second leg,
-`check-open-boot-selfhost.sh`, boots `docker-compose.yml` with `sandbox-runner` started
-unconditionally and `SANDBOX_BACKEND` left unset, and asserts the launcher is RUNNING on the
-docker default — the boot half of this gap. It still does not drive a sandbox run through it;
-that remains a larger, separately-scoped change. (docker-compose.dev.yml no longer defaults the
-service to `e2b` either — its passthrough is empty, matching docker-compose.yml.)
 
 ### Manual end-to-end proof (2026-09-01, against a real Docker daemon)
 
-Reproduced with a minimal stub agent image (a `triage.js` that echoes its input) standing in for
+Reproduced with a minimal stub agent image (a lane script that echoes its input) standing in for
 the published `AGENT_IMAGE`, both as a bare host process and as a genuinely containerized launcher
 (matching the compose deployment shape) — real Docker (`docker info`), no E2B key set anywhere:
 

@@ -7,11 +7,8 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Top-level eval-pipeline record. Mirrors {@code pipeline.yaml} as written by
- * the evals plugin orchestrator at step 7 (schema v0.3.0).
- *
- * <p>Field order is significant for YAML output — matches the canonical
- * ordering documented in the evals plugin's output_format.md.
+ * Mirrors {@code pipeline.yaml} (schema v0.3.0). Field order is significant: it is the YAML output order from the evals
+ * plugin's output_format.md.
  */
 @JsonInclude(JsonInclude.Include.ALWAYS)
 public record Pipeline(

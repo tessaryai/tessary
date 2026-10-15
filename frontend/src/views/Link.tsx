@@ -19,9 +19,6 @@ export function Link() {
     retry: false,
   });
 
-  // The org picker below reads the list off GET /auth/me (already fetched by AuthProvider)
-  // instead of a second query. This account has exactly one org, so this Select renders one
-  // option.
   const { user } = useAuth();
   const orgs = user?.orgs ?? [];
   const [orgSlug, setOrgSlug] = useState("");
@@ -60,13 +57,8 @@ export function Link() {
   });
   const deny = useMutation({ mutationFn: () => link.deny(code) });
 
-  // Once *this* browser confirms the link, hold on the "Connected" screen and poll
-  // the project's pipeline until the plugin publishes its graders — then route in,
-  // so the project lands already warm rather than flashing an empty state while it
-  // catches up. Same cache key as the shell (`["pipeline", base]`), so the pipeline
-  // is warm on arrival and the step is correct immediately. We only do this for our
-  // own confirm, not a pre-claimed link (its selected project may be a default, not
-  // the linked one). The terminal keeps polling independently.
+  // After this browser confirms, hold on "Connected" and poll the pipeline until it publishes, so the
+  // project lands warm. Not for a pre-claimed link, whose selected project may not be the linked one.
   const linkedApi = useMemo(
     () => (confirm.isSuccess && orgSlug && projectSlug ? projectApi(orgSlug, projectSlug) : null),
     [confirm.isSuccess, orgSlug, projectSlug],
@@ -91,8 +83,7 @@ export function Link() {
       go();
       return;
     }
-    // Safety net: if a publish stalls or fails, don't trap the user on the spinner —
-    // fall through to the wizard, whose own step-1 listening state takes over.
+    // If a publish stalls, fall through to the wizard rather than trap the user on the spinner.
     const fallback = setTimeout(go, 45_000);
     return () => clearTimeout(fallback);
   }, [confirm.isSuccess, pipelineReady, orgSlug, projectSlug, nav]);
@@ -115,8 +106,6 @@ export function Link() {
     return <Centered title="Link expired" body="This connect link has expired. Re-run the command in your terminal to get a fresh one." />;
   }
   if (confirm.isSuccess) {
-    // This browser just confirmed: graders are publishing and we're routing into the
-    // project (see the auto-nav effect). Pure transition — a spinner, no button.
     return (
       <Centered
         title="Connected"
@@ -128,8 +117,6 @@ export function Link() {
     );
   }
   if (status === "claimed") {
-    // Link was already claimed elsewhere — we can't be sure which project, so we
-    // don't auto-redirect; offer a manual way in.
     return (
       <Centered
         title="Connected"

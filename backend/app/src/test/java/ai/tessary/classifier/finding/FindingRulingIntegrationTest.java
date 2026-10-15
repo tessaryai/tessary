@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -34,16 +33,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  * again opens a fresh row rather than mutating the settled one.
  */
 @SpringBootTest
-class FindingRulingIntegrationTest {
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    BehaviorTriageSource behaviorTriage;
-
-    @Autowired
-    TenantService tenants;
+record FindingRulingIntegrationTest(
+        FindingRepository findings, BehaviorTriageSource behaviorTriage, TenantService tenants) {
 
     private static final String GRAM = "gram-ruling";
 
@@ -63,19 +54,6 @@ class FindingRulingIntegrationTest {
     }
 
     @Test
-    @DisplayName("triage negative closes the finding")
-    void triageNegativeCloses() {
-        Project p = project("ruling-triage-negative");
-        String findingId = firing(p, GRAM);
-
-        behaviorTriage.recordVerdict(p.id(), findingId, verdict("negative", "an artifact"), null, now());
-
-        FindingRow row = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(FindingRow.Status.CLOSED, row.status());
-        assertEquals(FindingRow.TriageVerdict.NEGATIVE, row.triageVerdict());
-    }
-
-    @Test
     @DisplayName("a firing after a ruling opens a fresh row rather than mutating the settled one")
     void aFiringAfterRulingOpensAFreshRow() {
         Project p = project("ruling-refire");
@@ -89,7 +67,9 @@ class FindingRulingIntegrationTest {
         assertEquals(FindingRow.Status.OPEN, refired.status());
         assertNull(refired.triageVerdict(), "the new row starts unruled, exactly like a first firing");
         FindingRow closed = findings.findById(p.id(), first).orElseThrow();
-        assertEquals(FindingRow.Status.CLOSED, closed.status(), "the earlier ruling is untouched");
+        assertEquals(
+                FindingRow.Status.CLOSED, closed.status(), "triage negative closed it, and the ruling is untouched");
+        assertEquals(FindingRow.TriageVerdict.NEGATIVE, closed.triageVerdict());
     }
 
     @Test

@@ -4,11 +4,7 @@ package ai.tessary.tenant;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
-/**
- * An organization (product label) backed by the {@code organization} table. {@code archivedAt} is the
- * soft-archive marker — non-null means the organization is archived (reversible) but still resolvable;
- * {@code settings} is a per-organization JSON blob for extensible, owner-managed preferences.
- */
+/** Non-null {@code archivedAt} means archived (reversible) but still resolvable. */
 public record Organization(
         String id,
         @JsonProperty("workos_org_id") @Nullable String workosOrgId,

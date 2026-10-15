@@ -10,12 +10,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * CRUD for {@code project_model_setting} — a project's per-{@link ModelLane} model choices.
- *
- * <p>Reads return only the rows that exist, and a row only ever exists because someone chose it. A
- * lane with <b>no row</b> is the normal state, not an error and not a null-model: it means the lane
- * is resolved automatically from the org's configured providers. Working that out is
- * {@link ProjectModelSettings}' job, not this class's.
+ * CRUD for {@code project_model_setting}. No row is the normal state, meaning the lane resolves automatically;
+ * {@link ProjectModelSettings} works that out.
  */
 @Repository
 public class ProjectModelSettingRepository {
@@ -28,7 +24,7 @@ public class ProjectModelSettingRepository {
         this.jdbc = jdbc;
     }
 
-    /** Every lane this project has explicitly set. Lanes with no row are absent, not defaulted. */
+    /** Lanes with no row are absent, not defaulted. */
     public List<ProjectModelSetting> findByProject(String projectId) {
         return jdbc.sql("SELECT " + COLS + " FROM project_model_setting WHERE project_id = :pid ORDER BY lane")
                 .param("pid", projectId)
@@ -36,10 +32,7 @@ public class ProjectModelSettingRepository {
                 .list();
     }
 
-    /**
-     * Set (or replace) one lane's choice. {@code created_at} survives an update so the row keeps its
-     * original opt-in date.
-     */
+    /** {@code created_at} survives an update so the row keeps its opt-in date. */
     public void upsert(String projectId, ModelLane lane, String modelKey) {
         String now = Instant.now().toString();
         jdbc.sql("""
@@ -54,7 +47,7 @@ public class ProjectModelSettingRepository {
                 .update();
     }
 
-    /** Drop one lane's choice, returning it to the automatic answer. A no-op when there is no row. */
+    /** A no-op when there is no row. */
     public void delete(String projectId, ModelLane lane) {
         jdbc.sql("DELETE FROM project_model_setting WHERE project_id = :pid AND lane = :lane")
                 .param("pid", projectId)

@@ -13,15 +13,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * JdbcClient repository for the first-class {@code tool_call} table — a tool invocation hung off the
- * span that made it. Append-only insert plus a trace-scoped read.
- *
- * <p>Idempotent insert: {@code ON CONFLICT DO NOTHING} against the primary key, which is derived from
- * {@code (project, trace, span, seq)} ({@code SideTableIds}), makes the write path's at-least-once
- * replays first-write-wins no-ops. It used to lean on the natural key
- * {@code (observation_id, source_external_id)}, which stopped deduping the moment {@code observation_id}
- * went null and is gone with that column. jsonb/timestamptz columns carry {@code String} bound with explicit casts;
- * timestamps read back as ISO-8601 via {@link Timestamps}.
+ * Append-only {@code tool_call} writes and trace-scoped reads. {@code ON CONFLICT DO NOTHING} on the primary key,
+ * derived from {@code (project, trace, span, seq)}, makes at-least-once replays no-ops.
  */
 @Repository
 public class ToolCallRepository {
@@ -79,7 +72,6 @@ public class ToolCallRepository {
         return source;
     }
 
-    /** Batch-inserts rows; ON CONFLICT DO NOTHING makes replays no-ops. */
     public void insertAll(List<ToolCallRow> rows) {
         if (rows.isEmpty()) return;
         int[] applied = named.batchUpdate(
@@ -87,20 +79,9 @@ public class ToolCallRepository {
         BatchCounts.requireReal(applied);
     }
 
-    /** One tool call together with the producer span id it hangs off — the detail read's grouping key. */
     public record SpanToolCall(@Nullable String spanId, ToolCallRow row) {}
 
-    /**
-     * All tool calls of one trace, by producer key.
-     *
-     * <p><b>No join to the v1 {@code observation} table.</b> The previous shape was
-     * {@code tool_call tc JOIN observation o ON o.id = tc.observation_id WHERE o.trace_id = :tid} — a join
-     * through the v1 substrate on a bare, unscoped surrogate trace id, so the read was neither
-     * project-scoped nor able to survive the v1 tables going away, and they are now gone. The side table carries the producer
-     * keys directly now ({@code trace_id}/{@code span_id} — written by the backfill's phase-C sweep for
-     * history and by ingest since the v2 writer took over extraction), which makes this a single-table
-     * indexed read on {@code ix_tool_call_trace}, project-scoped as every v2 key is.
-     */
+    /** A single-table indexed read on {@code ix_tool_call_trace}, project-scoped. */
     public List<SpanToolCall> listByTrace(String projectId, String traceId) {
         return jdbc.sql("SELECT " + COLS + " FROM tool_call"
                         + " WHERE project_id = :pid AND trace_id = :tid"
@@ -114,11 +95,7 @@ public class ToolCallRepository {
                 .list();
     }
 
-    /**
-     * The batched sibling of {@link #listByTrace}, for a set of traces (a session's) in one query. No
-     * {@code session_id} column exists on this table, and none is needed — {@code trace_id} already leads
-     * its primary key, so {@code trace_id = ANY(:ids)} is the same read path as the single-trace lookup.
-     */
+    /** {@code trace_id} leads the primary key, so {@code trace_id = ANY(:ids)} is the same read path. */
     public List<SpanToolCall> listByTraceIds(String projectId, Collection<String> traceIds) {
         if (traceIds.isEmpty()) {
             return List.of();

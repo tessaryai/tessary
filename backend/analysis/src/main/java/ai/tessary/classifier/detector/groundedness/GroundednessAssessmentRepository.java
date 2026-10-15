@@ -10,23 +10,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * {@code groundedness_assessment}: one row per answer the groundedness model scored, flagged or not,
- * which is what the rate test counts trials from. Insert only, and idempotent on {@code (project_id,
- * classifier_id, subject_trace_id, subject_span_id, scorer_version)}, so a sweep rewound over spans it
- * already scored writes each answer once.
+ * One row per scored answer, flagged or not: the rate test's trials. Idempotent on
+ * {@code (project_id, classifier_id, subject_trace_id, subject_span_id, scorer_version)}, so a rewound sweep writes
+ * each answer once.
  */
 @Repository
 public class GroundednessAssessmentRepository {
 
     /**
-     * One assessment row.
-     *
-     * @param callSiteId the span's call site, or {@code ""} when it has none; the replay never judges
-     *     {@code ""}
-     * @param unsupported the answer's score, P(unsupported) of its strongest sentence
-     * @param flagged whether {@code unsupported} reached the threshold when the answer was scored
-     * @param spanCreatedAt the span's ingest time, as the sweep read it; the row's event time comes from
-     *     the span itself, and this stands in only when the span and its trace are both gone
+     * @param callSiteId {@code ""} when none; the replay never judges {@code ""} @param unsupported P(unsupported) of
+     * the strongest sentence @param spanCreatedAt stands in for event time only when the span and its trace are both
+     * gone
      */
     public record Assessment(
             String id,
@@ -47,7 +41,6 @@ public class GroundednessAssessmentRepository {
         this.jdbc = jdbc;
     }
 
-    /** Delete every assessment this classifier made. */
     public int deleteByClassifier(String projectId, String classifierId) {
         return jdbc.sql("DELETE FROM groundedness_assessment WHERE project_id = :pid AND classifier_id = :cid")
                 .param("pid", projectId)
@@ -56,11 +49,8 @@ public class GroundednessAssessmentRepository {
     }
 
     /**
-     * Insert {@code a} unless this scorer already assessed its span. Returns whether it was written.
-     *
-     * <p>{@code observation_started_at} is the span's own {@code started_at}, falling back to its
-     * trace's, the expression {@code ClassifierDetectionWriteRepository} stamps a detection's
-     * {@code subject_started_at} with, so an assessment and the detection beside it read on one clock.
+     * Returns whether it was written. {@code observation_started_at} uses the same expression as a detection's
+     * {@code subject_started_at}, so both read on one clock.
      */
     public boolean insert(Assessment a) {
         return jdbc.sql("""
@@ -91,7 +81,7 @@ public class GroundednessAssessmentRepository {
                 > 0;
     }
 
-    /** When this classifier last scored an answer in the project, under any scorer; empty until it has. */
+    /** Under any scorer; empty until it has. */
     public Optional<Instant> lastScoredAt(String projectId, String classifierId) {
         List<Timestamp> last = jdbc.sql("""
                         SELECT MAX(scored_at) AS last FROM groundedness_assessment

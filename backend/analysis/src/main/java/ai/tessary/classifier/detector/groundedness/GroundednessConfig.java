@@ -11,19 +11,9 @@ import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Groundedness classifier's operating point: the flag threshold on P(unsupported), and the dials of the
- * rate test that watches flagged traces per call site. Its own record with its own key names, clamped on
- * construction, as {@code FrustrationConfig} is, because the rate test counts traces where tool_error counts
- * tool calls. {@link #engine()} is the {@link ToolErrorConfig} the shared engine runs on.
- *
- * @param threshold P(unsupported) at or above which an answer is flagged
- * @param arlTarget traces a healthy call site should run between false alarms
- * @param minDecisionInterval the lower clamp on the derived alarm threshold {@code h}
- * @param shiftMultiple the multiple of the learned rate the test is tuned to catch quickly
- * @param shiftFloor the smallest absolute rise in the flagged-trace rate worth arming for
- * @param minBaselineTraces traces the learned reference must hold before anything is judged
- * @param freezeBaselineTraces traces the reference keeps learning up to, judging all the while; never below
- *     {@code minBaselineTraces}
+ * The Groundedness classifier's operating point, clamped on construction; its own keys because the rate test counts
+ * traces where tool_error counts tool calls. @param threshold P(unsupported) at or above which an answer is flagged
+ * @param freezeBaselineTraces never below {@code minBaselineTraces}
  */
 public record GroundednessConfig(
         double threshold,
@@ -34,36 +24,28 @@ public record GroundednessConfig(
         int minBaselineTraces,
         int freezeBaselineTraces) {
 
-    /**
-     * The flag cutoff on P(unsupported): the 2% false-alarm point on RAGTruth test, read with thresholds
-     * cross-validated by response. One band: an answer at or above it is flagged, one below is scored clean.
-     */
+    /** The 2% false-alarm point on RAGTruth test, thresholds cross-validated by response. */
     public static final double DEFAULT_THRESHOLD = 0.975;
 
     /**
-     * Traces a healthy call site runs between false alarms. The model's false-alarm rate depends on the
-     * domain, and the reference learns that rate per call site, so the budget is spent only on the test's
-     * own noise.
+     * The reference learns the model's domain-dependent false-alarm rate per call site, so the budget covers only the
+     * test's own noise.
      */
     public static final long DEFAULT_ARL_TARGET = 50_000L;
 
     /** The floor on {@code h}, frustration's: it binds only on a call site whose learned rate is near zero. */
     public static final double DEFAULT_MIN_DECISION_INTERVAL = 4.0;
 
-    /** A doubling, as tool_error and frustration. */
     public static final double DEFAULT_SHIFT_MULTIPLE = 2.0;
 
-    /** Two traces in a hundred: the model's own false-alarm rate on RAGTruth at the default threshold. */
+    /** The model's own false-alarm rate on RAGTruth at the default threshold. */
     public static final double DEFAULT_SHIFT_FLOOR = 0.02;
 
-    /** Traces the reference holds before a call site is judged. */
     public static final int DEFAULT_MIN_BASELINE_TRACES = 100;
 
     /**
-     * Traces the reference keeps learning up to. Simulated on null traffic at 2% to 10% flagged, judging from
-     * 100 while learning to 1,000 gives a 0.6% to 2.6% chance of a false finding while learning, against 0.5%
-     * to 2.0% when judging waits for 200, and the two match once the reference is full. Freezing at 100
-     * instead roughly doubles the false findings over the first 5,000 traces.
+     * Simulated on null traffic at 2-10% flagged: judging from 100 while learning to 1,000 costs 0.6-2.6% false
+     * findings vs 0.5-2.0% waiting for 200; freezing at 100 roughly doubles false findings over the first 5,000 traces.
      */
     public static final int DEFAULT_FREEZE_BASELINE_TRACES = 1_000;
 
@@ -101,9 +83,8 @@ public record GroundednessConfig(
     }
 
     /**
-     * Parse a classifier's blob, falling back to the default for any key it does not carry and to every
-     * default for a blob that does not parse. {@code threshold_high} is read only for a blob written before
-     * v7 named the cutoff {@code threshold}.
+     * Falls back per missing key and to all defaults for an unparseable blob. {@code threshold_high} is read only for
+     * blobs written before v7 named it {@code threshold}.
      */
     public static GroundednessConfig of(ObjectMapper mapper, @Nullable String configJson) {
         if (configJson == null || configJson.isBlank()) return defaults();
@@ -124,10 +105,7 @@ public record GroundednessConfig(
         }
     }
 
-    /**
-     * The shared engine's config. The keys this classifier does not set stay at the engine's defaults; none of
-     * them affects the up arm, which is the only one filed.
-     */
+    /** Unset keys stay at the engine's defaults; none affects the up arm, the only one filed. */
     public ToolErrorConfig engine() {
         return new ToolErrorConfig(
                 arlTarget,
@@ -140,16 +118,12 @@ public record GroundednessConfig(
                 freezeBaselineTraces);
     }
 
-    /** The hash of the model, the input layout and the threshold, stamped on every assessment row it scores. */
+    /** The hash of the model, the input layout and the threshold. */
     public String scorerVersion() {
         return GroundednessDetector.scorerVersion(threshold);
     }
 
-    /**
-     * The schema version handed to {@link ToolErrorTrend#sweep(java.util.List, ToolErrorConfig, java.util.Map,
-     * java.util.Map, String)}: the engine's own, plus what the engine's epoch does not already carry. A flag
-     * under one scorer and under another are different events, and a different floor is a different threshold.
-     */
+    /** The engine's schema version plus the scorer and floor, which the engine's epoch does not carry. */
     public String schemaVersion() {
         return String.join(
                 "|",
@@ -159,7 +133,6 @@ public record GroundednessConfig(
                 scorerVersion());
     }
 
-    /** The epoch a {@code groundedness_state} row built under this config carries. */
     public String stateEpoch() {
         return CarriedState.epochOf(engine(), schemaVersion());
     }

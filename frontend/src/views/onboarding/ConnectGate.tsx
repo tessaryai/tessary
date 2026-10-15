@@ -20,30 +20,9 @@ import { PromptBlock } from "../components/PromptBlock";
 import { Button, Spinner, useToast, writeClipboard } from "../../ui";
 
 /**
- * The first-run gate: stands in place of the whole shell
- * (sidebar included) until this project has landed a span carrying `tessary.call_site.id`.
- * Mounted by `ProjectShell` in App.tsx, which decides WHETHER to render this instead of
- * `<ShellChrome>` — this component owns only what the gate looks like, not the decision to show it.
- *
- * Three states, matching the design exactly:
- *   1. nothing received      — the connect prompt + fields + a pulsing "listening" banner + one
- *                               quiet escape hatch. Which escape hatch depends on whether this org
- *                               has anywhere else to go: a brand-new account gets "Start with a
- *                               sample project", and an org that already has other real projects
- *                               (i.e. someone just created a second one) instead gets "Check
- *                               existing projects", which discloses them inline rather than
- *                               navigating away from a screen the user is mid-way through.
- *   2. spans received,
- *      none tagged           — a full replacement screen (four-stat row, one paragraph, the repair
- *                               prompt). No sample-project link and no other exit on this state.
- *   3. a tagged span arrives — no screen; the parent's poll (in App.tsx) sees `has_tagged_span` flip
- *                               and stops rendering this component at all, in favor of the real shell.
- *
- * The gate mints its ingest token from the Bearer Token field's own copy control, on the click that
- * takes the value — not on mount. Minting on mount cost one live write-scoped key per render, so a
- * few reloads of a screen nobody had used yet left a project holding keys it never issued on
- * purpose and nothing revoked. Every key that now exists was deliberately taken, and a token
- * already copied stays valid, which superseding the unused ones on each mint could not promise.
+ * Stands in for the whole shell until a span carrying `tessary.call_site.id` lands; ProjectShell decides
+ * whether to mount it. The ingest token is minted from the Bearer Token field's click, never on mount,
+ * which left a live key per render.
  */
 export function ConnectGate() {
   const { orgSlug, projectSlug } = useTenant();
@@ -53,9 +32,7 @@ export function ConnectGate() {
   const toast = useToast();
   const qc = useQueryClient();
 
-  // Same queryKey shape ProjectShell (App.tsx) polls to decide whether to mount this component at
-  // all — react-query dedupes both hooks against one shared cache entry, so this is a second
-  // subscriber, not a second live poll.
+  // Same queryKey ProjectShell polls, so this shares its cache entry rather than adding a poll.
   const status = useQuery({
     queryKey: ["substrate-status", api.base],
     queryFn: api.substrateStatus,
@@ -64,9 +41,7 @@ export function ConnectGate() {
   const hasTaggedSpan = status.data?.has_tagged_span ?? false;
 
   const { token, issueAsync, issuing } = useIngestToken();
-  // Set when a mint succeeded but the clipboard write did not, which is the one state where the
-  // elision would strand the user: the key exists, it is unrecoverable after this render, and the
-  // only way to reach it is to read it off the screen.
+  // Mint succeeded but the clipboard write failed: the key is unrecoverable after this render.
   const [revealed, setRevealed] = useState(false);
 
   async function mintAndCopy() {
@@ -90,8 +65,6 @@ export function ConnectGate() {
 
   const endpoint = `${window.location.origin}/v1/traces`;
 
-  // Same queryKey ProjectShell/OrgRedirect/Sidebar already use, so this is a cache read in the
-  // common case rather than a third request. It decides which escape hatch this gate offers.
   const projects = useQuery({
     queryKey: ["projects", orgSlug],
     queryFn: () => auth.listProjects(orgSlug),
@@ -103,20 +76,15 @@ export function ConnectGate() {
   const sample = useMutation({
     mutationFn: () => auth.ensureSampleProject(orgSlug),
     onSuccess: async (project) => {
-      // The route pattern (projectSlug only) doesn't change, so ProjectShell/Sidebar don't remount
-      // and would otherwise keep serving this org's pre-creation project list -- the new sample
-      // project would then fail to resolve by slug, isSample would default to false, and the
-      // sample banner + gate-skip both silently break. Invalidate before navigating so
-      // ['projects', orgSlug] is refetched by the time ProjectShell mounts for the new slug.
+      // The route pattern does not change, so ProjectShell would resolve the sample's slug against a stale
+      // project list without this.
       await qc.invalidateQueries({ queryKey: ["projects", orgSlug] });
       nav(`/orgs/${orgSlug}/projects/${project.slug}/triage`, { replace: true });
     },
     onError: () => toast.error("Could not start the sample project"),
   });
 
-  // ProjectShell already gated on has_tagged_span before mounting this component, so this only ever
-  // fires from a TRUE poll transition during this mount (the redirect effect above then fires too) —
-  // rendering null for that one tick avoids a flash of the connect screen after the flip.
+  // Avoids a flash of the connect screen on the tick the poll flips.
   if (hasTaggedSpan) return null;
 
   if (status.data && status.data.untagged_spans > 0) {
@@ -185,19 +153,7 @@ export function ConnectGate() {
   );
 }
 
-/**
- * The second-project escape hatch, as progressive disclosure rather than a link.
- *
- * Someone who just created a project and is staring at a connect screen has one plausible other
- * intent: they wanted a project they already have. Navigating them to a switcher to find out would
- * cost them this screen — the endpoint and the freshly-minted header are on it — so the list opens
- * in place, and only if they ask for it. Closed, it is one line of text and no claim about how many
- * projects exist; open, it is the org's other real projects, each a direct way in.
- *
- * The sample project is filtered out by the caller for the same reason every other implicit
- * "which project" resolution filters it: it is a deletable demo row, not somewhere to send someone
- * who is looking for their own work.
- */
+/** Opens in place: navigating away would cost the endpoint and freshly minted header on this screen. */
 function ExistingProjects({ orgSlug, projects }: { orgSlug: string; projects: Project[] }) {
   const [open, setOpen] = useState(false);
   return (
@@ -315,14 +271,7 @@ function Stat({ label, value, tone, mono }: { label: string; value: string; tone
   );
 }
 
-/**
- * The Bearer Token field before a token exists: the same read-only-plus-control shape as
- * {@link CopyField}, with the control doing the minting.
- *
- * The placeholder is the real key prefix, so the field reads as the thing it is about to hold
- * rather than as an empty box, and the button says what the click does — it writes a key that
- * cannot be shown again, which is not what a bare "Copy" promises.
- */
+/** The button says it writes a key that cannot be shown again, which a bare "Copy" does not promise. */
 function MintTokenField({ pending, onMint }: { pending: boolean; onMint: () => void }) {
   return (
     <div>

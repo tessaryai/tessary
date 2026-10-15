@@ -1,28 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Traces index — the column set and per-user column config.
- *
- * Every column the list API can serve is here and every one is toggleable; the
- * choice persists to localStorage per browser. The default set answers "what
- * ran, what did it say, how long, what did it cost" — the questions a
- * monitoring table is opened for, including a content preview so the table
- * doesn't read as a bare metrics report. The rest are opt-in because they are
- * either wide (the per-direction cost/token breakdowns), or identifiers you go
- * looking for deliberately rather than scan (trace id, session id).
- *
- * No Status column. Runtime status is binary and nearly always `ok`, so a column
- * restating that costs more width than it returns; a trace that errored carries
- * a red dot on its name instead. The Status FILTER stays — narrowing to errors
- * is a real question.
- *
- * No Models column either, and its absence is a wire fact rather than a taste:
- * the v2 list row is a single-table read of one trace row, and "which models did
- * this turn use" is a question about its spans. It was served before by
- * aggregating every observation in the project on every request, which is the
- * cost this milestone exists to remove. The models a turn used are in its detail;
- * the Model FILTER stays, because filtering is a semi-join rather than an
- * aggregate.
- */
+// No Status column (a red dot on the name marks errors) and no Models column: the list row is a
+// single-table trace read, and models are a span fact. Both filters stay.
 import { useCallback, useState } from "react";
 import { Button, cn } from "../../ui";
 import { useDismissOnOutside } from "./index-filters";
@@ -53,15 +31,8 @@ export type ColumnKey =
 export type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean; flex?: boolean; width: number };
 
 /**
- * Declaration order is display order — the table renders whichever of these are visible, in this
- * order. `width` is a fixed pixel width, not a hint: the table renders with `table-layout: fixed`
- * against a `<colgroup>` built from these, specifically so a column's width never depends on what
- * happens to be in it on a given render. Before this, width came from the browser's auto layout
- * scanning every cell's content — which meant Input/Output (long text preview vs. a bare "—" on a
- * session rollup row) would visibly resize the whole table on every toggle between flat and
- * grouped-by-session, and again on every session expand/collapse. Fixed widths make both silent.
- *
- * `flex` marks the columns whose width is a floor rather than a fixed size — see `columnWidths`.
+ * Declaration order is display order. `width` is fixed (the table uses `table-layout: fixed`), so toggling
+ * grouped mode or expanding a session never resizes columns. `flex` widths are a floor; see `columnWidths`.
  */
 export const COLUMN_DEFS: ColumnDef[] = [
   { key: "when", label: "Start time", width: 150 },
@@ -89,18 +60,8 @@ export const COLUMN_DEFS: ColumnDef[] = [
 ];
 
 /**
- * The `<colgroup>` widths, as CSS width values, for the visible columns in display order.
- *
- * The table is `width: 100%` with the column sum as its `min-width`: narrower than the sum it
- * scrolls at exactly these widths, wider than the sum the surplus has to go somewhere. Left to the
- * browser the surplus is spread across every column, which pads the numeric ones that were already
- * sized to their longest value and leaves the text previews truncating anyway. So it goes to the
- * `flex` columns instead, split in proportion to their declared widths — on a wide monitor the
- * table fills the page and Input/Output show more of the payload, which is the point of them.
- *
- * `extraFixedPx` is width the table carries outside `columns` (the pinned expand column in grouped
- * mode). With no flex column visible there is nothing to hand the surplus to, so the declared
- * widths are returned as-is and the browser's own distribution is left alone.
+ * The `<colgroup>` widths for the visible columns. Surplus width beyond the column sum goes to the `flex`
+ * columns in proportion, not spread over the numeric ones. `extraFixedPx` is the pinned expand column.
  */
 export function columnWidths(columns: ColumnDef[], extraFixedPx = 0): (string | number)[] {
   const flexTotal = columns.reduce((sum, c) => (c.flex ? sum + c.width : sum), 0);
@@ -116,15 +77,7 @@ export const SESSION_EXPAND_COLUMN_WIDTH = 40;
 
 const DEFAULT_VISIBLE: ColumnKey[] = ["when", "name", "input", "output", "detectedBy", "latency", "cost", "tokens", "spans"];
 
-/**
- * Bumped from `tessary:traces:columns` with the v2 wire.
- *
- * The old key holds a set naming columns this table no longer has (`models`, `toolCalls`) and missing
- * the ones it gained. The loader drops unknown keys, so a stale set would have silently shrunk to
- * whatever still existed — a returning user's table losing columns for no visible reason. A new key
- * gives everyone the current default once, and the old value is simply abandoned rather than migrated:
- * it encodes preferences about a column set that no longer exists.
- */
+/** A new key rather than a migration: the old set named columns that no longer exist. */
 const STORAGE_KEY = "tessary:traces:columns:v2";
 const ALL_KEYS = new Set<string>(COLUMN_DEFS.map((c) => c.key));
 
@@ -134,8 +87,7 @@ function load(): Set<ColumnKey> {
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        // Unknown keys are dropped rather than rejected, so a saved set from an
-        // older column list keeps whatever still exists instead of resetting.
+        // Unknown keys are dropped, so a saved set keeps whatever still exists.
         const keys = parsed.filter((k): k is ColumnKey => typeof k === "string" && ALL_KEYS.has(k));
         if (keys.length > 0) return new Set(keys);
       }
@@ -175,7 +127,6 @@ export function useColumnConfig(): {
     });
   };
 
-  // Twenty-one columns is enough that turning them off one by one is a chore.
   const reset = () => setVisible(() => persist(new Set(DEFAULT_VISIBLE)));
 
   return { visible, toggle, reset };

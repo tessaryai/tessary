@@ -54,22 +54,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
- * Frustration, judged by TypeSafe's Jev decision model on the org's own OpenRouter or TypeSafe key, or on
- * the deployment's own provider when it supplies one.
- *
- * <p>Per page: a paused classifier sends nothing. Otherwise each turn the worker hands over, already limited to
- * the classifier's call sites ({@link ClassifierRow#callSiteIds}), whose conversation is known and whose turn is
- * eligible ({@link FrustrationTurnBuilder}) is sent as one request carrying one choice question ({@link JevFrustrationQuestion}), a few at a time. A turn fires when the probability
- * of {@code unhappy_with_assistant} exceeds the classifier's threshold; {@code unhappy_other_cause}
- * never fires. A refused key, no key at all, or no platform credit left pauses the classifier and
- * abandons the page.
- *
- * <p>What a persisted page writes, in one transaction: an assessment row for every turn sent, flagged
- * or not, with the exact request and response bodies, and a detection row for every flagged turn
- * whose {@code subject_session_id} is the conversation key and whose evidence names the call site. The
- * detection row is the session's flag, a session being a conversation on one call site: while it stands
- * uncleared the sweep sends no more of that session's turns. Ineligible turns, and turns
- * whose call failed, leave no row anywhere.
+ * A turn fires when P({@code unhappy_with_assistant}) exceeds the threshold; {@code unhappy_other_cause} never fires.
+ * An uncleared detection is the session's flag, and the sweep sends no more of that session's turns. A refused key, no
+ * key, or no credit pauses the classifier and abandons the page. Ineligible and failed turns leave no row.
  */
 @Component
 public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetector.Page> {
@@ -143,42 +130,25 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
 
     @Override
     public int maxPageRetries() {
-        return Math.max(0, props.getPageRetries());
+        return Math.max(0, props.pageRetries());
     }
 
-    /** One turn that was eligible and sent, and what came of it. */
     public record Sent(SubstrateObservation turn, EligibleTurn eligible, TurnFacts facts, Outcome outcome) {}
 
-    /**
-     * A call's outcome: an answer, or the failure that ended it.
-     *
-     * @param answer set on success
-     * @param failure set on failure: {@code unavailable}, {@code rejected}, {@code refused}, {@code
-     *     no_credit} or {@code failed}
-     */
     public record Outcome(
             @Nullable DecisionAnswer answer, @Nullable String failure) {
         static final String UNAVAILABLE = "unavailable";
         static final String REJECTED = "rejected";
-        /** The provider refused the request itself (a 4xx other than 401, 402, 403): same again next turn. */
         static final String REFUSED = "refused";
 
         static final String NO_CREDIT = "no_credit";
         static final String FAILED = "failed";
 
-        /** A failure every later call on the same key would repeat, so the sweep stops sending. */
         boolean stopsTheKey() {
             return REJECTED.equals(failure) || REFUSED.equals(failure) || NO_CREDIT.equals(failure);
         }
     }
 
-    /**
-     * A scored page.
-     *
-     * @param pauseReason set when the page ended paused or aborted
-     * @param eligible turns that passed eligibility, whether or not they were sent
-     * @param turns the eligible turns, each with its call's outcome
-     */
     public record Page(
             Status status,
             @Nullable String pauseReason,
@@ -226,7 +196,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         Optional<ClassifierPause> pause = classifiers.findPause(projectId, signal.id());
         boolean recheck = pause.isPresent();
         if (pause.isPresent()) {
-            Duration wait = Duration.ofSeconds(Math.max(0, props.getCredentialRetrySeconds()));
+            Duration wait = Duration.ofSeconds(Math.max(0, props.credentialRetrySeconds()));
             if (pause.get().pausedAt().plus(wait).isAfter(now)) {
                 return new Page(Status.PAUSED, pause.get().reason(), 0, List.of(), threshold, scorerVersion);
             }
@@ -234,7 +204,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         Optional<DecisionTarget> resolved = providers.resolve(projectId, ModelLane.FRUSTRATION);
         if (resolved.isEmpty()) {
             classifiers.pause(projectId, signal.id(), ClassifierPause.NO_PROVIDER, now);
-            // A re-check that still finds nothing to run on passes the page, as the pause it extends would have.
+            // A re-check that still finds nothing to run on passes the page.
             Status status = recheck ? Status.PAUSED : Status.ABORTED;
             return new Page(status, ClassifierPause.NO_PROVIDER, 0, List.of(), threshold, scorerVersion);
         }
@@ -268,8 +238,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         boolean refused =
                 sent.stream().anyMatch(s -> Outcome.REFUSED.equals(s.outcome().failure()));
         if (rejected || refused || sent.stream().anyMatch(s -> s.outcome().stopsTheKey())) {
-            // A refused request on the org's own key is request_refused: the key works, the request does not,
-            // and the log line above carries the provider's words.
+            // A refused request on the org's own key is request_refused.
             String reason;
             if (rejected) reason = ClassifierPause.PROVIDER_REJECTED;
             else if (refused) reason = ClassifierPause.REQUEST_REFUSED;
@@ -281,12 +250,8 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     }
 
     /**
-     * Send the eligible turns, at most {@code concurrency} calls at once, returning outcomes in page order.
-     * One session's turns go one at a time, earliest first, and stop at its first flag or refused key: a
-     * turn after that is never sent and its outcome is null. Sessions run side by side. A session is a
-     * conversation on one call site ({@link #session}).
-     * Once the sweep is interrupted no further turn is sent, even by a task that wins the permit an
-     * interrupted call just released before its own interrupt arrives.
+     * One session's turns go one at a time and stop at its first flag or refused key. Once interrupted, no further turn
+     * is sent, even by a task that wins a just-released permit.
      */
     private List<@Nullable Outcome> send(
             String projectId,
@@ -303,7 +268,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                     .add(i);
         }
         List<@Nullable Outcome> outcomes = new ArrayList<>(Collections.nCopies(eligible.size(), null));
-        Semaphore permits = new Semaphore(Math.max(1, props.getConcurrency()));
+        Semaphore permits = new Semaphore(Math.max(1, props.concurrency()));
         // Set before an interrupted call releases its permit, so the release carries it to the next holder.
         AtomicBoolean stopped = new AtomicBoolean();
         List<Future<?>> futures = new ArrayList<>(bySession.size());
@@ -348,9 +313,8 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     }
 
     /**
-     * Surface a task's failure. The executor's close has already waited for every task, so each future is
-     * done. A task catches its own call's runtime failures, so only an {@link Error} or a failure outside the
-     * call (scoring an answer) lands here, and it fails the page rather than dropping that session.
+     * Only an {@link Error} or a failure outside the call lands here, and it fails the page rather than dropping that
+     * session.
      */
     private static void joinAll(List<Future<?>> futures) {
         for (Future<?> f : futures) {
@@ -370,9 +334,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             if (e.error() == DecisionError.PROVIDER_NO_CREDIT) return new Outcome(null, Outcome.NO_CREDIT);
             if (e.error() == DecisionError.PROVIDER_UNAVAILABLE) return new Outcome(null, Outcome.UNAVAILABLE);
             if (e.error() == DecisionError.REQUEST_REFUSED) {
-                // The one failure whose cause is in the provider's answer rather than in our state: a model
-                // id it does not serve, a body shape it rejects. Said once here, with the provider's words,
-                // because the page line that follows only counts it.
+                // The one failure caused by the provider's answer, so it is logged once with the provider's words.
                 String detail = Objects.requireNonNullElse(e.getMessage(), DecisionError.REQUEST_REFUSED.code());
                 StructuredLog.warn(log, Markers.OPS, "signal.frustration.refused")
                         .message("%s refused a frustration call: %s", target.provider(), detail)
@@ -397,7 +359,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     private List<FiredTurn> persist(ClassifierRow signal, Page page) {
         List<FiredTurn> fired = tx.execute(status -> {
             List<FiredTurn> out = new ArrayList<>();
-            // A page can hold two turns of one session; the session's flag is its first.
             Set<Session> flaggedSessions = new HashSet<>();
             for (Sent s : page.turns()) {
                 DecisionAnswer answer = s.outcome().answer();
@@ -427,10 +388,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         return fired == null ? List.of() : fired;
     }
 
-    /**
-     * What one flag stands for and stops: a conversation on one call site. One turn can reach several call
-     * sites, and each is judged, flagged and stopped on its own.
-     */
+    /** One turn can reach several call sites, each judged and stopped on its own. */
     private record Session(String conversationId, String callSiteId) {}
 
     private static Session session(SubstrateObservation turn, TurnFacts facts) {
@@ -439,7 +397,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 Objects.requireNonNull(turn.callSiteId(), "a turn candidate has a call site"));
     }
 
-    /** The probability of {@code unhappy_with_assistant}. */
     static double score(DecisionAnswer answer) {
         DecisionAnswer.Answer a = answer.answers().get(JevFrustrationQuestion.NAME);
         return a == null ? 0.0 : a.probability(JevFrustrationQuestion.UNHAPPY_WITH_ASSISTANT);
@@ -466,7 +423,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 (int) Math.min(Integer.MAX_VALUE, answer.latencyMs()));
     }
 
-    /** The request as sent, minus the model id, which the row carries in its own column. */
     private static Object stateAndQuestions(DecisionAnswer answer) {
         if (!answer.requestBody().isObject()) return answer.requestBody();
         ObjectNode copy = ((ObjectNode) answer.requestBody()).deepCopy();
@@ -474,7 +430,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         return copy;
     }
 
-    /** What the finding page shows about one flagged turn. */
     private String evidence(Page page, Sent s, DecisionAnswer answer, double score) {
         Map<String, Object> e = new LinkedHashMap<>();
         e.put("model", answer.respondedModel());

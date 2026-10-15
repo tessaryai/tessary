@@ -5,32 +5,10 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * How each classifier works, in the words an agent auditing its finding needs — delivered as
- * {@code dossier/method.md} to triage and RCA.
- *
- * <h2>The problem it solves</h2>
- *
- * <p>{@code finding_evidence} has one role vocabulary and the roles do not mean the same thing across
- * classifiers. An empty {@code baseline} is CORRECT for {@code tool_error} (a CUSUM compares against a
- * fitted rate, and no window of rows exists), CORRECT for metric drift's rolling arm (a weighted ring
- * of per-day histograms, likewise no rows), and a DEFECT for the pinned arm when the detector set the
- * pin (an absorb stores no rows). An agent handed a role and a count, with no statement of method,
- * reads the same zero three ways and is wrong on two of them.
- *
- * <p>So the cards state, per classifier: what it measures, what it compared against, where the claim's
- * numbers sit in {@code get_finding}, what each role it writes means HERE, what an absent role
- * legitimately signifies, and — per cause the classifier files — what that cause actually asserts.
- *
- * <h2>Why here and not on {@code ClassifierModelModule}</h2>
- *
- * <p>The obvious home is a component beside {@code description}, and the compiler would then force a
- * new module to supply one. Two things argue against it. {@code description} is user-facing catalogue
- * copy re-synced onto project rows only when {@code version} advances — and a version bump rewrites
- * {@code configJson} wholesale, clobbering operator-edited thresholds — so text that wants to be
- * editable freely does not belong on that record. And these cards are a set: an author writing one
- * needs to see how the others phrase "an absent role means", because inconsistency between them is
- * exactly what would mislead an agent reading two findings in one investigation. Coverage is pinned by
- * a test instead of the compiler, which is the trade this makes deliberately.
+ * How each classifier works, delivered as {@code dossier/method.md} to triage and RCA, because evidence roles mean
+ * different things per classifier: an empty {@code baseline} is correct for {@code tool_error} and a defect elsewhere.
+ * Kept here, not on {@code ClassifierModelModule}, so the cards can be edited without a version bump that rewrites
+ * {@code configJson}; coverage is pinned by a test.
  */
 public final class ClassifierMethodCard {
 
@@ -314,11 +292,7 @@ public final class ClassifierMethodCard {
             BuiltInDetector.Kind.FRUSTRATION, FRUSTRATION,
             BuiltInDetector.Kind.GROUNDEDNESS, GROUNDEDNESS);
 
-    /**
-     * The card for one classifier key, or null when the key names nothing this knows about — a
-     * user-authored regex or classifier row, whose method is whatever its author configured and which
-     * this cannot describe for them.
-     */
+    /** Null for user-authored classifiers, whose method this cannot describe. */
     public static @Nullable String forClassifier(@Nullable String classifierKey) {
         if (classifierKey == null || classifierKey.isBlank()) return null;
         return BY_KEY.get(classifierKey);

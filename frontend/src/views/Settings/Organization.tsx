@@ -27,12 +27,7 @@ import {
 } from "../../ui";
 import { AppearanceControls } from "./Appearance";
 
-/**
- * Owner-facing organization administration: rename the organization, plus
- * per-project lifecycle (set-default, archive, delete). Mirrors the owner-gating the backend
- * enforces: non-owners see a read-only view. The "default project" invariant is surfaced here: the default
- * project cannot be archived or deleted, and exactly one project carries the badge.
- */
+/** Owner-gated like the backend. The default project cannot be archived or deleted. */
 export function Organization() {
   const { orgSlug, projectSlug } = useTenant();
   const { user } = useAuth();
@@ -43,9 +38,7 @@ export function Organization() {
   const projects = useQuery({
     queryKey: ["org-projects", orgSlug],
     queryFn: () => auth.listProjects(orgSlug),
-    // A project being deleted is the one row on this page that changes without the user doing
-    // anything: the purge worker removes it, and the row should go with it. Poll only while one is
-    // actually in that state, so the page is otherwise as static as it was.
+    // Poll only while a project is draining.
     refetchInterval: (query) => (query.state.data?.some((p) => p.deleting_at) ? 3000 : false),
   });
   const members = useQuery({ queryKey: ["org-members", orgSlug], queryFn: () => auth.listMembers(orgSlug) });
@@ -54,8 +47,7 @@ export function Organization() {
   const canManage = me?.role === "owner";
 
   const [name, setName] = useState("");
-  // Asked in the page, not with window.confirm(): a native dialog blocks the tab, and an automated
-  // browser dismisses it unseen, so the delete never runs (#84).
+  // Not window.confirm(): an automated browser dismisses it unseen, so the delete never runs (#84).
   const [toDelete, setToDelete] = useState<string | null>(null);
   useEffect(() => {
     if (org.data) setName(org.data.name);
@@ -65,7 +57,6 @@ export function Organization() {
     qc.invalidateQueries({ queryKey: ["org", orgSlug] });
     qc.invalidateQueries({ queryKey: ["org-projects", orgSlug] });
     qc.invalidateQueries({ queryKey: ["org-members", orgSlug] });
-    // GET /auth/me carries the org list; AuthProvider owns its own refetch, not this key.
   };
 
   const rename = useMutation({
@@ -97,8 +88,7 @@ export function Organization() {
       toast.error(p.archived ? "Could not unarchive project" : "Could not archive project", (err as ApiError).message),
   });
 
-  // The endpoint returns 202, not 200: it revokes the project's API keys and marks it, then a worker
-  // removes the data. So this reports what actually happened rather than claiming the project is gone.
+  // 202: keys are revoked and a worker removes the data, so report that rather than "gone".
   const deleteProject = useMutation({
     mutationFn: (slug: string) => auth.deleteProject(orgSlug, slug),
     onSuccess: () => {

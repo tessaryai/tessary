@@ -9,12 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
-/**
- * Slack channel delivered via an incoming webhook. Maps the stored config blob to a delivery
- * request; {@link SlackDelivery} makes the actual POST.
- *
- * <p>Config JSON shape: {@code {"url": "https://hooks.slack.com/services/…"}}.
- */
+/** Slack incoming webhook; {@link SlackDelivery} makes the POST. Config: {@code {"url"}}. */
 @Component
 public class SlackChannel implements AlertChannel {
 

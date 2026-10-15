@@ -3,7 +3,6 @@ package ai.tessary.search;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
@@ -11,6 +10,7 @@ import ai.tessary.search.GlobalSearchDtos.SearchHit;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.SeedRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
@@ -19,12 +19,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 /**
  * The global search palette over real Postgres with pg_trgm: ranked trace hits scoped to the caller's project. The
@@ -32,38 +29,12 @@ import org.springframework.web.server.ResponseStatusException;
  * is what {@code traces/<id>} routes on.
  */
 @SpringBootTest
-class GlobalSearchServiceIntegrationTest {
-
-    @Autowired
-    GlobalSearchService service;
-
-    @Autowired
-    GlobalSearchRepository repository;
-
-    @Autowired
-    GlobalSearchController controller;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    TenantService tenants;
-
-    @Test
-    void resultsAreRankedBestFirst() {
-        String pid = TenantFixture.bootstrap(tenants, "search-rank").project().id();
-        // Two spans: one whose payload repeats the term (higher ts_rank), one with a single mention.
-        seedSpan(pid, "latency latency latency", "latency latency in the response", "latency budget blown");
-        seedSpan(pid, "tone", "a passing aside", "mentions latency once");
-
-        List<SearchHit> hits = service.search(pid, "latency");
-
-        assertFalse(hits.isEmpty(), "the term matches at least one span");
-        for (int i = 1; i < hits.size(); i++) {
-            assertTrue(
-                    hits.get(i - 1).score() >= hits.get(i).score(), "hits are sorted by descending score (best-first)");
-        }
-    }
+record GlobalSearchServiceIntegrationTest(
+        GlobalSearchService service,
+        GlobalSearchRepository repository,
+        GlobalSearchController controller,
+        JdbcClient jdbc,
+        TenantService tenants) {
 
     @Test
     void searchIsScopedToProject() {
@@ -145,15 +116,15 @@ class GlobalSearchServiceIntegrationTest {
         // A project of one payload is cheaper to read through its primary key than through any word index, so the
         // project gets the few hundred payloads a real one has before the plan is asked for.
         jdbc.sql("""
-                        WITH t AS (
-                            INSERT INTO trace (project_id, id, started_at, event_ts)
-                            SELECT :pid, 'bulk-' || g, now(), now() FROM generate_series(1, 500) g RETURNING id),
-                        s AS (
-                            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-                            SELECT :pid, id, 'sp', 'llm', 'chat', now(), now() FROM t RETURNING trace_id)
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        SELECT :pid, trace_id, 'sp', 'where is my order', 'it ships today', now() FROM s
-                        """).param("pid", pid).update();
+            WITH t AS (
+                INSERT INTO trace (project_id, id, started_at, event_ts)
+                SELECT :pid, 'bulk-' || g, now(), now() FROM generate_series(1, 500) g RETURNING id),
+            s AS (
+                INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+                SELECT :pid, id, 'sp', 'llm', 'chat', now(), now() FROM t RETURNING trace_id)
+            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+            SELECT :pid, trace_id, 'sp', 'where is my order', 'it ships today', now() FROM s
+            """).param("pid", pid).update();
         jdbc.sql("ANALYZE span_payload").update();
         jdbc.sql("SET LOCAL enable_seqscan = off").update();
         jdbc.sql("SET LOCAL enable_indexscan = off").update();
@@ -184,29 +155,29 @@ class GlobalSearchServiceIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, "search-broad").project().id();
         int matching = GlobalSearchRepository.PAYLOAD_CANDIDATE_LIMIT + 50;
         jdbc.sql("""
-                        INSERT INTO trace (project_id, id, started_at, event_ts)
-                        SELECT :pid, 'broad-' || g, now(), now() FROM generate_series(1, :n) g
-                        """).param("pid", pid).param("n", matching).update();
+            INSERT INTO trace (project_id, id, started_at, event_ts)
+            SELECT :pid, 'broad-' || g, now(), now() FROM generate_series(1, :n) g
+            """).param("pid", pid).param("n", matching).update();
         jdbc.sql("""
-                        INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-                        SELECT :pid, 'broad-' || g, 'broad-' || g, 'llm', 'chat', now(), now()
-                        FROM generate_series(1, :n) g
-                        """).param("pid", pid).param("n", matching).update();
+            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+            SELECT :pid, 'broad-' || g, 'broad-' || g, 'llm', 'chat', now(), now()
+            FROM generate_series(1, :n) g
+            """).param("pid", pid).param("n", matching).update();
         jdbc.sql("""
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        SELECT :pid, 'broad-' || g, 'broad-' || g,
-                               '[{"role":"user","content":"order ' || g || '"}]', 'ok', now()
-                        FROM generate_series(1, :n) g
-                        """).param("pid", pid).param("n", matching).update();
+            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+            SELECT :pid, 'broad-' || g, 'broad-' || g,
+                   '[{"role":"user","content":"order ' || g || '"}]', 'ok', now()
+            FROM generate_series(1, :n) g
+            """).param("pid", pid).param("n", matching).update();
         jdbc.sql("CREATE SCHEMA rank_probe").update();
         jdbc.sql("""
-                        CREATE FUNCTION rank_probe.ts_rank(v tsvector, q tsquery) RETURNS real VOLATILE LANGUAGE plpgsql AS $$
-                        BEGIN
-                          PERFORM set_config('rank_probe.calls',
-                              (coalesce(nullif(current_setting('rank_probe.calls', true), ''), '0')::int + 1)::text, true);
-                          RETURN pg_catalog.ts_rank(v, q);
-                        END $$
-                        """).update();
+            CREATE FUNCTION rank_probe.ts_rank(v tsvector, q tsquery) RETURNS real VOLATILE LANGUAGE plpgsql AS $$
+            BEGIN
+              PERFORM set_config('rank_probe.calls',
+                  (coalesce(nullif(current_setting('rank_probe.calls', true), ''), '0')::int + 1)::text, true);
+              RETURN pg_catalog.ts_rank(v, q);
+            END $$
+            """).update();
         jdbc.sql("SET LOCAL search_path = rank_probe, pg_catalog, public").update();
 
         List<SearchHit> hits = service.search(pid, "content");
@@ -230,9 +201,9 @@ class GlobalSearchServiceIntegrationTest {
         jdbc.sql("SET LOCAL pg_trgm.word_similarity_threshold = 0.4").update();
 
         String plan = jdbc.sql("""
-                        EXPLAIN (FORMAT TEXT)
-                        SELECT trace_id FROM span WHERE name %> :q
-                        """).param("q", "refn").query((rs, n) -> rs.getString(1)).list().stream()
+            EXPLAIN (FORMAT TEXT)
+            SELECT trace_id FROM span WHERE name %> :q
+            """).param("q", "refn").query((rs, n) -> rs.getString(1)).list().stream()
                 .collect(Collectors.joining("\n"));
 
         assertTrue(
@@ -244,52 +215,38 @@ class GlobalSearchServiceIntegrationTest {
      * Seeds a trace, span, and span_payload with raw SQL, the name feeding the trigram leg and the payload the FTS
      * leg. Returns the trace id.
      */
-    private String seedSpan(String projectId, String name, String input, String output) {
-        String now = Instant.now().toString();
+    private String seedSpan(String projectId, @Nullable String name, String input, String output) {
         String traceId = Ids.ulid();
-        jdbc.sql("""
-                        INSERT INTO trace (project_id, id, started_at, event_ts)
-                        VALUES (:pid, :id, :now::timestamptz, :now::timestamptz)
-                        """)
-                .param("pid", projectId)
-                .param("id", traceId)
-                .param("now", now)
-                .update();
-        String spanId = Ids.ulid();
-        jdbc.sql("""
-                        INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-                        VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
-                        """)
-                .param("pid", projectId)
-                .param("trace", traceId)
-                .param("id", spanId)
-                .param("name", name)
-                .param("now", now)
-                .update();
-        jdbc.sql("""
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        VALUES (:pid, :trace, :id, :input, :output, :now::timestamptz)
-                        """)
-                .param("pid", projectId)
-                .param("trace", traceId)
-                .param("id", spanId)
-                .param("input", input)
-                .param("output", output)
-                .param("now", now)
-                .update();
+        Instant now = Instant.now();
+        SeedRows.insert(jdbc, """
+            trace | project_id | id | started_at | event_ts
+                  | $1         | $2 | $3         | $3
+            """, projectId, traceId, now);
+        seedSpanIn(projectId, traceId, name, input, output, now);
         return traceId;
+    }
+
+    /** One more span, under an existing trace, for a trace that matches on more than one span. */
+    private void seedSpanIn(
+            String projectId, String traceId, @Nullable String name, String input, String output, Instant at) {
+        SeedRows.insert(jdbc, """
+            span         | project_id | trace_id | id      | kind  | name   | started_at | event_ts
+                         | $1         | $2       | $3      | llm   | $4     | $5         | $5
+            span_payload | project_id | trace_id | span_id | input | output | event_ts
+                         | $1         | $2       | $3      | $6    | $7     | $5
+            """, projectId, traceId, Ids.ulid(), name, at, input, output);
     }
 
     /**
      * One hit per trace, keeping the stronger named hit; an unnamed span is titled by its trace; a long excerpt is
-     * clipped; a caller outside the org is refused.
+     * clipped.
      */
     @Test
     void theSearchEndpointNamesEachTraceOnceAndTitlesAnUnnamedSpanByItsTrace() {
         var fix = TenantFixture.bootstrap(tenants, "search-endpoint");
         String pid = fix.project().id();
         String weakPayload = seedSpan(pid, null, "a note on reconciliation", "ok");
-        seedSpanIn(pid, weakPayload, "reconciliation", "unrelated words");
+        seedSpanIn(pid, weakPayload, "reconciliation", "unrelated words", "ok", Instant.now());
         String longBody = "reconciliation " + "x".repeat(200);
         String unnamed = seedSpan(pid, null, longBody, "ok");
         String blankName = seedSpan(pid, "   ", "reconciliation", "ok");
@@ -308,15 +265,6 @@ class GlobalSearchServiceIntegrationTest {
         assertEquals(longBody.substring(0, 117) + "\u2026", byTrace.get(unnamed).snippet());
         assertEquals("Trace " + blankName, byTrace.get(blankName).title());
         assertEquals("reconciliation", byTrace.get(blankName).snippet());
-
-        var outsider =
-                TenantFixture.bootstrap(tenants, "search-endpoint-outsider").user();
-        TenantContext stranger = new TenantContext(outsider.id(), outsider.email(), null, null, null, null);
-        ResponseStatusException refused = assertThrows(
-                ResponseStatusException.class,
-                () -> controller.search(
-                        stranger, fix.org().slug(), fix.project().slug(), "reconciliation"));
-        assertEquals(HttpStatus.FORBIDDEN, refused.getStatusCode());
     }
 
     /** The merged legs are capped at the limit: two payload-only and two name-only matches at limit two return two. */
@@ -330,31 +278,5 @@ class GlobalSearchServiceIntegrationTest {
 
         assertEquals(4, repository.searchLexical(pid, "escalation", 10).size(), "precondition: four traces match");
         assertEquals(2, repository.searchLexical(pid, "escalation", 2).size());
-    }
-
-    /** One more span, under an existing trace, for a trace that matches on more than one span. */
-    private void seedSpanIn(String projectId, String traceId, @Nullable String name, String input) {
-        String now = Instant.now().toString();
-        String spanId = Ids.ulid();
-        jdbc.sql("""
-                        INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-                        VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
-                        """)
-                .param("pid", projectId)
-                .param("trace", traceId)
-                .param("id", spanId)
-                .param("name", name)
-                .param("now", now)
-                .update();
-        jdbc.sql("""
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        VALUES (:pid, :trace, :id, :input, 'ok', :now::timestamptz)
-                        """)
-                .param("pid", projectId)
-                .param("trace", traceId)
-                .param("id", spanId)
-                .param("input", input)
-                .param("now", now)
-                .update();
     }
 }

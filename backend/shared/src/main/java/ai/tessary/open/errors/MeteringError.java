@@ -3,7 +3,6 @@ package ai.tessary.open.errors;
 
 import org.springframework.http.HttpStatus;
 
-/** Error codes for the usage-metering feature. */
 public enum MeteringError implements ErrorCode {
     TOKEN_REQUIRED(HttpStatus.UNAUTHORIZED, "Usage metering requires a project-scoped token"),
     INVALID_RANGE(HttpStatus.UNPROCESSABLE_ENTITY, "Usage query requires both a 'from' and a 'to' bound"),

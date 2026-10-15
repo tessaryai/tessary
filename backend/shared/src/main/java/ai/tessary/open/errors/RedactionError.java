@@ -3,10 +3,6 @@ package ai.tessary.open.errors;
 
 import org.springframework.http.HttpStatus;
 
-/**
- * Error codes for the PII redaction feature — per-project redaction rules and the
- * authoring/testing playground. Wire form is {@code REDACTION.<NAME>}.
- */
 public enum RedactionError implements ErrorCode {
     INVALID_PATTERN(HttpStatus.BAD_REQUEST, "Invalid redaction regex pattern: %s"),
     RULE_NOT_FOUND(HttpStatus.NOT_FOUND, "Redaction rule not found: %s"),

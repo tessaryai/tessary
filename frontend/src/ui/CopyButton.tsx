@@ -5,17 +5,9 @@ import { Check, Copy } from "lucide-react";
 import { Button, type ButtonSize, type ButtonVariant } from "./Button";
 
 /**
- * The one copy-to-clipboard path in the app.
- *
- * Every copy affordance has to answer "did that work?" on the control the pointer is already on —
- * a toast in the corner is a supplement, never the confirmation, and several of these buttons sit
- * inside modals that cover it. So the hook owns the confirmed/reset cycle and every button built on
- * it flips to "Copied" for {@link RESET_MS}.
- *
- * It also owns the fallback. `navigator.clipboard` is undefined on any non-secure origin, which
- * includes a self-hosted Tessary reached over plain http:// — the exact deployment whose whole first
- * run is copying an endpoint and a token out of these screens. Without the `execCommand` path those
- * buttons throw into a floating promise and do nothing at all.
+ * The one copy path. The button itself confirms ("Copied"), since a toast can sit under a modal.
+ * `navigator.clipboard` is undefined off a secure origin, such as a self-hosted install over plain
+ * http, so `execCommand` is the fallback.
  */
 
 const RESET_MS = 1600;
@@ -25,7 +17,6 @@ function legacyCopy(text: string): boolean {
     const ta = document.createElement("textarea");
     ta.value = text;
     ta.setAttribute("readonly", "");
-    // Off-screen but still selectable: `display:none` and `visibility:hidden` are not.
     ta.style.position = "fixed";
     ta.style.top = "0";
     ta.style.left = "-9999px";
@@ -41,7 +32,6 @@ function legacyCopy(text: string): boolean {
   }
 }
 
-/** Writes to the clipboard, falling back to `execCommand` off a secure origin. Never throws. */
 export async function writeClipboard(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
@@ -49,15 +39,10 @@ export async function writeClipboard(text: string): Promise<boolean> {
       return true;
     }
   } catch {
-    /* denied, or no clipboard permission — the legacy path may still work */
   }
   return legacyCopy(text);
 }
 
-/**
- * `copied` is true for {@link RESET_MS} after a successful write and false after a failed one, so a
- * caller can render "Copied" without owning a timer. `copy` resolves to whether it worked.
- */
 export function useCopy(resetMs: number = RESET_MS) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | null>(null);
@@ -88,17 +73,13 @@ export function useCopy(resetMs: number = RESET_MS) {
 }
 
 type CopyButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "value" | "onCopy"> & {
-  /** What to put on the clipboard. A thunk for a value that is not ready at render time. */
   value: string | (() => string | null | undefined);
   label?: ReactNode;
   copiedLabel?: ReactNode;
   variant?: ButtonVariant;
   size?: ButtonSize;
-  /** Set false for the compact fields where the label alone carries it. */
   icon?: boolean;
-  /** Fired after a confirmed write — the place for a toast, telemetry or a wizard step. */
   onCopied?: () => void;
-  /** Fired when nothing reached the clipboard. Callers that can explain the failure should say so. */
   onCopyFailed?: () => void;
 };
 

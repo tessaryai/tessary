@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The three renderings of one trace's execution: Conversation (default) · Tree ·
- * Timeline. All read the same observation list — they differ only in what they
- * make legible.
- *
- * A fourth surface, the Verdicts panel, sat over them until grading left the platform: it read the
- * grader rulings on the trace. What a trace is judged by now is a classifier finding,
- * which has its own page.
- */
 import { useMemo, useState } from "react";
 import { cn } from "../../ui";
 import { ChatItems, PriorContext, messageItems, planConversation, planTools, spanItems } from "./detail-chat";
@@ -21,14 +12,8 @@ import type { TraceListItemView as TraceListItem } from "../../api/types";
 import type { Span, TraceRollup } from "./detail-data";
 import { clockLabel, depthOf, formatDuration, formatTokens, spanOrder, traceBounds } from "./detail-data";
 
-/* ------------------------------------------------------------ conversation */
-
 export type { Emphasis } from "./detail-chat";
 
-/**
- * What a caller marks on a conversation, by span id. The root span carries its `question` and `reply`
- * parts; any other span carries its `step` part.
- */
 export type EmphasisBySpan = Map<string, Emphasis[]>;
 
 const NO_EMPHASIS: EmphasisBySpan = new Map();
@@ -37,18 +22,8 @@ const ofPart = (entries: Emphasis[] | undefined, part: Emphasis["part"]) =>
   (entries ?? []).filter((e) => e.part === part);
 
 /**
- * Chat grammar: one transcript for the trace, read in the order it happened —
- * the question, then the work, then the answer.
- *
- * That order has to be built rather than followed, because the root agent span
- * holds *both* ends of the turn: the user's message is its input and the final
- * reply is its output, with every tool call recorded in between by child spans
- * that start later. Rendering spans in sequence therefore answers before it
- * works. So the root is split — its question opens the view, its answer closes
- * it — and the steps sit where they belong.
- *
- * The planning (whose message is whose, what is prior context, what repeats) is
- * a trace-wide question, so it happens once in {@link planConversation}.
+ * The root span holds both the question (input) and the answer (output), so it is split around the
+ * steps rather than rendered in sequence, which would answer before it works.
  */
 export function ConversationView({
   spans,
@@ -61,15 +36,10 @@ export function ConversationView({
 }: {
   spans: Span[];
   focusId: string | null;
-  /** The classifiers that flagged this turn, drawn on the person's message they judged. */
   marks?: string[];
-  /** Offer the fold of earlier messages; off where the page already shows those turns. */
   showPrior?: boolean;
-  /** The parts a caller marks, by span id. */
   emphasis?: EmphasisBySpan;
-  /** Whether a marked trace dims its parts with no entry, so the marked ones read first. */
   dim?: boolean;
-  /** A line drawn under each dimmed part, saying why it is dimmed. */
   contextNote?: string;
 }) {
   const plan = useMemo(() => planConversation(spans), [spans]);
@@ -84,15 +54,12 @@ export function ConversationView({
     );
   }
 
-  // `spanOrder` walks roots first, so the head of the list is the outermost span
-  // even when this trace's parent lives outside it.
   const root = ordered[0] ?? null;
   const rootPlan = root ? plan.bySpan.get(root.id) : undefined;
   const steps = ordered.filter((o) => o !== root);
   const question = rootPlan ? messageItems(rootPlan.input) : [];
   const reply = rootPlan ? messageItems(rootPlan.output ?? []) : [];
 
-  // Once any part of this trace is marked, every part with no entry reads as context.
   const dimming = dim && spans.some((o) => (emphasis.get(o.id)?.length ?? 0) > 0);
   const rootEntries = root ? emphasis.get(root.id) : undefined;
   const questionEmphasis = ofPart(rootEntries, "question");
@@ -108,7 +75,6 @@ export function ConversationView({
     <div className="flex flex-col gap-4.5">
       {showPrior && <PriorContext messages={plan.prior} />}
 
-      {/* The question the turn is answering. */}
       {root &&
         question.length > 0 &&
         chrome(
@@ -117,13 +83,10 @@ export function ConversationView({
           questionDimmed,
         )}
 
-      {/* The work, in the order it ran: what each model call said, then the tools
-          it asked for, batched onto one line. */}
       {batchSteps(steps, tools).map((group, i) =>
         group.kind === "tools" ? (
           <Dimmable
             key={`tools-${i}`}
-            // A tool call has no bubble to draw a mark on, so an entry on its span only keeps it undimmed.
             dimmed={dimming && !group.steps.some((step) => ofPart(emphasis.get(step.key), "step").length > 0)}
             note={contextNote}
           >
@@ -132,8 +95,6 @@ export function ConversationView({
         ) : (
           (() => {
             const o = group.span;
-            // Skip the whole block, chrome included, when the span draws nothing:
-            // an outlined empty box is worse than an absent one.
             const items = spanItems(plan.bySpan.get(o.id));
             if (items.length === 0) return null;
             const stepEmphasis = ofPart(emphasis.get(o.id), "step");
@@ -147,7 +108,6 @@ export function ConversationView({
         ),
       )}
 
-      {/* The answer, last, where the reader expects it. */}
       {root && reply.length > 0 && (
         <Dimmable dimmed={replyDimmed} note={contextNote}>
           <ChatItems items={reply} failed={root.status === "error"} emphasis={replyEmphasis} dimmed={replyDimmed} />
@@ -160,12 +120,8 @@ export function ConversationView({
 type StepGroup = { kind: "tools"; steps: ToolStep[] } | { kind: "span"; span: Span };
 
 /**
- * The step list as rows: each llm span, then the calls it requested.
- *
- * Tool calls come from {@link planTools} rather than from the tool spans in this
- * list, because the two disagree — a trace can request a tool it never records a
- * span for, and vice versa. Tool spans already accounted for are skipped here so
- * nothing is drawn twice; the rest are shown where they ran.
+ * Tool calls come from planTools, not the tool spans: a trace can request a tool it never records a span
+ * for, and vice versa.
  */
 export function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
   const out: StepGroup[] = [];
@@ -176,8 +132,7 @@ export function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
   };
 
   for (const o of steps) {
-    // Keyed on the execution record, not the kind: a tool reached through a retrieval or mcp span is
-    // still a tool call (see toolStepOf), and keying on `kind === "tool"` dropped it from the transcript.
+    // Keyed on the execution record, not the kind: a tool reached through a retrieval or mcp span is still a tool call.
     if (toolStepOf(o) != null) {
       const orphan = tools.orphans.get(o.id);
       if (orphan) pushTools([orphan]);
@@ -191,9 +146,8 @@ export function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
 }
 
 /**
- * Focus outline around a span's messages — and deliberately no header. A latency-and-token line
- * between two sentences is span bookkeeping, not dialogue; it belongs to the trace summary above and
- * to Tree and Timeline, which exist to read spans. The anchor stays so a link can still scroll here.
+ * Focus outline around a span's messages, deliberately with no header: latency and tokens belong to the
+ * trace summary and to Tree and Timeline. The anchor stays so a link can scroll here.
  */
 function SpanBlock({
   o,
@@ -221,7 +175,6 @@ function SpanBlock({
   );
 }
 
-/** A part of the turn, faded when the caller marked other parts and not this one, with its note under it. */
 function Dimmable({ dimmed, note, children }: { dimmed: boolean; note?: string; children: React.ReactNode }) {
   if (!dimmed) return <>{children}</>;
   return (
@@ -249,8 +202,7 @@ export function TreeView({
   /** The classifiers that flagged each span, by span id. */
   marksBySpan?: Map<string, string[]>;
 }) {
-  // A trace parents its tool spans to the agent, so the llm call that requested
-  // them is their sibling. planTools recovers the real link from the request ids.
+  // A trace parents its tool spans to the agent; planTools recovers the requesting llm call from the request ids.
   const parentOf = planTools(spans).parentOf;
   const depths = depthOf(spans, parentOf);
   return (
@@ -304,20 +256,8 @@ function SpanStats({ o }: { o: Span }) {
 }
 
 /**
- * What this span cost, or why we cannot say.
- *
- * `cost_source` is the only correct way to read a null cost, so the label reads
- * it rather than inferring from the number: `unpriced` means we hold no rate for
- * the model and the span really did have a bill, whereas a priced span with no
- * usage has nothing to charge for. Rendering both as a blank — which is what the
- * old client-side pricing table did whenever it did not recognise a model —
- * turns real spend into apparently free work.
- *
- * The token test is `> 0`, matching `trace.unpriced_spans`: a span whose usage is
- * an explicit zero reported nothing to bill, so labelling it "unpriced" claims a
- * missing rate for a call that had no spend. Those placeholder spans are 58% of
- * the corpus, and a trace that now reports `unpriced_spans: 0` must not open onto
- * spans badged unpriced.
+ * What this span cost, or why we cannot say. Reads `cost_source`, the only correct way to read a null cost:
+ * `unpriced` means real spend we hold no rate for. The `> 0` token test matches `trace.unpriced_spans`.
  */
 function costLabel(o: Span): string | null {
   if (o.total_cost != null) return `$${o.total_cost < 0.01 ? o.total_cost.toFixed(4) : o.total_cost.toFixed(2)}`;
@@ -326,10 +266,8 @@ function costLabel(o: Span): string | null {
 }
 
 /**
- * A span row that opens to show what went in and what came out — every span, not
- * only tool calls, since "what did this llm step actually receive" is the same
- * question one row up. Selection and expansion are separate controls rather than
- * one click doing both, because reading a payload should not move the focus.
+ * A span row that opens to show what went in and what came out. Selection and expansion are separate
+ * controls, because reading a payload should not move the focus.
  */
 function ExpandableRow({
   o,
@@ -346,10 +284,8 @@ function ExpandableRow({
 }) {
   const [open, setOpen] = useState(false);
   const step = toolStepOf(o);
-  // A purged payload is a THIRD state, and it has to be openable to be explained. `payload_available`
-  // is false when the span_payload row is gone — either it never existed or retention aged it out
-  // ahead of the span, which the substrate does deliberately. Collapsing that into "no payload" would
-  // present a span whose prompt we deleted as a span that never had one.
+  // A purged payload is a third state: retention can age the span_payload row out ahead of the span, and
+  // "no payload" would misstate a span whose prompt we deleted.
   const expired = !o.payload_available && o.kind !== "tool";
   const hasPayload = step != null || o.input != null || o.output != null || expired;
   return (
@@ -406,13 +342,8 @@ function ExpandableRow({
 /* ---------------------------------------------------------------- timeline */
 
 /**
- * The waterfall: every span positioned by its real wall-clock start and duration.
- *
- * The scale is the TRACE's own start→end where it has one, not the envelope of
- * the spans on screen. A turn routinely spends time no span covers — queueing
- * before the first call, the gap between an llm reply and the tool it asked for
- * — and a chart scaled to the spans hides exactly that time by construction,
- * which is the time a reader opening a waterfall is usually looking for.
+ * The waterfall. The scale is the trace's own start-to-end where it has one, not the span envelope, so
+ * time no span covers (queueing, gaps before a tool) stays visible.
  */
 export function TimelineView({
   trace,
@@ -451,13 +382,7 @@ export function TimelineView({
   );
 }
 
-/**
- * One span's waterfall bar, scaled against `bounds` — factored out of {@link TimelineView} so
- * {@link SessionTimelineView} can plot spans from several traces against ONE shared bounds instead of
- * each trace computing (and being positioned against) its own. Everything about a single bar — the icon,
- * the label, the failed/ok color, the exact-duration tooltip — is unchanged; only where `bounds` comes
- * from differs between the two callers.
- */
+/** One span's bar, scaled against `bounds`, so the session timeline can plot several traces on one scale. */
 function TimelineRow({
   o,
   bounds,
@@ -509,23 +434,11 @@ function TimelineRow({
   );
 }
 
-/* ------------------------------------------------------------------ session
- *
- * The three renderings above, extended to a whole session: several traces'
- * worth of spans instead of one. Deliberately NOT a rewrite — a session is
- * traces grouped, not a fourth kind of thing to render, so each of the three
- * below loops over the session's traces (oldest first, as SessionDetail
- * already orders them) and either reuses the exact view above unchanged
- * (Conversation, Tree) or reuses only its per-row presentation (Timeline,
- * which needs bars plotted against one shared session-wide scale rather than
- * each trace's own). The one new visual element either way is the thin
- * divider naming which trace a block of content belongs to.
- */
+/* ------------------------------------------------------------------ session */
 
 /** `t.id → its spans`, the shape every session view below groups by. */
 export type SpansByTrace = Map<string, Span[]>;
 
-/** A trace's own line — reused by all three session views as the "which trace is this" label. */
 function traceLabel(t: TraceListItem): string {
   const parts = [clockLabel(t.started_at)];
   if (t.name) parts.push(t.name);
@@ -533,7 +446,6 @@ function traceLabel(t: TraceListItem): string {
   return parts.join(" · ");
 }
 
-/** The divider between one trace's block and the next — the "minor addition" for Conversation. */
 function TraceDivider({ trace, first }: { trace: TraceListItem; first: boolean }) {
   return (
     <div
@@ -548,13 +460,8 @@ function TraceDivider({ trace, first }: { trace: TraceListItem; first: boolean }
 }
 
 /**
- * The session's whole conversation, end to end — every trace's turn in order, with a divider between
- * them rather than a table of traces. Each trace's own {@link ConversationView} is reused; verdicts are
- * per-trace judgment and out of scope for a session read, so each call gets an empty list rather than a
- * session-wide verdicts fetch this view does not have.
- *
- * Only the first trace offers its earlier messages. A later trace's history is the traces drawn above
- * it, so its fold would repeat them; the first one's can be real, when capture began mid-session.
+ * The session's whole conversation, each trace's ConversationView with a divider between them. Only the
+ * first trace offers earlier messages; a later trace's history is the traces drawn above it.
  */
 export function SessionConversationView({
   traces,
@@ -604,7 +511,6 @@ export function SessionConversationView({
   );
 }
 
-/** One trace's collapsible header in {@link SessionTreeView} — name, time, duration, cost, tokens. */
 function TraceHeadRow({
   trace,
   open,
@@ -640,11 +546,8 @@ function TraceHeadRow({
 }
 
 /**
- * Every trace in the session as its own collapsible node, spans nested underneath exactly like the
- * single-trace {@link TreeView} already renders them — reused unchanged inside each node. Spans never
- * share a parent across traces, so keeping `spanOrder`/`depthOf` scoped per trace (which reusing
- * {@link TreeView} directly does) is correct, not a shortcut. The first trace opens by default; the rest
- * are one click away.
+ * Every trace as a collapsible node with TreeView nested inside. Spans never share a parent across traces,
+ * so per-trace `spanOrder`/`depthOf` is correct.
  */
 export function SessionTreeView({
   traces,
@@ -708,11 +611,7 @@ export function SessionTreeView({
   );
 }
 
-/**
- * Wall-clock bounds of a whole session, for {@link SessionTimelineView}'s shared scale — the same
- * preference order {@link traceBounds} uses (a trace's own started_at/ended_at over scanning its spans),
- * just min/maxed across every trace in the session instead of read from one.
- */
+/** Wall-clock bounds of a whole session, in the same preference order as traceBounds. */
 export function sessionBounds(
   traces: TraceListItem[],
   spansByTrace: SpansByTrace,
@@ -729,16 +628,8 @@ export function sessionBounds(
 }
 
 /**
- * One waterfall across the whole session — every span from every trace, on ONE shared time axis, so an
- * idle gap between traces or two traces overlapping is visible the way it never can be from a single
- * trace's own Timeline. Reuses {@link TimelineRow} (the exact bar {@link TimelineView} draws) for every
- * span; the "minor addition" is the same trace divider {@link SessionConversationView} uses, so a reader
- * can still tell which trace a cluster of bars belongs to without the axis breaking into separate scales.
- *
- * Traces are still walked in {@link SessionDetail}'s own oldest-first order rather than a raw global sort
- * of every span's start time, so a trace's bars always read together as one block — consistent with how
- * {@link SessionTreeView} and {@link SessionConversationView} group, and readable even when two traces
- * genuinely overlap in wall-clock time.
+ * One waterfall across the whole session on a shared axis, so idle gaps and overlaps between traces show.
+ * Traces are walked oldest first rather than by global span start, so each trace's bars read as one block.
  */
 export function SessionTimelineView({
   traces,

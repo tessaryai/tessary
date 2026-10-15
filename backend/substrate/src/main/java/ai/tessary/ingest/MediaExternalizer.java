@@ -21,38 +21,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Externalizes inline base64 image and document content out of the trace substrate into the
- * {@link MediaStore} at ingest. Runs at the persistence chokepoint ({@code SpanBatchWriter}) so EVERY
- * ingest path (Langfuse/Braintrust/Phoenix pull, JSONL upload, OTLP push) is covered by one seam — the
- * persisted {@code span_payload.input}/{@code .output} never carries base64. Each externalized image
- * becomes a {@link ContentBlock}-shaped {@code image_ref} node
- * ({@code {type:"image_ref", data:"<mediaId>", mediaType:"<mime>"}}); each externalized document
- * becomes a {@code document_ref} node whose {@code text} field ALSO carries the extracted PDF text (or
- * a labeled failure marker) so the judge boundary never needs a MediaStore round trip for the common
- * case. Bytes live once (content-addressed, per-project deduped) in
- * {@code media_object}. Readers re-hydrate by id: the judge boundary via {@link MediaStore#get}
- * just-in-time, the frontend via the media serve endpoint.
- *
- * <p>The entry point, {@link #externalizeJson}, rewrites a raw OpenAI/Anthropic content <em>payload
- * string</em> ({@code span_payload.input/output}, {@code tool_call} args/result) in place, replacing inline
- * base64 image/document nodes with {@code image_ref}/{@code document_ref} nodes. Non-JSON or media-free
- * payloads are returned byte-identical.
- *
- * <p><b>Every call reports the media it minted.</b> The ids are the only thing that can tie a
- * {@code media_object} row back to the span that carries it: the reference itself is a string inside the
- * payload JSON, invisible to FKs and cascades, so the caller writes a {@code media_ref} row per id in the
- * same transaction as the payload. Dropping them on the floor is what made every one of those rows
- * unreachable and uncollectable, and a store that succeeds without the caller learning the id is
- * the bug re-appearing.
- *
- * <p>Recognises the same base64 shapes {@code ContentExtractor} does: Anthropic
- * {@code {type:"image"|"document", source:{type:"base64", data, media_type}}} and OpenAI
- * {@code {type:"image_url"|"input_image"|"output_image", image_url:{url:"data:…;base64,…"}}} /
- * {@code {type:"input_file"|"file", file_data:"data:…;base64,…"}}. An undecodable/oversized/otherwise-
- * failing image is left inline rather than dropped (never fatal to the batch) — the same
- * first-do-no-harm posture as the rest of the ingest path. A document whose PDF text extraction fails
- * (encrypted, scanned, corrupt) still externalizes — the bytes are preserved and {@code text} carries a
- * labeled failure marker rather than the batch failing or the bytes being dropped.
+ * Runs at the persistence chokepoint ({@code SpanBatchWriter}) so every ingest path is covered and stored payloads
+ * never carry base64. Every call reports the media ids it minted: the ref is a string inside JSON, invisible to FKs, so
+ * the caller writes a {@code media_ref} row per id or the object is uncollectable. Failures leave media inline rather
+ * than failing the batch; a document whose text extraction fails still externalizes with a labeled marker.
  */
 @Component
 public class MediaExternalizer {
@@ -61,13 +33,9 @@ public class MediaExternalizer {
 
     private static final String DATA_URI_PREFIX = "data:";
 
-    /** The "nothing decodable" sentinel {@link #decodeBase64} returns instead of null. */
     private static final byte[] NO_BYTES = new byte[0];
 
-    /** Alias for {@link PdfTextExtractor#DOCUMENT_TEXT_UNAVAILABLE_MARKER} — kept as a local name so
-     *  call sites in this class read naturally; the literal itself lives in {@code core} so the judge
-     *  boundary ({@code ContentBlocks}) can check against the exact same constant instead of only
-     *  testing blank/null. */
+    /** The literal lives in {@code core} so the judge boundary checks the exact same constant. */
     static final String DOCUMENT_TEXT_UNAVAILABLE_MARKER = PdfTextExtractor.DOCUMENT_TEXT_UNAVAILABLE_MARKER;
 
     private final MediaStore media;
@@ -78,13 +46,7 @@ public class MediaExternalizer {
         this.mapper = mapper;
     }
 
-    /**
-     * A rewritten payload and the media ids it now references.
-     *
-     * @param payload the payload string, byte-identical to the input when nothing was externalized.
-     * @param mediaIds every {@code media_object} id this payload's {@code image_ref}/{@code document_ref}
-     *     nodes point at, deduplicated and in first-seen order. Empty for the common media-free case.
-     */
+    /** @param payload byte-identical to the input when nothing was externalized */
     public record Externalized(@Nullable String payload, List<String> mediaIds) {
 
         static Externalized unchanged(@Nullable String payload) {
@@ -92,13 +54,7 @@ public class MediaExternalizer {
         }
     }
 
-    /**
-     * Rewrite inline base64 image/document nodes in an OpenAI/Anthropic content payload to
-     * {@code image_ref}/{@code document_ref} nodes, storing the decoded bytes in the {@link MediaStore}.
-     * The payload comes back unchanged when it is null/blank, not JSON, or carries no inline base64
-     * media (the common, media-free case pays only a parse), and the ids of every object it did
-     * externalize come back with it.
-     */
+    /** A media-free payload pays only a parse. */
     public Externalized externalizeJson(String projectId, @Nullable String payload) {
         if (payload == null || payload.isBlank()) return Externalized.unchanged(payload);
         String trimmed = payload.stripLeading();
@@ -113,12 +69,11 @@ public class MediaExternalizer {
         }
         Minted minted = new Minted();
         JsonNode rewritten = rewrite(projectId, root, minted);
-        // No base64 media → identical bytes, avoid a needless re-serialize.
+        // No base64 media: identical bytes, avoid a needless re-serialize.
         if (minted.ids.isEmpty()) return Externalized.unchanged(payload);
         return new Externalized(rewritten.toString(), List.copyOf(minted.ids));
     }
 
-    /** The ids minted while rewriting one payload, deduplicated in first-seen order. */
     private static final class Minted {
         private final Set<String> ids = new LinkedHashSet<>();
 
@@ -126,8 +81,6 @@ public class MediaExternalizer {
             ids.add(ref.id());
         }
     }
-
-    // --- JSON tree rewrite ----------------------------------------------------
 
     private JsonNode rewrite(String projectId, JsonNode node, Minted minted) {
         if (node.isArray()) {
@@ -147,10 +100,6 @@ public class MediaExternalizer {
         return node;
     }
 
-    /**
-     * If {@code node} is a base64 image or document content part, store the bytes and return the
-     * replacement {@code _ref} node (recording the id); else null (the caller recurses into its fields).
-     */
     private @Nullable JsonNode tryExternalizeMediaNode(String projectId, JsonNode node, Minted minted) {
         String type = node.path("type").asText("");
         // Anthropic: {type:"image", source:{type:"base64", data, media_type}}
@@ -169,8 +118,7 @@ public class MediaExternalizer {
             }
             return null;
         }
-        // Anthropic: {type:"document", source:{type:"base64", data, media_type}}. The url-source variant
-        // is left untouched — nothing to externalize, same as a real http(s) image_url.
+        // The url-source variant has nothing to externalize.
         if ("document".equals(type)) {
             JsonNode src = node.get("source");
             if (src != null
@@ -189,8 +137,7 @@ public class MediaExternalizer {
             }
             return null;
         }
-        // OpenAI: {type:"image_url"|"input_image"|"output_image", image_url:{url:"data:…"}} (or a bare
-        // string url). Only inline data: URIs are externalized; a real http(s) URL is left untouched.
+        // Only inline data: URIs are externalized; a real http(s) URL is left untouched.
         if ("image_url".equals(type) || "input_image".equals(type) || "output_image".equals(type)) {
             String url = imageUrlOf(node);
             DataUri du = parseDataUri(url);
@@ -203,9 +150,7 @@ public class MediaExternalizer {
             }
             return null;
         }
-        // OpenAI: {type:"input_file"|"file", file_data:"data:<mime>;base64,…"} — the document
-        // counterpart of image_url's data-URI path. A bare url/file_url field is a real URL, left
-        // untouched (nothing to externalize).
+        // A bare url/file_url field is a real URL, left untouched.
         if ("input_file".equals(type) || "file".equals(type)) {
             DataUri du = parseDataUri(node.path("file_data").asText(""), "application/pdf");
             if (du != null) {
@@ -220,8 +165,6 @@ public class MediaExternalizer {
         return null;
     }
 
-    /** The image URL of an OpenAI-style part: {@code image_url} as an object with a {@code url}, as a
-     *  bare string, or a top-level {@code url} field. Empty when none present. */
     private static String imageUrlOf(JsonNode node) {
         JsonNode iu = node.get("image_url");
         if (iu != null) {
@@ -231,13 +174,7 @@ public class MediaExternalizer {
         return node.path("url").asText("");
     }
 
-    /**
-     * A {@code document_ref} block with {@code text} populated from {@link PdfTextExtractor}, run
-     * ONCE here, or {@link #DOCUMENT_TEXT_UNAVAILABLE_MARKER} on any extraction failure (encrypted,
-     * scanned, corrupt) — the bytes are preserved either way (already stored by the caller before this
-     * method runs); only the label differs. This is what lets the judge boundary read {@code text}
-     * directly for a {@code document_ref} block without a MediaStore round trip in the common case.
-     */
+    /** Extraction runs once here, so the judge boundary reads {@code text} without a MediaStore round trip. */
     private static ContentBlock documentRefWithExtractedText(String mediaId, String mediaType, byte[] bytes) {
         Optional<String> text = PdfTextExtractor.extract(bytes);
         return new ContentBlock(
@@ -249,12 +186,9 @@ public class MediaExternalizer {
     }
 
     private JsonNode refNode(ContentBlock ref) {
-        // Serialize through ContentBlock so the on-wire ref node shape ({type,text,data,mediaType}) is
-        // the single source of truth shared with ContentExtractor and the frontend.
+        // Through ContentBlock, so the ref node shape is shared with ContentExtractor and the frontend.
         return mapper.valueToTree(ref);
     }
-
-    // --- MediaStore puts ------------------------------------------------------
 
     private @Nullable MediaRef putBase64(
             String projectId, @Nullable String base64, @Nullable String mediaType, String defaultMediaType) {
@@ -263,9 +197,7 @@ public class MediaExternalizer {
         return putBytes(projectId, bytes, mediaType == null || mediaType.isBlank() ? defaultMediaType : mediaType);
     }
 
-    /** Nothing decodable is a zero-length array, never null (SpotBugs PZLA): every caller's next move
-     *  on "no bytes" is to leave the block inline, and {@link #putBytes} already rejects an empty array,
-     *  so a sentinel array costs nothing and keeps a null out of a byte[] return. */
+    /** Zero-length, never null (SpotBugs PZLA); {@link #putBytes} already rejects an empty array. */
     private byte[] decodeBase64(@Nullable String base64) {
         if (base64 == null || base64.isBlank()) return NO_BYTES;
         try {
@@ -290,15 +222,8 @@ public class MediaExternalizer {
         }
     }
 
-    /** A parsed {@code data:<mime>;base64,<bytes>} URI. */
     private record DataUri(String mime, byte[] bytes) {}
 
-    /**
-     * Parse a {@code data:<mime>;base64,<payload>} URI into its declared mime + decoded bytes, or null
-     * when {@code url} is not a base64 data URI (a real http(s) URL, a non-base64 data URI, or garbage).
-     * {@code defaultMime} is applied when the header carries no mime segment — {@code "image/png"} for
-     * an image_url data URI, {@code "application/pdf"} for a document data URI.
-     */
     private static @Nullable DataUri parseDataUri(@Nullable String url) {
         return parseDataUri(url, "image/png");
     }

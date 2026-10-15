@@ -11,10 +11,10 @@ said it twice.
 
 ```
 app          TessaryApplication, application.yaml, integration tests, ArchitectureRulesTest
-surfaces     query, search, mcp, ci, metering, billing, telemetry
+surfaces     query, search, mcp, metering, billing, telemetry
 analysis     classifier, rca, cases, alert, onboarding, prompt
 llm-runtime  llm, sandbox              (the ONLY module declaring a provider SDK or AWS client)
-product      pipeline, gate, plan
+product      pipeline, plan
 substrate    storage, ingest, redaction, retention, pricing, sources, traces, git, usage, vitals
 tenancy      tenant, auth, edition, featureflags, version            (declares bcrypt)
 core         web, model, apidoc, ops, crypto, db, config, telemetry, llmspi
@@ -58,10 +58,6 @@ but the split still earns its keep on the usage/pricing reason alone.)
 observer and the change-history risk model were removed outright, and those five packages went
 with them. The one finding table every classifier files into is what replaced the trend rollup.
 
-**`ci` is a stub.** `PreDeployCheck*` is a store of gate findings → `gate` package in `product`;
-`PreDeployCheckController` is all that is left at `surfaces`, the CI merge-gate having gone with
-grading.
-
 **`OtlpGrpcServerConfig` moves `config` → `ingest`.** `config` holds properties; wiring for one
 wire protocol belongs with that protocol.
 
@@ -78,9 +74,8 @@ as an interface **owned by the lower layer** and implemented above, wired in `ap
 
 Three narrow interfaces, not one general-purpose listener — the callers want different things, and a
 single wide interface would have forced each implementor to stub the half it does not care about. There
-was a fourth, `ingest/FeedbackObserver`, announcing user feedback upward to the pre-deploy gate; it
-went with the substrate's feedback table, and a since-squashed migration dropped the gate's
-now-single-valued `source` column with it.
+was a fourth, `ingest/FeedbackObserver`, announcing user feedback upward; it went with the substrate's
+feedback table.
 
 The last two exist for the same reason: `plan/CapabilityService` sits in `product`, so anything in
 `substrate` that must be capability- or quota-gated has no downward call to make. That is why both
@@ -88,9 +83,7 @@ The last two exist for the same reason: `plan/CapabilityService` sits in `produc
 resolvable and the enforcement point was a module below it.
 
 The other upward edges dissolved rather than needing a seam: `ContentExtractor` moved to `core/model`,
-so that import now points down. And
-`classifier → gate` needs no interface at all, because `gate` sits in `product` (L3) while
-`classifier` is in `analysis` (L6) — that call was always downward once `gate` was placed correctly.
+so that import now points down.
 
 This is the pattern that makes the design survive extension: a new consumer of ingest implements the
 interface; it does not add an import to `ingest`.
@@ -162,7 +155,7 @@ tests are the ones that need no Spring context, which is also the vast majority 
 
 ## How the boundary is held
 
-The quality gates — surefire, compiler/NullAway, forbiddenapis, SpotBugs, PMD, Spotless — are declared
+The quality gates — surefire, compiler/NullAway, forbiddenapis, SpotBugs, Spotless — are declared
 once in the parent `pluginManagement`. A new module activates them with a bare `<plugin>` stub and
 cannot silently opt out of them.
 

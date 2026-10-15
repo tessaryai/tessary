@@ -24,7 +24,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -34,16 +33,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * the corresponding column or mapper, which silently drops data on import.
  */
 @SpringBootTest
-class PipelineRepositoryTest {
-
-    @Autowired
-    PipelineRepository repo;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record PipelineRepositoryTest(PipelineRepository repo, TenantService tenants, JdbcClient jdbc) {
 
     @Test
     void replaceAndLoad_preservesEveryField() {

@@ -35,47 +35,20 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Malformed Output's findings: a call site whose outputs are failing their declared schema at a rate its own
- * history does not predict.
- *
- * <p><b>tool_error's engine, not a copy of it.</b> An output either parses against its call site's schema or it
- * does not, which is a Bernoulli rate exactly as a tool call either succeeds or fails. So the hourly tallies are
- * replayed through {@link ToolErrorTrend} and {@link ToolErrorConfig}'s tuning, the grouped CUSUM whose run
- * lengths tool_error's eval rig measured, with the call site where a tool would be. What is this classifier's own
- * is only what differs: where the tallies come from ({@link MalformedOutputRateRepository}), the table the carried
- * state lives in, and the finding it writes.
- *
- * <p><b>Why a rate and not a count.</b> A fixed count fires on a busy call site that is fine and stays silent on
- * a quiet one that broke completely. A call site that has never produced a malformed output starts from
- * Jeffreys-smoothed zero, and the shift floor is what makes it watchable: three in a row is enough there.
- *
- * <p><b>Only the rise is a finding.</b> The engine watches both directions. A call site failing its schema less
- * often than it used to is a fix, and nothing a person needs to hear about.
- *
- * <p><b>Rebuilt every pass, where tool_error resumes</b> ({@link CarriedState#rebuilding}). A resume folds each
- * hour once and never reads it again, which is sound only if an hour's tally is final when first read. Here it
- * is not: a backfill lands one hour's spans across several uploads, and a schema arriving rewinds the sweep to
- * check hours already tallied as clean. What survives a rebuild is the frozen reference and the human
- * decisions; the reset fence ({@link CarriedState#resetAt}) is what keeps a resolve from being re-folded.
- *
- * <p>Recomputed when the sweep catches up, never mid-backlog; see {@link ClassifierCatchUp}.
+ * A call site whose outputs fail their schema at a rate its history does not predict, on tool_error's engine
+ * ({@link ToolErrorTrend}). Only a rise is a finding. Rebuilt every pass rather than resumed, because a backfill or a
+ * newly arriving schema changes hours already tallied; the reset fence keeps a resolve durable.
  */
 @Service
 public class MalformedOutputRateService implements ClassifierCatchUp {
 
     private static final Logger log = LoggerFactory.getLogger(MalformedOutputRateService.class);
 
-    /** How far back a replay reads: tool_error's window, for its reasons. */
     static final Duration REPLAY_WINDOW = Duration.ofDays(28);
 
-    /**
-     * How long a spell may go unrefreshed before the next firing starts a new one. Short, as tool_error's is,
-     * because every call site is re-evaluated whenever the sweep catches up, so a recovered one stops refreshing
-     * within minutes.
-     */
+    /** Short because every call site is re-evaluated whenever the sweep catches up. */
     public static final Duration QUIET_WINDOW = Duration.ofHours(6);
 
-    /** Failing spans kept on a finding for a reader to open. */
     static final int MAX_WITNESSES = 50;
 
     private final MalformedOutputRateRepository rates;
@@ -106,13 +79,8 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
     }
 
     /**
-     * Replay every call site's tallies from where the last pass left them, carry the state forward, and write a
-     * finding for each call site whose rise is alarming now.
-     *
-     * <p>State first, findings second, as tool_error orders it: if this dies between the two, the next pass
-     * re-derives the same findings from the same state.
-     *
-     * @return how many call sites are in a spell
+     * State first, findings second: if this dies between the two, the next pass re-derives the same findings from the
+     * same state. @return how many call sites are in a spell
      */
     int refresh(String projectId, ClassifierRow signal, String checkedBefore, Instant at) {
         Instant started = Instant.now();
@@ -196,10 +164,6 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
                 .log();
     }
 
-    /**
-     * What a finding says about itself: the reference it was measured against and the run since onset, the same
-     * quantities a tool-error finding carries, named for a call site.
-     */
     private String payload(String callSite, Decision d) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("call_site_id", callSite);

@@ -2,14 +2,12 @@
 package ai.tessary.git;
 
 /**
- * Mints the ephemeral credential a {@link GitProviderClient} attaches to API
- * calls for one integration. Abstracts "platform-app + installation id"
- * (GitHub App tokens) from "per-integration sealed secret" (PAT/OAuth).
+ * Mints the credential a {@link GitProviderClient} attaches, hiding App installation tokens versus sealed
+ * per-integration secrets.
  */
 public interface GitTokenService {
 
     GitProvider provider();
 
-    /** A ready-to-send {@code Authorization} header value for this integration. */
     String authHeader(GitIntegrationRow integ);
 }

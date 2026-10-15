@@ -10,9 +10,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -20,46 +18,20 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * The v2 trace list against real Postgres: a filter, a sort, and a page over columns a writer already wrote, never an
  * aggregate computed during the request.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
-class TraceSubstrateRepositoryTest {
+@SpringBootTest
+record TraceSubstrateRepositoryTest(
+        SubstrateV2Fixtures fx,
+        TenantService tenants,
+        SessionRepository sessions,
+        TraceV2Repository v2traces,
+        SpanRepository spans,
+        SpanPayloadRepository payloads,
+        JdbcClient jdbc,
+        ToolCallRepository toolCalls,
+        RetrievedDocRepository retrievedDocs) {
 
     private static final TraceV2Repository.TraceQuery NO_FILTER =
             new TraceV2Repository.TraceQuery(null, null, null, null, null, null, null, null, null);
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository v2traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    ToolCallRepository toolCalls;
-
-    @Autowired
-    RetrievedDocRepository retrievedDocs;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void seedFixtures() {
-        fx = new SubstrateV2Fixtures(sessions, v2traces, spans, payloads);
-    }
 
     /**
      * The list serves the numbers the rollup worker wrote. The second half overwrites the stored rollup with values

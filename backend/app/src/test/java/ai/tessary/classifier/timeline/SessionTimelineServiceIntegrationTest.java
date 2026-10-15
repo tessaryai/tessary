@@ -18,14 +18,17 @@ import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,20 +83,6 @@ class SessionTimelineServiceIntegrationTest {
     private String pid;
     private Instant t0;
 
-    private record Row(
-            String id,
-            String kind,
-            int position,
-            Instant at,
-            int depth,
-            @Nullable String parentId,
-            @Nullable String parentKind,
-            List<String> ancestorKinds,
-            @Nullable String agentId,
-            String turn,
-            @Nullable String callSiteId) {}
-
-    /** The seeded acceptance session: its id and the span id each fixture name got. */
     private record Seeded(String sessionId, String trA, String trB, Map<String, String> ids) {
         String id(String name) {
             return Objects.requireNonNull(ids.get(name), name);
@@ -113,179 +102,24 @@ class SessionTimelineServiceIntegrationTest {
 
         SessionTimeline timeline = timelines.load(pid, s.sessionId());
 
-        String trA = s.trA();
-        String trB = s.trB();
         assertEquals(
-                List.of(
-                        new Row(
-                                trA + "/" + s.id("a1") + "#user:0",
-                                "user_message",
-                                0,
-                                at(0),
-                                1,
-                                s.id("a1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("a1"),
-                                trA,
-                                "cs-agent"),
-                        new Row(
-                                trA + "/" + s.id("a2"),
-                                "llm",
-                                1,
-                                at(200),
-                                1,
-                                s.id("a1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("a1"),
-                                trA,
-                                "cs-llm"),
-                        new Row(
-                                trA + "/" + s.id("a3"),
-                                "tool",
-                                2,
-                                at(300),
-                                1,
-                                s.id("a1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("a1"),
-                                trA,
-                                "cs-turn-a"),
-                        new Row(
-                                trA + "/" + s.id("a5"),
-                                "llm",
-                                3,
-                                at(590),
-                                2,
-                                s.id("a4"),
-                                "agent",
-                                List.of("agent", "agent"),
-                                s.id("a4"),
-                                trA,
-                                "cs-billing-llm"),
-                        new Row(
-                                trA + "/" + s.id("a4"),
-                                "agent",
-                                4,
-                                at(600),
-                                1,
-                                s.id("a1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("a1"),
-                                trA,
-                                "cs-billing"),
-                        new Row(
-                                trA + "/" + s.id("a6"),
-                                "llm",
-                                5,
-                                at(900),
-                                1,
-                                s.id("a1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("a1"),
-                                trA,
-                                "cs-llm"),
-                        new Row(
-                                trA + "/" + s.id("a6") + "#reply:0",
-                                "assistant_reply",
-                                6,
-                                at(900),
-                                2,
-                                s.id("a6"),
-                                "llm",
-                                List.of("agent", "llm"),
-                                s.id("a1"),
-                                trA,
-                                "cs-llm"),
-                        new Row(
-                                trA + "/" + s.id("a1"),
-                                "agent",
-                                7,
-                                at(900),
-                                0,
-                                null,
-                                null,
-                                List.of(),
-                                null,
-                                trA,
-                                "cs-agent"),
-                        new Row(
-                                trB + "/" + s.id("b1") + "#user:0",
-                                "user_message",
-                                8,
-                                at(1000),
-                                1,
-                                s.id("b1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("b1"),
-                                trB,
-                                "cs-agent"),
-                        new Row(
-                                trB + "/" + s.id("b4"),
-                                "step",
-                                9,
-                                at(1005),
-                                1,
-                                s.id("b1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("b1"),
-                                trB,
-                                "cs-turn-b"),
-                        new Row(
-                                trB + "/" + s.id("b2"),
-                                "llm",
-                                10,
-                                at(1400),
-                                1,
-                                s.id("b1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("b1"),
-                                trB,
-                                "cs-llm"),
-                        new Row(
-                                trB + "/" + s.id("b3"),
-                                "tool",
-                                11,
-                                at(1450),
-                                1,
-                                s.id("b1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("b1"),
-                                trB,
-                                "cs-turn-b"),
-                        new Row(
-                                trB + "/" + s.id("b1"),
-                                "agent",
-                                12,
-                                at(1500),
-                                0,
-                                null,
-                                null,
-                                List.of(),
-                                null,
-                                trB,
-                                "cs-agent"),
-                        new Row(
-                                trB + "/" + s.id("b1") + "#reply:0",
-                                "assistant_reply",
-                                13,
-                                at(1500),
-                                1,
-                                s.id("b1"),
-                                "agent",
-                                List.of("agent"),
-                                s.id("b1"),
-                                trB,
-                                "cs-agent")),
-                rows(timeline),
+                """
+                trA/a1#user:0  user_message     0    0 1 a1 agent agent       a1 trA cs-agent
+                trA/a2         llm              1  200 1 a1 agent agent       a1 trA cs-llm
+                trA/a3         tool             2  300 1 a1 agent agent       a1 trA cs-turn-a
+                trA/a5         llm              3  590 2 a4 agent agent,agent a4 trA cs-billing-llm
+                trA/a4         agent            4  600 1 a1 agent agent       a1 trA cs-billing
+                trA/a6         llm              5  900 1 a1 agent agent       a1 trA cs-llm
+                trA/a6#reply:0 assistant_reply  6  900 2 a6 llm   agent,llm   a1 trA cs-llm
+                trA/a1         agent            7  900 0 -  -     -           -  trA cs-agent
+                trB/b1#user:0  user_message     8 1000 1 b1 agent agent       b1 trB cs-agent
+                trB/b4         step             9 1005 1 b1 agent agent       b1 trB cs-turn-b
+                trB/b2         llm             10 1400 1 b1 agent agent       b1 trB cs-llm
+                trB/b3         tool            11 1450 1 b1 agent agent       b1 trB cs-turn-b
+                trB/b1         agent           12 1500 0 -  -     -           -  trB cs-agent
+                trB/b1#reply:0 assistant_reply 13 1500 1 b1 agent agent       b1 trB cs-agent
+                """,
+                table(timeline, s),
                 "a thread-keyed read, a span of another session, or a wrong row mapping changes the timeline");
         assertEquals(false, timeline.truncated());
 
@@ -610,21 +444,40 @@ class SessionTimelineServiceIntegrationTest {
         return t0.plusMillis(ms);
     }
 
-    private static List<Row> rows(SessionTimeline timeline) {
+    /**
+     * One line per event: id, kind, position, milliseconds after t0, depth, parent and its kind, ancestor kinds, agent,
+     * turn and call site, with every seeded id written as its name.
+     */
+    private String table(SessionTimeline timeline, Seeded s) {
         return timeline.events().stream()
-                .map(e -> new Row(
-                        e.id(),
+                .map(e -> String.format(
+                        Locale.ROOT,
+                        "%-14s %-15s %2d %4d %d %-2s %-5s %-11s %-2s %s %s",
+                        named(e.id(), s),
                         e.kind(),
                         e.position(),
-                        e.at(),
+                        Duration.between(t0, e.at()).toMillis(),
                         e.depth(),
-                        e.parentId(),
-                        e.parentKind(),
-                        e.ancestorKinds(),
-                        e.agentId(),
-                        e.turn(),
-                        e.callSiteId()))
-                .toList();
+                        named(dash(e.parentId()), s),
+                        dash(e.parentKind()),
+                        e.ancestorKinds().isEmpty() ? "-" : String.join(",", e.ancestorKinds()),
+                        named(dash(e.agentId()), s),
+                        named(e.turn(), s),
+                        named(dash(e.callSiteId()), s)))
+                .map(String::stripTrailing)
+                .collect(Collectors.joining("\n", "", "\n"));
+    }
+
+    private static String named(String line, Seeded s) {
+        String named = line.replace(s.trA(), "trA").replace(s.trB(), "trB");
+        for (Map.Entry<String, String> id : s.ids().entrySet()) {
+            named = named.replace(id.getValue(), id.getKey());
+        }
+        return named;
+    }
+
+    private static String dash(@Nullable String value) {
+        return value == null ? "-" : value;
     }
 
     /** The data nodes re-read from text, so a long the builder wrote compares equal to the int a test parses. */

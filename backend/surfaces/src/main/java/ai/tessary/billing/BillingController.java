@@ -19,16 +19,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Billing surface for an org. There is no charging integration, so what this controller anchors is the
- * RBAC contract: billing is a separate axis from organization content, reachable only by a role holding
- * {@link Permission#BILLING_MANAGE} (owner or the dedicated billing role). A viewer/member/admin who can
- * manage organization content is deliberately 403'd here, and the gate survives a direct API call, not
- * just UI hiding.
- *
- * <p>The org-scoped usage read lives here: cross-project usage totals per unit over a billing period,
- * behind the same {@link Permission#BILLING_MANAGE} gate, so billing works from real metered
- * consumption. Per-project self-serve usage lives separately behind the project-token
- * {@code MeteringController}; org rollups are never exposed through a project token.
+ * Billing is a separate RBAC axis from org content: only {@link Permission#BILLING_MANAGE} (owner or the billing role)
+ * reaches it, enforced on the API, not just the UI. Org rollups are never exposed through a project token.
  */
 @RestController
 public class BillingController {
@@ -41,21 +33,15 @@ public class BillingController {
         this.metering = metering;
     }
 
-    /** One billable unit's total over the requested period (org-scoped). */
     public record UsageLine(String unit, long value) {}
 
-    /**
-     * The billing summary for an org. {@code plan} and {@code billing_email} are permanently dead
-     * placeholders in the wire shape; {@code usage} is the cross-project metered consumption per unit
-     * over the requested period, the basis billing works from.
-     */
+    /** {@code plan} and {@code billing_email} are dead placeholders in the wire shape. */
     public record BillingSummary(
             @JsonProperty("org_id") String orgId,
             String plan,
             @JsonProperty("billing_email") String billingEmail,
             List<UsageLine> usage) {}
 
-    /** The billing summary for an org. */
     @GetMapping("/api/orgs/{orgSlug}/billing")
     public ApiResponse<BillingSummary> getBilling(
             TenantContext ctx,
@@ -67,19 +53,10 @@ public class BillingController {
         List<UsageLine> usage = metering.orgTotals(r.org().id(), from, to).stream()
                 .map(t -> new UsageLine(t.metric(), t.value()))
                 .toList();
-        // plan/billing_email are dead placeholders; the usage block is real metered consumption.
         return ApiResponse.ok(new BillingSummary(r.org().id(), "free", null, usage));
     }
 
-    /**
-     * The org's LLM token + cost total over {@code [from, to)} (both optional; an omitted bound is
-     * open): input / output / cache-read / cache-write kept apart, with the BYO share of the cost.
-     *
-     * <p>Read live off the per-call ledger rather than the closed-bucket rollups, so it answers "what
-     * are we burning right now" instead of "what did we burn as of the last closed hour". Same
-     * {@link Permission#BILLING_MANAGE} gate as the summary: per-call model and cost data is billing
-     * detail, not organization content.
-     */
+    /** Read live off the per-call ledger rather than closed-bucket rollups. An omitted bound is open. */
     @GetMapping("/api/orgs/{orgSlug}/usage/llm")
     public ApiResponse<LlmUsageView> getLlmUsage(
             TenantContext ctx,
@@ -92,15 +69,7 @@ public class BillingController {
     }
 
     /**
-     * The same LLM consumption as {@link #getLlmUsage}, bucketed over time, what the usage chart
-     * draws. {@code grain} is the bucket width ({@code hour} / {@code day} / {@code week}, default
-     * {@code day}) and {@code group} the series axis ({@code none} / {@code lane} / {@code project} /
-     * {@code model}, default {@code none}); {@code lane}, {@code project} and {@code model} narrow the
-     * window to one key each, echoing back a key from the breakdown slices.
-     *
-     * <p>Unlike the breakdown, both bounds default rather than staying open ({@code to} to now,
-     * {@code from} to 30 days before it), since a per-bucket read of an unbounded ledger is a full scan.
-     * Same {@link Permission#BILLING_MANAGE} gate, for the same reason.
+     * Bounds default ({@code to} now, {@code from} 30 days earlier), since an unbounded per-bucket read is a full scan.
      */
     @GetMapping("/api/orgs/{orgSlug}/usage/llm/series")
     public ApiResponse<LlmUsageSeriesView> getLlmUsageSeries(
@@ -120,16 +89,8 @@ public class BillingController {
     }
 
     /**
-     * The org's Layer-2 triage spend broken down per ruling, costliest first, with the cost of an
-     * average ruling above it.
-     *
-     * <p>The reads above answer "the triage agent cost this org $X" but not across how many rulings. A
-     * ruling is an agent session rather than a chat call, so the per-ruling unit price is the number
-     * that decides whether the filter is worth what it costs.
-     *
-     * <p>{@code limit} bounds only the listed rulings; the aggregate figures always cover the whole
-     * window, so a truncated list cannot produce a truncated total. Same {@link Permission#BILLING_MANAGE}
-     * gate as the other two: this is billing detail, not organization content.
+     * Per-ruling cost decides whether the triage filter is worth it. {@code limit} bounds only the listed rulings;
+     * aggregates cover the whole window.
      */
     @GetMapping("/api/orgs/{orgSlug}/usage/llm/triages")
     public ApiResponse<TriageSpendView> getTriageSpend(

@@ -15,15 +15,9 @@ import { PaletteProvider } from "./PaletteContext";
 import { ShellActionsProvider, useShellActions } from "./ShellActions";
 import { pushRecent } from "./recents";
 
-const mocks = vi.hoisted(() => ({
-  search: vi.fn(),
-  getCapabilities: vi.fn(),
-  openSwitcher: vi.fn(),
-}));
+const mocks = vi.hoisted(() => ({ search: vi.fn(), getCapabilities: vi.fn(), openSwitcher: vi.fn() }));
 
-vi.mock("../tenant/TenantContext", () => ({
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "web" }),
-}));
+vi.mock("../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "web" }) }));
 
 vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>();

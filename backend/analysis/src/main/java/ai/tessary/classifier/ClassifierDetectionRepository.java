@@ -10,29 +10,15 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Reads classifier detections out of the runtime-stitched union {@link DetectionTableRegistry}
- * builds over every registered per-classifier detection table. A table not registered on this
- * classpath removes its arm instead of the query naming a relation that never existed.
- *
- * <p>The union's {@code classifier_id} column holds the classifier key, so the definition's id
- * and version come from a JOIN on {@code classifier_key = d.classifier_id}.
- *
- * <p>The session is the flagged trace's {@code session_id}, not the union's {@code subject_session_id}: a
- * Frustration row written before {@code 0034} holds the trace's thread id there, which names no {@code session}
- * row.
- *
- * <p>Detection ids are their own id space: a stored link to an old verdict id resolves to
- * nothing.
- *
- * <p>The raw {@link JdbcClient} lives here, not in {@link ClassifierService}, so the
- * architecture rule "JDBC only in repositories" holds.
+ * Reads detections from {@link DetectionTableRegistry}'s union; an unregistered table drops its arm. Its
+ * {@code classifier_id} holds the key. The session is the trace's {@code session_id}: pre-{@code 0034} Frustration rows
+ * hold a thread id in {@code subject_session_id}.
  */
 @Repository
 public class ClassifierDetectionRepository {
 
     private final JdbcClient jdbc;
     private final String select;
-    private final String modeCountsSql;
     private final String dailyCountsSql;
 
     public ClassifierDetectionRepository(JdbcClient jdbc, DetectionTableRegistry detectionTables) {
@@ -48,10 +34,6 @@ public class ClassifierDetectionRepository {
                 + "FROM " + relation + " "
                 + "JOIN classifier s ON s.project_id = d.project_id AND s.classifier_key = d.classifier_id "
                 + "LEFT JOIN trace t ON t.project_id = d.project_id AND t.id = d.subject_trace_id ";
-        this.modeCountsSql = "SELECT\n"
-                + "  COUNT(*) FILTER (WHERE confidence = 'low')                        AS low_count,\n"
-                + "  COUNT(*) FILTER (WHERE confidence = 'high' OR confidence IS NULL) AS high_count\n"
-                + "FROM " + relation + " WHERE project_id = :pid AND classifier_id = :classifierKey";
         this.dailyCountsSql = "SELECT s.id AS classifier_id,\n"
                 + "       (d.subject_started_at AT TIME ZONE 'UTC')::date AS day,\n"
                 + "       COUNT(DISTINCT d.subject_trace_id) AS traces\n"
@@ -62,21 +44,7 @@ public class ClassifierDetectionRepository {
                 + "ORDER BY day ASC";
     }
 
-    /** All detections for a project, newest event-time first. */
-    public List<ClassifierDtos.ClassifierEventView> listByProject(String projectId, int limit) {
-        return jdbc.sql(select
-                        + "WHERE d.project_id = :pid ORDER BY d.subject_started_at DESC NULLS LAST, d.created_at DESC"
-                        + " LIMIT :limit")
-                .param("pid", projectId)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
-    }
-
-    /**
-     * Detections for one classifier key, newest event-time first. When {@code trackingOnly},
-     * restrict to the high-confidence band (unbanded NULL reads as high).
-     */
+    /** {@code trackingOnly} restricts to the high band; unbanded NULL reads as high. */
     public List<ClassifierDtos.ClassifierEventView> listByClassifierKey(
             String projectId, String classifierKey, boolean trackingOnly, int limit) {
         String confidenceFilter = trackingOnly ? " AND (d.confidence = 'high' OR d.confidence IS NULL)" : "";
@@ -89,26 +57,10 @@ public class ClassifierDetectionRepository {
                 .list();
     }
 
-    /** High/low confidence-band counts for one classifier's detections: the discovery-vs-tracking breakdown. */
-    public ModeCounts modeCounts(String projectId, String classifierKey) {
-        return jdbc.sql(modeCountsSql)
-                .param("pid", projectId)
-                .param("classifierKey", classifierKey)
-                .query((rs, n) -> new ModeCounts(rs.getLong("high_count"), rs.getLong("low_count")))
-                .single();
-    }
-
-    /** High/low detection counts for a classifier's key. */
-    public record ModeCounts(long high, long low) {}
-
     /**
-     * Per-classifier, per-UTC-day distinct-trace detection counts since {@code from}, oldest day
-     * first. Buckets on {@code (subject_started_at AT TIME ZONE 'UTC')::date} — the day the span
-     * ran, not the day the sweep checked it, so a backfill charts on its real days — rather than
-     * {@code date_trunc('day', ...)}: date_trunc on a timestamptz follows the session timezone,
-     * which would shift day boundaries. A row with no {@code subject_started_at} falls out of the
-     * {@code >= :from} filter rather than being coalesced onto today, which would misreport it and
-     * would stop the {@code ix_*_subject_started} index from being usable.
+     * Buckets by {@code (subject_started_at AT TIME ZONE 'UTC')::date}, the day the span ran; {@code date_trunc}
+     * follows the session timezone. A null {@code subject_started_at} falls out of the filter so the index stays
+     * usable.
      */
     public List<DailyClassifierCount> dailyDetectionCounts(String projectId, java.time.Instant from) {
         return jdbc.sql(dailyCountsSql)
@@ -121,12 +73,10 @@ public class ClassifierDetectionRepository {
                 .list();
     }
 
-    /** One classifier's distinct-trace detection count in one UTC day bucket. */
     public record DailyClassifierCount(String classifierId, java.time.LocalDate day, long traces) {}
 
     private static ClassifierDtos.ClassifierEventView map(ResultSet rs) throws SQLException {
-        // Each detection table declares the one grain its classifier judges at, so 'span' and
-        // 'trace' are the only two answers, read off the column that holds that grain's id.
+        // Each detection table has one grain, so only 'span' and 'trace' are possible.
         String subjectKind = rs.getString("subject_kind");
         String subjectId = "trace".equals(subjectKind) ? rs.getString("trace_id") : rs.getString("span_id");
         return new ClassifierDtos.ClassifierEventView(

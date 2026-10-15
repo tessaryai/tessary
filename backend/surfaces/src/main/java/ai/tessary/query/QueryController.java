@@ -20,18 +20,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The aggregation-first query API — a stable, token-scoped read surface over the trace + signal
- * store: {@code count} / {@code timeseries} / {@code facets} / keyword {@code search}.
- *
- * <p><b>Auth + project resolution.</b> Like the OTLP front door ({@code OtlpTraceController}), this lives
- * on a token-scoped {@code /v1/query/*} path — outside {@code /api/**}, so {@code AuthFilter} doesn't
- * hard-401 it; the controller enforces the project-scoped token itself. The {@code tsy_} bearer
- * token resolves {@link TenantContext#projectId()} directly, so token-scoped callers need no org/project path
- * segments. Every read is scoped to that token's project — the request body never carries a project id.
- *
- * <p>Four POST endpoints, one validated request record each. Reuses the {@code ApiResponse<T>} envelope
- * and snake_case JSON, per the {@code ClassifierController} convention. All reads funnel through
- * {@link QueryService} → {@link QueryRepository}; no caller above the repository touches a table.
+ * Token-scoped aggregation query API ({@code count}, {@code timeseries}, {@code facets}, {@code search}). On
+ * {@code /v1/query/*}, outside {@code /api/**}, so like {@code OtlpTraceController} it enforces the project-scoped
+ * token itself; the request never carries a project id.
  */
 @RestController
 @RequestMapping("/v1/query")
@@ -63,13 +54,13 @@ public class QueryController {
         return ApiResponse.ok(SearchView.of(service.search(projectId(ctx), req)));
     }
 
-    /** The project-scoped token requirement, identical to the OTLP ingest front door. */
+    /** Same requirement as the OTLP ingest front door. */
     private static String projectId(TenantContext ctx) {
         String projectId = ctx.projectId();
         if (!ctx.isMcpToken() || projectId == null) {
             throw new TessaryException(QueryError.TOKEN_REQUIRED);
         }
-        // Least-privilege key family: a query or mcp key may read; a write-only key may not.
+        // A query or mcp key may read; a write-only key may not.
         if (!ctx.keyPermits(ai.tessary.tenant.KeyScope.QUERY)) {
             throw new TessaryException(QueryError.WRONG_KEY_SCOPE);
         }

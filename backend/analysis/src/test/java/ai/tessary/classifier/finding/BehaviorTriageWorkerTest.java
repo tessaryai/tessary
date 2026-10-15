@@ -28,6 +28,7 @@ import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.Props;
 import io.micrometer.tracing.Tracer;
 import java.util.List;
 import java.util.Map;
@@ -107,8 +108,7 @@ class BehaviorTriageWorkerTest {
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
         TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
         when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(refusal);
-        ClassifierProperties props = new ClassifierProperties();
-        props.setTriageConfigRetrySeconds(1800);
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "triage-config-retry-seconds", 1800);
 
         tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), props)
                 .triageForTest(job("job_1", "f1"));
@@ -197,7 +197,7 @@ class BehaviorTriageWorkerTest {
                         mock(BehaviorTriageEngine.class),
                         trippedBreaker(),
                         FakeTriageSource.briefing(),
-                        new ClassifierProperties())
+                        Props.of(ClassifierProperties.class))
                 .tick();
 
         verifyNoInteractions(jobs);
@@ -209,14 +209,14 @@ class BehaviorTriageWorkerTest {
         BehaviorTriageJobRepository sweepFails = mock(BehaviorTriageJobRepository.class);
         when(sweepFails.failExhausted(anyInt())).thenThrow(new IllegalStateException("db down"));
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
-        tickableWorker(sweepFails, engine, breaker(), FakeTriageSource.briefing(), new ClassifierProperties())
+        tickableWorker(sweepFails, engine, breaker(), FakeTriageSource.briefing(), Props.of(ClassifierProperties.class))
                 .tick();
         verify(sweepFails, never()).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
 
         BehaviorTriageJobRepository claimFails = mock(BehaviorTriageJobRepository.class);
         when(claimFails.claimBatch(anyString(), anyInt(), anyLong(), anyInt()))
                 .thenThrow(new IllegalStateException("db down"));
-        tickableWorker(claimFails, engine, breaker(), FakeTriageSource.briefing(), new ClassifierProperties())
+        tickableWorker(claimFails, engine, breaker(), FakeTriageSource.briefing(), Props.of(ClassifierProperties.class))
                 .tick();
 
         verifyNoInteractions(engine);
@@ -235,7 +235,7 @@ class BehaviorTriageWorkerTest {
                 .thenThrow(new TessaryException(ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, "status 401"));
         TriageLauncherBreaker breaker = breaker();
 
-        tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), new ClassifierProperties())
+        tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), Props.of(ClassifierProperties.class))
                 .tick();
 
         verify(jobs).releaseWithoutAttempt(eq("job_1"), anyString());
@@ -251,7 +251,12 @@ class BehaviorTriageWorkerTest {
         TriageSource claimsNothing = mock(TriageSource.class);
         when(claimsNothing.brief(any())).thenReturn(Optional.empty());
 
-        tickableWorker(jobs, mock(BehaviorTriageEngine.class), breaker(), claimsNothing, new ClassifierProperties())
+        tickableWorker(
+                        jobs,
+                        mock(BehaviorTriageEngine.class),
+                        breaker(),
+                        claimsNothing,
+                        Props.of(ClassifierProperties.class))
                 .tick();
 
         verify(jobs, times(100)).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
@@ -259,9 +264,8 @@ class BehaviorTriageWorkerTest {
 
     /** A breaker that trips on the first launcher failure and parks for an hour. */
     private static TriageLauncherBreaker breaker() {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setTriageBreakerFailures(1);
-        props.setTriageBreakerCooldownSeconds(3600);
+        ClassifierProperties props = Props.of(
+                ClassifierProperties.class, "triage-breaker-failures", 1, "triage-breaker-cooldown-seconds", 3600);
         return new TriageLauncherBreaker(props);
     }
 
@@ -282,7 +286,7 @@ class BehaviorTriageWorkerTest {
                 List.of(source),
                 engine,
                 props,
-                new ObserverProperties(),
+                Props.of(ObserverProperties.class),
                 new TraceMdcBridge(mock(Tracer.class)),
                 new SyncTaskExecutor(),
                 breaker);

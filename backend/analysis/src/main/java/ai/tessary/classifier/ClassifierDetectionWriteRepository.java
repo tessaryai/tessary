@@ -18,41 +18,21 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Writes a fired detection into its classifier's own table (migration {@code 0088}).
- *
- * <p>A detection used to be a {@code verdict} row with {@code source='automatic'}, sharing a table with
- * grader scores, human rulings and escalation runs. It no longer is. Each per-span classifier has a
- * table, each table declares the grain that classifier judges at, and the idempotency follows from that
- * grain instead of from whatever the shared {@code ux_verdict_online_subject} index happened to key on.
- *
- * <p><b>The routing is by detector kind, not by table name guessing.</b> {@link #tableFor} is the one
- * place that maps a classifier onto its store; a kind with no table is a classifier that does not write
- * per-span detections (the drift families file findings directly), and {@link #tableFor} says so by
- * returning null rather than inventing a destination. Every other method takes a kind that has a table.
- *
- * <p>The name says WRITE because {@link ClassifierDetectionRepository} is the read side: that one
- * projects the stitched view for the events surface, this one owns the six tables the view is stitched
- * from and the window counts a classifier's arming gate reads back.
- *
- * <p><b>Insert-if-absent, first-write-wins.</b> {@code ON CONFLICT DO NOTHING} against the per-table
- * unique subject index, so a re-sweep over the same window writes nothing and
- * {@link #insert} reports {@code false}: a genuinely new detection is the one that inserted. That is the
- * same contract the old online-verdict upsert had, and the arming counter and the pre-deploy
- * registration both still key on it.
+ * Writes a fired detection into its classifier's own table, whose unique subject index sets the idempotency.
+ * {@link #tableFor} is the one routing map; null means the classifier files findings directly. Insert-if-absent: a
+ * re-sweep writes nothing and {@link #insert} reports {@code false}, which arming and pre-deploy registration key on.
  */
 @Repository
 public class ClassifierDetectionWriteRepository {
 
     /**
-     * The window a detection falls in, on its own {@code subject_started_at} (migration {@code 0012}):
-     * {@code floor(subject_started_at / W) * W} in epoch seconds. Bound to {@code :window}, and the same
-     * expression wherever a facet or whole-classifier window is read, so the query that finds which
-     * windows a sweep touched and the one that counts them cannot disagree.
+     * The same expression wherever a window is read, so the touched-windows query and the counting query cannot
+     * disagree.
      */
     private static final String EVENT_WINDOW =
             "(floor(extract(epoch FROM d.subject_started_at) / :window)::bigint * :window)";
 
-    /** The HIGH band. NULL reads as high, the convention every detection read here uses. */
+    /** NULL reads as high, as every detection read here does. */
     private static final String HIGH_BAND = " AND (confidence = 'high' OR confidence IS NULL)";
 
     private static final String SPAN_JOIN = " JOIN span s ON s.project_id = d.project_id"
@@ -66,23 +46,20 @@ public class ClassifierDetectionWriteRepository {
         this.tables = tables;
     }
 
-    /** The detection table for {@code detectorKind}, or null when that classifier writes no detections. */
     public @Nullable String tableFor(String detectorKind) {
         return tables.tableFor(detectorKind);
     }
 
-    /** The detection table for a kind the caller has already checked with {@link #writesDetections}. */
     private String requireTable(String detectorKind) {
         return Objects.requireNonNull(
                 tableFor(detectorKind), () -> "no detection table for detector kind " + detectorKind);
     }
 
-    /** True when {@code detectorKind} has a detection table — i.e. it is one of the per-span classifiers. */
     public boolean writesDetections(String detectorKind) {
         return tables.writesDetections(detectorKind);
     }
 
-    /** Delete every detection this classifier wrote. Returns 0 for a kind that writes none. */
+    /** Returns 0 for a kind that writes none. */
     public int deleteByClassifier(String detectorKind, String projectId, String classifierId) {
         String table = tableFor(detectorKind);
         if (table == null) return 0;
@@ -93,10 +70,8 @@ public class ClassifierDetectionWriteRepository {
     }
 
     /**
-     * Insert one fired detection, or do nothing if this classifier has already spoken about this subject.
-     *
-     * @return true when the row was written — a genuinely new detection; the caller checks
-     *     {@link #writesDetections} before it scores anything
+     * Insert one fired detection, or do nothing if this classifier has already spoken about this subject. Returns true
+     * only for a genuinely new detection.
      */
     public boolean insert(
             String id,
@@ -112,14 +87,9 @@ public class ClassifierDetectionWriteRepository {
             @Nullable String confidence,
             @Nullable String evidenceJson) {
         String table = requireTable(detectorKind);
-        // The table name is interpolated because it is not a bind-able position; every value that
-        // reaches SQL from outside this class is a parameter, and the name itself comes from a
-        // DetectionTable registration, whose constructor rejects anything but a bare identifier.
-        //
-        // subject_started_at is the span's own started_at, falling back to the trace's when there is no
-        // span (a future trace-grain table; :spanId is null there) — the same expression migration 0012's
-        // backfill used, so a row written today reads on the same clock as one backfilled at the cutover.
-        // A span or trace that has since aged out of retention leaves it NULL rather than guessed.
+        // The table name is interpolated because it is not a bindable position; it comes from a DetectionTable
+        // registration, which rejects anything but a bare identifier. subject_started_at uses the same expression as
+        // migration 0012's backfill, so new and backfilled rows share a clock.
         int written = jdbc.sql("INSERT INTO " + table + " (id, project_id, classifier_id, classifier_key,"
                         + " project_version_id, subject_session_id, subject_trace_id, subject_span_id,"
                         + " severity, confidence, evidence, subject_started_at, created_at)"
@@ -146,10 +116,8 @@ public class ClassifierDetectionWriteRepository {
     }
 
     /**
-     * The detections this classifier recorded at one call site in the event-time window {@code [since,
-     * until)}, newest first, capped: the flagged answers of a rate finding with what the detector said about
-     * each, for the triage dossier. The call site is the span's own, read through the span table, so a
-     * detection whose span has aged out of retention is not listed.
+     * Newest first and capped. The call site is read through the span table, so a detection whose span has aged out of
+     * retention is not listed.
      */
     public List<DetectionInWindow> listWitnessDetections(
             String detectorKind,
@@ -189,7 +157,6 @@ public class ClassifierDetectionWriteRepository {
                 .list();
     }
 
-    /** A detection as the dossier lists it: where it fired, when the span ran, and what the detector wrote. */
     public record DetectionInWindow(
             String traceId,
             String spanId,
@@ -200,11 +167,8 @@ public class ClassifierDetectionWriteRepository {
             String subjectStartedAt) {}
 
     /**
-     * Of {@code turns}, the ones whose session this classifier has a detection for that nobody has cleared. A
-     * session is a conversation on one call site: the conversation is {@code trace.session_id}, the key such a
-     * classifier writes into {@code subject_session_id}, and the call site is
-     * the one it writes into {@code evidence.call_site_id}. A trace in no conversation is never returned. Reads
-     * the detection table's partial index on uncleared rows.
+     * A session is {@code trace.session_id} on one call site ({@code evidence.call_site_id}); a trace in no
+     * conversation is never returned.
      */
     public Set<CallSiteTurn> unclearedFlaggedSessions(
             String detectorKind, String projectId, String classifierId, Collection<CallSiteTurn> turns) {
@@ -228,15 +192,9 @@ public class ClassifierDetectionWriteRepository {
         return flagged;
     }
 
-    /** One call site's part of a turn: the trace and the call site. */
     public record CallSiteTurn(String traceId, String callSiteId) {}
 
-    /**
-     * Clear this classifier's detections in each of {@code sessionIds} on {@code callSiteId}, the sessions a
-     * human ruled not frustrated: every uncleared row keyed to one of those conversations on that call site gets
-     * {@code cleared_at = now}. The same conversation's flags on other call sites stand. Rows already cleared
-     * keep their first clear time. Returns how many rows it cleared.
-     */
+    /** The same conversation's flags on other call sites stand. Rows already cleared keep their first clear time. */
     public int clearSessions(
             String detectorKind,
             String projectId,
@@ -258,11 +216,7 @@ public class ClassifierDetectionWriteRepository {
                 .update();
     }
 
-    /**
-     * Clear this classifier's detections on each of {@code spans}, the flagged answers a human ruled a false
-     * alarm: every uncleared row keyed to one of them gets {@code cleared_at = now}. Rows already cleared keep
-     * their first clear time. Returns how many rows it cleared.
-     */
+    /** Rows already cleared keep their first clear time. */
     public int clearSpans(
             String detectorKind, String projectId, String classifierId, Collection<SpanKey> spans, String now) {
         String table = requireTable(detectorKind);
@@ -279,17 +233,11 @@ public class ClassifierDetectionWriteRepository {
                 .update();
     }
 
-    /** A span, by both halves of its composite key. */
     public record SpanKey(String traceId, String spanId) {}
 
-    /**
-     * One fired detection, resolved to the call site and facet it is about and the event-time window its
-     * span falls in.
-     */
     public record FiredFacet(
             String traceId, String spanId, @Nullable String callSiteId, String facet, long windowStartEpochSecond) {}
 
-    /** One call site's detections of one facet inside one event-time window. */
     public record FacetWindow(
             @Nullable String callSiteId,
             String facet,
@@ -301,16 +249,8 @@ public class ClassifierDetectionWriteRepository {
     private record WindowKey(String callSiteId, String facet, long windowStartEpochSecond) {}
 
     /**
-     * Resolve the spans this classifier just fired on to the facet each detection is about and the window
-     * its span falls in.
-     *
-     * <p><b>Event time, not write time.</b> A detection's {@code created_at} is when the sweep checked the
-     * span, and a backfill checks months of traffic in an afternoon: bucketing on it would report a
-     * quarter's firings as one day's. {@code subject_started_at} (migration {@code 0012}) is when the
-     * thing happened; the span join here is for {@code call_site_id} alone.
-     *
-     * @param facetKey the evidence member the facet is read from; a detection without one is left out
-     * @param highOnly restrict to the HIGH band (NULL reads as high)
+     * Buckets on {@code subject_started_at} (event time), not {@code created_at}: a backfill checks months of traffic
+     * in an afternoon, so write time would report a quarter's firings as one day's.
      */
     public List<FiredFacet> firedFacets(
             String detectorKind,
@@ -345,12 +285,7 @@ public class ClassifierDetectionWriteRepository {
                 .list();
     }
 
-    /**
-     * Count every detection in the windows {@code touched} names, across all sweeps rather than only the
-     * one that touched them, ordered by window start so a caller filing them walks forward in event time.
-     *
-     * @param distinctSessions count sessions rather than detections, the {@code distinct_users} basis
-     */
+    /** Counts across all sweeps, not only the one that touched the window, ordered by window start. */
     public List<FacetWindow> countFacetWindows(
             String detectorKind,
             String projectId,
@@ -370,8 +305,8 @@ public class ClassifierDetectionWriteRepository {
         List<Object[]> keys = distinct.stream()
                 .map(k -> new Object[] {k.callSiteId(), k.facet(), k.windowStartEpochSecond()})
                 .toList();
-        // Grouped by ordinal: the facet and window expressions each bind their parameter afresh, so
-        // Postgres would not recognise a repeated expression in GROUP BY as the one in the select list.
+        // Grouped by ordinal: each expression binds its parameter afresh, so Postgres would not match a repeated
+        // expression in GROUP BY to the select list.
         return jdbc.sql("SELECT s.call_site_id, d.evidence ->> :facetKey AS facet, " + EVENT_WINDOW
                         + " AS window_start, "
                         + (distinctSessions ? "COUNT(DISTINCT d.subject_session_id)" : "COUNT(*)") + " AS observed,"
@@ -397,21 +332,10 @@ public class ClassifierDetectionWriteRepository {
                 .list();
     }
 
-    /** One fired detection resolved to the event-time window it falls in — the whole-classifier
-     *  counterpart of {@link FiredFacet}, with no facet or call site to key on: the classifier-wide
-     *  shape implicates no single call site. */
     public record FiredWindow(String traceId, String spanId, long windowStartEpochSecond) {}
 
-    /** One event-time window's count across all sweeps — the whole-classifier counterpart of
-     *  {@link FacetWindow}. */
     public record CountedWindow(long windowStartEpochSecond, long observed, Instant lastSeenAt, boolean anyHigh) {}
 
-    /**
-     * Resolve the spans this classifier just fired on to the event-time window each falls in — {@link
-     * #firedFacets} without a facet to key on.
-     *
-     * @param highOnly restrict to the HIGH band (NULL reads as high)
-     */
     public List<FiredWindow> firedWindows(
             String detectorKind,
             String projectId,
@@ -437,13 +361,7 @@ public class ClassifierDetectionWriteRepository {
                 .list();
     }
 
-    /**
-     * Count every detection in the windows {@code touched} names, across all sweeps rather than only the
-     * one that touched them, ordered by window start so a caller filing them walks forward in event time —
-     * {@link #countFacetWindows} without a facet or call site to group by.
-     *
-     * @param distinctSessions count sessions rather than detections, the {@code distinct_users} basis
-     */
+    /** Counts across all sweeps, not only the one that touched the window, ordered by window start. */
     public List<CountedWindow> countWindows(
             String detectorKind,
             String projectId,
@@ -477,12 +395,8 @@ public class ClassifierDetectionWriteRepository {
     }
 
     /**
-     * A secret-leak facet's population since its finding's onset: how many detections, across how many
-     * traces, first to last by the span's own clock, and whether any of them is HIGH band. Null when the
-     * facet's population has aged out from under the span join entirely.
-     *
-     * <p>Scoped by call site AND facet together, the same pair {@code ClassifierArming} files one finding
-     * per: a project-wide count here would mix a leak at one call site into another's numbers.
+     * Null when the population has aged out from under the span join. Scoped by call site and facet together, the pair
+     * {@code ClassifierArming} files one finding per.
      */
     public @Nullable SecretLeakSummary secretLeakSummary(
             String detectorKind,
@@ -514,12 +428,7 @@ public class ClassifierDetectionWriteRepository {
                 .orElse(null);
     }
 
-    /**
-     * Every masked key this facet has leaked as, newest-leaking-first: how many leaks and how many
-     * traces each key accounts for, when it last leaked, and whether any instance of it is still sitting
-     * in stored output unredacted. A key the redaction stamp or the raw-output reading could not name
-     * groups under {@code unknown} rather than being dropped, per the forward-only degrade.
-     */
+    /** Newest first. A key that could not be named groups under {@code unknown} rather than being dropped. */
     public List<SecretLeakKeySummary> secretLeakKeys(
             String detectorKind,
             String projectId,
@@ -553,11 +462,8 @@ public class ClassifierDetectionWriteRepository {
     }
 
     /**
-     * What {@code secret_leak_detection} recorded for each of a finding's own witnesses — the bounded
-     * set {@code ClassifierArming} already pinned, joined here for the mask, whether it is still stored
-     * raw, and the span's own time. A witness whose span has aged out of the join drops out rather than
-     * appearing with nulls: {@link #secretLeakSummary} and {@link #secretLeakKeys} are the full-population
-     * counts, this is only the instances a reader can still open.
+     * A witness whose span has aged out drops out rather than appearing with nulls; the summary and key reads are the
+     * full-population counts.
      */
     public List<SecretLeakWitness> secretLeakWitnesses(
             String detectorKind, String projectId, String classifierId, Collection<SpanKey> spans) {
@@ -588,14 +494,12 @@ public class ClassifierDetectionWriteRepository {
         return v == null ? null : v.toInstant();
     }
 
-    /** A secret-leak facet's population since onset: see {@link #secretLeakSummary}. */
     public record SecretLeakSummary(
             long leakCount,
             long traceCount,
             @Nullable Instant firstAt,
             @Nullable Instant lastAt) {}
 
-    /** One masked key's aggregate within a secret-leak facet: see {@link #secretLeakKeys}. */
     public record SecretLeakKeySummary(
             String masked,
             long leaks,
@@ -603,7 +507,6 @@ public class ClassifierDetectionWriteRepository {
             @Nullable Instant lastAt,
             boolean storedRaw) {}
 
-    /** One witness leak, joined to what {@code secret_leak_detection} recorded: see {@link #secretLeakWitnesses}. */
     public record SecretLeakWitness(
             String traceId,
             @Nullable String spanId,

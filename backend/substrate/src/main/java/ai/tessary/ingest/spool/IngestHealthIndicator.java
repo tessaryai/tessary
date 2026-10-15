@@ -9,13 +9,9 @@ import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
 /**
- * The {@code ingestSpool} health contributor, served through the {@code /actuator/health/ingest} group: the spool's depth, bytes,
- * oldest unprocessed age and dead-lettered count, and how many of the drainers are alive, so a self-hoster
- * can ask one HTTP endpoint whether accepted data is reaching the substrate instead of scraping the
- * once-a-minute throughput log line. DOWN when any drainer is dead (health used to say UP while the
- * queue silently stopped draining) when the oldest queued batch is older than
- * {@code tessary.ingest.spool.max-lag-ms}, or when the spool reports itself unavailable (a durable
- * spool whose broker is not answering).
+ * The {@code ingestSpool} health contributor ({@code /actuator/health/ingest}): spool depth, oldest age, dead letters
+ * and drainer liveness. DOWN when any drainer is dead, the oldest batch exceeds
+ * {@code tessary.ingest.spool.max-lag-ms}, or the spool reports itself unavailable.
  */
 @Component("ingestSpool")
 public class IngestHealthIndicator implements HealthIndicator {
@@ -34,7 +30,7 @@ public class IngestHealthIndicator implements HealthIndicator {
     public Health health() {
         IngestSpool.Stats stats = writer.spoolStats();
         boolean alive = writer.drainerAlive();
-        boolean lagging = props.getMaxLagMs() > 0 && stats.oldestAgeMs() > props.getMaxLagMs();
+        boolean lagging = props.maxLagMs() > 0 && stats.oldestAgeMs() > props.maxLagMs();
         Optional<String> unavailable = spool.unavailable();
         Health.Builder h = alive && !lagging && unavailable.isEmpty() ? Health.up() : Health.down();
         unavailable.ifPresent(reason -> h.withDetail("unavailable", reason));

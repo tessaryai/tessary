@@ -2,42 +2,17 @@
 package ai.tessary.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Tuning for the async usage-metering worker, bound from {@code tessary.metering.*}.
- * Metering is infrastructure feeding billing quotas and runs unconditionally (no enablement env gate);
- * defaults live here in code, auto-registered via {@code @ConfigurationPropertiesScan}.
- *
- * <p>{@code MeteringWorker}'s poll cadence is bound directly by {@code @Scheduled} from
- * {@code tessary.metering.heartbeat-ms}. {@link #claimBatch} bounds how many per-(project,
- * bucket) jobs one heartbeat claims; the {@code FOR UPDATE SKIP LOCKED} claim spreads the rest across
- * instances and the next heartbeat picks up the remainder. {@link #leaseSeconds} is the reclaim window
- * for a job a worker took but died before finishing.
+ * Tuning for the usage-metering worker ({@code tessary.metering.*}). Metering feeds billing quotas and always runs.
+ * Poll cadence is {@code tessary.metering.heartbeat-ms}, bound by {@code @Scheduled}.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.metering")
-public class MeteringProperties {
+public record MeteringProperties(
 
-    /** How many per-(project, bucket) jobs one heartbeat claims; SKIP-LOCKED spreads the rest. */
-    private int claimBatch = 50;
+        /** SKIP LOCKED spreads the rest across instances. */
+        @DefaultValue("50") int claimBatch,
 
-    /** Reclaim window (seconds) for a job a worker claimed but did not finish (e.g. crashed mid-aggregation). */
-    private long leaseSeconds = 600;
-
-    public int getClaimBatch() {
-        return claimBatch;
-    }
-
-    public void setClaimBatch(int v) {
-        this.claimBatch = v;
-    }
-
-    public long getLeaseSeconds() {
-        return leaseSeconds;
-    }
-
-    public void setLeaseSeconds(long v) {
-        this.leaseSeconds = v;
-    }
-}
+        /** Reclaim window for a job whose worker died mid-aggregation. */
+        @DefaultValue("600") long leaseSeconds) {}

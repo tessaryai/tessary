@@ -1,10 +1,5 @@
-# gitleaks rules for the credential formats this product itself mints or accepts. Extends the
-# built-in rule set rather than replacing it, so every third-party vendor key shape gitleaks
-# already knows stays covered; what is added is what no vendor list will ever carry.
-# Two readers: this repo's own secret scan (.github/workflows/secret-scan.yml, through
-# .gitleaks.toml) scans the checkout, so a contributor's push is checked the moment it lands; and
-# scripts/sync-gitleaks.sh merges these rules into the backend's redaction corpus. Nothing stock
-# matches `tsy_w_…`.
+# gitleaks rules for credential formats this product mints, extending the built-in set. Read by
+# .gitleaks.toml (the repo secret scan) and merged into the redaction corpus by scripts/sync-gitleaks.sh.
 title = "tessary self-minted credential formats"
 
 [extend]
@@ -28,8 +23,7 @@ keywords = ["link_"]
 [[rules]]
 id = "tessary-sealing-key"
 description = "A session or secret-box sealing key assigned to its environment name (44-char base64); the two shipped placeholders are public by design and excluded"
-# The value may sit directly after the name, or inside a compose default (`NAME: ${NAME:-value}`),
-# which is exactly how docker-compose.yml carries these keys.
+# The value may also sit inside a compose default (`NAME: ${NAME:-value}`).
 regex = '''(?i)\b(TESSARY_AUTH_COOKIE_PASSWORD|TESSARY_SECRET_KEY)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Za-z0-9+/]{43}=)'''
 secretGroup = 2
 keywords = ["TESSARY_AUTH_COOKIE_PASSWORD", "TESSARY_SECRET_KEY"]
@@ -44,10 +38,7 @@ secretGroup = 2
 keywords = ["CLASSIFY_API_KEY", "COMPILE_SERVICE_KEY", "SLACK_SERVICE_KEY", "SANDBOX_API_KEY", "EMBED_API_KEY", "LAUNCHER_API_KEY", "ENCODER_API_KEY", "SOP_COMPILE_API_KEY"]
 
 [rules.allowlist]
-# Base64 of `CHANGE-ME-insecure-default-launch`, the launcher bearer docker-compose.yml ships on
-# both sides of the pair. Excluded on the same terms as the two sealing placeholders above: it is
-# published deliberately so a fresh `docker compose up` authenticates instead of 401ing, and
-# PlaceholderSecretGuard refuses to boot a SITE_DOMAIN install that is still on it.
+# docker-compose.yml's public launcher placeholder; PlaceholderSecretGuard refuses it with a SITE_DOMAIN.
 regexes = ['''Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo''']
 
 [[rules]]
@@ -57,7 +48,6 @@ description = "The database password assigned to its environment name with any v
 regex = '''(?i)\b(POSTGRES_PASSWORD|TESSARY_DB_PASSWORD)\s*[:=]\s*["']?(?:\$\{[A-Z_]+:-)?([A-Za-z0-9!@#%^&*_+=\-./]{8,})'''
 secretGroup = 2
 keywords = ["POSTGRES_PASSWORD", "TESSARY_DB_PASSWORD"]
-# Allowlist regexes are matched against the secret group alone. The public placeholder `tessary` is
-# already shorter than the eight characters a value needs, so this row is a statement, not a filter.
+# Matched against the secret group alone; `tessary` is already too short to match.
 [rules.allowlist]
 regexes = ['''^tessary$''']

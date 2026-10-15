@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TessaryProperties;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -20,10 +21,6 @@ import org.slf4j.LoggerFactory;
 /**
  * Pins the boundary that makes the shipped placeholder keys defensible: permitted on a
  * domainless instance, fatal on one that has a hostname.
- *
- * <p>The refuse branch is otherwise reachable only through {@code check-open-boot-selfhost.sh},
- * which is EXCLUDED from {@code task check} and needs Docker, so nothing an engineer runs
- * per-change would exercise it.
  */
 class PlaceholderSecretGuardTest {
 
@@ -54,8 +51,7 @@ class PlaceholderSecretGuardTest {
         tessary.setSecretKey(secretKey);
         AuthProperties auth = new AuthProperties();
         auth.setCookiePassword(cookiePassword);
-        RcaProperties rca = new RcaProperties();
-        rca.getAgentic().setLauncherApiKey(launcherApiKey);
+        RcaProperties rca = Props.of(RcaProperties.class, "agentic.launcher-api-key", launcherApiKey);
         return new PlaceholderSecretGuard(tessary, auth, rca);
     }
 

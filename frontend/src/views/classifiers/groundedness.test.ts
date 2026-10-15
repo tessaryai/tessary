@@ -6,13 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GroundednessStatus } from "../../api/types";
 import {
-  GROUNDEDNESS_AWS_MD,
-  atRef,
-  clockTime,
-  notScoringLabel,
-  readSetupFlag,
-  restartPrompt,
-  rowState,
+  GROUNDEDNESS_AWS_MD, atRef, clockTime, notScoringLabel, readSetupFlag, restartPrompt, rowState,
 } from "./groundedness";
 
 function at(day: number, hour: number, minute: number): Date {
@@ -21,17 +15,8 @@ function at(day: number, hour: number, minute: number): Date {
 
 function status(overrides: Partial<GroundednessStatus>): GroundednessStatus {
   return {
-    state: "not_scoring",
-    mode: "dev",
-    configured: true,
-    available: false,
-    reason: "unreachable: ConnectException",
-    checked_at: null,
-    ever_swept: true,
-    last_scored_at: null,
-    last_caught_up_at: null,
-    setup_ref: "main",
-    ...overrides,
+    state: "not_scoring", mode: "dev", configured: true, available: false, reason: "unreachable: ConnectException",
+    checked_at: null, ever_swept: true, last_scored_at: null, last_caught_up_at: null, setup_ref: "main", ...overrides,
   };
 }
 
@@ -72,13 +57,11 @@ describe("groundedness", () => {
   });
 });
 
-describe("readSetupFlag", () => {
-  it("reads no setup under way when storage refuses", () => {
-    const spy = vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
-
-    expect(readSetupFlag("acme", "default")).toBe(false);
-    spy.mockRestore();
+it("readSetupFlag: reads no setup under way when storage refuses", () => {
+  const spy = vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+    throw new Error("denied");
   });
+
+  expect(readSetupFlag("acme", "default")).toBe(false);
+  spy.mockRestore();
 });

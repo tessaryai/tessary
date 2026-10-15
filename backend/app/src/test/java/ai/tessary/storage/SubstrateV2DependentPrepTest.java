@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -14,10 +13,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * post-teardown end state: surrogates gone, producer keys under canonical names.
  */
 @SpringBootTest
-class SubstrateV2DependentPrepTest {
-
-    @Autowired
-    JdbcClient jdbc;
+record SubstrateV2DependentPrepTest(JdbcClient jdbc) {
 
     @ParameterizedTest(name = "{0} carries its resolver terminal-state predicate")
     @CsvSource({

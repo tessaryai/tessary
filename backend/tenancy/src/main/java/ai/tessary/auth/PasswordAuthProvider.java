@@ -15,40 +15,18 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataIntegrityViolationException;
 
 /**
- * The dependency-free, zero-cloud-credential {@link AuthProvider}: this build's default. Unlike
- * {@link WorkOsClient}, there is no external configuration that could be missing.
- *
- * <p>Every WorkOS-shaped downstream call site ({@link AuthFilter#resolveCookie},
- * {@code TenantService.upsertUserFromWorkos}, the {@code auth.workos_failed}-style error handling
- * in {@link AuthController}) keys off {@link Principal#workosUserId()}. Rather than touch any of
- * those signatures, this provider mints a synthetic-but-stable id of the form
- * {@code "local_" + Ids.ulid()} at signup and returns that same id, unchanged, on every subsequent
- * login — which is what keeps {@code AuthFilter}'s {@code findByWorkosId} lookup resolving to the
- * same principal across sessions. It does NOT implement the OAuth redirect dance: see
- * {@link #supportsRedirectFlow()}.
- *
- * <p>Not wired via {@code @Component}, for the same {@code NoUniqueBeanDefinitionException} reason
- * documented on {@link WorkOsClient}: it is one of two candidate {@link AuthProvider} beans, and
- * {@link AuthProviderConfig} is what decides which one wins.
+ * Mints a stable {@code "local_" + Ids.ulid()} id at signup and returns it on every login, so the WorkOS-keyed call
+ * sites keep resolving the same principal. Not a {@code @Component}: {@link AuthProviderConfig} picks between the two
+ * {@link AuthProvider} beans.
  */
 public class PasswordAuthProvider implements AuthProvider {
 
     private static final String SYNTHETIC_ID_PREFIX = "local_";
 
     /**
-     * INVARIANT: the hasher and the verifier must carry the SAME long-password strategy, or a password
-     * this class hashed is one it cannot verify.
-     *
-     * <p>bcrypt itself reads at most 72 bytes. {@code BCrypt.withDefaults()} pairs that with
-     * {@code LongPasswordStrategies.strict()}, which THROWS past the cap rather than deriving — so a
-     * passphrase inside the 200-character contract {@code AuthController.SignupRequest} advertises left
-     * this method as an {@code IllegalArgumentException}, and {@code GlobalExceptionHandler} rendered it
-     * as a 400 carrying bcrypt's own wording. The cap is bytes, not characters, so a non-Latin or emoji
-     * password crossed it around 24 characters. SHA-512 pre-derivation accepts any length instead.
-     *
-     * <p>It does not invalidate a hash already stored: {@code BaseLongPasswordStrategy.derive} only
-     * derives at or past the cap and returns the same reference below it, so every password short enough
-     * to have been hashable under the old strategy hashes byte-identically under this one.
+     * The hasher and verifier must share this strategy, or a stored hash cannot be verified. bcrypt reads at most 72
+     * bytes and the default strategy throws past that (around 24 characters for non-Latin text); SHA-512 pre-derivation
+     * accepts any length and leaves shorter passwords' hashes byte-identical.
      */
     private static final LongPasswordStrategy LONG_PASSWORDS =
             LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A);
@@ -68,9 +46,8 @@ public class PasswordAuthProvider implements AuthProvider {
 
     @Override
     public String authorizationUrl(String state) {
-        // Unreachable once AuthController's supportsRedirectFlow() guard is in place — GET
-        // /auth/login degrades to a frontend redirect instead of calling this. Kept as a loud
-        // failure rather than a silent one in case some future call site forgets the guard.
+        // Unreachable behind AuthController's supportsRedirectFlow() guard; kept loud in case a future call site
+        // forgets it.
         throw new UnsupportedOperationException(
                 "PasswordAuthProvider has no OAuth redirect flow; guard callers on supportsRedirectFlow()");
     }
@@ -83,24 +60,18 @@ public class PasswordAuthProvider implements AuthProvider {
 
     @Override
     public AuthResult refresh(String refreshToken, @Nullable String organizationId) {
-        // Never called: signupWithCredentials/authenticateWithCredentials always return a null
-        // refreshToken (see their Javadoc below), and AuthFilter.tryRefresh short-circuits cleanly
-        // on old.refreshToken() == null before it would ever reach a provider's refresh().
+        // Never called: these credentials carry no refresh token, and AuthFilter short-circuits on a null one.
         throw new UnsupportedOperationException("PasswordAuthProvider never issues a refresh token");
     }
 
     @Override
     public Invitation createInvitation(String email) {
-        // Invitation bookkeeping already happens locally via org_invitation/InvitationRepository
-        // (TenantService.consumePendingInvitations); the WorkOS call only fired a notification
-        // email, which this dependency-free provider has no mechanism to send.
+        // Invitations are tracked locally; the WorkOS call only sent an email, which this provider cannot.
         return new Invitation(null);
     }
 
     @Override
-    public void revokeInvitation(String invitationId) {
-        // No-op — see createInvitation.
-    }
+    public void revokeInvitation(String invitationId) {}
 
     @Override
     public AuthResult signupWithCredentials(String email, String password) throws AuthException {
@@ -121,12 +92,8 @@ public class PasswordAuthProvider implements AuthProvider {
         try {
             users.insertWithPassword(fresh, hash);
         } catch (DataIntegrityViolationException e) {
-            // The findByEmail check above is a pre-check, not a lock: two concurrent signups for
-            // the same email can both pass it and race to insert. The loser hits app_user's email
-            // unique constraint here rather than the check above — translate it to the same
-            // AuthException the check-above path throws, so AuthController.signup's single catch
-            // (AuthException -> 409 auth.signup_failed) covers both, instead of this leaking as an
-            // unhandled 500 from GlobalExceptionHandler's generic fallback.
+            // The findByEmail pre-check is not a lock: a concurrent signup can hit the unique constraint here, so
+            // translate it to the same AuthException (409) instead of a 500.
             throw new AuthException("an account with this email already exists", e);
         }
         return result(workosUserId, email, fresh.displayName(), fresh.avatarUrl());
@@ -147,11 +114,9 @@ public class PasswordAuthProvider implements AuthProvider {
         if (!verified.verified) {
             throw new AuthException("invalid credentials");
         }
-        // Re-read the row's current display fields rather than trust anything caller-supplied — a
-        // login carries no display_name/avatar_url of its own to begin with.
+        // A login carries no display fields of its own, so re-read the row.
         Principal current = users.findById(c.principalId()).orElseThrow(() -> new AuthException("invalid credentials"));
-        // The stored workos_user_id, never a freshly-minted one — this is what keeps
-        // AuthFilter.findByWorkosId resolving the same principal across logins.
+        // The stored id, never a fresh one, so AuthFilter.findByWorkosId resolves the same principal across logins.
         return result(current.workosUserId(), current.email(), current.displayName(), current.avatarUrl());
     }
 
@@ -160,17 +125,8 @@ public class PasswordAuthProvider implements AuthProvider {
             @Nullable String email,
             @Nullable String displayName,
             @Nullable String avatarUrl) {
-        // No refreshToken: AuthController seals the session cookie with
-        // AuthProperties.getCookieMaxAgeSeconds() as its own expiry, so the session simply
-        // expires with the cookie instead of needing silent refresh. No accessToken either — nothing
-        // downstream of this provider reads it for anything but presence (AuthController's
-        // "malformed 2xx body" null-check), so a stable non-null placeholder satisfies that without
-        // implying a real bearer credential exists anywhere.
-        //
-        // accessTokenExpiresAt reads the SAME AuthProperties.getCookieMaxAgeSeconds() that
-        // AuthController.establishSession derives the Set-Cookie Max-Age from, so the two never
-        // diverge if an operator overrides auth.cookie-max-age-seconds -- unlike a hardcoded
-        // literal, which would drift from that config.
+        // No refresh token: the session expires with the cookie. The access token is a placeholder that only satisfies
+        // a presence check. Expiry reads the same cookie max-age the Set-Cookie uses, so the two never diverge.
         return new AuthResult(
                 "local-session",
                 null,

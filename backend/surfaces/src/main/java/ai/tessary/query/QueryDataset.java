@@ -9,53 +9,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The allow-listed datasets the query API reads, and, per dataset, the closed set of columns
- * that may be used as a facet/group-by <em>dimension</em> or scanned by keyword {@code search()}. This
- * enum is the SQL-injection firewall: a request names a dataset and a field as opaque snake_case wire
- * strings; the service resolves them <b>here</b> to fixed table/column identifiers that are the only
- * thing ever interpolated into SQL. A value outside the allow-list is a {@code 400}, never a query.
- *
- * <p>Every dataset is project-scoped on {@code project_id} and filtered, paged and bucketed on its own
- * {@link #timeColumn()} — the event clock, not necessarily {@code created_at} (ingest time). {@code spans}
- * and {@code tool_calls} range on {@code started_at}, the producer's own timing; {@code created_at} still
- * rides on every row (never filtered) so a caller can tell when a late-arriving row was received.
- * The {@code field -> column} maps are intentionally small and index-aware (see {@code QueryRepository})
- * so v1 stays index-served.
- *
- * <h2>Row identity is per-dataset</h2>
- *
- * <p>A span's identity is the producer triple {@code (project_id, trace_id, id)}, and its
- * {@code id} is unique only inside its trace, so a bare id names nothing. Two members carry that
- * fact: {@link #idExpr()} is the SQL expression that renders a row's handle (for {@code spans},
- * {@code trace_id || ':' || id}, the same handle {@code get_span} uses), and {@link #keyColumns()}
- * is the ordered identity tuple the keyset cursor compares on. Single-key datasets simply declare
- * {@code id} for both.
+ * The SQL-injection firewall for the query API: wire dataset and field names resolve HERE to fixed identifiers, the
+ * only things ever interpolated into SQL, and anything else is a {@code 400}. Every dataset is project-scoped and
+ * ranges on its own {@link #timeColumn()}. A span id is unique only inside its trace, so {@link #idExpr()} and
+ * {@link #keyColumns()} carry the full identity.
  */
 public enum QueryDataset {
     /**
-     * Typed spans: facet/filter/search by {@code kind} and {@code name}, and facet/filter by
-     * {@code call_site_id} / {@code session_id} / {@code status} /
-     * {@code model_id} / {@code cost_source}. Faceting {@code call_site_id} answers "which call sites
-     * have telemetry, and how much" in one request. The filter path is index-served
-     * ({@code ix_span_call_site}, {@code ix_span_project_started}); the facet's
-     * {@code GROUP BY} aggregates over the project-bounded row set those indexes select.
-     *
-     * <p>Wire name {@code spans} is the only spelling the query API and the MCP dataset enum accept;
-     * any other is a {@code 400}.
-     *
-     * <p>Search reads previews, not payloads: {@code input}/{@code output} moved off-row to
-     * {@code span_payload}, and this dataset stays a single-table read (no payload join), so keyword
-     * search matches {@code name} and the two 200-char previews. Full-text over the payload is
-     * the global-search surface's job (it has the GIN index for it); this one answers structured
-     * questions cheaply.
-     *
-     * <p>Untagged spans form a null facet bucket: an untagged span has a null {@code call_site_id},
-     * and {@code GROUP BY} emits it as a {@code Facet} with a {@code null} value, ranked by count
-     * like any other bucket, so early on it is usually the largest. Two consequences for callers:
-     * drop the null-valued bucket rather than treating it as a call site, and remember it consumes
-     * one of the {@code top_n} slots, so a response holding {@code top_n} buckets may have evicted a
-     * real, low-traffic call site. The equality filter is unaffected: SQL {@code =} never matches
-     * NULL, so filtering by a call site excludes untagged rows outright.
+     * Search reads the 200-char previews, not payloads, so this stays a single-table read. Untagged spans form a null
+     * {@code call_site_id} facet bucket that takes one of the {@code top_n} slots; callers should drop it.
      */
     SPANS(
             "spans",
@@ -76,9 +38,7 @@ public enum QueryDataset {
             dims(
                     entry("kind", "kind"),
                     entry("name", "name"),
-                    // `model` is the producer's own model string (v1's observation.model); `model_id` is the
-                    // resolved catalogue key the price book is stated in. Both are filterable because they
-                    // answer different questions: "what did the SDK say" vs "what did we price it as".
+                    // `model` is what the SDK said; `model_id` is what we priced it as.
                     entry("model", "provided_model_name"),
                     entry("model_id", "model_id"),
                     entry("trace_id", "trace_id"),
@@ -91,20 +51,14 @@ public enum QueryDataset {
             dims(
                     entry("kind", "kind"),
                     entry("name", "name"),
-                    // Both halves of the identity ride in the projection, so a caller can feed a search row
-                    // straight into get_span without parsing the composite handle.
+                    // Both halves ride in the projection so a search row feeds get_span directly.
                     entry("trace_id", "trace_id"),
                     entry("span_id", "id"),
                     entry("started_at", "started_at"),
                     entry("cost_source", "cost_source")),
-            true), // started_at (the time column) and created_at are both timestamptz
+            true),
 
-    /**
-     * First-class tool calls: facet/filter/search by tool {@code name}, filter by the producer keys of
-     * the span that made the call. The table keeps its own surrogate {@code id} (it is not part of the v2
-     * substrate), so its handle is still a bare id; what changed is the <em>pointer</em>: it names a span
-     * by {@code (trace_id, span_id)} rather than by a surrogate observation id.
-     */
+    /** Keeps its own surrogate {@code id}; it points at its span by {@code (trace_id, span_id)}. */
     TOOL_CALLS(
             "tool_calls",
             "tool_call",
@@ -123,30 +77,17 @@ public enum QueryDataset {
                     entry("trace_id", "trace_id"),
                     entry("span_id", "span_id"),
                     entry("started_at", "started_at")),
-            true), // started_at (the time column) and created_at are both timestamptz
+            true),
 
     /**
-     * Classifier detections: facet by {@code classifier_id}/{@code severity}/{@code confidence}/
-     * {@code subject_kind}. Each per-span classifier writes its own detection table; this reads
-     * {@code DetectionTableRegistry}'s runtime-stitched union over them, so {@code classifier_id} is
-     * the classifier's key rather than the classifier row's id, and {@code severity} is its coarse
-     * band. {@link #table()} for this dataset is never read as a real relation name: it is a marker,
-     * {@link QueryRepository#relation}'s {@code dataset ==} switch resolves this one dataset to the
-     * union instead.
-     *
-     * <p>Queries over a range before the classifier-pipeline cutover return nothing: earlier
-     * detections lived as {@code verdict} rows that were deleted, not migrated into this table.
-     *
-     * <p>A subject span id is half a key: {@code subject_span_id} is a producer span id, unique only
-     * inside its trace, so it's only meaningful read together with {@code subject_trace_id}, which is
-     * why both are filterable and both are projected. {@code subject_kind} takes exactly three
-     * values, {@code span}/{@code trace}/{@code session}; the producer-keyed fields are the only
-     * spelling for the subject location.
+     * Reads {@code DetectionTableRegistry}'s union over the per-classifier detection tables; {@link #table()} is only a
+     * marker resolved by {@link QueryRepository#relation}. Detections from before the classifier-pipeline cutover were
+     * deleted, not migrated. {@code subject_span_id} is meaningful only with {@code subject_trace_id}.
      */
     CLASSIFIER_EVENTS(
             "classifier_events",
-            "classifier_events_union", // marker only; see class javadoc + QueryRepository#relation
-            "subject_started_at", // the span (or trace) it judged actually ran; migration 0012, decision 8b
+            "classifier_events_union",
+            "subject_started_at",
             null,
             true,
             "id",
@@ -173,18 +114,12 @@ public enum QueryDataset {
                     entry("subject_trace_id", "subject_trace_id"),
                     entry("subject_span_id", "subject_span_id"),
                     entry("subject_started_at", "subject_started_at")),
-            true), // subject_started_at is timestamptz (nullable) on every detection table
+            true),
 
     /**
-     * Pre-aggregated usage rollups: the {@code metric_rollup} table the metering worker writes. This
-     * dataset is fundamentally different from the three above: it is already aggregated, so its
-     * measure is {@code SUM(value)} (a {@link #measureColumn}), not {@code COUNT(*)}, and its time
-     * column is {@code bucket_start} (a {@link #timeColumn}), not {@code created_at}. Facet/filter by
-     * {@code metric} and {@code granularity} (always filter {@code granularity} so a
-     * {@code timeseries} does not mix the hour and day grains into one truncated bucket and
-     * double-count). Search is unsupported ({@link #supportsSearch} false): a rollup row has no text
-     * to match and no page to keyset. The aggregation results are consistent with the dedicated
-     * {@code MeteringController} timeseries.
+     * Already aggregated: the measure is {@code SUM(value)} over {@code bucket_start}. Always filter
+     * {@code granularity}, or a timeseries mixes hour and day grains and double-counts. No search: a rollup row has no
+     * text.
      */
     USAGE_ROLLUPS(
             "metric_rollups",
@@ -213,7 +148,6 @@ public enum QueryDataset {
     private final Map<String, String> displayColumns;
     private final boolean timeIsTimestamptz;
 
-    /** Every dataset states its own {@code timeColumn} and {@code measureColumn}; there is no default. */
     QueryDataset(
             String wireName,
             String table,
@@ -242,81 +176,47 @@ public enum QueryDataset {
     }
 
     /**
-     * Whether the dataset's {@code timeColumn} is a native {@code timestamptz} (the TEXT→timestamptz
-     * cutover, {@code observation} first). When true the query SQL casts bound time params with
-     * {@code ::timestamptz} and reads the time column back as an ISO-8601 instant; when false the column is
-     * ISO-8601 TEXT and compares lexicographically. Never user input.
+     * When true, bound time params are cast {@code ::timestamptz}; when false the column is ISO-8601 TEXT compared
+     * lexicographically.
      */
     public boolean timeIsTimestamptz() {
         return timeIsTimestamptz;
     }
 
-    /** The physical table name (a fixed identifier; never user input). */
     public String table() {
         return table;
     }
 
-    /**
-     * The SQL expression rendering a row's opaque handle: the value that comes back as a search
-     * row's {@code id} and that a caller hands to a point-lookup. A fixed, trusted enum constant, never
-     * user input. Bare {@code id} for every dataset with a surrogate key; {@code trace_id || ':' || id}
-     * for {@code spans}, because a span id alone does not identify a span.
-     */
+    /** {@code trace_id || ':' || id} for {@code spans}, because a span id alone does not identify a span. */
     public String idExpr() {
         return idExpr;
     }
 
-    /**
-     * The identity columns behind {@link #idExpr()}, in the order the handle concatenates them. The keyset
-     * cursor's tiebreak tuple is built from this, so a dataset's identity is stated once. Trusted
-     * identifiers.
-     */
+    /** The keyset cursor's tiebreak tuple, so identity is stated once. */
     public List<String> keyColumns() {
         return keyColumns;
     }
 
-    /**
-     * The dataset's time column: a trusted, fixed identifier the query SQL ranges, keysets and buckets on.
-     * Its own event clock, stated per dataset rather than defaulted — {@code started_at} for {@code spans}
-     * and {@code tool_calls} (the producer's own timing), {@code subject_started_at} for
-     * {@code classifier_events} (the span or trace it judged, migration {@code 0012}), {@code bucket_start}
-     * for {@code metric_rollups} (the rollup grain column, still ingest time — billing). {@code created_at}
-     * still rides on every row for display; it is filtered only where it is also the time column. Never
-     * user input.
-     */
+    /** {@code created_at} rides on every row for display but is filtered only where it is also the time column. */
     public String timeColumn() {
         return timeColumn;
     }
 
-    /**
-     * The numeric measure column to {@code SUM}, or {@code null} for the default {@code COUNT(*)}. A fixed,
-     * trusted identifier (only {@code metric_rollups} sets one, {@code value}); never user input. A SUM
-     * dataset's {@code count}/{@code timeseries}/{@code facets} return {@code SUM(measure)} in place of the
-     * row count.
-     */
+    /** Null means {@code COUNT(*)}; only {@code metric_rollups} sums {@code value}. */
     public @org.jspecify.annotations.Nullable String measureColumn() {
         return measureColumn;
     }
 
-    /**
-     * Whether keyword/keyset {@code search()} is supported. {@code false} for pre-aggregated datasets
-     * ({@code metric_rollups}) that have no text columns and no row-level page; the service rejects a search
-     * on them with a {@code 400} before the repository's {@code created_at} keyset cursor can run.
-     */
+    /** Rejected with a {@code 400} before the {@code created_at} keyset cursor can run. */
     public boolean supportsSearch() {
         return supportsSearch;
     }
 
-    /** The snake_case wire identifier for this dataset. */
     public String wireName() {
         return wireName;
     }
 
-    /**
-     * Resolve a snake_case wire dataset name to the enum, or {@code 400} if unknown. The match is exact on
-     * {@link #wireName()}: a dataset has exactly one spelling on the wire, and a writer that persists a
-     * dataset name persists the resolved {@link #wireName()} rather than the caller's string.
-     */
+    /** Exact: a dataset has one wire spelling. */
     public static QueryDataset fromWire(String wire) {
         for (QueryDataset d : values()) {
             if (d.wireName.equals(wire)) {
@@ -326,11 +226,7 @@ public enum QueryDataset {
         throw new TessaryException(QueryError.UNKNOWN_DATASET, wire);
     }
 
-    /**
-     * Resolve a facet/group-by field to its fixed column identifier, or {@code 400} if the field is not
-     * an allow-listed dimension on this dataset. The returned string is a trusted, hard-coded column
-     * name: the only group-by token that reaches SQL.
-     */
+    /** The returned name is the only group-by token that reaches SQL. */
     public String facetColumn(String field) {
         String col = facetColumns.get(field);
         if (col == null) {
@@ -340,10 +236,7 @@ public enum QueryDataset {
     }
 
     /**
-     * Resolve an equality-filter field to its fixed column identifier, or {@code 400} if the field is not
-     * an allow-listed filter on this dataset. Filters are a slightly wider set than facet dimensions
-     * (they include indexed discriminators that make sense to pin but not to group by, e.g. {@code
-     * trace_id} / {@code span_id} / {@code subject_span_id}). The returned identifier is trusted; the
+     * Wider than facets: includes indexed discriminators worth pinning but not grouping. The identifier is trusted; the
      * value is bound.
      */
     public String filterColumn(String field) {
@@ -355,42 +248,23 @@ public enum QueryDataset {
     }
 
     /**
-     * The wire field names this dataset accepts as a facet/group-by dimension, in declaration order.
-     *
-     * <p>The <em>keys</em>, deliberately, not the map: a caller outside the query layer has no business
-     * naming a physical column, and the resolution {@code field -> column} stays the firewall's private
-     * business ({@link #facetColumn}). What the keys are for is telling a caller which fields exist:
-     * {@code describe_dataset} on the MCP surface publishes exactly this, so the advertised vocabulary is
-     * read off the enum rather than transcribed beside it. Unmodifiable (the backing map is built by
-     * {@link #dims}).
+     * Keys only: the {@code field -> column} resolution stays the firewall's private business. {@code describe_dataset}
+     * publishes exactly this.
      */
     public Set<String> facetFields() {
         return facetColumns.keySet();
     }
 
-    /**
-     * The wire field names this dataset accepts as an equality filter, in declaration order. Wider than
-     * {@link #facetFields()}; see {@link #filterColumn} for why. Keys only, and unmodifiable, for the same
-     * reasons.
-     */
     public Set<String> filterFields() {
         return filterColumns.keySet();
     }
 
-    /**
-     * The allow-listed text columns keyword {@code search()} may match against on this dataset. Returns a
-     * fixed list of trusted column identifiers; the request supplies only the bound query <em>value</em>.
-     */
+    /** The request supplies only the bound value. */
     public List<String> searchColumns() {
         return List.copyOf(searchColumns);
     }
 
-    /**
-     * The trusted columns a {@code search()} row projects into its {@code fields} map, keyed by wire
-     * field name ({@code wire field -> column identifier}, insertion-ordered). Wire name and column
-     * usually coincide; {@code spans} is the exception, aliasing {@code span_id} onto the row's own
-     * {@code id}.
-     */
+    /** {@code spans} aliases {@code span_id} onto the row's own {@code id}. */
     public Map<String, String> displayColumns() {
         return displayColumns;
     }
@@ -405,7 +279,7 @@ public enum QueryDataset {
         for (Map.Entry<String, String> e : entries) {
             m.put(e.getKey(), e.getValue());
         }
-        // Unmodifiable but insertion-ordered (Map.copyOf would scramble displayColumns' SELECT order).
+        // Map.copyOf would scramble displayColumns' SELECT order.
         return java.util.Collections.unmodifiableMap(m);
     }
 }

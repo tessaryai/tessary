@@ -14,6 +14,7 @@ import ai.tessary.plan.Capability;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.Props;
 import io.micrometer.tracing.Tracer;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -79,7 +80,12 @@ class TriageAutoEscalatorTest {
 
     private TriageAutoEscalator escalator() {
         return new TriageAutoEscalator(
-                projects, capabilities, List.of(source), drift, new ClassifierProperties(), new TraceMdcBridge(tracer));
+                projects,
+                capabilities,
+                List.of(source),
+                drift,
+                Props.of(ClassifierProperties.class),
+                new TraceMdcBridge(tracer));
     }
 
     private static Project project(String id, String orgId) {

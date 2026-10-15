@@ -1,96 +1,36 @@
-# Production stack. Three long-running services on the `tessary` network, plus the launcher:
-#   - postgres  Postgres 16, EBS-backed data volume, healthcheck-gated
-#   - backend   Spring Boot JVM (layered bootJar), internal :8080
-#   - frontend  Caddy serving the built static + reverse-proxying /api → backend,
-#               TLS on :443 when SITE_DOMAIN is set, plain HTTP on :8000 always
+# Production stack: postgres, backend, frontend (Caddy, TLS on :443 when SITE_DOMAIN is set, HTTP on
+# :8000 always) and the sandbox-runner launcher. Every service starts on a default `up` except
+# `redpanda`, the opt-in ingest buffer under `--profile kafka`.
 #
-# EVERY SERVICE HERE STARTS ON A DEFAULT `up`, with ONE named exception: `redpanda`, the opt-in
-# durable ingest buffer under `--profile kafka`. It is image-only, so a registry reference
-# resolves it like every other service, and it is off unless an operator asks for it by name; what
-# a reader sees is what boots, plus one block that says when it does not.
+# Usage: fill .env (.env.example lists every key), then `docker compose pull && docker compose up -d`.
+# Set TESSARY_VERSION to pin every image; each *_IMAGE key overrides one.
 #
-# NO TELEMETRY COLLECTOR. A Grafana Alloy sidecar used to sit here as the egress point for OTLP
-# traces, Docker logs, host metrics and profiles, together with the backend's OTEL_* and
-# PYROSCOPE_* keys that only ever addressed it. It was opt-in behind `profiles: ["observability"]`
-# and started on no default `up`; it now lives in a separate overlay compose file that this
-# edition does not ship, merged in by an file-exists probe when it is present.
+# Also the published install: `docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y`.
+# The release stamps the floating TESSARY_VERSION defaults with its version; no version literal lives
+# here (scripts/check-version-consistency.sh).
 #
-# Nothing about a default boot changed. What changed is the reading cost: `docker compose -f
-# oci://…` shows an operator a confirmation table of EVERY variable this file interpolates before
-# it will run, and that block contributed fourteen GRAFANA_CLOUD_*/LANGFUSE_* rows plus two
-# hostnames naming a container the file did not define. To ship OTLP somewhere from this stack,
-# point OTEL_EXPORTER_OTLP_ENDPOINT at your own collector and add it as an override file.
-#
-# Usage:
-#   # populate .env with the values your deployment needs (.env.example lists every key)
-#   docker compose pull && docker compose up -d
-#   # pin every image to a different published version at once: set TESSARY_VERSION in .env
-#   # (each service's own *_IMAGE key still overrides individually when that's what you need)
-#
-# THIS FILE IS ALSO THE PUBLISHED ONE-COMMAND INSTALL. Every release
-# pushes it verbatim as an OCI artifact, so someone with nothing cloned runs
-#
-#   docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
-#
-# and gets this exact file, EXCEPT for one generated substitution: the release stamps each
-# floating TESSARY_VERSION default below with the version it is publishing, so the artifact a remote
-# install pulls is pinned to that release and can never name older images. `tessaryai/tessary`
-# also carries the four IMAGE tags (`<service>-<version>`, `<service>-latest`); `compose` and
-# `compose-<version>` are artifact tags in the same repository and shadow none of them.
-#
-# NO VERSION LITERAL LIVES IN THIS FILE, deliberately. The git tag `v<semver>` that
-# .github/workflows/release.yml pushes is the only source of truth for a published version; a
-# hand-typed fallback here would be a second one, and the copy that goes stale first. From a
-# clone the unset default therefore FLOATS to `-latest`; set TESSARY_VERSION in .env to pin.
-# scripts/check-version-consistency.sh holds that no such literal comes back.
-#
-# FOUR RULES THIS FILE NOW KEEPS, because a remote install has no repository to resolve against
-# (scripts/check-compose-artifact.sh is the gate for all four):
-#   1. NO HOST-PATH BIND in a default-profile service. A relative bind resolves against the file's
-#      own directory, which for a remote install is Compose's cache under ~/.cache/docker-compose;
-#      a ${PWD} bind writes into whatever directory the operator happened to run the command from.
-#      Both leave state outside Docker. Postgres and the launcher work dir are named volumes now.
-#   2. LONG-SYNTAX `ports:` and LITERAL memory limits. `docker compose publish` loads this file
-#      WITHOUT interpolation (that is what preserves ${VAR} for the consumer), and both the short
-#      port syntax and any ${VAR} in a memory field fail that stricter decode.
-#   3. `env_file:` IS INERT FOR A REMOTE INSTALL. publish rewrites the path to a content hash and
-#      ships no blob (including the blob is `--with-env`, which would bake the PUBLISHER's .env
-#      into a public artifact — never pass it). A remote operator's `.env` still feeds every
-#      ${VAR} below, because Compose reads .env from the working directory; only keys that are
-#      passthrough-only reach nothing. docs/self-hosting/setup.mdx documents the override-file
-#      escape hatch under "Operating a stack you started from a registry".
-#   4. A PROFILE-GATED SERVICE MUST BE REMOTE-RESOLVABLE: image, volumes and env only, no host
-#      bind. `redpanda` under `--profile kafka` is the one profile-gated service now, and it keeps
-#      this rule: a named volume, flags, an image.
+# A remote install has no repository to resolve against, so (scripts/check-compose-artifact.sh):
+# 1. No host-path bind in a default-profile service; use named volumes.
+# 2. Long-syntax `ports:` and literal memory limits: publish decodes without interpolation.
+# 3. `env_file:` is inert remotely, so read keys through ${VAR}. Never publish `--with-env`.
+# 4. A profile-gated service uses image, volumes and env only.
 
-# Pin the Compose project name so the stack is identical from any directory
-# (incl. git worktrees); otherwise Compose derives it from the cwd and spawns a
-# duplicate set of containers/volumes per worktree.
+# Pinned so the stack is identical from any directory, including git worktrees.
 name: tessary
 
 services:
   postgres:
-    # pgvector/pgvector:pg16 = Postgres 16 with the pgvector extension preinstalled, so
-    # `CREATE EXTENSION vector` (migration 042) works. Drop-in for postgres:16-alpine — same
-    # PG 16 data directory format, so existing volumes remain compatible.
+    # Postgres 16 with pgvector preinstalled; same data directory format as postgres:16-alpine.
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tessary}
-      # Defaulted, not `:?must be set`. Compose refuses to RENDER on an unset `:?` key, so
-      # those two turned `docker compose up -d` on a fresh clone into a failure before any image was
-      # pulled — the one command the quickstart is named after. This service publishes no host port,
-      # so the credential is reachable only from the `tessary` network; change it if you publish the
-      # port or share the host.
+      # Defaulted, not `:?`: Compose refuses to render an unset `:?` key. No host port is published, so the
+      # credential is reachable only from the `tessary` network; change it if you publish the port.
       POSTGRES_USER: ${POSTGRES_USER:-tessary}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tessary}
     volumes:
-      # A NAMED VOLUME by default (rule 1 in the header), not the ./.local/postgres it used to be:
-      # a relative bind is meaningless to a remote install, and the point of the one-command
-      # install is that nothing lands on disk but what Docker manages. Compose classifies this by
-      # the value's shape — a name is a volume, anything starting with / or ./ is a bind — so
-      # POSTGRES_DATA_DIR still takes a host path and still means exactly what it meant: on the
-      # deployed EC2 host, /data/postgres is a dedicated EBS mount that survives instance
-      # replacement. `docker compose down` keeps the volume; `down -v` is what deletes the data.
+      # A named volume by default (rule 1). POSTGRES_DATA_DIR still takes a host path (/ or ./), such as an
+      # EBS mount. `docker compose down` keeps the volume; `down -v` deletes the data.
       - ${POSTGRES_DATA_DIR:-tessary-postgres-data}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
@@ -106,178 +46,83 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      # The version identity both images carry: the Taskfile exports the repo's
-      # short and full SHA; a bare `docker compose build` falls back to the Dockerfile's "dev".
       args:
         IMAGE_VERSION: ${IMAGE_VERSION:-dev}
         IMAGE_REVISION: ${IMAGE_REVISION:-unknown}
-    # tessaryai/tessary is the one published repo: one TESSARY_VERSION
-    # setting moves all four service tags together, and BACKEND_IMAGE (etc.) still overrides the
-    # whole reference individually when that's what's needed. Unset means `-latest`, which the
-    # release repoints — never a version literal (see the header). Until a human dispatches
-    # .github/workflows/release.yml for the first time, no tag exists on either registry yet —
-    # build locally instead (`docker compose up -d --build`) until it does.
+    # Unset means `-latest`, which the release repoints. Before the first release no tag exists; use
+    # `docker compose up -d --build`.
     image: ${BACKEND_IMAGE:-tessaryai/tessary:backend-${TESSARY_VERSION:-latest}}
-    # A declared ceiling, so -XX:MaxRAMPercentage in backend/Dockerfile sizes the heap against a number
-    # this file states rather than against whatever the host's Docker VM happens to have. Without it a
-    # 2 GB dev VM and a large production host produce two very different JVMs from the same image, and
-    # the ingest write buffer's byte budget (tessary.ingest.substrate.queue-max-bytes, 64 MiB) is tuned
-    # against a heap size that is then only true by accident.
-    #
-    # A LITERAL, not the `${BACKEND_MEM_LIMIT:-2g}` it used to be (rule 2 in the header): publish's
-    # non-interpolating loader decodes every memory field as a number, so an interpolation here —
-    # under `mem_limit:` or under `deploy.resources.limits.memory:`, both were tried — made the
-    # whole file unpublishable. Raising it is an override-file edit now, documented in
-    # docs/self-hosting/setup.mdx.
+    # A literal ceiling (rule 2), so -XX:MaxRAMPercentage sizes the heap against a stated number. Raise it
+    # with an override file (docs/self-hosting/setup.mdx).
     mem_limit: 2g
     expose:
       - "8080"
-      # OTLP/gRPC trace receiver. Reachable on the internal `tessary` network so the Caddy
-      # ingress can route :4317 to it. Inert unless tessary.ingest.otlp.transport is grpc|both. NOTE: publishing 4317 to the host additionally needs
-      # `EXPOSE 4317` in backend/Dockerfile (a protected path — human-owned) and a
-      # host `ports:` mapping wired with the ingress change.
+      # OTLP/gRPC, internal only. Inert unless tessary.ingest.otlp.transport is grpc or both.
+      # Publishing 4317 to the host also needs `EXPOSE 4317` in backend/Dockerfile.
       - "4317"
     env_file:
       - path: ./.env
         required: false
     environment:
       TESSARY_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-tessary}
-      # Same defaults as the postgres service above, and they have to be repeated rather than
-      # inherited: these are what the BACKEND connects with, and a bare ${POSTGRES_USER} would hand
-      # it an empty credential the moment the file stopped hard-failing on an unset one.
+      # Repeated, not inherited: an unset ${POSTGRES_USER} would hand the backend an empty credential.
       TESSARY_DB_USERNAME: ${POSTGRES_USER:-tessary}
       TESSARY_DB_PASSWORD: ${POSTGRES_PASSWORD:-tessary}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-production}
-      # Liquibase phones home to config.liquibase.com at startup for its own analytics unless told
-      # not to, through its own environment key. Off, because a self-hosted instance's one permitted
-      # outbound destination is the opt-out heartbeat (docs/self-hosting/configuration.mdx, "What
-      # leaves your network"); an egress audit found this lookup with the heartbeat
-      # already disabled. Spring's `spring.liquibase.analytics-enabled` did not reach it.
+      # Liquibase phones home to config.liquibase.com unless this key is set; Spring's
+      # `spring.liquibase.analytics-enabled` does not reach it.
       LIQUIBASE_ANALYTICS_ENABLED: "false"
 
-      # THE TWO KEYS THIS INSTANCE SEALS EVERYTHING WITH, AND THEY SHIP INSECURE ON PURPOSE.
-      #
-      # Both defaults below are PUBLIC: they are in this file, in a public repository. Anyone can
-      # forge a session cookie against an instance still running the first one, and decrypt every
-      # provider API key an instance still running the second one has sealed. They exist so the
-      # ten-minute quickstart is `docker compose up -d` and nothing else, on a localhost box holding
-      # nothing real.
-      #
-      # PlaceholderSecretGuard is what keeps that from reaching a deployment: set SITE_DOMAIN to a
-      # real hostname with either key still at its default and the backend REFUSES TO START, naming
-      # the key. On localhost it warns on every boot instead. Replace both with
-      # `openssl rand -base64 32` before this instance holds anything you care about.
-      #
-      # Each default is base64 of an exactly-32-byte ASCII string, which is not cosmetic: SessionCipher
-      # and SecretBox both require a 32-byte decode, so a "REPLACE_ME"-shaped placeholder would boot
-      # green and then fail at first sign-in. Distinct per key so the guard can name which one is still
-      # default. `:-` treats an EMPTY value as unset, so a .env that carries these keys blank (as
-      # .env.example used to ship them) also lands on the placeholder rather than on a broken boot.
+      # INSECURE PUBLIC DEFAULTS so the quickstart is one command. Anyone can forge a session cookie or decrypt
+      # sealed provider keys on an instance still using them. PlaceholderSecretGuard refuses to start with a
+      # real SITE_DOMAIN; replace both with `openssl rand -base64 32`. Each must decode to exactly 32 bytes.
       TESSARY_AUTH_COOKIE_PASSWORD: ${TESSARY_AUTH_COOKIE_PASSWORD:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtY29va2k=}
       TESSARY_SECRET_KEY: ${TESSARY_SECRET_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtc2VhbCE=}
 
-      # What arms the guard above, and the ONE variable that puts this instance on a hostname:
-      # PublicOriginGuard derives the sign-in landing origin and the WorkOS callback from
-      # it, refuses a value that is not a bare hostname, and refuses to start when an explicitly-set
-      # origin below names a different host. TLS_MODE and ACME_EMAIL are the frontend's settings,
-      # repeated here so that guard can refuse an ACME boot with no account address before Caddy
-      # would fail to obtain a certificate.
+      # Puts the instance on a hostname and arms the guard above. PublicOriginGuard derives the sign-in origin
+      # and WorkOS callback from it. TLS_MODE and ACME_EMAIL are repeated so an ACME boot without an address is refused.
       SITE_DOMAIN: ${SITE_DOMAIN:-}
       TLS_MODE: ${TLS_MODE:-acme}
       ACME_EMAIL: ${ACME_EMAIL:-}
 
-      # Where the browser lands after sign-in and sign-out. Derived from the port this file actually
-      # publishes, because the code default (AuthProperties#frontendUrl) assumes :8000 while the
-      # frontend service below publishes ${HTTP_PORT:-80} — so a self-hoster who did not
-      # copy .env.example verbatim got a stack that booted clean, authenticated correctly, and then
-      # bounced every sign-in to a port nothing was listening on, with no warning. With SITE_DOMAIN
-      # set, this localhost default is replaced by https://<SITE_DOMAIN>/ at boot; an explicit
-      # value on another host refuses the boot instead.
+      # Derived from the published port; the code default assumes :8000. With SITE_DOMAIN set it becomes
+      # https://<SITE_DOMAIN>/, and an explicit value on another host refuses the boot.
       TESSARY_AUTH_FRONTEND_URL: ${TESSARY_AUTH_FRONTEND_URL:-http://localhost:${HTTP_PORT:-80}/}
-      # TESSARY_PLATFORM_BEDROCK_ENABLED lived here until it was removed — the switch it fed had zero
-      # production callers (RCA/TRIAGE never resolved through it), so removing it changes no live
-      # behavior. Every RCA/TRIAGE run resolves the org's own Bedrock/mantle (or other provider)
-      # credential unconditionally now; there is no ambient-identity path left to opt into.
-      # Where the backend reaches the agentic-analysis launcher (the sandbox-runner service on the
-      # internal network). Set explicitly (not silently blank) so an agentic run can't no-op on a
-      # missing URL.
+      # Explicit so an agentic run cannot no-op on a missing URL.
       TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL: http://sandbox-runner:8080
-      # A SHIPPED PLACEHOLDER, not blank — the same treatment TESSARY_AUTH_COOKIE_PASSWORD and
-      # TESSARY_SECRET_KEY get above, and for the same reason: this is a symmetric secret between two
-      # services in THIS compose file, so the value only has to match itself. Blank did not mean
-      # "unauthenticated", it meant BROKEN: server.js rejects every request when its own key is
-      # empty (`!SANDBOX_API_KEY || auth !== ...`), so an install that set nothing got a 401 on
-      # every triage and RCA run with both sides agreeing the key was "". PlaceholderSecretGuard
-      # covers the real exposure — an instance still on a public default must not face the network.
+      # A shipped placeholder, not blank: the launcher rejects every request when its key is empty.
+      # PlaceholderSecretGuard covers the exposure.
       TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}
-      # RCA — same launcher sidecar (and bearer key) as the observer's agentic lane. REQUIRED:
-      # the sandboxed agent is RCA's only analysis path, so a blank launcher URL fails every
-      # "Run RCA" press.
+      # Required: the sandboxed agent is RCA's only analysis path.
       TESSARY_RCA_AGENTIC_LAUNCHER_URL: http://sandbox-runner:8080
-      # Same placeholder default, repeated verbatim rather than referencing the key above: compose
-      # interpolates every one of these from the HOST environment, so a default written in one entry
-      # is invisible to the others. All three must carry it or the pair silently disagrees.
+      # Repeated verbatim: compose interpolates each entry from the host env, so a default in one entry is
+      # invisible to the others.
       TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}
-      # The evidence door, for BOTH agent lanes. Where it has to point depends on where the agent
-      # runs, and that is SANDBOX_NETWORK_ISOLATION's call (sandbox-runner below):
-      #
-      #   isolation OFF (default) -- the sibling agent container shares this backend's network, so
-      #     the internal service name resolves and needs no public hostname. This is what lets a
-      #     plain `docker compose up` run agentic RCA and Triage out of the box.
-      #   isolation ON, or the E2B backend -- the agent is off this network (a microVM is off the
-      #     host entirely) and can only come back in through the public origin. Set SITE_DOMAIN and
-      #     this picks it up; the concatenation is safe only because PublicOriginGuard refuses a
-      #     SITE_DOMAIN that already carries a scheme.
-      #
-      # Neither lane has a fallback: their dossiers carry the detector's claim and every row behind
-      # it is fetched over MCP, so an unreachable value dead-letters every triage job and fails
-      # every RCA press. It is a deployment fault and it fails loudly as one — including the
-      # scheme-only `https://` an isolated install with no SITE_DOMAIN used to build, which
-      # PublicOriginGuard now rejects instead of handing to the agent.
-      # The default is the INTERNAL service name, which is correct precisely because isolation
-      # defaults off: the agent shares this network and resolves it. It stays correct on an install
-      # that sets SITE_DOMAIN, too — a sibling on the service network reaches the backend directly
-      # whether or not a public origin also exists, and skips a round trip through Caddy to do it.
-      # The two deployments that CANNOT use it — SANDBOX_NETWORK_ISOLATION=1, and SANDBOX_BACKEND=e2b,
-      # where the agent is off this host entirely — set this variable to their public origin, and
-      # PublicOriginGuard rejects the value if they set it to something an outside caller can't reach.
+      # The agents' MCP evidence endpoint. The internal name works while SANDBOX_NETWORK_ISOLATION is off (the
+      # default). With isolation on, or SANDBOX_BACKEND=e2b, set it to the public origin; PublicOriginGuard
+      # rejects an unreachable value.
       TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://backend:8080}
       TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-http://backend:8080}
-      # The groundedness model server (classifiers/groundedness/serve.py), which runs on a GPU
-      # outside this stack. A blank URL means groundedness is not set up: its sweeps are skipped,
-      # not failed. The setup guides in classifiers/groundedness/setup/ write all three values to
-      # .env. The mode is `dev` (a Mac running serve.py) or `production` (a GPU instance that stops
-      # itself when idle); blank means dev.
+      # The groundedness model server (classifiers/groundedness/serve.py) on a GPU outside this stack. Blank
+      # skips groundedness sweeps. The setup guides in classifiers/groundedness/setup/ write these to .env.
       TESSARY_OBSERVER_ENCODER_URL: ${TESSARY_OBSERVER_ENCODER_URL:-}
       TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
       TESSARY_GROUNDEDNESS_CLASSIFIER_MODE: ${TESSARY_GROUNDEDNESS_CLASSIFIER_MODE:-}
-      # The ingest spool: `memory` (default, no broker) or `kafka`, the opt-in durable buffer
-      # served by the `redpanda` service below under `--profile kafka`. Nothing depends_on it on
-      # purpose: with the mode left at memory the profile never starts, and with it set to kafka a
-      # broker that is still coming up simply sheds (503 + Retry-After) until it answers.
+      # `memory` (default) or `kafka` (the `redpanda` service). No depends_on: with kafka set, a broker still
+      # starting sheds with 503 + Retry-After.
       TESSARY_INGEST_SPOOL_MODE: ${TESSARY_INGEST_SPOOL_MODE:-memory}
       TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS: ${TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
-      # The sweep, and how long the instance keeps traces and detections; 0 keeps forever.
-      # Interpolated here rather than left to env_file so the registry install, which carries no
-      # .env, still reads the operator's .env beside the command (rule 3 in the header).
+      # Interpolated rather than left to env_file so the registry install still reads .env (rule 3). 0 keeps forever.
       TESSARY_RETENTION_ENABLED: ${TESSARY_RETENTION_ENABLED:-true}
       TESSARY_RETENTION_TRACE_TTL_DAYS: ${TESSARY_RETENTION_TRACE_TTL_DAYS:-90}
       TESSARY_RETENTION_DETECTION_TTL_DAYS: ${TESSARY_RETENTION_DETECTION_TTL_DAYS:-90}
-      # The opt-OUT heartbeat, interpolated for that same reason, and it matters more here: left
-      # to env_file alone, an operator on the registry install who sets this to false in their
-      # .env gets no error and keeps sending the ping.
+      # Interpolated for the same reason: via env_file alone, a registry install setting false keeps sending.
       TESSARY_TELEMETRY_ENABLED: ${TESSARY_TELEMETRY_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy
-    # "Up" means serving, and the stack says so itself: every default
-    # service carries a compose-side probe, one mechanism for all four, so `docker compose ps`
-    # reports `healthy` and the frontend's start waits on it. The runtime image ships no curl or
-    # wget, so bash's /dev/tcp speaks the one request; /actuator/health is the exact path AuthFilter
-    # admits without a session, and it is 200 only once the database indicator is UP.
-    # Latency this adds to the boot clock: at most one interval (5 s) after the first UP; a success
-    # inside start_period counts immediately, so start_period adds none. Unhealthy arrives no sooner
-    # than start_period plus 60 retries x 5 s, 315 s, and only then do dependents stop waiting.
+    # The runtime image has no curl or wget, so bash's /dev/tcp makes the request. /actuator/health is the
+    # path AuthFilter admits without a session, and it is 200 only once the database is UP.
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
       interval: 5s
@@ -298,18 +143,13 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-      # The Taskfile exports PNPM_VERSION (CI mirrors it with the PNPM_VERSION Actions variable);
-      # the fallback here is the same literal so a bare `docker compose build` from a fresh clone
-      # works. Keep every copy of the literal equal to the Taskfile's by hand.
+      # Keep this fallback equal to the Taskfile's PNPM_VERSION by hand.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
         IMAGE_VERSION: ${IMAGE_VERSION:-dev}
         IMAGE_REVISION: ${IMAGE_REVISION:-unknown}
-    # Same tessaryai/tessary convention as backend above — TESSARY_VERSION moves both together.
     image: ${FRONTEND_IMAGE:-tessaryai/tessary:frontend-${TESSARY_VERSION:-latest}}
-    # Long syntax, not "${HTTP_PORT:-80}:8000" (rule 2 in the header): publish's non-interpolating
-    # loader rejects a short-form port string outright, so the file could not be published at all.
-    # `published` must stay quoted — it is a string here, which is what carries the ${VAR}.
+    # Long syntax (rule 2). `published` must stay a quoted string to carry the ${VAR}.
     ports:
       - mode: ingress
         target: 8000
@@ -321,13 +161,9 @@ services:
         protocol: tcp
     environment:
       BACKEND_URL: backend:8080
-      # frontend/caddy/render.sh builds the Caddyfile from these at container start, so a
-      # blank SITE_DOMAIN simply means no TLS site (the inert-loopback placeholder the old static
-      # Caddyfile needed is gone). TLS_MODE picks how the domain is served: acme (Let's
-      # Encrypt over TLS-ALPN-01, ACME_EMAIL required and never defaulted to an address that is not
-      # the operator's), owncert (a certificate mounted at /certs, see docs/self-hosting/custom-domain.mdx),
-      # or upstream (plain HTTP on :8000 behind the operator's own terminator, whose addresses go in
-      # TRUSTED_PROXIES so the forwarded client IP and scheme are honoured from it and from nobody else).
+      # frontend/caddy/render.sh builds the Caddyfile from these; blank SITE_DOMAIN means no TLS site.
+      # TLS_MODE: acme (ACME_EMAIL required), owncert (certs at /certs) or upstream (plain HTTP behind your own
+      # terminator, listed in TRUSTED_PROXIES).
       SITE_DOMAIN: ${SITE_DOMAIN:-}
       TLS_MODE: ${TLS_MODE:-acme}
       ACME_EMAIL: ${ACME_EMAIL:-}
@@ -335,15 +171,10 @@ services:
       TLS_CERT_FILE: ${TLS_CERT_FILE:-/certs/tls.crt}
       TLS_KEY_FILE: ${TLS_KEY_FILE:-/certs/tls.key}
     volumes:
-      # Caddy needs to persist its ACME state across restarts so we don't
-      # re-request certs on every redeploy (rate-limited by Let's Encrypt).
+      # Persist ACME state so redeploys do not hit Let's Encrypt rate limits.
       - caddy-data:/data
       - caddy-config:/config
-    # Waits on the backend SERVING, not merely created, so a `healthy` frontend line in
-    # `docker compose ps` means the whole path a browser takes is open. Caddy's own probe is its
-    # plain-HTTP site answering the SPA shell; caddy:2-alpine carries busybox wget.
-    # Latency added to the boot clock: at most one interval (5 s) after Caddy is up; start_period
-    # is 5 s because Caddy serves within a second of starting.
+    # Waits on the backend serving, so a healthy frontend means the whole browser path is open.
     depends_on:
       backend:
         condition: service_healthy
@@ -363,21 +194,10 @@ services:
         max-file: "3"
         tag: "tessary/caddy"
 
-  # The opt-in durable ingest buffer: a single-node Redpanda, a Kafka-API broker in one binary,
-  # started only by `docker compose --profile kafka up -d` together with TESSARY_INGEST_SPOOL_MODE=kafka.
-  # Internal network only, no published port; its own data volume is what makes an accepted batch
-  # survive a restart. Sized for the quickstart box: one core, 512 MB, overprovisioned, and the
-  # startup resource checks skipped (`--check=false`) — and fsync kept, explicitly. The image's
-  # shipped redpanda.yaml carries `developer_mode: true`, and it has to stay: with it off Redpanda
-  # refuses to start below 1 GiB. From that mode rpk would add `--unsafe-bypass-fsync=true` to the
-  # binary's flags, which would make "persisted before the 200" untrue, so the flag is passed as
-  # `false` outright and rpk keeps the explicit value (rpk still prints its dev-mode data-corruption
-  # WARNING on every start; that warning is about the bypass it would have added, which is what
-  # the explicit flag denies). The proof is the binary's own `Starting redpanda` line, not rpk's. Write caching is off at the cluster default and again per topic (the
-  # spool sets `write.caching=false` on the topics it creates, where the broker accepts it). The
-  # phone-home reporter (`enable_metrics_reporter`, which posts to Redpanda's endpoint) is off at
-  # boot, so the zero-egress posture holds with the profile on as well as off; `enable_usage` is
-  # the local usage-stats collector, off too. `--set` is two tokens: rpk parses it that way only.
+  # Opt-in single-node Redpanda: `--profile kafka` plus TESSARY_INGEST_SPOOL_MODE=kafka. Internal only.
+  # The image needs `developer_mode` to start under 1 GiB, which makes rpk bypass fsync, so
+  # `--unsafe-bypass-fsync=false` is passed explicitly (rpk's warning is about the bypass it would add).
+  # Write caching and the metrics reporter are off. `--set` must be two tokens.
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v25.2.1
     profiles: ["kafka"]
@@ -415,17 +235,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Agentic-analysis launcher (drives sandboxed OpenCode runs for RCA/triage/analysis/synthesis/
-  # codegen). Reachable only on the internal `tessary` network at http://sandbox-runner:8080 — the
-  # backend's tessary.observer.agentic.launcher-url. Deliberately NOT given `env_file: .env` (which
-  # the backend uses) so it receives only its own minimal secrets; the AWS_* keys are remapped
-  # from the OBSERVER_LAUNCHER_-prefixed SSM vars so they never override the backend container's
-  # instance-profile creds.
-  # One-shot init: Docker creates a fresh named volume as root:root mode 0755, unwritable by
-  # sandbox-runner's non-root `node` user (uid 1000, the default in node:24-alpine3.24; see
-  # sandbox-runner/launcher/Dockerfile's final `USER node`). This runs as root and chowns it to
-  # 1000:1000 so the launcher's mkdtempSync calls (server.js's LAUNCHER_WORK_DIR) succeed. Exits
-  # immediately; sandbox-runner waits on it via `condition: service_completed_successfully` below.
+  # One-shot: a fresh named volume is root-owned, so this chowns it to the launcher's uid 1000.
   sandbox-runner-work-init:
     image: busybox:1.36
     command: ["sh", "-c", "mkdir -p /launcher-work && chown 1000:1000 /launcher-work"]
@@ -437,133 +247,60 @@ services:
     depends_on:
       sandbox-runner-work-init:
         condition: service_completed_successfully
-    # Starts by default. It was gated behind the `observer-launcher` profile after the
-    # 2026-07-12 OOM (four warm ONNX heads, ~1.5 GB, OOM-looping the shared host); that hazard
-    # is gone — this launcher is lightweight orchestration only, hard-capped below at 1536m so
-    # any relapse kills this container alone, never the host.
-    #
-    # Ungated once RCA deleted its inline-LLM fallback, so "Run RCA" now reaches
-    # this launcher on EVERY click. While the profile stayed off, each click POSTed to an
-    # unresolvable `sandbox-runner` host and died as `agentic RCA transport failure`. A profile
-    # that must be flipped on for the product to work at all is not a safety valve, it is an
-    # outage waiting for someone to notice — mem_limit is the real guard.
-    # A `build:` block, matching backend/frontend above: before this, `docker compose
-    # up -d --build` built backend+frontend from source but still tried to PULL sandbox-runner,
-    # so a bad or missing published tag failed as `manifest unknown` instead of building locally
-    # — one of five default-profile services had no source path at all. Same shape as
-    # docker-compose.dev.yml's sandbox-runner service.
+    # Internal only, at http://sandbox-runner:8080. Deliberately no `env_file: .env`, so it receives only
+    # its own minimal secrets. Not profile-gated: RCA reaches it on every run; mem_limit is the guard.
     build:
       context: ./sandbox-runner/launcher
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
         IMAGE_VERSION: ${IMAGE_VERSION:-dev}
         IMAGE_REVISION: ${IMAGE_REVISION:-unknown}
-    # Same tessaryai/tessary convention as backend/frontend above.
     image: ${SANDBOX_RUNNER_IMAGE:-tessaryai/tessary:sandbox-runner-${TESSARY_VERSION:-latest}}
     expose:
       - "8080"
-    # The launcher's own GET /healthz (sandbox-runner/launcher/server.js), unauthenticated by
-    # design; node:24-alpine carries busybox wget. Same 5 s interval as the others, so a
-    # launcher that exits on a config it rejects shows as unhealthy, not merely restarting.
+    # The launcher's unauthenticated GET /healthz; a launcher that rejects its config shows as unhealthy.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "-T", "3", "http://127.0.0.1:8080/healthz"]
       interval: 5s
       timeout: 3s
       retries: 12
       start_period: 5s
-    # `USER node` (sandbox-runner/launcher/Dockerfile) is non-root but is NOT a member of whatever
-    # group owns /var/run/docker.sock on the host — on a typical Linux Docker install that's the
-    # `docker` group, group-writable (0660, root:docker), and its GID varies per install (read it
-    # as a container sees it, per the comment below). This grants that ONE supplementary group rather than running
-    # the container as root, matching the "keep the launcher non-root" mitigation described
-    # below.
-    #
-    # The default is 0, not the common Debian/Ubuntu `docker` GID of 999, because Docker Desktop
-    # mounts the socket root:root 0660 — so 0 is the answer for every Mac and Windows install, which
-    # is most people running this compose file for the first time. 999 sent them all to `EACCES
-    # /var/run/docker.sock` at boot and a launcher that could not spawn a single agent container.
-    # On a Linux host whose socket really is root:docker, set DOCKER_SOCK_GID to that group AS A
-    # CONTAINER SEES IT: `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock busybox:1.36
-    # stat -c %g /var/run/docker.sock`.
+    # Grants the docker.sock group rather than running as root. 0 fits Docker Desktop (root:root 0660). On
+    # Linux set DOCKER_SOCK_GID to the group as a container sees it: `docker run --rm -v
+    # /var/run/docker.sock:/var/run/docker.sock busybox:1.36 stat -c %g /var/run/docker.sock`.
     group_add:
       - "${DOCKER_SOCK_GID:-0}"
     volumes:
-      # The docker sandbox driver spawns fresh, hardened SIBLING containers for each
-      # agentic run by talking to the Engine API over this socket — READ-WRITE. It is the only
-      # socket mount left in this file: alloy's read-only, log-only one went to the paid overlay
-      # with the service. This is functionally host-root-adjacent
-      # access for the launcher process itself; no flag on a spawned sibling container changes
-      # that fact about the process sitting behind the socket. Inherent to this architecture,
-      # not something designed around — mitigated by keeping the launcher non-root (see
-      # sandbox-runner/launcher/Dockerfile's `USER node`) and adding no other host mount to this
-      # service beyond this and the work dir below. Only exercised when SANDBOX_BACKEND=docker
-      # (the default); a self-hoster who switches to e2b/local never needs this mount at all, but
-      # it is unconditional here rather than profile-gated so switching backends is one env var,
-      # not a compose edit.
+      # SECURITY: read-write docker.sock is host-root-adjacent for the launcher process. Inherent to spawning
+      # sibling agent containers; mitigated by running non-root with no other host mount. Unconditional so
+      # switching SANDBOX_BACKEND is one env var.
       - /var/run/docker.sock:/var/run/docker.sock
-      # The other half of the Docker-outside-of-Docker path pair (see server.js's LAUNCHER_WORK_DIR
-      # comment for the full mechanism). A NAMED VOLUME, not the ${PWD}/.data/sandbox-runner-work
-      # bind it used to be: a host path is something only the operator's own filesystem can supply,
-      # which a remote install has no way to name (rule 1 in the header) — and the daemon resolves a
-      # volume NAME identically from inside a container and from the host, which is exactly the
-      # property the bind was there to fake. The launcher mounts the same volume into each sibling
-      # container by name, addressing the per-run subdirectory with the Engine API's
-      # VolumeOptions.Subpath; SANDBOX_WORK_VOLUME below carries the name so it can.
+      # A named volume (rule 1): the daemon resolves a volume name the same from a container and the host.
+      # Each sibling mounts its per-run subdirectory via VolumeOptions.Subpath.
       - sandbox-work:/launcher-work
     environment:
       PORT: "8080"
-      # The launcher half of the pair the backend presents. Same placeholder default, same reason as
-      # the backend's two entries: an empty key here is not "no auth", it is server.js rejecting
-      # every request, so it must never resolve blank just because the operator set no env var.
+      # Same placeholder as the backend's: an empty key makes the launcher reject every request.
       SANDBOX_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}
-      # The open default — see server.js's own Env-block comment for what each value means.
-      # Unset here (falls through to the code default 'docker') rather than hardcoded, so a
-      # self-hoster who opts into e2b or local only has to set ONE var, not edit this file.
+      # Blank falls through to the code default, `docker`.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-}
-      # Cut agent containers off from this network. Off by default — see server.js's own Env-block
-      # comment for the trade. Turning it on means the agent can only reach the backend over the
-      # public origin, so an install that sets this must also set SITE_DOMAIN and point
-      # TESSARY_RCA_AGENTIC_MCP_BASE_URL at it.
+      # Cuts agent containers off this network. Turning it on requires SITE_DOMAIN and pointing
+      # TESSARY_RCA_AGENTIC_MCP_BASE_URL at the public origin.
       SANDBOX_NETWORK_ISOLATION: ${SANDBOX_NETWORK_ISOLATION:-}
-      # The tag is agent-sandbox, not agent: this Docker tag is deliberately named to
-      # match the E2B template alias tessary-agent-sandbox. Pulled lazily by the launcher itself
-      # over docker.sock (server.js), not by `docker compose pull` — so `up -d --build` cannot
-      # build this one locally the way it can backend/frontend/sandbox-runner above. Until a human
-      # dispatches release.yml for the first time no tag exists yet, and "Run RCA" 502s
-      # (server.js:765-771) — set AGENT_IMAGE to something you built or already have locally if you
-      # need this before the first release ships.
+      # Pulled lazily by the launcher, not by `docker compose pull` or `--build`. Before the first release no
+      # tag exists; set AGENT_IMAGE to a local image.
       AGENT_IMAGE: ${AGENT_IMAGE:-tessaryai/tessary:agent-sandbox-${TESSARY_VERSION:-latest}}
       SANDBOX_DOCKER_CONCURRENCY: "1"
-      # Must be the SAME volume as the `sandbox-work` mount above — see that mount's comment. The
-      # docker backend fails at boot if this is unset. The top-level volume declares this literal
-      # as its `name:`, so Compose does not project-prefix it and the launcher can hand the daemon
-      # the name verbatim.
+      # Must equal the `sandbox-work` volume's `name:`; the docker backend fails at boot if unset.
       SANDBOX_WORK_VOLUME: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work}
       E2B_API_KEY: ${E2B_API_KEY:-}
-      # NAMESPACED, AND VERSIONED, for the same reason AGENT_IMAGE above is both. E2B scopes a
-      # template name to the project that built it, so the bare `tessary-agent-sandbox` this used
-      # to say resolved ONLY for a key belonging to the Tessary team — a self-hoster who set
-      # SANDBOX_BACKEND=e2b with their own key got `Sandbox.create` finding nothing. The template
-      # is published public; `tessary/…` is the form anyone's key can reach.
-      # Unset floats to `:latest`, which release.yml's finalize repoints; the version lives in the
-      # git tag, never in a literal here.
+      # Namespaced so any E2B key can reach the public template; unset floats to `:latest`.
       E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary/tessary-agent-sandbox:${TESSARY_VERSION:-latest}}
-      # FULL REMOVAL of every deployment-env-var credential the launcher used to read
-      # here — AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/MANTLE_REGION, the whole
-      # AGENT_PROVIDER dev-override block (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK,
-      # OPENAI_API_KEY, GEMINI_API_KEY, GLM_API_KEY/GLM_BASE_URL, GROK_API_KEY,
-      # CUSTOM_OPENAI_BASE_URL/CUSTOM_OPENAI_API_KEY). The launcher now reads NO provider secret
-      # from its own process env — every /rca and /triage carries the org's own decrypted
-      # ProviderCredential on the request itself (see server.js's file-header doc and
-      # AgenticCredentialResolver on the Java side). MANTLE_PROJECT_ID stays below: it is an
-      # attribution scope, not a secret, and has no per-org column to move to.
+      # The launcher reads no provider secret from its env; each run carries the org's own credential.
+      # MANTLE_PROJECT_ID is an attribution scope, not a secret.
       MANTLE_PROJECT_ID: ${TESSARY_MANTLE_PROJECT_ID:-}
-    # The limit must be BELOW host RAM to mean anything — the 2026-07-12 outage was a
-    # classification burst ballooning past the 4 GB host inside a 4g "limit": the kernel
-    # thrashed the page cache at the EBS IOPS cap and froze every other container. 1.5g
-    # OOMs this container alone; restart: unless-stopped brings it back in seconds. Unrelated to
-    # the docker backend's OWN per-sibling-container memory cap (SANDBOX_DOCKER_MEMORY_MB) — this
-    # limit is on the launcher process, that one is on each spawned agent container.
+    # Below host RAM so an OOM kills this container alone. Separate from SANDBOX_DOCKER_MEMORY_MB, which caps
+    # each agent container.
     mem_limit: 1536m
     restart: unless-stopped
     networks:
@@ -583,16 +320,9 @@ volumes:
   redpanda-data:
   caddy-data:
   caddy-config:
-  # The Postgres data volume the `postgres` service falls back to when POSTGRES_DATA_DIR names no
-  # host path. NO explicit `name:` — Compose project-prefixes it, which is what keeps a clean-room
-  # boot (COMPOSE_PROJECT_NAME set, as the boot checks do) from sharing or destroying a
-  # developer's own database. Find it with `docker volume ls | grep postgres-data`.
+  # No explicit `name:`, so it is project-prefixed and a clean-room boot cannot touch a developer's database.
   tessary-postgres-data:
-  # The launcher's work volume — shared between sandbox-runner and every sibling agent container it
-  # spawns. Explicit `name:` is load-bearing here, not cosmetic: the launcher hands this string to
-  # the Engine API as a sibling container's mount source, and a project-prefixed name would differ
-  # between what Compose created and what the launcher asks for. That also means the name is NOT
-  # isolated by COMPOSE_PROJECT_NAME the way every other volume here is, so a clean-room boot must
-  # set SANDBOX_WORK_VOLUME to a run-scoped value or its `down -v` reaches another stack's volume.
+  # Explicit `name:` is load-bearing: the launcher hands this exact string to the Engine API. It is not
+  # isolated by COMPOSE_PROJECT_NAME, so a clean-room boot must set a run-scoped SANDBOX_WORK_VOLUME.
   sandbox-work:
     name: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work}

@@ -4,15 +4,14 @@ package ai.tessary.classifier.finding;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One entry in the baseline changelog (PROGRAM.md §4.3). An online learner cannot be stopped from
- * absorbing drift; making every absorption a durable, readable row is what turns that from a blind
- * spot into a changelog.
+ * One baseline changelog entry: every absorption is a durable row, so an online learner's drift is visible rather than
+ * a blind spot.
  */
 public record BehaviorBaselineEventRow(
         String id,
-        /** The behaviour-drift epoch this happened to, or null for a metric-drift baseline event. */
+        /** Null for a metric-drift baseline event. */
         @Nullable String profileId,
-        /** The metric-drift baseline this happened to, or null for a behaviour-drift event. */
+        /** Null for a behaviour-drift event. */
         @Nullable String baselineId,
         String projectId,
         String event,
@@ -21,11 +20,7 @@ public record BehaviorBaselineEventRow(
         String occurredAt,
         @Nullable String detailJson) {
 
-    /**
-     * An entry against a metric-drift baseline. {@code gramKey} carries the finding's {@code cause_key}
-     * — the changelog's "what was this about" column, which for a distribution shift is the same string
-     * the Classifiers page renders as the finding's headline.
-     */
+    /** {@code gramKey} carries the finding's {@code cause_key}. */
     public static BehaviorBaselineEventRow forBaseline(
             String id,
             String baselineId,
@@ -40,25 +35,20 @@ public record BehaviorBaselineEventRow(
                 baselineId,
                 projectId,
                 event,
-                // The identical constant, on the open side of the boundary: a baseline has no workflow
-                // scope, and the column is NOT NULL, so both classifiers write the same sentinel.
+                // The column is NOT NULL and a baseline has no workflow scope, so both classifiers write the same
+                // sentinel.
                 FindingRow.GLOBAL_WORKFLOW,
                 causeKey,
                 occurredAt,
                 detailJson);
     }
 
-    /** {@code behavior_baseline_event.event} values. */
     public static final class Event {
         private Event() {}
 
         /**
-         * A metric-drift baseline's pinned reference was moved onto the current level — the write behind
-         * <em>Legitimate — absorb</em>. This is the entry the changelog exists for: the reference is the
-         * bar everything is compared against, so moving it silently is how a monitoring system boils a
-         * frog. Layer-2 cannot produce this event, only a human pressing the verb can
-         * ({@code BehaviorTriageVerdict}: its confidence is read "never as authority to mutate the
-         * baseline").
+         * The write behind <em>Legitimate, absorb</em>. Only a human can produce it; Layer 2 never mutates the
+         * baseline.
          */
         public static final String BASELINE_REPINNED = "baseline_repinned";
     }

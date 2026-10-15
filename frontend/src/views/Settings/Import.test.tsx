@@ -9,13 +9,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityDiff, ImportResult } from "../../api/client";
 import { currentLocation, renderRoute } from "../../test/render";
 import { ImportYaml } from "./Import";
+import { api, tenant } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/support-bot", importEvalsDirectory: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "support-bot" }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
+tenant.projectSlug = "support-bot";
 
 /** A file as a directory picker hands it over: its path within the chosen directory on webkitRelativePath. */
 const picked = (path: string) => {
@@ -35,13 +32,7 @@ const BUNDLE = [
 
 const none: EntityDiff = { added: 0, updated: 0, removed: 0 };
 const result = (over: Partial<ImportResult> = {}): ImportResult => ({
-  mode: "upsert",
-  metaReplaced: false,
-  callSites: none,
-  chains: none,
-  failureModes: none,
-  repairs: [],
-  ...over,
+  mode: "upsert", metaReplaced: false, callSites: none, chains: none, failureModes: none, repairs: [], ...over,
 });
 
 const choose = (paths: string[]) => {
@@ -82,11 +73,7 @@ describe("choosing a bundle", () => {
   it("finds meta.yaml at the top of the selection too, and counts every quality dim shard", () => {
     renderRoute(<ImportYaml />);
 
-    choose([
-      "pipeline/meta.yml",
-      "x/pipeline/quality_dimensions/a.yaml",
-      "x/pipeline/quality_dimensions/b.yaml",
-    ]);
+    choose(["pipeline/meta.yml", "x/pipeline/quality_dimensions/a.yaml", "x/pipeline/quality_dimensions/b.yaml"]);
 
     const counts = screen.getByText("call sites").parentElement!.parentElement!.textContent;
     expect(counts).toBe("0 call sites0 graders2 quality dims3 files");

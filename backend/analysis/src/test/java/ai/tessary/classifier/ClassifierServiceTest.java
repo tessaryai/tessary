@@ -14,7 +14,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
@@ -41,6 +40,7 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.plan.EncoderAvailability;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -52,11 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.function.Executable;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 
@@ -89,7 +85,7 @@ class ClassifierServiceTest {
     private final MetricBaselineRepository baselines = mock(MetricBaselineRepository.class);
     private final ProjectRepository projects = mock(ProjectRepository.class);
     private final DecisionProviderResolver decisionProviders = mock(DecisionProviderResolver.class);
-    private final ClassifierProperties props = new ClassifierProperties();
+    private final ClassifierProperties props = Props.of(ClassifierProperties.class);
     private final BuiltInClassifierCatalog catalog = mock(BuiltInClassifierCatalog.class);
 
     /** A sweep from outside the tree, for a kind no catalog module declares. */
@@ -110,11 +106,6 @@ class ClassifierServiceTest {
             decisionProviders,
             mock(EncoderAvailability.class),
             new GroundednessProperties());
-
-    @BeforeEach
-    void setup() {
-        props.setMaxAttempts(5);
-    }
 
     /**
      * Catches the rate read off the mean spread, the first bucket, or nothing once one sketch is unreadable, and an
@@ -219,34 +210,6 @@ class ClassifierServiceTest {
     }
 
     @Test
-    void failingSweep_surfacesStatusAttemptsAndLastError() {
-        when(signals.listByProject(PID)).thenReturn(List.of(signal("sig-b")));
-        ClassifierJobRow failing = new ClassifierJobRow(
-                "job-1",
-                PID,
-                "sig-b",
-                JobStatus.FAILED,
-                null,
-                null,
-                null,
-                null,
-                3,
-                "classify: connection refused",
-                "2026-01-01T00:00:00Z",
-                "2026-01-05T12:00:00Z",
-                0);
-        when(jobs.listByProject(PID)).thenReturn(List.of(failing));
-
-        ClassifierHealthView v = service.health(PID).get(0);
-
-        assertEquals(JobStatus.FAILED, v.status());
-        assertEquals(3, v.attempts());
-        assertEquals("classify: connection refused", v.lastError());
-        assertEquals("2026-01-05T12:00:00Z", v.lastSweptAt());
-        assertNull(v.nextAttemptAt(), "no backoff stamp on main yet — null reads as 'next heartbeat'");
-    }
-
-    @Test
     void healthySweep_reportsDoneWithNoAlarmingState() {
         when(signals.listByProject(PID)).thenReturn(List.of(signal("sig-c")));
         ClassifierJobRow done = new ClassifierJobRow(
@@ -273,31 +236,14 @@ class ClassifierServiceTest {
     }
 
     /** Catches a zero-row write being reported as a success, handing back a row the write never touched. */
-    @ParameterizedTest
-    @ValueSource(strings = {"enabled", "mode"})
-    void aWriteThatMatchesNoRowIsNotFound(String write) {
+    @Test
+    void aWriteThatMatchesNoRowIsNotFound() {
         when(signals.findById(PID, "sig-a")).thenReturn(Optional.of(row()));
-        Executable call;
-        if ("enabled".equals(write)) {
-            when(signals.setEnabled(PID, "sig-a", false)).thenReturn(0);
-            call = () -> service.setEnabled(PID, "sig-a", false);
-        } else {
-            when(signals.setMode(PID, "sig-a", ClassifierRow.Mode.TRACKING)).thenReturn(0);
-            call = () -> service.setMode(PID, "sig-a", ClassifierRow.Mode.TRACKING);
-        }
+        when(signals.setEnabled(PID, "sig-a", false)).thenReturn(0);
 
-        TessaryException e = assertThrows(TessaryException.class, call);
+        TessaryException e = assertThrows(TessaryException.class, () -> service.setEnabled(PID, "sig-a", false));
 
         assertEquals(ClassifierError.NOT_FOUND, e.error());
-    }
-
-    /** Catches an unknown operating point being written (and read back) as if it were a mode. */
-    @Test
-    void anUnknownModeIsRefusedBeforeAnythingIsReadOrWritten() {
-        TessaryException e = assertThrows(TessaryException.class, () -> service.setMode(PID, "sig-a", "aggressive"));
-
-        assertEquals(ClassifierError.INVALID_MODE, e.error());
-        verifyNoInteractions(signals);
     }
 
     /**

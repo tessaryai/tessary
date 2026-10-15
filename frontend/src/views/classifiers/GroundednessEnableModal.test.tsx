@@ -6,64 +6,23 @@
  * the classifier exactly once and says so. The restart modal closes itself once a poll reads the model
  * scoring again; the turn-off modal warns, in production only, that the AWS instance keeps running.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ApiError, type GroundednessStatus } from "../../api/types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderRoute } from "../../test/render";
+import { ApiError } from "../../api/types";
 import { GroundednessEnableModal, SETUP_POLL_MS } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
 import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
 import { chartReadsStale, seedChartReads } from "../../test/chartReads";
+import { api } from "../../test/api";
+import { groundednessStatus as status } from "../../test/fixtures";
 
-const getGroundednessStatus = vi.fn<(id: string) => Promise<GroundednessStatus>>();
-const setClassifierEnabled = vi.fn(async () => ({}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({
-      orgSlug: "acme",
-      projectSlug: "default",
-      api: { base: "/api/orgs/acme/projects/default", getGroundednessStatus, setClassifierEnabled },
-    }),
-  };
-});
+beforeEach(() => api.setClassifierEnabled.mockImplementation(async () => ({})));
 
-afterEach(() => {
-  getGroundednessStatus.mockReset();
-  setClassifierEnabled.mockClear();
-});
-
-function status(overrides: Partial<GroundednessStatus>): GroundednessStatus {
-  return {
-    state: "off",
-    mode: "dev",
-    configured: false,
-    available: false,
-    reason: "no encoder URL configured",
-    checked_at: null,
-    ever_swept: false,
-    last_scored_at: null,
-    last_caught_up_at: null,
-    setup_ref: "v1.3.0",
-    ...overrides,
-  };
-}
-
-function renderModal(onPromptCopied = vi.fn()) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <GroundednessEnableModal
-        classifierId="clf-g"
-        onClose={() => {}}
-        onEnabled={() => {}}
-        onPromptCopied={onPromptCopied}
-      />
-    </QueryClientProvider>,
-  );
-}
+const renderModal = (onPromptCopied = vi.fn()) =>
+  renderRoute(<GroundednessEnableModal classifierId="clf-g" onClose={() => {}} onEnabled={() => {}} onPromptCopied={onPromptCopied} />);
 
 /** Moves the fake clock `ms` on and lets the reads and renders it starts settle. */
 async function tick(ms: number) {
@@ -94,7 +53,7 @@ function activeStep(): string | null {
 
 describe("GroundednessEnableModal", () => {
   it("swaps the prompt and the requirements line with where the model runs", async () => {
-    getGroundednessStatus.mockResolvedValue(status({}));
+    api.getGroundednessStatus.mockResolvedValue(status({}));
     renderModal();
 
     await screen.findByText(/Set up the Groundedness classifier on this Mac by following/);
@@ -108,7 +67,7 @@ describe("GroundednessEnableModal", () => {
   });
 
   it("starts on the backend's mode", async () => {
-    getGroundednessStatus.mockResolvedValue(status({ mode: "production" }));
+    api.getGroundednessStatus.mockResolvedValue(status({ mode: "production" }));
     renderModal();
 
     await screen.findByText(/on AWS by following/);
@@ -118,7 +77,7 @@ describe("GroundednessEnableModal", () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const onPromptCopied = vi.fn();
-    getGroundednessStatus.mockResolvedValue(status({}));
+    api.getGroundednessStatus.mockResolvedValue(status({}));
     renderModal(onPromptCopied);
 
     fireEvent.click(await screen.findByRole("button", { name: "Copy prompt" }));
@@ -132,28 +91,28 @@ describe("GroundednessEnableModal", () => {
 
   it("moves through the steps as the setup runs, then enables once and says so", async () => {
     vi.useFakeTimers();
-    getGroundednessStatus.mockResolvedValueOnce(status({}));
+    api.getGroundednessStatus.mockResolvedValueOnce(status({}));
     renderModal();
 
     await tick(50);
     expect(activeStep()).toBe("Set up model");
 
     // The agent restarts Tessary: nothing answers, which is a step, not an error.
-    getGroundednessStatus.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    api.getGroundednessStatus.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await poll();
-    expect(getGroundednessStatus).toHaveBeenCalledTimes(2);
+    expect(api.getGroundednessStatus).toHaveBeenCalledTimes(2);
     expect(activeStep()).toBe("Restart Tessary");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText(/Failed to fetch/)).toBeNull();
 
     // Back with the model URL set, the model not answering yet: still restarting.
-    getGroundednessStatus.mockResolvedValueOnce(status({ configured: true }));
+    api.getGroundednessStatus.mockResolvedValueOnce(status({ configured: true }));
     await poll();
     expect(activeStep()).toBe("Restart Tessary");
-    expect(setClassifierEnabled).not.toHaveBeenCalled();
+    expect(api.setClassifierEnabled).not.toHaveBeenCalled();
 
     // The model answers: the modal enables the classifier.
-    getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
+    api.getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
     await poll();
 
     expect(screen.getByText("Groundedness enabled")).toBeTruthy();
@@ -162,48 +121,43 @@ describe("GroundednessEnableModal", () => {
 
     await poll();
     await poll();
-    expect(setClassifierEnabled).toHaveBeenCalledOnce();
-    expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true);
+    expect(api.setClassifierEnabled).toHaveBeenCalledOnce();
+    expect(api.setClassifierEnabled).toHaveBeenCalledWith("clf-g", true);
   });
 
   // Bug: Groundedness enabled by the setup still reads "Off" in the Configure menu on Classifiers until the
   // staleTime ends.
   it("marks the Classifiers charts and menu stale once it enables", async () => {
-    getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    api.getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
+    const { queryClient: qc } = renderModal();
     seedChartReads(qc);
-    render(
-      <QueryClientProvider client={qc}>
-        <GroundednessEnableModal classifierId="clf-g" onClose={() => {}} onEnabled={() => {}} onPromptCopied={() => {}} />
-      </QueryClientProvider>,
-    );
 
     await screen.findByText("Groundedness enabled");
-    expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true);
+    expect(api.setClassifierEnabled).toHaveBeenCalledWith("clf-g", true);
     expect(chartReadsStale(qc)).toEqual([true, true]);
   });
 
   it("moves to the restart step when the model URL turns up set, with no failed read between", async () => {
     vi.useFakeTimers();
-    getGroundednessStatus.mockResolvedValueOnce(status({}));
+    api.getGroundednessStatus.mockResolvedValueOnce(status({}));
     renderModal();
     await tick(50);
     expect(activeStep()).toBe("Set up model");
 
-    getGroundednessStatus.mockResolvedValue(status({ configured: true }));
+    api.getGroundednessStatus.mockResolvedValue(status({ configured: true }));
     await poll();
 
     expect(activeStep()).toBe("Restart Tessary");
-    expect(setClassifierEnabled).not.toHaveBeenCalled();
+    expect(api.setClassifierEnabled).not.toHaveBeenCalled();
   });
 
   it("shows a refused read as an error, not as the restart", async () => {
     vi.useFakeTimers();
-    getGroundednessStatus.mockResolvedValueOnce(status({}));
+    api.getGroundednessStatus.mockResolvedValueOnce(status({}));
     renderModal();
     await tick(50);
 
-    getGroundednessStatus.mockRejectedValue(
+    api.getGroundednessStatus.mockRejectedValue(
       new ApiError(403, { code: "auth.forbidden", message: "only an owner can read this" }),
     );
     await poll();
@@ -213,36 +167,26 @@ describe("GroundednessEnableModal", () => {
   });
 });
 
-describe("GroundednessRestartModal", () => {
-  it("closes itself once a poll reads the model scoring again", async () => {
-    vi.useFakeTimers();
-    getGroundednessStatus.mockResolvedValueOnce(status({ state: "not_scoring", mode: "production", configured: true }));
-    const onClose = vi.fn();
-    render(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <GroundednessRestartModal classifierId="clf-g" mode="production" setupRef="v1.3.0" onClose={onClose} />
-      </QueryClientProvider>,
-    );
-    await tick(50);
-    expect(getGroundednessStatus).toHaveBeenCalledOnce();
-    expect(onClose).not.toHaveBeenCalled();
+it("GroundednessRestartModal: closes itself once a poll reads the model scoring again", async () => {
+  vi.useFakeTimers();
+  api.getGroundednessStatus.mockResolvedValueOnce(status({ state: "not_scoring", mode: "production", configured: true }));
+  const onClose = vi.fn();
+  renderRoute(<GroundednessRestartModal classifierId="clf-g" mode="production" setupRef="v1.3.0" onClose={onClose} />);
+  await tick(50);
+  expect(api.getGroundednessStatus).toHaveBeenCalledOnce();
+  expect(onClose).not.toHaveBeenCalled();
 
-    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true }));
-    // The result reaches the component on a zero-delay timer of its own, a few ms past the poll.
-    await tick(SETUP_POLL_MS + 50);
+  api.getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true }));
+  // The result reaches the component on a zero-delay timer of its own, a few ms past the poll.
+  await tick(SETUP_POLL_MS + 50);
 
-    expect(getGroundednessStatus).toHaveBeenCalledTimes(2);
-    expect(onClose).toHaveBeenCalledOnce();
-  });
+  expect(api.getGroundednessStatus).toHaveBeenCalledTimes(2);
+  expect(onClose).toHaveBeenCalledOnce();
 });
 
 describe("GroundednessTurnOffModal", () => {
   const renderTurnOff = (mode: "production" | "dev", onClose = vi.fn()) => {
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <GroundednessTurnOffModal classifierId="clf-g" mode={mode} onClose={onClose} />
-      </QueryClientProvider>,
-    );
+    renderRoute(<GroundednessTurnOffModal classifierId="clf-g" mode={mode} onClose={onClose} />);
     return onClose;
   };
 
@@ -267,6 +211,6 @@ describe("GroundednessTurnOffModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Turn off" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", false);
+    expect(api.setClassifierEnabled).toHaveBeenCalledWith("clf-g", false);
   });
 });

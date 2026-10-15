@@ -13,26 +13,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Lists an OpenAI-compatible {@code GET /models} endpoint — the shape OpenAI itself, and every
- * OpenAI-compat provider this platform builds against, report: {@code {"data":[{"id": "..."}, ...]}}.
- * Bearer auth, per the convention every one of these providers follows. Confirmed against a live,
- * unauthenticated read of {@code https://openrouter.ai/api/v1/models}
- * (2026-09-04) — same {@code data[].id} shape, OpenRouter's own {@code /models} just
- * carries more fields per entry.
- *
- * <p>One instance covers {@link ai.tessary.llm.ModelProvider#OPENAI}, {@code MOONSHOT},
- * {@code GEMINI}, {@code GLM}, {@code GROK} and {@code CUSTOM} — each constructed with its own fixed
- * {@code vendor} label, because unlike {@link ai.tessary.llm.catalog.SupportedMaker}-filtered
- * OpenRouter/Bedrock, each of these five IS a single maker (the credential names the maker; nothing
- * this endpoint returns needs classifying). {@code CUSTOM} is the exception the {@code vendor} label
- * makes visible rather than hides: it is passed {@code "Custom"} and returned wholly unfiltered — the
- * one deliberate exemption from the six-maker allowlist, because an arbitrary user-supplied endpoint's
- * model list is not enumerable against a maker at all.
- *
- * <p>{@code /models} carries no display-name field in the OpenAI shape (just {@code id}, {@code
- * object}, {@code created}, {@code owned_by}) — {@link ProviderModel#displayName} is set to the same
- * value as {@link ProviderModel#modelName} here; {@code ModelCatalog#mergeLive} only uses a live
- * listing's display name when a static entry does not already have a better one.
+ * Lists an OpenAI-compatible {@code GET /models} ({@code data[].id}), bearer auth. Each instance is one maker, so
+ * nothing needs classifying; {@code CUSTOM} is listed unfiltered, the one exemption from the maker allowlist. No
+ * display name in this shape, so it equals the model name.
  */
 public final class OpenAiCompatModelLister implements ProviderModelLister {
 
@@ -41,8 +24,7 @@ public final class OpenAiCompatModelLister implements ProviderModelLister {
     private final String vendor;
     private final Duration timeout;
 
-    /** @param timeout per-call ceiling on the {@code GET /models} request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
+    /** @param timeout per-call ceiling on the {@code GET /models} request */
     public OpenAiCompatModelLister(HttpClient http, ObjectMapper mapper, String vendor, Duration timeout) {
         this.http = http;
         this.mapper = mapper;

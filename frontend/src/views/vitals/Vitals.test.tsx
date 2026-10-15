@@ -10,12 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Vitals as VitalsData, VitalsGroup } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { Vitals } from "./Vitals";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getVitals: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const group = (
   key: string | null,
@@ -26,24 +23,12 @@ const group = (
   label: over.label ?? key,
   flagged: false,
   cost: {
-    usd,
-    baseline_usd: null,
-    calls: 10,
-    tokens: 1000,
-    unpriced_calls: 0,
-    delta_pct_per_turn: null,
-    usd_per_turn: null,
+    usd, baseline_usd: null, calls: 10, tokens: 1000, unpriced_calls: 0, delta_pct_per_turn: null, usd_per_turn: null,
     flagged: false,
     ...over.cost,
   },
   duration: {
-    p50_ms: null,
-    p95_ms: null,
-    baseline_p95_ms: null,
-    delta_pct: null,
-    turns: 5,
-    unterminated: 0,
-    flagged: false,
+    p50_ms: null, p95_ms: null, baseline_p95_ms: null, delta_pct: null, turns: 5, unterminated: 0, flagged: false,
     ...over.duration,
   },
 });
@@ -57,13 +42,8 @@ const DATA: VitalsData = {
   total: group(null, 512.4, {
     // The deltas and flags are set so a page that started printing them again would show them.
     cost: {
-      baseline_usd: 400,
-      delta_pct_per_turn: 28.4,
-      flagged: true,
-      unpriced_calls: 1234,
-      usd_per_turn: 0.0427,
-      calls: 3400,
-      tokens: 1_200_000,
+      baseline_usd: 400, delta_pct_per_turn: 28.4, flagged: true, unpriced_calls: 1234, usd_per_turn: 0.0427,
+      calls: 3400, tokens: 1_200_000,
     },
     duration: { p95_ms: 4200, p50_ms: 1100, baseline_p95_ms: 4500, delta_pct: -6.6, turns: 1232, unterminated: 2 },
   }),
@@ -223,28 +203,23 @@ describe("the call-site table", () => {
   });
 });
 
-describe("the model table", () => {
-  it("reads by model, shows LLM spans and tokens instead of latency, and opens nothing", async () => {
-    renderRoute(<Vitals />, { route: "/vitals" });
-    await screen.findByText("answer");
+it("the model table: reads by model, shows LLM spans and tokens instead of latency, and opens nothing", async () => {
+  renderRoute(<Vitals />, { route: "/vitals" });
+  await screen.findByText("answer");
 
-    fireEvent.click(screen.getByRole("button", { name: "By model" }));
-    await screen.findByText("claude-sonnet");
-    expect(api.getVitals).toHaveBeenLastCalledWith(7, "model");
+  fireEvent.click(screen.getByRole("button", { name: "By model" }));
+  await screen.findByText("claude-sonnet");
+  expect(api.getVitals).toHaveBeenLastCalledWith(7, "model");
 
-    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
-      "Model",
-      "Spend↓",
-      "LLM spans",
-      "Tokens",
-    ]);
-    expect(cells()).toEqual([
-      ["claude-sonnet", "$400", "1,200", "800K"],
-      ["claude-haiku", "$100", "9,000", "2.5M"],
-    ]);
+  expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+    "Model",
+    "Spend↓",
+    "LLM spans",
+    "Tokens",
+  ]);
+  expect(cells()).toEqual([["claude-sonnet", "$400", "1,200", "800K"], ["claude-haiku", "$100", "9,000", "2.5M"]]);
 
-    fireEvent.click(bodyRows()[0]);
-    expect(currentLocation()).toBe("/vitals");
-    expect(screen.queryByRole("row", { name: /Open traces/ })).toBeNull();
-  });
+  fireEvent.click(bodyRows()[0]);
+  expect(currentLocation()).toBe("/vitals");
+  expect(screen.queryByRole("row", { name: /Open traces/ })).toBeNull();
 });
