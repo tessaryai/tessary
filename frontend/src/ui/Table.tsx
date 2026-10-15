@@ -32,11 +32,9 @@ export function TBody({ children, className }: { children: ReactNode; className?
 
 export function TR({ interactive, className, children, ...rest }: HTMLAttributes<HTMLTableRowElement> & { interactive?: boolean }) {
   return (
-    <tr
-      className={cn(interactive && "cursor-pointer transition-colors hover:bg-hover", className)}
-      style={interactive ? { transitionDuration: "var(--duration-micro)" } : undefined}
-      {...rest}
-    >
+    // No hover fade: a background transition repaints the whole table on every frame it runs, and a
+    // wheel scroll drags the pointer across a fresh row every few frames.
+    <tr className={cn(interactive && "cursor-pointer hover:bg-hover", className)} {...rest}>
       {children}
     </tr>
   );
