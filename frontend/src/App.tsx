@@ -65,10 +65,19 @@ export default function App() {
       <ToastProvider>
         <Suspense fallback={<FullScreen>Loading…</FullScreen>}>
         <Routes>
-          {/* Load-bearing: this Routes has no catch-all, so an unmatched /pricing would render a blank page. */}
+          {/*
+            There is no pricing page. The redirect is load-bearing: this top-level Routes has no
+            catch-all, so an unmatched /pricing would render a blank page rather than falling
+            through anywhere.
+          */}
           <Route path="/pricing" element={<Navigate to="/" replace />} />
-          {/* Public and outside TenantProvider: the backend's GET /auth/login bounces unauthenticated visitors
-             here, and bouncing to the app root would loop through ProtectedRoute. */}
+          {/*
+            /login and /signup join /pricing in the same public, unauthenticated tier: outside
+            ProtectedRoute and outside TenantProvider. This is where the backend's GET /auth/login
+            degrade branch bounces an unauthenticated visitor; bouncing to the app root instead
+            would loop, since that route sits behind ProtectedRoute, which sends an unauthenticated
+            visitor right back to that same GET.
+          */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/link" element={<ProtectedRoute><Link /></ProtectedRoute>} />
@@ -186,8 +195,9 @@ function ProjectShell() {
         <Route path="sessions/:sessionId" element={<SessionDetail />} />
         <Route path="classifiers" element={<ClassifiersPage />} />
         <Route path="classifiers/findings/:findingId" element={<FindingPage />} />
-        {/* Static paths above outrank it. */}
+        {/* One classifier: switch, status, call sites, tuning, detections, reset. Static paths above outrank it. */}
         <Route path="classifiers/:classifierId" element={<ClassifierConfigurePage />} />
+        {/* The Triage pulse strip's full-size page. Amber only, never red. */}
         <Route path="vitals" element={<Vitals />} />
 
         <Route path="rca/:reportId" element={<RcaReport />} />

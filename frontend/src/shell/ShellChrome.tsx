@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Providers are layered here rather than at the app root because they are project-scoped.
+/*
+ * ShellChrome — the persistent frame around every project surface: the sidebar, the main
+ * content well, and the command palette (⌘K). Providers are layered here (not at the app
+ * root) because they are project-scoped.
+ */
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";

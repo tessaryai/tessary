@@ -83,6 +83,7 @@ export function ClassifierConfigurePage() {
           </Link>
         </>
       )}
+      {/* Keyed so a move to another classifier's page reseeds every form from that classifier. */}
       {classifier && <Configure key={classifier.id} classifier={classifier} basePath={basePath} />}
     </div>
   );

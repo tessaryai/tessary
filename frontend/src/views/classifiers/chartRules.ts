@@ -212,6 +212,11 @@ export function headlineOf(card: ChartCard): {
 
 const isOpen = (s: ChartCaseSpan) => s.end_at == null;
 
+/**
+ * The cases a card's strip draws, in at most three rows: every case when three or fewer ran, else two and a
+ * "+N more" row. The open ones come first and then the newest, drawn oldest first so they read left to right.
+ * `more` is how many were left out.
+ */
 export function lanesOf(spans: ChartCaseSpan[]): { lanes: ChartCaseSpan[]; more: number } {
   const ranked = [...spans].sort(
     (a, b) => Number(isOpen(b)) - Number(isOpen(a)) || Date.parse(b.start_at) - Date.parse(a.start_at),
@@ -268,6 +273,7 @@ export function spanLabel(startAt: string, endAt: string): string {
   return `${day}, ${hhmm(start)} to ${utcDay(endAt)}, ${hhmm(end)} UTC`;
 }
 
+/** The hover text for one point of a card: its time span first, then its numbers by card kind. */
 export function pointTooltip(card: ChartCard, index: number): string[] {
   const p = card.points[index];
   const when = `${spanLabel(p.start_at, p.end_at)}${p.open ? ", still filling" : ""}`;

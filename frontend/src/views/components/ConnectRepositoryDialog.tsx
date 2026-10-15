@@ -52,6 +52,7 @@ export function ConnectRepositoryDialog({
 }: {
   open: boolean;
   onClose: () => void;
+  /** Omitted where the App path has no home, e.g. the dialog opened from a case. */
   onUseGithubApp?: () => void;
 }) {
   const api = useProjectApi();

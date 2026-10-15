@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Tool Errors and tool-call Duration Drift are keyed on the tool server-side, hence the Tool section.
-// A classifier with nothing to chart gets a chip with the reason, so a missing card is never ambiguous.
+/*
+ * Classifiers: what each classifier sees, charted per call site and per tool.
+ *
+ * The Call site section charts every classifier that is on for one call site; the Tool section charts Tool Errors
+ * and tool-call Duration Drift for one tool across every call site, because the server keys those two on the tool,
+ * not on the call site. One range drives both. A classifier with nothing to chart is named in a chip with the
+ * reason, so a missing card never reads as a missing classifier. The open findings live on Triage, and each
+ * classifier's switch and settings live on its configure page, which the Configure menu lists.
+ */
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ChartRange, ChartToolOption, ClassifierCharts } from "../../api/types";

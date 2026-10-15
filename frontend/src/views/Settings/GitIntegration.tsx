@@ -66,7 +66,8 @@ export function GitIntegration() {
   });
 
   const [connectOpen, setConnectOpen] = useState(false);
-  // A token works on every deployment; leading with the App sent self-hosters through dead buttons.
+  // The App routes stay one disclosure back. A token works on every deployment; an App needs one
+  // registered first, so leading with it is what sent self-hosters through three dead buttons.
   const [appOpen, setAppOpen] = useState(false);
 
   const installRedirect = useMutation({
@@ -74,6 +75,8 @@ export function GitIntegration() {
     onSuccess: (res) => {
       window.location.href = res.url;
     },
+    // No hosted app configured (self-hosted, or the app isn't set up): fall back
+    // to binding a repo by name rather than dead-ending.
     onError: () => setConnectOpen(true),
   });
 
@@ -85,7 +88,9 @@ export function GitIntegration() {
     onError: () => setConnectOpen(true),
   });
 
-  // The manifest must be POSTed (too large for a query string), so submit a throwaway form.
+  // GitHub's manifest flow needs a POSTed `manifest` form field — too large for a query string —
+  // so this can't be a window.location.href redirect like the two above. Build a throwaway <form>,
+  // fill it, submit it, and let the browser navigate away; nothing here runs after that.
   const manifestSetup = useMutation({
     mutationFn: api.getGithubManifestStart,
     onSuccess: (res) => {
