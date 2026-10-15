@@ -31,10 +31,7 @@ import ai.tessary.classifier.toolerror.ToolErrorRepository;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
@@ -52,9 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,7 +60,28 @@ import org.springframework.transaction.annotation.Transactional;
  * selector counts.
  */
 @SpringBootTest
-class ClassifierChartRepositoryIntegrationTest {
+record ClassifierChartRepositoryIntegrationTest(
+        ClassifierChartRepository charts,
+        RateClassifierFixture fixture,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        JdbcClient jdbc,
+        SpanRepository spans,
+        SubstrateV2Fixtures fx,
+        ClassifierService classifierService,
+        ClassifierRepository classifierRows,
+        FrustrationRateRepository frustrationRates,
+        GroundednessRateRepository groundednessRates,
+        GroundednessStatus groundednessStatus,
+        MalformedOutputRateRepository malformedRates,
+        ToolErrorRepository toolErrors,
+        ToolErrorStateRepository toolErrorStates,
+        ToolErrorReferenceRepository toolErrorReferences,
+        MetricBaselineRepository baselines,
+        FindingRepository findings,
+        ClassifierJobRepository jobs,
+        SubstrateReadRepository substrate,
+        ObjectMapper mapper) {
 
     private static final String VERSION =
             JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
@@ -73,82 +89,8 @@ class ClassifierChartRepositoryIntegrationTest {
     private static final Instant FROM = Instant.parse("2026-09-11T00:00:00Z");
     private static final Instant TO = Instant.parse("2026-10-09T00:00:00Z");
 
-    @Autowired
-    ClassifierChartRepository charts;
-
-    @Autowired
-    RateClassifierFixture fixture;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    ClassifierService classifierService;
-
-    @Autowired
-    ClassifierRepository classifierRows;
-
-    @Autowired
-    FrustrationRateRepository frustrationRates;
-
-    @Autowired
-    GroundednessRateRepository groundednessRates;
-
-    @Autowired
-    GroundednessStatus groundednessStatus;
-
-    @Autowired
-    MalformedOutputRateRepository malformedRates;
-
-    @Autowired
-    ToolErrorRepository toolErrors;
-
-    @Autowired
-    ToolErrorStateRepository toolErrorStates;
-
-    @Autowired
-    ToolErrorReferenceRepository toolErrorReferences;
-
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    SubstrateReadRepository substrate;
-
-    @Autowired
-    ObjectMapper mapper;
-
-    private SubstrateV2Fixtures fx;
-    private ClassifierChartService service;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-        service = new ClassifierChartService(
+    private ClassifierChartService service() {
+        return new ClassifierChartService(
                 classifierService,
                 charts,
                 frustrationRates,
@@ -201,8 +143,8 @@ class ClassifierChartRepositoryIntegrationTest {
         fixture.frustrationAssessment(
                 pid, signal, "t-2", "conv-2", "cs-a", Instant.parse("2026-10-05T10:00:00Z"), false, VERSION);
 
-        ChartCard week = card(service.charts(pid, "cs-a", null, 7), BuiltInDetector.Kind.FRUSTRATION);
-        ChartCard month = card(service.charts(pid, "cs-a", null, 28), BuiltInDetector.Kind.FRUSTRATION);
+        ChartCard week = card(service().charts(pid, "cs-a", null, 7), BuiltInDetector.Kind.FRUSTRATION);
+        ChartCard month = card(service().charts(pid, "cs-a", null, 28), BuiltInDetector.Kind.FRUSTRATION);
 
         assertEquals(0.0, week.headline().value(), "conv-1 is a trial of Sep 30, before the headline's week");
         assertEquals(week.headline(), month.headline());
@@ -245,7 +187,7 @@ class ClassifierChartRepositoryIntegrationTest {
                 List.of(new ToolCallTurn(at, "Timeout", null, null), new ToolCallTurn(at, null, null, null)));
         fx.toolCallTurns(pid, "search_orders", List.of(new ToolCallTurn(at.plusSeconds(5), null, null, null)));
 
-        ChartCard card = card(service.charts(pid, null, "tool:search_orders", 7), BuiltInDetector.Kind.TOOL_ERROR);
+        ChartCard card = card(service().charts(pid, null, "tool:search_orders", 7), BuiltInDetector.Kind.TOOL_ERROR);
 
         assertEquals(
                 List.of(ChartPoint.rate(at, at.plusSeconds(3600), false, 3, 1)),
@@ -400,8 +342,8 @@ class ClassifierChartRepositoryIntegrationTest {
         match(pid, refunds, "cs-b", at.plusSeconds(1));
         match(pid, refunds, "cs-b", at.plusSeconds(2));
 
-        ChartCard week = card(service.charts(pid, "cs-a", null, 7), "refund-words");
-        ChartCard month = card(service.charts(pid, "cs-a", null, 28), "refund-words");
+        ChartCard week = card(service().charts(pid, "cs-a", null, 7), "refund-words");
+        ChartCard month = card(service().charts(pid, "cs-a", null, 28), "refund-words");
 
         assertEquals(new ArmingView(2, 86_400, "event_count", "any"), week.arming());
         Instant hour = Instant.parse("2026-10-06T10:00:00Z");
