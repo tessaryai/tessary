@@ -35,6 +35,8 @@ public class DataSourceConfig {
         ds.setMaximumPoolSize(10);
         ds.setMinimumIdle(1);
         ds.setLeakDetectionThreshold(30_000);
+        // JIT compiling the chart, vitals and search reads took longer than running them.
+        ds.setConnectionInitSql("SET jit = off");
         // A Micrometer pool= tag; renaming it splits the series (frozen per telemetry-naming.md).
         ds.setPoolName("evals-hikari");
         ds.setJdbcUrl(jdbcUrl);

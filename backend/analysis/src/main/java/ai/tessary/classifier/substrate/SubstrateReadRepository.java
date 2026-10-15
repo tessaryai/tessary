@@ -44,7 +44,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
 
     /**
      * Bucketed on event time in UTC, so a backfilled corpus lands on its own days. Served by
-     * {@code ix_trace_project_started}.
+     * {@code ix_trace_project_started_id}.
      */
     public List<DailyTraceCount> dailyTraceCounts(String projectId, java.time.Instant from) {
         return jdbc.sql("""
@@ -65,7 +65,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
 
     /**
      * Spans with no {@code call_site_id}, for the "instrument your call sites" nudge. Capped at {@value #UNTAGGED_CAP}
-     * because the UI shows "{cap}+" beyond it.
+     * because the UI shows "{cap}+" beyond it. Served by {@code ix_span_untagged}, which holds only untagged spans.
      */
     public long untaggedSpans(String projectId) {
         return jdbc.sql("""

@@ -2,7 +2,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../api/types";
 import { auth as authApi } from "../api/client";
-import { preloadRouteChunk } from "../lib/routePreload";
 import type { Me } from "../api/types-auth";
 
 interface AuthState {
@@ -36,8 +35,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void refetch();
-    /* Warm the route's chunk alongside the sign-in check rather than after it. Fire-and-forget. */
-    preloadRouteChunk(window.location.pathname);
   }, [refetch]);
 
   const value = useMemo<AuthState>(() => ({

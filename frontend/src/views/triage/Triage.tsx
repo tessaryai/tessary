@@ -14,6 +14,7 @@ import { needsSetupScreen, resolveState } from "./emptyState";
 import { OpenFindings } from "./OpenFindings";
 import { useOnboarding } from "../onboarding/useOnboarding";
 import { useCapabilities } from "../../capabilities/useCapabilities";
+import { casesQuery } from "../../shell/shellQueries";
 
 type Lens = "open" | "resolved";
 
@@ -22,7 +23,7 @@ export function Triage() {
   const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
   const navigate = useNavigate();
 
-  const triageQ = useQuery({ queryKey: ["cases", api.base], queryFn: api.getTriage });
+  const triageQ = useQuery(casesQuery(api));
   // The pulse strip is deterministic vitals, never judged and never paged.
   const vitalsQ = useQuery({ queryKey: ["vitals", "triage", api.base], queryFn: () => api.getVitals(7) });
   const onboarding = useOnboarding();

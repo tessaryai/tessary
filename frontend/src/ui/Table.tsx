@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { HTMLAttributes, ReactNode, ThHTMLAttributes, TdHTMLAttributes } from "react";
+import type { HTMLAttributes, ReactNode, Ref, ThHTMLAttributes, TdHTMLAttributes } from "react";
 import { cn, hasTypeSize } from "./cn";
 
 export function Table({ className, children, ...rest }: HTMLAttributes<HTMLTableElement>) {
@@ -24,17 +24,27 @@ export function THead({ children, className }: { children: ReactNode; className?
   );
 }
 
-export function TBody({ children, className }: { children: ReactNode; className?: string }) {
-  return <tbody className={cn("divide-y divide-border", className)}>{children}</tbody>;
+export function TBody({
+  children,
+  className,
+  ref,
+}: {
+  children: ReactNode;
+  className?: string;
+  ref?: Ref<HTMLTableSectionElement>;
+}) {
+  return (
+    <tbody ref={ref} className={cn("divide-y divide-border", className)}>
+      {children}
+    </tbody>
+  );
 }
 
 export function TR({ interactive, className, children, ...rest }: HTMLAttributes<HTMLTableRowElement> & { interactive?: boolean }) {
   return (
-    <tr
-      className={cn(interactive && "cursor-pointer transition-colors hover:bg-hover", className)}
-      style={interactive ? { transitionDuration: "var(--duration-micro)" } : undefined}
-      {...rest}
-    >
+    // No hover fade: a background transition repaints the whole table on every frame it runs, and a
+    // wheel scroll drags the pointer across a fresh row every few frames.
+    <tr className={cn(interactive && "cursor-pointer hover:bg-hover", className)} {...rest}>
       {children}
     </tr>
   );

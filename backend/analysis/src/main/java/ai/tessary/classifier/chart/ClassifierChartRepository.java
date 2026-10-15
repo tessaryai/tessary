@@ -34,22 +34,25 @@ public class ClassifierChartRepository {
 
     static final String UNATTRIBUTED = "__unattributed__";
 
-    /** Copied from {@code ToolErrorRepository} so the chart counts the calls the detector counts. */
+    /**
+     * Copied from {@code ToolErrorRepository}, outer join and {@code NOT COALESCE} liveness test included for the plan
+     * reason it gives, so the chart counts the calls the detector counts. {@link ToolFailure#SQL_PREDICATE} also reads a
+     * {@code pl} alias, which only {@link #toolErrorHours} joins.
+     */
     private static final String TOOL_SPAN_JOIN = """
-            JOIN span o ON o.project_id = tc.project_id
-                       AND o.trace_id = tc.trace_id AND o.id = tc.span_id
-            JOIN trace tr ON tr.project_id = o.project_id AND tr.id = o.trace_id
-            LEFT JOIN span_payload pl
-              ON pl.project_id = o.project_id AND pl.trace_id = o.trace_id AND pl.span_id = o.id
+            LEFT JOIN span o ON o.project_id = tc.project_id
+                            AND o.trace_id = tc.trace_id AND o.id = tc.span_id
+            JOIN trace tr ON tr.project_id = tc.project_id AND tr.id = tc.trace_id
             """;
 
     private static final String TOOL_CALLS_WHERE = """
              WHERE tc.project_id = :pid
                AND tc.is_deleted IS NOT TRUE
-               AND o.is_deleted IS NOT TRUE
+               AND NOT COALESCE(o.is_deleted, TRUE)
                AND tr.is_settled
             """;
 
+    /** The first parentless span of a trace, spelled as {@code ix_span_root} is so the index alone answers it. */
     private static final String ROOT_LATERAL = """
             JOIN LATERAL (
                 SELECT s.started_at, s.ended_at
@@ -78,24 +81,32 @@ public class ClassifierChartRepository {
     private static final String PRICED =
             " AND tr.total_cost IS NOT NULL AND tr.total_cost >= 0" + " AND COALESCE(tr.unpriced_spans, 0) = 0";
 
+    /**
+     * A tool span's name: its first live named call, then its {@code gen_ai.tool.name} attribute, then its own name.
+     * The first call is every joined call with no earlier one, not a {@code LATERAL ... LIMIT 1}, which Postgres runs
+     * once per span and never in a parallel worker.
+     */
     private static final String TOOL_SPANS = """
               FROM span s
               JOIN trace tr ON tr.project_id = s.project_id AND tr.id = s.trace_id
-              LEFT JOIN span_payload pl
-                ON pl.project_id = s.project_id AND pl.trace_id = s.trace_id AND pl.span_id = s.id
-              LEFT JOIN LATERAL (
-                  SELECT tc.name
-                    FROM tool_call tc
-                   WHERE tc.project_id = s.project_id AND tc.trace_id = s.trace_id
-                     AND tc.span_id = s.id AND tc.is_deleted IS NOT TRUE AND tc.name IS NOT NULL
-                   ORDER BY tc.started_at ASC NULLS LAST, tc.created_at ASC, tc.id ASC
-                   LIMIT 1) tcn ON TRUE
+              LEFT JOIN tool_call tcn
+                ON tcn.project_id = s.project_id AND tcn.trace_id = s.trace_id AND tcn.span_id = s.id
+               AND tcn.is_deleted IS NOT TRUE AND tcn.name IS NOT NULL
              WHERE s.project_id = :pid AND s.kind = 'tool' AND s.is_deleted IS NOT TRUE
                AND tr.is_settled AND tr.is_deleted IS NOT TRUE
                AND s.started_at >= :from
+               AND NOT EXISTS (
+                   SELECT 1 FROM tool_call e
+                    WHERE e.project_id = tcn.project_id AND e.trace_id = tcn.trace_id AND e.span_id = tcn.span_id
+                      AND e.is_deleted IS NOT TRUE AND e.name IS NOT NULL
+                      AND ((e.started_at IS NOT NULL AND (tcn.started_at IS NULL OR e.started_at < tcn.started_at))
+                           OR (e.started_at IS NOT DISTINCT FROM tcn.started_at
+                               AND (e.created_at, e.id) < (tcn.created_at, tcn.id))))
             """;
 
-    private static final String TOOL_NAME = "COALESCE(tcn.name, pl.attributes->>'gen_ai.tool.name', s.name)";
+    private static final String TOOL_NAME = "COALESCE(tcn.name, (SELECT pl.attributes->>'gen_ai.tool.name'"
+            + " FROM span_payload pl WHERE pl.project_id = s.project_id AND pl.trace_id = s.trace_id"
+            + " AND pl.span_id = s.id), s.name)";
 
     private static final String TOOL_MS = "CASE WHEN s.latency_ms IS NOT NULL AND s.latency_ms >= 0"
             + " THEN s.latency_ms::float8"
@@ -291,14 +302,16 @@ public class ClassifierChartRepository {
     }
 
     /**
-     * A tool key is a normalization and never matches a raw name, so the names come from
-     * {@code ToolErrorRepository#namesByToolKey}.
+     * A tool key is a normalization and never matches a raw name, so the names come from {@link #toolCallNames}.
      */
     public List<RateRow> toolErrorHours(String projectId, Collection<String> names, Instant from) {
         if (names.isEmpty()) return List.of();
         return jdbc.sql("SELECT date_trunc('hour', tc.started_at, 'UTC') AS hour, COUNT(*) AS checked,"
                         + " COUNT(*) FILTER (WHERE " + ToolFailure.SQL_PREDICATE + ") AS flagged"
-                        + " FROM tool_call tc " + TOOL_SPAN_JOIN + TOOL_CALLS_WHERE
+                        + " FROM tool_call tc " + TOOL_SPAN_JOIN
+                        + " LEFT JOIN span_payload pl"
+                        + " ON pl.project_id = tc.project_id AND pl.trace_id = tc.trace_id AND pl.span_id = tc.span_id"
+                        + TOOL_CALLS_WHERE
                         + " AND tc.started_at >= :from"
                         + " AND COALESCE(NULLIF(tc.name, ''), 'unnamed') IN (:names)"
                         + " GROUP BY 1")
@@ -306,6 +319,22 @@ public class ClassifierChartRepository {
                 .param("from", at(from))
                 .param("names", names)
                 .query((rs, n) -> rateRow(rs))
+                .list();
+    }
+
+    /**
+     * Every raw name a live tool call since {@code from} carries, spelled as Tool Errors groups it. No span or settle
+     * gate, so it may hold more names than {@code ToolErrorRepository#namesByToolKey}: only for narrowing a read that
+     * applies those gates itself, over a window starting no earlier.
+     */
+    public List<String> toolCallNames(String projectId, Instant from) {
+        return jdbc.sql("""
+                        SELECT DISTINCT COALESCE(NULLIF(name, ''), 'unnamed') AS name FROM tool_call
+                         WHERE project_id = :pid AND is_deleted IS NOT TRUE AND started_at >= :from
+                        """)
+                .param("pid", projectId)
+                .param("from", at(from))
+                .query((rs, n) -> rs.getString("name"))
                 .list();
     }
 
@@ -430,6 +459,7 @@ public class ClassifierChartRepository {
                         toolDuration(
                                 "SELECT date_trunc('hour', s.started_at, 'UTC') AS hour, " + bin("s.ms")
                                         + " AS bin, COUNT(*) AS n",
+                                "",
                                 " GROUP BY 1, 2",
                                 projectId,
                                 names,
@@ -445,6 +475,7 @@ public class ClassifierChartRepository {
         if (names.isEmpty()) return null;
         return toolDuration(
                         "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY ms) AS p95",
+                        "",
                         "",
                         projectId,
                         names,
@@ -465,6 +496,7 @@ public class ClassifierChartRepository {
         return toolDuration(
                         "SELECT MAX(s.started_at) AS last_at",
                         " AND s.started_at < :before",
+                        "",
                         projectId,
                         names,
                         callSiteIds,
@@ -474,17 +506,25 @@ public class ClassifierChartRepository {
                 .single();
     }
 
+    /**
+     * {@code select} over the timed tool spans of {@code names}, with {@code spans} added to the span filter and
+     * {@code tail} after the name filter. The names are tested above an {@code OFFSET 0} fence: Postgres has no
+     * statistics on a resolved name, guesses 0.5% of spans match, and on that guess plans the trace join and the first
+     * call test as serial nested loops, where reading every tool span in parallel and dropping the other tools after
+     * is the cheaper plan.
+     */
     private JdbcClient.StatementSpec toolDuration(
             String select,
+            String spans,
             String tail,
             String projectId,
             Collection<String> names,
             @Nullable Collection<String> callSiteIds,
             Instant from) {
         String scoped = callSiteIds == null ? "" : " AND tr.call_site_id IN (:callSites)";
-        JdbcClient.StatementSpec spec = jdbc.sql(select + " FROM (SELECT s.started_at, " + TOOL_MS + " AS ms "
-                        + TOOL_SPANS + " AND " + TOOL_NAME + " IN (:names)" + scoped + ") s"
-                        + " WHERE s.ms IS NOT NULL" + tail)
+        JdbcClient.StatementSpec spec = jdbc.sql(select + " FROM (SELECT s.started_at, " + TOOL_MS + " AS ms, "
+                        + TOOL_NAME + " AS name " + TOOL_SPANS + scoped + spans + " OFFSET 0) s"
+                        + " WHERE s.ms IS NOT NULL AND s.name IN (:names)" + tail)
                 .param("pid", projectId)
                 .param("from", at(from))
                 .param("names", names);

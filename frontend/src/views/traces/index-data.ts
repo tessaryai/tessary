@@ -83,26 +83,22 @@ export function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  const clock = d.toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const clock = CLOCK.format(d);
   const now = new Date();
   const sameDay =
     d.getFullYear() === now.getFullYear() &&
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate();
   if (sameDay) return clock;
-  const date = d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    // A year only when it is not this one — the same rule as the date itself.
-    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
-  });
+  // A year only when it is not this one — the same rule as the date itself.
+  const date = (d.getFullYear() === now.getFullYear() ? MONTH_DAY : MONTH_DAY_YEAR).format(d);
   return `${date} ${clock}`;
 }
+
+// Built once: toLocaleTimeString builds a formatter per call, and this runs for every row on every page.
+const CLOCK = new Intl.DateTimeFormat("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const MONTH_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const MONTH_DAY_YEAR = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 
 /** A duration labeled per part (`42s`, `5m 30s`, `2h 15m 30s`, `3d 2h 15m 30s`), since session rows can span days. */
 export function formatLatency(ms: number | null | undefined): string {

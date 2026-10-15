@@ -44,17 +44,18 @@ public class VitalsRepository {
     /**
      * Scoped to {@code kind = 'llm'}: a container span reports its subtree's cumulative usage. {@code unpriced} is
      * never folded into {@code usd}. Only settled traces count, since averaging partial costs makes spend look like it
-     * fell.
+     * fell. Served from {@code ix_span_llm_usage} alone; grouping keys compare under {@code "C"}, which groups exactly
+     * as the deterministic database collation does but sorts cheaply.
      */
     public List<UsageRow> usageIn(String projectId, Instant from, Instant to, Dimension by) {
-        String dim = "COALESCE(s." + by.column() + ", '" + UNATTRIBUTED + "')";
+        String dim = "COALESCE(s." + by.column() + ", '" + UNATTRIBUTED + "') COLLATE \"C\"";
         return jdbc.sql("SELECT " + dim + " AS dim,"
                         + " sum(s.total_tokens) AS tokens,"
                         + " sum(s.total_cost) AS usd,"
                         + " count(*) FILTER (WHERE s.total_tokens IS NOT NULL) AS calls,"
                         + " count(*) FILTER (WHERE s.cost_source = '" + UNPRICED + "'"
                         + "                    AND s.total_tokens IS NOT NULL) AS unpriced_calls,"
-                        + " count(DISTINCT s.trace_id) FILTER (WHERE s.total_tokens IS NOT NULL)"
+                        + " count(DISTINCT s.trace_id COLLATE \"C\") FILTER (WHERE s.total_tokens IS NOT NULL)"
                         + "     AS spending_traces"
                         + " FROM span s JOIN trace t"
                         + "   ON t.project_id = s.project_id AND t.id = s.trace_id"

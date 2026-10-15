@@ -13,7 +13,6 @@ import { ProtectedRoute } from "./ProtectedRoute";
 import { auth } from "../test/api";
 
 vi.mock("../api/client", () => import("../test/api"));
-vi.mock("../lib/routePreload", () => ({ preloadRouteChunk: vi.fn() }));
 
 const ME = { id: "u-1", email: "dana@example.com", orgs: [], platform_staff: false };
 

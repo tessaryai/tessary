@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Warms a route's chunk while `/auth/me` is in flight, since ProtectedRoute renders nothing until
-// it answers. Its own module so AuthContext and App.tsx need not import each other. Moves no data.
+// it answers. Its own module so main.tsx (which starts a preload at boot) and App.tsx (which registers
+// the loaders) have no evaluation-order question. Moves no data: shell/shellQueries.ts prefetches that.
 
 const preloaders = new Map<string, () => Promise<unknown>>();
 
@@ -17,4 +18,17 @@ export function preloadRouteChunk(pathname: string): void {
   if (!load) return;
   void load().catch(() => {
   });
+}
+
+/** A chunk's loader, plus the module once any call to it has landed. */
+export function trackedChunk<M>(loader: () => Promise<M>): { load: () => Promise<M>; loaded: () => M | undefined } {
+  let module: M | undefined;
+  return {
+    load: () =>
+      loader().then((m) => {
+        module = m;
+        return m;
+      }),
+    loaded: () => module,
+  };
 }

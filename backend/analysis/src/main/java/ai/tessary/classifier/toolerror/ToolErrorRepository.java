@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,13 +26,18 @@ public class ToolErrorRepository {
     /**
      * {@code trace.is_settled} rather than a time window: a turn's calls arrive across flushes, and counting part of a
      * turn biases the rate.
+     *
+     * <p>The span is outer-joined and kept only when live via {@code NOT COALESCE(o.is_deleted, TRUE)}: as an inner join
+     * Postgres estimates about one row and probes {@code trace} once per call in a serial nested loop. Nothing else may
+     * be strict in {@code o}, or the outer join turns back into an inner one, so the trace and the payload join on the
+     * call's own keys.
      */
     private static final String SPAN_JOIN = """
-            JOIN span o ON o.project_id = tc.project_id
-                       AND o.trace_id = tc.trace_id AND o.id = tc.span_id
-            JOIN trace tr ON tr.project_id = o.project_id AND tr.id = o.trace_id
+            LEFT JOIN span o ON o.project_id = tc.project_id
+                            AND o.trace_id = tc.trace_id AND o.id = tc.span_id
+            JOIN trace tr ON tr.project_id = tc.project_id AND tr.id = tc.trace_id
             LEFT JOIN span_payload pl
-              ON pl.project_id = o.project_id AND pl.trace_id = o.trace_id AND pl.span_id = o.id
+              ON pl.project_id = tc.project_id AND pl.trace_id = tc.trace_id AND pl.span_id = tc.span_id
             """;
 
     /**
@@ -71,23 +77,44 @@ public class ToolErrorRepository {
 
     /** Oldest-first: a CUSUM fed out of order is not a CUSUM. Settled traces only, via {@link #SPAN_JOIN}. */
     public List<HourlyToolTally> hourlyTallies(String projectId, Instant from) {
-        return jdbc.sql("SELECT date_trunc('hour', " + EVENT_AT
-                        + ") AS bucket, "
-                        + "COALESCE(NULLIF(tc.name, ''), 'unnamed') AS tool_name, COUNT(*) AS calls, "
-                        + "COUNT(*) FILTER (WHERE " + ToolFailure.SQL_PREDICATE + ") AS failures "
-                        + """
-                        FROM tool_call tc
-                        """ + SPAN_JOIN + """
-                        WHERE tc.project_id = :pid
-                          AND tc.is_deleted IS NOT TRUE
-                          AND o.is_deleted IS NOT TRUE
-                          AND tr.is_settled
-                          AND\s""" + EVENT_AT + """
-                           >= :from
-                        GROUP BY 1, 2
-                        ORDER BY 1 ASC
-                        """)
-                .param("pid", projectId)
+        return hourlyTallies(jdbc.sql(hourlyTalliesSql("")), projectId, from);
+    }
+
+    /**
+     * {@link #hourlyTallies(String, Instant)} for the calls whose {@code tool_name} is one of {@code toolNames}: one
+     * tool's rows, read without counting every other tool's. Empty short-circuits rather than emitting {@code IN ()}.
+     */
+    public List<HourlyToolTally> hourlyTallies(String projectId, Instant from, Collection<String> toolNames) {
+        if (toolNames.isEmpty()) return List.of();
+        return hourlyTallies(
+                jdbc.sql(hourlyTalliesSql("  AND COALESCE(NULLIF(tc.name, ''), 'unnamed') IN (:tools)\n"))
+                        .param("tools", toolNames),
+                projectId,
+                from);
+    }
+
+    private static String hourlyTalliesSql(String nameFilter) {
+        return "SELECT date_trunc('hour', " + EVENT_AT
+                + ") AS bucket, "
+                + "COALESCE(NULLIF(tc.name, ''), 'unnamed') AS tool_name, COUNT(*) AS calls, "
+                + "COUNT(*) FILTER (WHERE " + ToolFailure.SQL_PREDICATE + ") AS failures "
+                + """
+                FROM tool_call tc
+                """ + SPAN_JOIN + """
+                WHERE tc.project_id = :pid
+                  AND tc.is_deleted IS NOT TRUE
+                  AND NOT COALESCE(o.is_deleted, TRUE)
+                  AND tr.is_settled
+                  AND\s""" + EVENT_AT + """
+                   >= :from
+                """ + nameFilter + """
+                GROUP BY 1, 2
+                ORDER BY 1 ASC
+                """;
+    }
+
+    private List<HourlyToolTally> hourlyTallies(JdbcClient.StatementSpec spec, String projectId, Instant from) {
+        return spec.param("pid", projectId)
                 .param("from", at(from))
                 .query((rs, n) -> new HourlyToolTally(
                         rs.getObject("bucket", OffsetDateTime.class).toInstant().toString(),
@@ -108,7 +135,7 @@ public class ToolErrorRepository {
                         """ + SPAN_JOIN + """
                         WHERE tc.project_id = :pid
                           AND tc.is_deleted IS NOT TRUE
-                          AND o.is_deleted IS NOT TRUE
+                          AND NOT COALESCE(o.is_deleted, TRUE)
                           AND tr.is_settled
                           AND\s""" + EVENT_AT + """
                            >= :from
@@ -133,7 +160,7 @@ public class ToolErrorRepository {
                         """ + SPAN_JOIN + """
                         WHERE tc.project_id = :pid
                           AND tc.is_deleted IS NOT TRUE
-                          AND o.is_deleted IS NOT TRUE
+                          AND NOT COALESCE(o.is_deleted, TRUE)
                           AND tc.started_at IS NULL
                           AND tc.created_at >= :from
                         """)
@@ -156,7 +183,7 @@ public class ToolErrorRepository {
                         """ + SPAN_JOIN + """
                         WHERE tc.project_id = :pid
                           AND tc.is_deleted IS NOT TRUE
-                          AND o.is_deleted IS NOT TRUE
+                          AND NOT COALESCE(o.is_deleted, TRUE)
                           AND COALESCE(NULLIF(tc.name, ''), 'unnamed') IN (:tools)
                           AND\s""" + EVENT_AT + """
                            >= :from
@@ -209,7 +236,7 @@ public class ToolErrorRepository {
                         """ + SPAN_JOIN + """
                         WHERE tc.project_id = :pid
                           AND tc.is_deleted IS NOT TRUE
-                          AND o.is_deleted IS NOT TRUE
+                          AND NOT COALESCE(o.is_deleted, TRUE)
                           AND tr.is_settled
                           AND COALESCE(NULLIF(tc.name, ''), 'unnamed') IN (:tools)
                           AND\s""" + EVENT_AT + """

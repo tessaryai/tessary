@@ -151,3 +151,18 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0041-drop-dead-schema.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0042-span-llm-usage.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0043-trace-started-id-order.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0044-span-untagged.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0045-span-root-index.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0046-tool-call-name-statistics.sql
+      relativeToChangelogFile: false
