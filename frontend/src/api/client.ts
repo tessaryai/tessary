@@ -87,15 +87,8 @@ import type {
   SignupPolicy,
 } from "./types-auth";
 
-/**
- * The single request choke point: every endpoint below funnels through here (only the `doImport`
- * upload flow bypasses it).
- */
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  // X-Requested-With is the backend's CSRF guard for cookie-authed /api/**
-  // mutations. Browsers will not send custom headers cross-origin without a
-  // CORS preflight, and we don't allow any origin to preflight, so a CSRF
-  // attempt from another site can't include this header and is rejected.
+  // X-Requested-With is the backend's CSRF guard: no origin may preflight, so a cross-site request cannot send it.
   const res = await fetch(path, {
     credentials: "include",
     ...init,
@@ -174,16 +167,8 @@ export interface ImportResult {
   repairs: string[];
 }
 
-/**
- * Both import flows share the same response envelope. They differ only in
- * Content-Type + body (YAML string vs FormData), so the response handling lives
- * in one place. {@link http} can't be reused because the request body type and
- * Content-Type aren't always JSON.
- */
+/** Not {@link http}: the multipart body sets its own Content-Type. */
 async function doImport(url: string, init: RequestInit): Promise<ImportResult> {
-  // Same CSRF marker as http(): see the note in http() above. We don't override
-  // Content-Type here because the two import flows already set their own
-  // (application/x-yaml or multipart/form-data via FormData).
   const res = await fetch(url, {
     ...init,
     headers: {
@@ -208,11 +193,7 @@ async function doImport(url: string, init: RequestInit): Promise<ImportResult> {
   return env.data;
 }
 
-/** Auth + tenant endpoints: no project context needed. */
 export const auth = {
-  // /auth/me is served by AuthController (exempt from the auth filter); it
-  // returns 401 with a JSON body when the cookie is missing/invalid. It also carries the
-  // signed-in user's org list (Me.orgs), the source of "which orgs am I in" in this build.
   me: () => http<Me>("/auth/me"),
 
   getOrg: (orgSlug: string) => http<Organization>(`/api/orgs/${enc(orgSlug)}`),
@@ -247,36 +228,22 @@ export const auth = {
   createProject: (orgSlug: string, body: { name: string; description?: string | null }) =>
     send<Project>("POST", `/api/orgs/${enc(orgSlug)}/projects`, body),
 
-  /**
-   * The connect gate's quiet escape hatch: idempotent, a second call (a double click, a
-   * stale tab) returns the same sample project rather than minting a duplicate.
-   */
+  /** Idempotent: a double click or a stale tab gets the same sample project back. */
   ensureSampleProject: (orgSlug: string) =>
     send<Project>("POST", `/api/orgs/${enc(orgSlug)}/sample-project`),
 
-  /**
-   * The org's capability object: one boolean per capability, resolved server-side from the build's
-   * defaults and the org's own overrides. Readable by any member. Server-side
-   * `CapabilityService.require` on each gated endpoint remains the authority; this is what the UI is
-   * built from.
-   */
+  /** What the UI is built from; `CapabilityService.require` on each gated endpoint stays the authority. */
   getCapabilities: (orgSlug: string) =>
     http<CapabilitiesView>(`/api/orgs/${enc(orgSlug)}/capabilities`),
 
-  /** Every capability with its default and whether the org overrides it. Readable by any member. */
   listCapabilityOverrides: (orgSlug: string) =>
     http<CapabilityOverrideView[]>(`/api/orgs/${enc(orgSlug)}/capabilities/overrides`),
 
-  /** Pin one capability on or off for the org. Owner or admin. */
   setCapabilityOverride: (orgSlug: string, key: CapabilityWire, enabled: boolean) =>
     send<CapabilityOverrideView>("PUT", `/api/orgs/${enc(orgSlug)}/capabilities/overrides/${enc(key)}`, { enabled }),
 
-  // ---- Organization lifecycle ----
-
   updateOrg: (orgSlug: string, body: { name: string; settings?: string | null }) =>
     send<Organization>("PATCH", `/api/orgs/${enc(orgSlug)}`, body),
-
-  // ---- Project lifecycle ----
 
   makeProjectDefault: (orgSlug: string, projectSlug: string) =>
     send<Project>("POST", `/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}/default`),
@@ -293,25 +260,15 @@ export const auth = {
   loginUrl: (returnTo?: string) =>
     `/auth/login${returnTo ? `?returnTo=${enc(returnTo)}` : ""}`,
 
-  /**
-   * /auth/logout is POST-only (a GET endpoint could be triggered by <img src>
-   * or other cross-site navigations). Caller should redirect to the returned
-   * frontendUrl after the cookie is cleared.
-   */
+  /** POST-only, so an <img src> or other cross-site navigation cannot sign anyone out. */
   logout: () =>
     send<{ frontendUrl: string }>("POST", "/auth/logout"),
 
-  /**
-   * Which flow the active provider drives: polled by the Login/Signup views on mount so
-   * they render the right UI without a rebuild when a deployment switches providers.
-   */
   mode: () => http<AuthMode>("/auth/mode"),
 
-  /** Create a local account and sign in, via the dependency-free password provider. */
   signup: (email: string, password: string) =>
     send<CredentialAuthResult>("POST", "/auth/signup", { email, password }),
 
-  /** Sign in with email/password, via the dependency-free password provider. */
   login: (email: string, password: string) =>
     send<CredentialAuthResult>("POST", "/auth/login", { email, password }),
 };
@@ -323,7 +280,6 @@ export interface DeviceLinkView {
   expiresAt: string;
 }
 
-/** Device-link browser endpoints (the /link confirm screen). Cookie-authed. */
 export const link = {
   get: (userCode: string) => http<DeviceLinkView>(`/api/link/${enc(userCode)}`),
 
@@ -334,20 +290,13 @@ export const link = {
     send<{ status: string }>("POST", `/api/link/${enc(userCode)}/deny`),
 };
 
-/**
- * Org-scoped API factory. Provider credentials are keyed by {@code (org, provider)}, one key per
- * org shared by every project in it, so the calls that read and write them live here rather than
- * in {@link projectApi}, even though the Settings → Providers page itself stays nested under a
- * project route (see {@code TenantContext.useOrgApi}). Small on purpose: this is not every
- * org-scoped endpoint, just the provider-credential ones.
- */
+/** Provider credentials are keyed by (org, provider), so they live here although Settings → Providers is a project route. */
 export function orgApi(orgSlug: string) {
   const base = `/api/orgs/${enc(orgSlug)}`;
 
   return {
     base,
 
-    // ---- Provider credentials (Settings → Providers), org-wide ----
     listProviderCatalog: () => http<ProviderCatalogResponse>(`${base}/providers/catalog`),
 
     listProviderCredentials: () => http<ProviderCredentialListResponse>(`${base}/providers`),
@@ -362,8 +311,6 @@ export function orgApi(orgSlug: string) {
 
 export type OrgApi = ReturnType<typeof orgApi>;
 
-/** Project-scoped API factory. Pass {orgSlug, projectSlug} once; everything is bound. */
-/** The traces list's filters, as the traces and sessions reads take them. */
 export type TraceFilterParams = {
   kind?: string;
   fromTimestamp?: string;
@@ -381,22 +328,15 @@ export function projectApi(orgSlug: string, projectSlug: string) {
   return {
     base,
 
-    // Cases: Triage's list and one case's page. Lifecycle is open → closed (Close or Absorb);
-    // there is no claim endpoint because nothing in this product is assigned.
     getTriage: () => http<TriageView>(`${base}/cases`),
     getCase: (id: string) => http<CaseDetail>(`${base}/cases/${encodeURIComponent(id)}`),
-    /** Close a case. The detector's reference stays where it was, so this case's evidence is left out of it. */
+    /** The detector's reference stays where it was, so this case's evidence is left out of it. */
     closeCase: (id: string) =>
       send<Case>("POST", `${base}/cases/${encodeURIComponent(id)}/resolve`, {}),
-    /**
-     * Close the case and move the detector's reference, so the level it fired on becomes the new
-     * baseline. Distinct from `closeCase`, which closes this case and leaves the bar where it
-     * was: an unchanged population then opens another case tomorrow.
-     */
+    /** Closes the case and moves the detector's reference, so the level it fired on becomes the new baseline. */
     absorbCase: (id: string) =>
       send<Case>("POST", `${base}/cases/${encodeURIComponent(id)}/absorb`),
 
-    // Notifications: the alert rules and delivery channels behind Settings → Notifications.
     listAlertRules: () => http<AlertRule[]>(`${base}/alert-rules`),
     upsertAlertRule: (body: UpsertAlertRule) =>
       send<AlertRule>("PUT", `${base}/alert-rules`, body),
@@ -412,94 +352,51 @@ export function projectApi(orgSlug: string, projectSlug: string) {
 
     listSources: () => http<IngestionSource[]>(`${base}/sources`),
 
-    /**
-     * Substrate liveness: whether this project's first REAL trace (via OTLP) has landed.
-     * Onboarding polls this to detect the live path and distinguish it from the sample fallback.
-     */
     substrateStatus: () => http<SubstrateStatus>(`${base}/substrate/status`),
 
-    /**
-     * The onboarding ladder: listening → first trace → fitting baselines → first finding → first case.
-     * One read behind the whole Setup surface and the Triage warm-up panel, so the two can never
-     * disagree about how far along a project is.
-     */
     onboarding: () => http<OnboardingProgress>(`${base}/onboarding`),
 
-    // ---- Classifiers (auto-classification) ----------------------------------
-    // Built-in classifiers are seeded by the first successful generation run; these
-    // endpoints list them, toggle a definition, and read recent detections.
     listClassifiers: () => http<Classifier[]>(`${base}/classifiers`),
     setClassifierEnabled: (id: string, enabled: boolean) =>
       send<Classifier>("PUT", `${base}/classifiers/${enc(id)}/enabled`, { enabled }),
-    /** Limit a classifier to some call sites, or `null` to run it on every call site again. */
+    /** `null` runs it on every call site again. */
     setClassifierCallSites: (id: string, callSiteIds: string[] | null) =>
       send<Classifier>("PUT", `${base}/classifiers/${enc(id)}/call-sites`, { call_site_ids: callSiteIds }),
-    /** The call sites a classifier can be limited to: declared in the bundle, or seen on traces. */
     listClassifierCallSites: () => http<string[]>(`${base}/classifiers/call-sites`),
     listClassifierHealth: () => http<ClassifierHealth[]>(`${base}/classifiers/health`),
-    /** Forget what the classifier found and learned, and check every kept trace again. 409s while it sweeps. */
+    /** 409s while the classifier sweeps. */
     resetClassifier: (id: string) =>
       send<Classifier>("POST", `${base}/classifiers/${enc(id)}/reset`),
-    /**
-     * The detections one classifier produced, newest-first: the traces that tripped it. This is
-     * the full high-recall set, which is what a classifier's configure page shows.
-     */
     listClassifierEvents: (id: string, limit = 25) =>
       http<ClassifierEvent[]>(`${base}/classifiers/${enc(id)}/events?limit=${limit}`),
-    /**
-     * Per-classifier daily detected-trace counts + per-day project trace totals over the trailing
-     * `days` UTC calendar days (oldest first, zero-filled, last bucket = today so far).
-     */
     getClassifierDailyVolume: (days = 7) =>
       http<ClassifierDailyVolume>(`${base}/classifiers/metrics/daily?days=${days}`),
-    /** The call sites and tools the Classifiers page can chart, and every classifier for its Configure menu. */
     getClassifierChartScopes: (days: ChartRange = 28) =>
       http<ChartScopes>(`${base}/classifiers/chart-scopes?days=${days}`),
-    /** The series for every classifier on one call site, or on one tool across call sites. */
     getClassifierCharts: (scope: ChartScope, days: ChartRange = 28) =>
       http<ClassifierCharts>(withQuery(`${base}/classifiers/charts`, { ...scope, days })),
-    /**
-     * Debug bundle for one classifier: sweep-job cursor/lease detail plus family-specific fitted
-     * state (metric_baseline rows for cost/duration drift). Not part of the product surface; see
-     * `views/classifiers/debug`.
-     */
     getClassifierDebug: (id: string) => http<ClassifierDebug>(`${base}/classifiers/${enc(id)}/debug`),
-    /** The Groundedness row's status: the model's health, the mode, and when it last scored. 422s for any other classifier. */
+    /** 422s for any classifier but groundedness. */
     getGroundednessStatus: (id: string) =>
       http<GroundednessStatus>(`${base}/classifiers/${enc(id)}/groundedness-status`),
-    /** The window/threshold operating point for a metric-drift classifier (cost_drift, duration_drift). */
     getClassifierTuning: (id: string) => http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`),
     setClassifierTuning: (id: string, req: SetClassifierTuningRequest) =>
       send<ClassifierTuning>("PUT", `${base}/classifiers/${enc(id)}/tuning`, req),
 
-    // ---- Vitals: cost / tool-error / turn-latency statistics, per call site ----
-    /** Cost / tool-error / turn-latency statistics for a window, grouped by call site. */
     getVitals: (days = 7, by = "call_site") => http<Vitals>(`${base}/vitals?days=${days}&by=${enc(by)}`),
 
-    // ---- Findings -------------------------------------------------------------
-
-    /**
-     * Every open finding (`include=all`). Scope-narrowed server-side: the row limit is per call
-     * site, not sliced across all of them.
-     */
+    /** The row limit is per call site, not sliced across all of them. */
     listBehaviorFindings: (
-      /** Narrow to one classifier's findings: three write to the same table. */
       detector?: string,
     ) =>
       http<BehaviorFindings>(
         `${base}/findings?status=open&include=all` + (detector ? `&detector=${enc(detector)}` : ""),
       ),
 
-    /** One finding with its evidence parsed: the finding page's only read. */
     getBehaviorFinding: (id: string) =>
       http<BehaviorFindingDetail>(`${base}/findings/${enc(id)}`),
 
-    /**
-     * One page of a finding's evidence, joined to the spans it names.
-     *
-     * <p>Paged rather than read off the finding: a tool-error cause can cite 27,000 refs, and
-     * attaching them to the finding view would download the whole set just to open one finding.
-     */
+    /** Paged rather than read off the finding: a tool-error cause can cite 27,000 refs. */
     getBehaviorFindingEvidence: (id: string, params?: { role?: string; limit?: number; cursor?: string }) =>
       http<EvidenceSpanPage>(
         withQuery(`${base}/findings/${enc(id)}/evidence`, {
@@ -509,19 +406,13 @@ export function projectApi(orgSlug: string, projectSlug: string) {
         }),
       ),
 
-    /** One page of the frustrated sessions a `frustration_rate` finding cites, newest flag first. */
     getFrustratedSessions: (id: string, params?: CausePageParams) =>
       http<FrustratedSessionPage>(withQuery(`${base}/findings/${enc(id)}/frustrated-sessions`, causePage(params))),
 
-    /** One page of the flagged answers a `groundedness_rate` finding cites, newest flag first. */
     getFlaggedAnswers: (id: string, params?: CausePageParams) =>
       http<FlaggedAnswerPage>(withQuery(`${base}/findings/${enc(id)}/flagged-answers`, causePage(params))),
 
-    /**
-     * One field's failing outputs since onset, for a `malformed_rate` finding's "How outputs broke".
-     * `field` is a declared field's collapsed path (`items[].sku`), or `not_json` / `other` for the
-     * two buckets no declared field owns.
-     */
+    /** `field` is a declared field's collapsed path (`items[].sku`), or `not_json` / `other`. */
     getMalformedOutputs: (id: string, field: string, params?: { limit?: number; cursor?: string }) =>
       http<MalformedOutputPage>(
         withQuery(`${base}/findings/${enc(id)}/malformed-outputs`, {
@@ -531,24 +422,13 @@ export function projectApi(orgSlug: string, projectSlug: string) {
         }),
       ),
 
-    /**
-     * Hand one finding to Layer 2: a repo-grounded microVM ruling the deviation against the
-     * committed spec. Nothing does this automatically, which is why it is a verb here. 409s only
-     * when the finding cites no evidence at all.
-     */
+    /** 409s only when the finding cites no evidence at all. */
     analyzeBehaviorFinding: (id: string) =>
       send<BehaviorAnalysis>("POST", `${base}/findings/${enc(id)}/analysis`),
 
-    /** Record a human decision on one finding. Leaving a finding alone is also a valid outcome
-     *  and posts nothing: persistence graduation then runs as normal. */
     resolveBehaviorFinding: (id: string, action: BehaviorResolutionAction) =>
       send<BehaviorFinding>("POST", `${base}/findings/${enc(id)}/resolution`, { action }),
 
-    // ---- Traces read API (list / detail) -----------------------------------
-    // Ingested production traces, one item per producer trace id, newest first. Every number on the
-    // row is a rollup column the worker wrote; the request filters, sorts and pages, and computes
-    // nothing. Filters compose with AND; sort is when|tokens|cost|latency, NULLS LAST; keyset-paginated
-    // via the opaque `cursor` (pass the page's next_cursor back).
     listTraces: (params?: {
       limit?: number;
       cursor?: string;
@@ -557,81 +437,52 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       toTimestamp?: string;
       status?: string;
       q?: string;
-      /** Scope to one call site (server-side only). */
       callSite?: string;
-      /** true: traces with any call site; false: traces with none. */
       hasCallSite?: boolean;
-      /** A classifier id, or "any": traces a classifier flagged. */
+      /** A classifier id, or "any". */
       detectedBy?: string;
       sort?: string;
-    }) => 
+    }) =>
       http<TracesPageView>(withQuery(`${base}/traces`, params)),
 
-    /**
-     * One trace in full: its own row (rollups and all) plus its ordered spans.
-     *
-     * `traceId` is the producer's trace id. A legacy v1 ULID from a bookmark or a Slack link still
-     * resolves: the server translates it through the id map until that map is retired.
-     */
+    /** A legacy v1 ULID from a bookmark or a Slack link still resolves, through the server's id map. */
     getTrace: (traceId: string) => http<TraceDetailView>(`${base}/traces/${enc(traceId)}`),
 
-    // ---- Sessions read API -------------------------------------------------
-    // One continuous interaction with one user. Sessions carry no rollup of their own: the detail
-    // sums its traces' rollup columns and reports `unsettled_traces` so a sum over traces still
-    // receiving spans is readable as the lower bound it is. There is deliberately no sort
-    // parameter: ordering sessions by cost or tokens would mean summing every session in the
-    // project before a page could be chosen.
-    // The filters are the traces list's: a session is listed when one of its traces passes every one.
-    listSessions: (params?: { limit?: number; cursor?: string; include?: "totals" } & TraceFilterParams) => 
+    // No sort parameter: ordering sessions by cost or tokens would sum every session before a page could be chosen.
+    // A session is listed when one of its traces passes every filter.
+    listSessions: (params?: { limit?: number; cursor?: string; include?: "totals" } & TraceFilterParams) =>
       http<SessionsPageView>(withQuery(`${base}/sessions`, params)),
 
-    /** One session. Given the traces list's filters, `matched_trace_ids` names the traces that pass them. */
-    getSession: (sessionId: string, filters?: TraceFilterParams) => 
+    /** `matched_trace_ids` names the traces that pass the filters. */
+    getSession: (sessionId: string, filters?: TraceFilterParams) =>
       http<SessionDetailView>(withQuery(`${base}/sessions/${enc(sessionId)}`, filters)),
 
-    /** Every span across a session's traces, in one read: see {@link SessionSpansView}. */
     getSessionSpans: (sessionId: string) =>
       http<SessionSpansView>(`${base}/sessions/${enc(sessionId)}/spans`),
 
     createSource: (body: CreateSourceRequest) =>
       send<IngestionSource>("POST", `${base}/sources`, body),
 
-    // ---- Git integration ----------------------------------------------------
-    // Coalesce to null: when the project has no integration the backend sends
-    // an empty body, so the envelope's `data` is undefined, but TanStack Query
-    // rejects undefined query results, so normalize it to null here.
+    // No integration sends an empty body, and TanStack Query rejects an undefined result.
     getGitIntegration: () =>
       http<GitIntegration | null>(`${base}/git`).then((v) => v ?? null),
-    /** Hosted GitHub App install URL: open it to install the app, then the
-     *  backend callback redirects back to the SPA with ?connected=1. */
     getGithubInstallUrl: () => http<InstallUrl>(`${base}/git/github/install-url`),
-    /** Standalone OAuth authorize URL: reuses an installation already on the user's account
-     *  (the 2nd+ project case). GitHub returns to the callback, which either auto-connects the
-     *  single repo or lands the SPA on the Settings Git picker with ?install_select=<token>. */
+    /** Reuses an installation already on the user's account (the 2nd+ project case). */
     getGithubAuthorizeUrl: () => http<InstallUrl>(`${base}/git/github/authorize-url`),
-    /** The BYO GitHub App manifest wizard's starting point: the frontend auto-submits
-     *  the returned `manifest` as a POSTed form field to `url` (github.com/settings/apps/new). */
+    /** The frontend auto-submits the returned `manifest` as a POSTed form field to `url`. */
     getGithubManifestStart: () => http<ManifestStart>(`${base}/git/github/manifest-url`),
-    /** The repos behind a selection token (the picker). */
     getGithubInstallationOptions: (token: string) =>
       http<InstallationOptions>(`${base}/git/github/installation-options?token=${enc(token)}`),
-    /** Finalize a picker choice: binds the chosen repo/installation to this project. */
     selectGithubInstallation: (body: { token: string; installationId: number; repoOwner: string; repoName: string }) =>
       send<GitIntegration>("POST", `${base}/git/github/select-installation`, body),
     connectGit: (body: ConnectGitRequest) =>
       send<GitIntegration>("POST", `${base}/git/connect`, body),
     disconnectGit: () => send<{ deleted: boolean }>("DELETE", `${base}/git`),
 
-    // ---- Import (populates project pipeline) -------------------------------
-    //
-    // Multipart-only: upload the full .tessary/ directory emitted by the
-    // evals plugin (sharded pipeline/, graders/, datasets/...).
-    //   mode = "upsert"  (default): never delete; insert new, update existing.
-    //   mode = "replace" (opt-in):  full sync; entities not in upload are removed.
+    // "upsert" never deletes; "replace" removes entities missing from the upload.
     importEvalsDirectory: (files: File[], mode: ImportMode = "upsert") => {
       const form = new FormData();
-      // Preserve each file's relative path (webkitdirectory leaves it on
-      // file.webkitRelativePath) so the backend can classify each shard.
+      // The backend classifies each shard by its relative path.
       for (const f of files) {
         const relPath = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
         const name = relPath && relPath.length > 0 ? relPath : f.name;
@@ -644,7 +495,6 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       });
     },
 
-    // ---- MCP personal tokens (member-mintable) -----------------------------
     listMcpTokens: () => http<McpTokenView[]>(`${base}/mcp-tokens`),
 
     issueMcpToken: (name: string) =>
@@ -653,77 +503,45 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     revokeMcpToken: (tokenId: string) =>
       send<{ revoked: boolean }>("DELETE", `${base}/mcp-tokens/${enc(tokenId)}`),
 
-    // ---- Managed API keys (project-scoped) ---------------------------------
-    // List includes revoked keys (filter client-side on revoked_at if needed).
+    // Includes revoked keys.
     listApiKeys: () => http<ApiKey[]>(`${base}/api-keys`),
 
-    // 201: returns the one-time plaintext secret under `plaintext`.
     createApiKey: (body: CreateKeyRequest) =>
       send<IssuedKeyResponse>("POST", `${base}/api-keys`, body),
 
-    // 201: re-issues the secret for an existing key, returning a fresh plaintext.
     rotateApiKey: (keyId: string) =>
       send<IssuedKeyResponse>("POST", `${base}/api-keys/${enc(keyId)}/rotate`),
 
     revokeApiKey: (keyId: string) =>
       send<RevokeKeyResponse>("DELETE", `${base}/api-keys/${enc(keyId)}`),
 
-    // Newest-first, capped at 200 rows server-side.
     listApiKeyAudit: () => http<ApiKeyAudit[]>(`${base}/api-keys/audit`),
 
-    // ---- Global search: tenant-scoped FTS across content entities ----------
-    /**
-     * Full-text search across the project's content, returning ranked, typed hits for the ⌘K
-     * palette. Pass an {@link AbortSignal} so an in-flight request can be cancelled when the query
-     * changes (debounced typeahead), so a stale earlier response can't race a newer one. A blank
-     * query returns no hits.
-     */
+    /** Abort on a new query so a stale earlier response cannot race a newer one. */
     search: (q: string, signal?: AbortSignal) =>
       http<SearchResults>(`${base}/search?q=${enc(q)}`, { signal }),
 
-    // ---- RCA: root-cause analysis of one finding ----
-    /**
-     * Press RCA on a case. There is no body: the server resolves the finding behind the case, and
-     * that id is the only thing that reaches the analysis lane: nothing the case says about the
-     * finding, and nothing an earlier pass ruled about it, crosses with it. Re-pressing the same
-     * case coalesces onto the existing report, which may already be running or done.
-     */
+    /** No body: only the finding id reaches the analysis lane. Re-pressing coalesces onto the existing report. */
     runCaseRca: (caseId: string) =>
       send<RcaReport>("POST", `${base}/cases/${enc(caseId)}/rca`),
     getRcaReport: (id: string) => http<RcaReport>(`${base}/rca/${enc(id)}`),
-    /**
-     * Re-run the analysis behind a finished report. Reports are immutable, so this returns a new
-     * report to navigate to (a re-run while the first one is still running is a no-op that hands
-     * back the running report).
-     */
+    /** Reports are immutable, so this returns a new report (or the running one, if it is still running). */
     rerunRca: (id: string) => send<RcaReport>("POST", `${base}/rca/${enc(id)}/rerun`),
 
-    // Provider credentials moved to orgApi(); see that factory's own comment.
-
-    // ---- Per-lane platform model settings (Settings → Models) --------------
-    // The GET carries the capability matrix as well as the current settings, so the UI never has to
-    // hardcode which models support which service tier.
     getModelSettings: () => http<ModelSettingsResponse>(`${base}/model-settings`),
 
-    // Both mutations return the full refreshed view, so a caller can replace its cache outright
-    // rather than patching one row and hoping the rest still matches. That matters more on the reset
-    // below than it looks: the lane it clears may land on a different model than the one it left.
+    // Both mutations return the full view: a reset lane may land on a model only the server can name.
     setLaneModel: (lane: ModelLane, body: SetLaneModelRequest) =>
       send<ModelSettingsResponse>("PUT", `${base}/model-settings/${enc(lane)}`, body),
 
-    // DELETE drops this project's choice for the lane, returning it to automatic: the best model in
-    // the lane's priority order that the org's configured providers can serve. Hence a full view
-    // back, same as the PUT: which model that turns out to be is the server's answer, not ours.
     resetLaneModel: (lane: ModelLane) =>
       send<ModelSettingsResponse>("DELETE", `${base}/model-settings/${enc(lane)}`),
 
-    // ---- Data retention (Settings → Data retention) ------------------------
     getRetention: () => http<RetentionView>(`${base}/retention`),
 
     updateRetention: (body: RetentionUpdateRequest) =>
       send<RetentionView>("PUT", `${base}/retention`, body),
 
-    // ---- PII redaction (Settings → PII redaction playground) --------------
     listRedactionRules: () => http<RedactionRuleListView>(`${base}/redaction/rules`),
 
     createRedactionRule: (body: UpsertRedactionRuleRequest) =>
