@@ -7,34 +7,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderRoute } from "../../test/render";
 import { chartReadsStale, seedChartReads } from "../../test/chartReads";
-import type { Classifier } from "../../api/types";
+import { classifier } from "../../test/fixtures";
 import { ClassifierResetModal } from "./ClassifierResetModal";
 import { api } from "../../test/api";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 beforeEach(() => api.resetClassifier.mockImplementation(async (id: string) => ({ id })));
-
-function classifier(overrides: Partial<Classifier>): Classifier {
-  return {
-    id: "clf-1",
-    classifier_key: "frustration",
-    name: "Frustration",
-    description: "Frustration the agent caused.",
-    detector: "frustration",
-    config_json: null,
-    built_in: true,
-    version: 9,
-    enabled: true,
-    mode: "tracking",
-    created_at: "2026-09-01T00:00:00Z",
-    updated_at: "2026-09-01T00:00:00Z",
-    readiness: null,
-    shown_in_trace_views: true,
-    call_site_ids: null,
-    ...overrides,
-  };
-}
 
 describe("ClassifierResetModal", () => {
   it("sends the reset only after Continue and the exact name typed back", async () => {

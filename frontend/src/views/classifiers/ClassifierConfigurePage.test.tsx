@@ -29,6 +29,7 @@ import { ClassifierConfigurePage, DetectionRow } from "./ClassifierConfigurePage
 import { ago } from "./shared";
 import { clockTime } from "./groundedness";
 import { api, orgApi } from "../../test/api";
+import { classifier as baseClassifier, groundednessStatus } from "../../test/fixtures";
 
 const EMPTY_VOLUME: ClassifierDailyVolume = { days: [], trace_totals: [], classifiers: [] };
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
@@ -42,26 +43,8 @@ beforeEach(() => {
 });
 afterEach(() => window.localStorage.clear());
 
-function classifier(overrides: Partial<Classifier>): Classifier {
-  return {
-    id: "clf-1",
-    classifier_key: "frustration",
-    name: "Frustration",
-    description: "Frustration the agent caused.",
-    detector: "frustration",
-    config_json: null,
-    built_in: true,
-    version: 9,
-    enabled: false,
-    mode: "tracking",
-    created_at: "2026-09-01T00:00:00Z",
-    updated_at: "2026-09-01T00:00:00Z",
-    readiness: null,
-    shown_in_trace_views: true,
-    call_site_ids: null,
-    ...overrides,
-  };
-}
+const classifier = (over: Partial<Classifier>) => baseClassifier({ enabled: false, ...over });
+const status = (over: Partial<GroundednessStatus>) => groundednessStatus({ setup_ref: "main", ...over });
 
 const renderPage = (id = "clf-1") =>
   renderRoute(<ClassifierConfigurePage />, {
@@ -389,22 +372,6 @@ function groundednessRow(overrides: Partial<Classifier> = {}): Classifier {
     detector: "groundedness",
     ...overrides,
   });
-}
-
-function status(overrides: Partial<GroundednessStatus>): GroundednessStatus {
-  return {
-    state: "off",
-    mode: "dev",
-    configured: false,
-    available: false,
-    reason: "no encoder URL configured",
-    checked_at: null,
-    ever_swept: false,
-    last_scored_at: null,
-    last_caught_up_at: null,
-    setup_ref: "main",
-    ...overrides,
-  };
 }
 
 /** Today at the given local time, so the 12-hour clock reads the same wherever the test runs. */

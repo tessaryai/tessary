@@ -3,7 +3,7 @@
  * Builders for the wire shapes several page tests render. Each returns a fully populated value with
  * neutral defaults, so a test states only the fields its assertion is about.
  */
-import type { TraceDetailView, TraceListItemView } from "../api/types";
+import type { Classifier, GroundednessStatus, TraceDetailView, TraceListItemView } from "../api/types";
 
 export type SpanView = TraceDetailView["spans"][number];
 
@@ -75,6 +75,43 @@ export function span(over: Partial<SpanView> & { id: string }): SpanView {
     total_tokens: null,
     trace_id: "tr-1",
     ttft_ms: null,
+    ...over,
+  };
+}
+
+export function classifier(over: Partial<Classifier> = {}): Classifier {
+  return {
+    id: "clf-1",
+    classifier_key: "frustration",
+    name: "Frustration",
+    description: "Frustration the agent caused.",
+    detector: "frustration",
+    config_json: null,
+    built_in: true,
+    version: 9,
+    enabled: true,
+    mode: "tracking",
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+    readiness: null,
+    shown_in_trace_views: true,
+    call_site_ids: null,
+    ...over,
+  };
+}
+
+export function groundednessStatus(over: Partial<GroundednessStatus> = {}): GroundednessStatus {
+  return {
+    state: "off",
+    mode: "dev",
+    configured: false,
+    available: false,
+    reason: "no encoder URL configured",
+    checked_at: null,
+    ever_swept: false,
+    last_scored_at: null,
+    last_caught_up_at: null,
+    setup_ref: "v1.3.0",
     ...over,
   };
 }

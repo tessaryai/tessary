@@ -18,40 +18,9 @@ import type {
 import { currentParams, pending, renderRoute } from "../../test/render";
 import { TracesIndex } from "./TracesIndex";
 import { api } from "../../test/api";
+import { classifier as baseClassifier, traceItem } from "../../test/fixtures";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
-
-function trace(over: Partial<TraceListItemView> = {}): TraceListItemView {
-  return {
-    id: "tr-1",
-    name: "checkout-agent",
-    started_at: "2026-09-25T10:00:00Z",
-    ended_at: "2026-09-25T10:00:02Z",
-    status: "ok",
-    is_settled: true,
-    latency_ms: 2_000,
-    input_preview: "where is my order",
-    output_preview: "it ships today",
-    total_cost: 0.0123,
-    input_cost: 0.01,
-    output_cost: 0.0023,
-    span_count: 4,
-    error_count: 0,
-    input_tokens: 1_200,
-    output_tokens: 300,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    reasoning_tokens: null,
-    total_tokens: 1_500,
-    call_site_id: "checkout",
-    session: "sess-1",
-    thread_id: null,
-    user_id: null,
-    unpriced_spans: 0,
-    detected_by: [],
-    ...over,
-  };
-}
 
 function session(over: Partial<SessionListItemView> = {}): SessionListItemView {
   return {
@@ -84,27 +53,24 @@ function session(over: Partial<SessionListItemView> = {}): SessionListItemView {
 
 const page = (traces: TraceListItemView[], next_cursor: string | null = null): TracesPageView => ({ traces, next_cursor });
 
-function classifier(over: Partial<Classifier> = {}): Classifier {
-  return {
-    id: "cls-fr",
-    classifier_key: "frustration",
-    name: "Frustration",
-    detector: "frustration",
-    enabled: true,
-    built_in: true,
-    call_site_ids: null,
-    config_json: null,
-    created_at: "2026-09-01T00:00:00Z",
-    updated_at: "2026-09-01T00:00:00Z",
-    description: null,
-    mode: "discovery",
-    readiness: null,
-    shown_in_trace_views: true,
-    version: 1,
+const trace = (over: Partial<TraceListItemView> = {}) =>
+  traceItem({
+    input_preview: "where is my order",
+    output_preview: "it ships today",
+    total_cost: 0.0123,
+    input_cost: 0.01,
+    output_cost: 0.0023,
+    span_count: 4,
+    input_tokens: 1_200,
+    output_tokens: 300,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    total_tokens: 1_500,
+    call_site_id: "checkout",
+    session: "sess-1",
     ...over,
-  };
-}
-
+  });
+const classifier = (over: Partial<Classifier> = {}) => baseClassifier({ id: "cls-fr", ...over });
 const FRUSTRATED = [{ classifier_id: "cls-fr", name: "Frustration" }];
 
 beforeEach(() => {

@@ -9,32 +9,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ApiError, type GroundednessStatus } from "../../api/types";
+import { ApiError } from "../../api/types";
 import { GroundednessEnableModal, SETUP_POLL_MS } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
 import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
 import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import { api } from "../../test/api";
+import { groundednessStatus as status } from "../../test/fixtures";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 beforeEach(() => api.setClassifierEnabled.mockImplementation(async () => ({})));
-
-function status(overrides: Partial<GroundednessStatus>): GroundednessStatus {
-  return {
-    state: "off",
-    mode: "dev",
-    configured: false,
-    available: false,
-    reason: "no encoder URL configured",
-    checked_at: null,
-    ever_swept: false,
-    last_scored_at: null,
-    last_caught_up_at: null,
-    setup_ref: "v1.3.0",
-    ...overrides,
-  };
-}
 
 function renderModal(onPromptCopied = vi.fn()) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
