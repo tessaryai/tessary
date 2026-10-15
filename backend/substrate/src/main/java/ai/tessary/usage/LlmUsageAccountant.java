@@ -64,14 +64,12 @@ public class LlmUsageAccountant {
     }
 
     /**
-     * One hosted decision-model call, already priced by the caller under the book it names. @param platformFunded true
-     * when the call ran on the deployment's own provider, which is the row a credit debit reads
+     * One hosted decision-model call, already priced by the caller under the book it names.
      */
     public void recordDecisionCall(
             @Nullable String projectId,
             String lane,
             String model,
-            boolean platformFunded,
             @Nullable Integer inputTokens,
             @Nullable Integer outputTokens,
             @Nullable BigDecimal costUsd,
@@ -81,7 +79,7 @@ public class LlmUsageAccountant {
                 projectId,
                 lane,
                 model,
-                platformFunded,
+                false,
                 inputTokens,
                 outputTokens,
                 null,
@@ -112,7 +110,6 @@ public class LlmUsageAccountant {
                     projectId,
                     lane,
                     model,
-                    null,
                     platformFunded ? LlmCallRow.CostFunding.PLATFORM : LlmCallRow.CostFunding.BYO,
                     inputTokens,
                     outputTokens,

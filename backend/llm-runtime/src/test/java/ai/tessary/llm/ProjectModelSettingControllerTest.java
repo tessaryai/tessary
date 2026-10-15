@@ -10,7 +10,6 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.pricing.ModelResolver;
 import ai.tessary.pricing.PriceBookRepository;
 import ai.tessary.tenant.Organization;
@@ -131,7 +130,9 @@ class ProjectModelSettingControllerTest {
                     lane + "'s options must offer the CUSTOM catalog entry: " + offered);
             // The Bedrock offer list is still there, not replaced by catalog keys.
             assertTrue(
-                    BedrockModelProfile.offeredFor(LaneGroup.AGENT_VM).stream().anyMatch(offered::contains),
+                    BedrockModelProfile.platformModels().stream()
+                            .map(BedrockModelProfile.ModelDescriptor::modelKey)
+                            .anyMatch(offered::contains),
                     lane + "'s options must still offer Bedrock models: " + offered);
         }
     }
@@ -183,19 +184,15 @@ class ProjectModelSettingControllerTest {
         assertEquals(Set.of(ModelProvider.PLATFORM), view.configuredProviders());
     }
 
-    /**
-     * The lane arrives lowercase in the path and is parsed by our reader, so any casing reaches it. Tier and effort
-     * are accepted and ignored.
-     */
+    /** The lane arrives lowercase in the path and is parsed by our reader, so any casing reaches it. */
     @Test
-    void putPointsTheParsedLaneAtTheModelAndIgnoresTierAndEffort() {
+    void putPointsTheParsedLaneAtTheModel() {
         controller.put(
                 ctx,
                 ORG_SLUG,
                 PROJECT_SLUG,
                 " RCA ",
-                new ProjectModelSettingController.SetLaneModelRequest(
-                        "anthropic.claude-haiku-4-5", ServiceTier.FLEX, "high"));
+                new ProjectModelSettingController.SetLaneModelRequest("anthropic.claude-haiku-4-5"));
 
         verify(settings).set(PROJECT_ID, ORG_ID, ModelLane.RCA, "anthropic.claude-haiku-4-5");
     }

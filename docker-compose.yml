@@ -57,7 +57,7 @@ services:
     mem_limit: 2g
     expose:
       - "8080"
-      # OTLP/gRPC, internal only. Inert unless tessary.ingest.otlp.enabled=true with a grpc transport.
+      # OTLP/gRPC, internal only. Inert unless tessary.ingest.otlp.transport is grpc or both.
       # Publishing 4317 to the host also needs `EXPOSE 4317` in backend/Dockerfile.
       - "4317"
     env_file:

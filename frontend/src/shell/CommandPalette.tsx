@@ -75,7 +75,7 @@ function CommandPalette() {
   const projectBase = `/orgs/${orgSlug}/projects/${projectSlug}/`;
 
   // The palette offers exactly the sidebar's surfaces and the Settings rail's sections.
-  const { liveNav, settingsSections, reserved, isPathReachable } = useNavigation();
+  const { liveNav, settingsSections, isPathReachable } = useNavigation();
 
   const commands = useMemo<Command[]>(
     () =>
@@ -84,7 +84,6 @@ function CommandPalette() {
         projectBase,
         nav: liveNav,
         settings: settingsSections,
-        reserved,
         isPathReachable,
         recents: readRecents(orgSlug, projectSlug),
         openProjectSwitcher: shellActions.openProjectSwitcher,
@@ -94,7 +93,6 @@ function CommandPalette() {
       projectBase,
       liveNav,
       settingsSections,
-      reserved,
       isPathReachable,
       orgSlug,
       projectSlug,
@@ -144,10 +142,7 @@ function CommandPalette() {
     return [...resultGroup, ...staticGroups];
   }, [search, staticGroups]);
 
-  const selectable = useMemo(
-    () => groups.flatMap((g) => g.items).filter((c) => !c.disabled),
-    [groups],
-  );
+  const selectable = useMemo(() => groups.flatMap((g) => g.items), [groups]);
 
   const searchLoading = search.status === "loading";
   const searchError = search.status === "error";
@@ -204,7 +199,7 @@ function CommandPalette() {
       pushRecent(orgSlug, projectSlug, { path: targetPath(cmd, projectBase), label: cmd.label });
     }
     close();
-    cmd.run!();
+    cmd.run();
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -292,23 +287,18 @@ function CommandPalette() {
               <div className="px-4 pt-2 pb-1 text-label uppercase text-subtle">{g.group}</div>
               {g.items.map((cmd) => {
                 const idx = selectable.indexOf(cmd);
-                const isActive = idx === active && !cmd.disabled;
+                const isActive = idx === active;
                 const res = cmd.result;
                 return (
                   <button
                     key={cmd.id}
                     type="button"
                     data-cmd-active={isActive}
-                    disabled={cmd.disabled}
-                    onMouseMove={() => idx >= 0 && setActive(idx)}
+                    onMouseMove={() => setActive(idx)}
                     onClick={() => runCommand(cmd)}
                     className={cn(
                       "w-full flex items-center gap-2.5 px-4 py-2 text-left transition-colors",
-                      cmd.disabled
-                        ? "cursor-default text-subtle"
-                        : isActive
-                          ? "bg-selected text-fg"
-                          : "text-muted hover:text-fg hover:bg-hover",
+                      isActive ? "bg-selected text-fg" : "text-muted hover:text-fg hover:bg-hover",
                     )}
                     style={{ transitionDuration: "var(--duration-micro)" }}
                   >
@@ -337,14 +327,6 @@ function CommandPalette() {
                         cmd.hint && <span className="block text-label text-subtle truncate">{cmd.hint}</span>
                       )}
                     </span>
-                    {cmd.alias && !cmd.disabled && (
-                      <span className="shrink-0 text-small text-subtle">{cmd.alias}</span>
-                    )}
-                    {cmd.disabled && (
-                      <span className="shrink-0 text-label uppercase text-subtle border border-border rounded-pill px-1.5">
-                        Soon
-                      </span>
-                    )}
                     {res && isActive && (
                       <span className="shrink-0 font-mono text-label text-subtle" aria-hidden="true">
                         ↵

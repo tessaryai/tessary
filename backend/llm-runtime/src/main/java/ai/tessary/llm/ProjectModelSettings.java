@@ -4,7 +4,6 @@ package ai.tessary.llm;
 import ai.tessary.llm.catalog.ModelCatalogFetchService;
 import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -103,11 +102,7 @@ public class ProjectModelSettings {
     }
 
     /** {@code automatic} lets the settings page say which of the two it is showing. */
-    public record LaneSelection(
-            @JsonProperty("model_key") String modelKey,
-            @JsonProperty("service_tier") ServiceTier serviceTier,
-            @JsonProperty("reasoning_effort") @Nullable String reasoningEffort,
-            boolean automatic) {}
+    public record LaneSelection(@JsonProperty("model_key") String modelKey, boolean automatic) {}
 
     private Optional<LaneSelection> usable(
             @Nullable String orgId, Set<ModelProvider> configured, ModelLane lane, ProjectModelSetting row) {
@@ -120,11 +115,7 @@ public class ProjectModelSettings {
         if (providerFor(row.modelKey()).filter(configured::contains).isEmpty()) {
             return Optional.empty();
         }
-        // Every platform Bedrock model runs at Standard only.
-        if (bedrock.isPresent() && row.serviceTier() != ServiceTier.STANDARD) {
-            return Optional.empty();
-        }
-        // A catalog row has no tier. Wrong-kind rows fail isOfferedOn below.
+        // Wrong-kind rows fail isOfferedOn below.
         boolean agentic = bedrock.map(BedrockModelProfile.ModelDescriptor::agentic)
                 .orElseGet(() -> catalog.map(ModelCatalog.CatalogEntry::agentic).orElse(false));
         if (lane.agentic() && !agentic) {
@@ -133,18 +124,17 @@ public class ProjectModelSettings {
         if (!isOfferedOn(lane, row.modelKey())) {
             return Optional.empty();
         }
-        return Optional.of(new LaneSelection(row.modelKey(), row.serviceTier(), null, false));
+        return Optional.of(new LaneSelection(row.modelKey(), false));
     }
 
     /**
-     * The first provider in the lane's {@link LanePriority} the org holds a credential for. No lane has a tier or
-     * effort control.
+     * The first provider in the lane's {@link LanePriority} the org holds a credential for.
      */
     private Optional<LaneSelection> autoSelect(Set<ModelProvider> configured, ModelLane lane) {
         return LanePriority.of(lane).stream()
                 .filter(o -> configured.contains(o.provider()))
                 .findFirst()
-                .map(o -> new LaneSelection(o.defaultModelKey(), ServiceTier.STANDARD, null, true));
+                .map(o -> new LaneSelection(o.defaultModelKey(), true));
     }
 
     /**
@@ -263,13 +253,12 @@ public class ProjectModelSettings {
 
     /**
      * Refused with {@link ModelConfigError#PROVIDER_NOT_CONFIGURED} when the org cannot run the provider: unreachable
-     * from the picker, but a raw PUT crosses this boundary. Stored at Standard with no effort, since no lane uses
-     * either.
+     * from the picker, but a raw PUT crosses this boundary.
      */
     public void set(String projectId, String orgId, ModelLane lane, String modelKey) {
         requireConfiguredProvider(orgId, modelKey);
         validate(orgId, lane, modelKey);
-        repo.upsert(projectId, lane, modelKey, ServiceTier.STANDARD, null);
+        repo.upsert(projectId, lane, modelKey);
         invalidate(projectId);
     }
 

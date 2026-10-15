@@ -362,7 +362,6 @@ public class JevDecisionClient implements DecisionClient {
                 projectId,
                 lane,
                 answer.requestedModel(),
-                answer.provider() == ModelProvider.PLATFORM,
                 answer.inputTokens(),
                 answer.outputTokens(),
                 answer.costUsd(),

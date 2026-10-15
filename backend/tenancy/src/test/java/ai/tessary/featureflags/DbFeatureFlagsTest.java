@@ -39,7 +39,7 @@ class DbFeatureFlagsTest {
         rows.put("graders_enabled", false);
         assertEquals(
                 Optional.empty(),
-                flags.override("graders_enabled", FlagContext.global()),
+                flags.override("graders_enabled", FlagContext.forOrg(null)),
                 "an override is one org's opinion about itself; there is no global row to find");
     }
 

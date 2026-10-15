@@ -34,7 +34,6 @@ import ai.tessary.classifier.frustration.StructuredThread.Message;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.config.FrustrationProperties;
 import ai.tessary.llm.ModelProvider;
-import ai.tessary.llm.PlatformCreditExhausted;
 import ai.tessary.llm.decisions.DecisionAnswer;
 import ai.tessary.llm.decisions.DecisionClient;
 import ai.tessary.llm.decisions.DecisionProviderResolver;
@@ -42,7 +41,6 @@ import ai.tessary.llm.decisions.DecisionRequest;
 import ai.tessary.llm.decisions.DecisionTarget;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.DecisionError;
-import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
@@ -78,7 +76,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionOperations;
@@ -106,11 +103,6 @@ class JevFrustrationDetectorTest {
 
     private final DecisionTarget target = new DecisionTarget(
             ModelProvider.TYPESAFE, "jev-latest", URI.create("https://api.typesafe.ai/v1/systemone"), "key");
-    private static final DecisionTarget PLATFORM = new DecisionTarget(
-            ModelProvider.PLATFORM,
-            "~typesafe/jev-latest",
-            URI.create("https://openrouter.ai/api/alpha/decisions"),
-            "platform-key");
 
     @BeforeEach
     void wire() {
@@ -453,32 +445,18 @@ class JevFrustrationDetectorTest {
     static Stream<Arguments> failedCalls() {
         return Stream.of(
                 arguments(
-                        named("a rejected own key, after a turn that answered", false),
-                        true,
+                        named("a rejected own key, after a turn that answered", true),
                         DecisionError.PROVIDER_REJECTED,
                         ClassifierPause.PROVIDER_REJECTED),
                 arguments(
-                        named("a refused request on the deployment's provider is not the org's to fix", true),
-                        false,
-                        DecisionError.REQUEST_REFUSED,
-                        ClassifierPause.PLATFORM_UNAVAILABLE),
-                arguments(
                         named("an own key out of credit is no_credit, not a bad key", false),
-                        false,
                         DecisionError.PROVIDER_NO_CREDIT,
-                        ClassifierPause.NO_CREDIT),
-                arguments(
-                        named("the deployment's key out of credit is not the org's to fix", true),
-                        false,
-                        DecisionError.PROVIDER_NO_CREDIT,
-                        ClassifierPause.PLATFORM_UNAVAILABLE));
+                        ClassifierPause.NO_CREDIT));
     }
 
     @ParameterizedTest
     @MethodSource("failedCalls")
-    void aFailedCallPausesTheClassifierAndAbortsThePage(
-            boolean platform, boolean answeredFirst, DecisionError error, String reason) {
-        if (platform) when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(PLATFORM));
+    void aFailedCallPausesTheClassifierAndAbortsThePage(boolean answeredFirst, DecisionError error, String reason) {
         List<SubstrateObservation> turns = new ArrayList<>();
         if (answeredFirst) {
             turns.add(eligibleTurn("t-ok", "conv-a"));
@@ -566,71 +544,18 @@ class JevFrustrationDetectorTest {
         }
     }
 
-    /** Out of platform credit is not "no key": the org has a provider, and adding a key is one of two ways out. */
     @Test
-    void aResolverReportingNoPlatformCreditPausesAsNoCreditAndSendsNothing() {
-        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
-
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
-
-        assertEquals(Status.ABORTED, page.status());
-        assertEquals(ClassifierPause.NO_CREDIT, page.pauseReason());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_CREDIT, NOW);
-        assertTrue(client.requests.isEmpty());
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {ClassifierPause.NO_CREDIT, ClassifierPause.NO_PROVIDER})
-    void aRecheckThatStillFindsTheSameGapPassesThePageAndRestampsThePause(String reason) {
+    void aRecheckThatStillFindsTheSameGapPassesThePageAndRestampsThePause() {
         when(classifiers.findPause(PROJECT, CLASSIFIER))
-                .thenReturn(
-                        Optional.of(new ClassifierPause(reason, NOW.minusSeconds(props.credentialRetrySeconds() + 1))));
-        if (ClassifierPause.NO_CREDIT.equals(reason)) {
-            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
-        } else {
-            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
-        }
+                .thenReturn(Optional.of(new ClassifierPause(
+                        ClassifierPause.NO_PROVIDER, NOW.minusSeconds(props.credentialRetrySeconds() + 1))));
+        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
 
         JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
 
         assertEquals(Status.PAUSED, page.status());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, reason, NOW);
+        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_PROVIDER, NOW);
         verify(classifiers, never()).unpause(any(), any());
-    }
-
-    /**
-     * The platform provider's key is the deployment's, shared by every org on it. Its refusal is not the org's to
-     * fix, so the pause must not tell them to fix a key, and an operator has to hear about it.
-     */
-    @Test
-    void aRejectedPlatformProviderCallPausesAsPlatformUnavailableAndLogsAnError() {
-        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(PLATFORM));
-            client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
-            JevFrustrationDetector d = detector();
-
-            JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(eligibleTurn("t-refused", "conv-a")));
-            d.complete(signal("{}"), page, PageAction.ABORT, 5);
-
-            assertEquals(Status.ABORTED, page.status());
-            assertEquals(ClassifierPause.PLATFORM_UNAVAILABLE, page.pauseReason());
-            verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PLATFORM_UNAVAILABLE, NOW);
-            List<Object> errors = appender.list.stream()
-                    .filter(e -> e.getLevel() == Level.ERROR)
-                    .map(e -> e.getKeyValuePairs().stream()
-                            .filter(kv -> "reason".equals(kv.key))
-                            .findFirst()
-                            .map(kv -> kv.value)
-                            .orElse("none"))
-                    .toList();
-            assertEquals(List.of(ClassifierPause.PLATFORM_UNAVAILABLE), errors);
-        } finally {
-            logger.detachAppender(appender);
-        }
     }
 
     @Test
@@ -716,13 +641,6 @@ class JevFrustrationDetectorTest {
         List<String> names = new ArrayList<>();
         node.fieldNames().forEachRemaining(names::add);
         return names;
-    }
-
-    /** What a deployment's resolver throws when the org has no platform credit left. */
-    private static final class NoCredit extends TessaryException implements PlatformCreditExhausted {
-        NoCredit() {
-            super(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.PLATFORM);
-        }
     }
 
     /** Answers by the trace id in the message text; records what it was asked. */

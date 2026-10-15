@@ -20,7 +20,6 @@ import ai.tessary.classifier.worker.SweepRouting;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.GroundednessProperties;
 import ai.tessary.llm.ModelProvider;
-import ai.tessary.llm.PlatformCreditExhausted;
 import ai.tessary.llm.decisions.DecisionProviderResolver;
 import ai.tessary.llm.decisions.DecisionTarget;
 import ai.tessary.llmspi.ModelLane;
@@ -390,13 +389,7 @@ public class ClassifierService {
             for (ClassifierRow row : signals.listByProject(project.id())) {
                 if (!BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())) continue;
                 if (signals.findPause(project.id(), row.id()).isEmpty()) continue;
-                Optional<DecisionTarget> target;
-                try {
-                    target = decisionProviders.resolve(project.id(), ModelLane.FRUSTRATION);
-                } catch (TessaryException e) {
-                    if (!(e instanceof PlatformCreditExhausted)) throw e;
-                    continue;
-                }
+                Optional<DecisionTarget> target = decisionProviders.resolve(project.id(), ModelLane.FRUSTRATION);
                 if (target.isEmpty() || target.get().provider() != provider) continue;
                 lifted += signals.unpause(project.id(), row.id());
             }

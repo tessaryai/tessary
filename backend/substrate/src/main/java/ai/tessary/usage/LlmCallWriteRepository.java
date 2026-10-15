@@ -20,11 +20,11 @@ public class LlmCallWriteRepository {
 
     public void insert(LlmCallRow row) {
         jdbc.sql("""
-                        INSERT INTO llm_call (id, project_id, lane, model, service_tier, funding,
+                        INSERT INTO llm_call (id, project_id, lane, model, funding,
                                               input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
                                               cost_usd, price_book_version, latency_ms, subject_kind, subject_id,
                                               created_at)
-                        VALUES (:id, :projectId, :lane, :model, :tier, :funding,
+                        VALUES (:id, :projectId, :lane, :model, :funding,
                                 :in, :out, :cacheRead, :cacheWrite,
                                 :cost, :priceBookVersion, :latency, :subjectKind, :subjectId,
                                 :createdAt::timestamptz)
@@ -33,7 +33,6 @@ public class LlmCallWriteRepository {
                 .param("projectId", row.projectId())
                 .param("lane", row.lane())
                 .param("model", row.model())
-                .param("tier", row.serviceTier())
                 .param("funding", row.funding())
                 .param("in", row.inputTokens())
                 .param("out", row.outputTokens())

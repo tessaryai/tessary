@@ -11,12 +11,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = "tessary.metering")
 public record MeteringProperties(
 
-        /**
-         * Off by default: storage's billable basis (rows, bytes or retention-days) is an undecided billing question.
-         * The other four units always meter.
-         */
-        @DefaultValue("false") boolean storageEnabled,
-
         /** SKIP LOCKED spreads the rest across instances. */
         @DefaultValue("50") int claimBatch,
 

@@ -2,12 +2,10 @@
 package ai.tessary.llm;
 
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
-import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -18,8 +16,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class ProjectModelSettingRepository {
 
-    private static final String COLS =
-            "project_id, lane, model_key, service_tier, reasoning_effort, created_at, updated_at";
+    private static final String COLS = "project_id, lane, model_key, created_at, updated_at";
 
     private final JdbcClient jdbc;
 
@@ -36,23 +33,16 @@ public class ProjectModelSettingRepository {
     }
 
     /** {@code created_at} survives an update so the row keeps its opt-in date. */
-    public void upsert(
-            String projectId, ModelLane lane, String modelKey, ServiceTier tier, @Nullable String reasoningEffort) {
+    public void upsert(String projectId, ModelLane lane, String modelKey) {
         String now = Instant.now().toString();
         jdbc.sql("""
-                INSERT INTO project_model_setting
-                    (project_id, lane, model_key, service_tier, reasoning_effort, created_at, updated_at)
-                VALUES (:pid, :lane, :model, :tier, :effort, :now, :now)
-                ON CONFLICT (project_id, lane) DO UPDATE
-                   SET model_key = :model, service_tier = :tier, reasoning_effort = :effort, updated_at = :now
+                INSERT INTO project_model_setting (project_id, lane, model_key, created_at, updated_at)
+                VALUES (:pid, :lane, :model, :now, :now)
+                ON CONFLICT (project_id, lane) DO UPDATE SET model_key = :model, updated_at = :now
                 """)
                 .param("pid", projectId)
                 .param("lane", lane.wire())
                 .param("model", modelKey)
-                .param("tier", tier.wireName())
-                // Written even when null, so a stale effort never stays attached to a newly chosen model that may not
-                // accept it.
-                .param("effort", reasoningEffort)
                 .param("now", now)
                 .update();
     }
@@ -70,8 +60,6 @@ public class ProjectModelSettingRepository {
                 rs.getString("project_id"),
                 ModelLane.fromWire(rs.getString("lane")),
                 rs.getString("model_key"),
-                ServiceTier.fromWire(rs.getString("service_tier")),
-                rs.getString("reasoning_effort"),
                 rs.getString("created_at"),
                 rs.getString("updated_at"));
     }

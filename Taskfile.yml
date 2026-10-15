@@ -238,12 +238,12 @@ tasks:
       - bash scripts/check-migrations-populated.sh {{.CLI_ARGS}}
 
   contract:check:
-    desc: Assert the vendored evals contract is internally consistent (schema $id parses; validator files present; VERSION names a release).
+    desc: Assert the vendored evals contract is internally consistent (schema $id parses; VERSION names a release).
     cmds:
       - bash scripts/check-contract-consistency.sh
 
   contract:plugin:
-    desc: "Gate the vendored evals plugin: run the validator's rules (contract/tests) and prove the vendored copy still matches tessaryai/plugins@main. The plugins repo is public and runs no PR CI on purpose, so this is where that enforcement lives. Offline the freshness half warns and passes; in CI it fails."
+    desc: "Prove the vendored evals contract still matches tessaryai/plugins@main. The plugins repo is public and runs no PR CI on purpose, so this is where that enforcement lives. Offline it warns and passes; in CI it fails."
     cmds:
       - bash scripts/check-vendored-plugin.sh
 

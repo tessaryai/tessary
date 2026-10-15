@@ -27,24 +27,22 @@ public final class RedactionEngine {
     private RedactionEngine() {}
 
     public sealed interface CompiledRule permits RegexRule, CorpusRule {
-        String name();
-
         String replacement();
     }
 
     /** Replacement substituted literally. */
-    public record RegexRule(String name, Pattern pattern, String replacement) implements CompiledRule {}
+    public record RegexRule(Pattern pattern, String replacement) implements CompiledRule {}
 
     /**
      * The one rule kind that reports what it matched: a credential redacted on the way in is what a leak detector reads
      * afterwards.
      */
-    public record CorpusRule(String name, GitleaksCorpus corpus, String replacement) implements CompiledRule {}
+    public record CorpusRule(GitleaksCorpus corpus, String replacement) implements CompiledRule {}
 
     /** Null when the regex does not compile. The replacement is literal, so {@code $} is substituted verbatim. */
-    public static @Nullable CompiledRule compile(String name, String regex, String replacement) {
+    public static @Nullable CompiledRule compile(String regex, String replacement) {
         try {
-            return new RegexRule(name, Pattern.compile(regex), replacement);
+            return new RegexRule(Pattern.compile(regex), replacement);
         } catch (PatternSyntaxException e) {
             return null;
         }
@@ -285,10 +283,10 @@ public final class RedactionEngine {
         List<CompiledRule> compiled = new ArrayList<>(rows.size());
         for (RedactionRuleRow row : rows) {
             if (row.builtIn() && row.pattern().startsWith(GitleaksCorpus.PATTERN_SCHEME)) {
-                compiled.add(new CorpusRule(row.name(), GitleaksCorpus.get(), row.replacement()));
+                compiled.add(new CorpusRule(GitleaksCorpus.get(), row.replacement()));
                 continue;
             }
-            CompiledRule rule = compile(row.name(), row.pattern(), row.replacement());
+            CompiledRule rule = compile(row.pattern(), row.replacement());
             if (rule != null) compiled.add(rule);
         }
         return compiled;

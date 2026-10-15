@@ -4,7 +4,6 @@ package ai.tessary.llm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
@@ -20,20 +19,19 @@ import org.springframework.boot.test.context.SpringBootTest;
 record ProjectModelSettingRepositoryTest(TenantService tenants, ProjectModelSettingRepository repo) {
 
     @Test
-    void upsertRoundTripsEveryLaneAndOnlineTier() {
+    void upsertRoundTripsEveryLane() {
         var fix = TenantFixture.bootstrap(tenants, "model-setting-roundtrip");
         String pid = fix.project().id();
 
-        // Every lane and every ONLINE tier must satisfy the table's CHECK constraints — this is what
-        // catches a lane added in Java but not in the migration's allow-list.
+        // Every lane must satisfy the table's CHECK constraint — this is what catches a lane added in
+        // Java but not in the migration's allow-list.
         for (ModelLane lane : ModelLane.values()) {
-            repo.upsert(pid, lane, "amazon.nova-2-lite", ServiceTier.FLEX, null);
+            repo.upsert(pid, lane, "amazon.nova-2-lite");
         }
         List<ProjectModelSetting> rows = repo.findByProject(pid);
         assertEquals(ModelLane.values().length, rows.size());
         for (ProjectModelSetting row : rows) {
             assertEquals("amazon.nova-2-lite", row.modelKey());
-            assertEquals(ServiceTier.FLEX, row.serviceTier());
         }
     }
 
@@ -42,8 +40,8 @@ record ProjectModelSettingRepositoryTest(TenantService tenants, ProjectModelSett
         var fix = TenantFixture.bootstrap(tenants, "model-setting-replace");
         String pid = fix.project().id();
 
-        repo.upsert(pid, ModelLane.RCA, "amazon.nova-2-lite", ServiceTier.FLEX, null);
-        repo.upsert(pid, ModelLane.RCA, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
+        repo.upsert(pid, ModelLane.RCA, "amazon.nova-2-lite");
+        repo.upsert(pid, ModelLane.RCA, "anthropic.claude-haiku-4-5");
 
         // Exactly one row, and it is the second write: (project, lane) is the primary key, so two
         // upserts onto RCA land on the same row rather than adding to it. Creating the project writes
@@ -57,7 +55,6 @@ record ProjectModelSettingRepositoryTest(TenantService tenants, ProjectModelSett
         ProjectModelSetting rca =
                 rows.stream().filter(r -> r.lane() == ModelLane.RCA).findFirst().orElseThrow();
         assertEquals("anthropic.claude-haiku-4-5", rca.modelKey());
-        assertEquals(ServiceTier.STANDARD, rca.serviceTier());
     }
 
     @Test
@@ -65,9 +62,9 @@ record ProjectModelSettingRepositoryTest(TenantService tenants, ProjectModelSett
         var fix = TenantFixture.bootstrap(tenants, "model-setting-delete");
         var sibling = TenantFixture.bootstrap(tenants, "model-setting-delete-sibling");
         String pid = fix.project().id();
-        repo.upsert(pid, ModelLane.RCA, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
-        repo.upsert(pid, ModelLane.TRIAGE, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
-        repo.upsert(sibling.project().id(), ModelLane.RCA, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
+        repo.upsert(pid, ModelLane.RCA, "anthropic.claude-haiku-4-5");
+        repo.upsert(pid, ModelLane.TRIAGE, "anthropic.claude-haiku-4-5");
+        repo.upsert(sibling.project().id(), ModelLane.RCA, "anthropic.claude-haiku-4-5");
 
         repo.delete(pid, ModelLane.RCA);
         repo.delete(pid, ModelLane.RCA); // a no-op when there is no row

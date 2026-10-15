@@ -10,7 +10,6 @@ import {
   Database,
   Filter,
   FileUp,
-  FlaskConical,
   GitBranch,
   Inbox,
   KeyRound,
@@ -19,7 +18,6 @@ import {
   Settings as SettingsIcon,
   Shield,
   ToggleRight,
-  TrendingUp,
   Users,
   Zap,
   type LucideIcon,
@@ -34,11 +32,8 @@ export type NavItem = {
   icon: LucideIcon;
   description?: string;
   keywords?: string[];
-  /** Shown dim for one release; `keywords` only match. */
-  alias?: string;
   /** A route named here wins over another item whose own route it sits under. */
   match?: string[];
-  state?: SurfaceState;
   /** Here, not in a side map, so the sidebar, palette and route table read one filtered list. */
   capability?: CapabilityWire;
 };
@@ -50,7 +45,6 @@ export const TRIAGE_NAV: NavItem = {
   label: "Triage",
   description: "Open cases, worst first, and the findings that are not a case yet.",
   keywords: ["cases", "findings", "inbox", "home", "overview", "worklist", "triage"],
-  alias: 'was "Overview"',
   match: ["cases", "classifiers/findings"],
   icon: Inbox,
 };
@@ -64,7 +58,6 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Traces",
         description: "Every trace, span, and conversation Tessary has received.",
         keywords: ["explore", "telemetry", "spans", "otel", "conversation", "session", "logs"],
-        alias: 'was "Explore"',
         icon: RouteIcon,
       },
       {
@@ -82,7 +75,6 @@ export const NAV_GROUPS: NavGroup[] = [
           "baseline",
           "monitoring",
         ],
-        alias: 'absorbed "Behavior drift"',
         icon: Filter,
       },
       {
@@ -96,38 +88,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-const RESERVED: NavItem[] = [
-  {
-    id: "experiments",
-    label: "Experiments",
-    state: "reserved",
-    description: "A/B prompt and model experiments.",
-    keywords: ["ab", "compare", "trials"],
-    icon: FlaskConical,
-  },
-  {
-    id: "predictions",
-    label: "Predictions",
-    state: "reserved",
-    description: "Predicted quality impact of code changes.",
-    keywords: ["forecast", "impact", "regressions", "changes"],
-    icon: TrendingUp,
-  },
-  {
-    id: "alerts",
-    label: "Notifications",
-    state: "reserved",
-    description: "Notifications on regressions and drift.",
-    keywords: ["alerts", "warnings", "monitors"],
-    icon: Bell,
-  },
-];
-
-export const NAV: NavItem[] = [TRIAGE_NAV, ...NAV_GROUPS.flatMap((g) => g.items), ...RESERVED];
-
-export const LIVE_NAV: NavItem[] = NAV.filter((n) => (n.state ?? "live") === "live");
-
-export const RESERVED_NAV: NavItem[] = NAV.filter((n) => n.state === "reserved");
+export const LIVE_NAV: NavItem[] = [TRIAGE_NAV, ...NAV_GROUPS.flatMap((g) => g.items)];
 
 export const SETTINGS_ICON: LucideIcon = SettingsIcon;
 

@@ -83,16 +83,7 @@ public class MeteringService {
                 from,
                 to,
                 Instant.now().toString(),
-                LlmUsageSliceView.of(llmCalls.orgTotal(orgId, from, to, LlmUsageFilter.NONE), null),
-                llmCalls.byLane(orgId, from, to).stream()
-                        .map(s -> LlmUsageSliceView.of(s, laneLabel(s.key())))
-                        .toList(),
-                llmCalls.byProject(orgId, from, to).stream()
-                        .map(s -> LlmUsageSliceView.of(s, s.label()))
-                        .toList(),
-                llmCalls.byModel(orgId, from, to).stream()
-                        .map(s -> LlmUsageSliceView.of(s, null))
-                        .toList());
+                LlmUsageSliceView.of(llmCalls.orgTotal(orgId, from, to, LlmUsageFilter.NONE), null));
     }
 
     /**
@@ -166,15 +157,6 @@ public class MeteringService {
             return OffsetDateTime.parse(value).toInstant();
         } catch (DateTimeParseException notIso) {
             throw new TessaryException(MeteringError.INVALID_RANGE, notIso);
-        }
-    }
-
-    /** A lane with no {@code ModelLane} behind it falls back to its wire value rather than being dropped. */
-    private static @Nullable String laneLabel(@Nullable String wire) {
-        try {
-            return ModelLane.fromWire(wire).label();
-        } catch (TessaryException unknownLane) {
-            return null;
         }
     }
 }

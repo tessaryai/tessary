@@ -4,15 +4,14 @@ package ai.tessary.classifier.detector;
 import java.util.regex.Pattern;
 
 /**
- * The default {@link NlPhraseCompiler}: the phrase is literal text, never a regex. Whitespace runs become {@code \s+}
- * and everything else is quoted, so the pattern cannot backtrack catastrophically. A future free-form regex path must
- * not bypass this with {@link Pattern#compile} on untrusted input.
+ * Compiles a phrase as literal text, never a regex. Whitespace runs become {@code \s+} and everything else is quoted,
+ * so the pattern cannot backtrack catastrophically. A future free-form regex path must not bypass this with
+ * {@link Pattern#compile} on untrusted input.
  */
-public final class DeterministicNlPhraseCompiler implements NlPhraseCompiler {
+public final class DeterministicNlPhraseCompiler {
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
-    @Override
     public Pattern compile(String nlPhrase, boolean wordBoundary) {
         String collapsed = WHITESPACE.matcher(nlPhrase.strip()).replaceAll(" ");
         String[] tokens = collapsed.split(" ");

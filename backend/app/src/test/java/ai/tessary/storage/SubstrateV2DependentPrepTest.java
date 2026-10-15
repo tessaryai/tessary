@@ -3,33 +3,17 @@ package ai.tessary.storage;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The dependent side of the substrate: producer-key columns on tables that point at spans, and the widened
- * subject/grain vocabulary. Asserts the post-teardown end state: surrogates gone, producer keys under canonical
- * names. The widening is asserted as constraint text, since a CHECK rejecting {@code 'span'} is broken whether or not
- * a row inserts one.
+ * The dependent side of the substrate: producer-key columns on tables that point at spans. Asserts the
+ * post-teardown end state: surrogates gone, producer keys under canonical names.
  */
 @SpringBootTest
 record SubstrateV2DependentPrepTest(JdbcClient jdbc) {
-
-    // The four grain CHECKs went with their tables; a span-grain subject carrying its trace id now has one guard, the
-    // next test.
-
-    @Test
-    @DisplayName("failure_mode_instance's span branch demands both of its subject columns")
-    void fmiSpanBranchRequiresBoth() {
-        String def = constraintDef("ck_fmi_subject").replaceAll("\\s+", " ");
-        assertTrue(def.contains("subject_trace_id IS NOT NULL"));
-        assertTrue(def.contains("subject_span_id IS NOT NULL"));
-        assertTrue(def.contains("'span'"));
-    }
 
     @ParameterizedTest(name = "{0} carries its resolver terminal-state predicate")
     @CsvSource({
@@ -51,13 +35,6 @@ record SubstrateV2DependentPrepTest(JdbcClient jdbc) {
                 .param("t", table)
                 .param("c", column)
                 .query(Integer.class)
-                .single();
-    }
-
-    private String constraintDef(String name) {
-        return jdbc.sql("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = :n")
-                .param("n", name)
-                .query(String.class)
                 .single();
     }
 

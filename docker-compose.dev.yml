@@ -1,6 +1,6 @@
 # Development stack: postgres (localhost:5433), backend (Spring Boot + devtools), frontend (Vite HMR) and
 # caddy on TESSARY_DEV_PORT (default 80), with source bind-mounted and build caches in named volumes.
-# Usage: `task docker:dev:tmux`, or `docker compose -f docker-compose.dev.yml up -d --build`.
+# Usage: `task dev`, or `docker compose -f docker-compose.dev.yml up -d --build`.
 # A non-80 TESSARY_DEV_PORT needs a matching TESSARY_DEV_ORIGIN; scripts/lib/dev-choices.sh derives it.
 
 # Pinned so the stack is identical from any directory, including git worktrees.
@@ -45,7 +45,7 @@ services:
         -Dspring-boot.run.jvmArguments=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     expose:
       - "8080"
-      # Internal OTLP/gRPC; inert unless tessary.ingest.otlp.enabled=true with a grpc transport.
+      # Internal OTLP/gRPC; inert unless tessary.ingest.otlp.transport is grpc or both.
       - "4317"
     ports:
       # JDWP is unauthenticated code execution, so the publish is loopback-only. The agent stays on *:5005
@@ -75,11 +75,10 @@ services:
       SPRING_DEVTOOLS_LIVERELOAD_ENABLED: "false"
       # Inert until MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED=true and the `observability` profile is up;
       # `task dev:profiling` sets both.
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
       OTEL_SERVICE_NAME: tessary-backend
       OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_NAME:-development},service.namespace=tessary
       # Local dev runs profile-less, so the OTLP endpoint wiring in application-production.yaml is set here via
-      # relaxed binding. Spring Boot reads these, not the OTEL_* vars; still inert until export is enabled.
+      # relaxed binding; still inert until export is enabled.
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://alloy:4317
       MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_TRANSPORT: grpc

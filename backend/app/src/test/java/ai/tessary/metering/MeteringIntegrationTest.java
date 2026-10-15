@@ -162,41 +162,6 @@ record MeteringIntegrationTest(
         assertEquals(hourlySum, daily.get(0).value(), "the day rollup equals the sum of its hourly rollups");
     }
 
-    /**
-     * {@code storage} is a level: a {@code COUNT(*)} of span rows at rest as of the bucket end. Re-snapshotting
-     * overwrites, never accumulates.
-     */
-    @Test
-    void metersStorageAsASnapshotLevel_idempotently() {
-        var fix = TenantFixture.bootstrap(tenants, "metering-storage");
-        String pid = fix.project().id();
-
-        Instant bucketStart = Instant.now().truncatedTo(ChronoUnit.HOURS).minus(2, ChronoUnit.HOURS);
-        String inBucket = bucketStart.plus(10, ChronoUnit.MINUTES).toString();
-        String to = bucketStart.plus(1, ChronoUnit.HOURS).toString();
-
-        observationAt(pid, newSession(pid, inBucket), inBucket);
-        observationAt(pid, newSession(pid, inBucket), inBucket);
-        observationAt(pid, newSession(pid, inBucket), inBucket);
-
-        assertEquals(3, rollups.snapshotStorageRows(pid, to), "three rows at rest");
-
-        jobs.scheduleDueBuckets(bucketStart.toString(), MeteringWorker.BUCKET_HOUR);
-        var job = jobs.claimBatch(50, 600).stream()
-                .filter(j -> j.projectId().equals(pid) && j.bucketStart().equals(bucketStart.toString()))
-                .findFirst()
-                .orElseThrow();
-        worker.meterOne(job);
-        worker.meterOne(job);
-
-        String from = bucketStart.minus(1, ChronoUnit.HOURS).toString();
-        String until = bucketStart.plus(1, ChronoUnit.HOURS).toString();
-        List<UsageBucket> series =
-                meteringService.projectTimeseries(pid, UsageUnit.STORAGE.wire(), "hour", from, until);
-        assertEquals(1, series.size(), "one storage bucket");
-        assertEquals(3, series.get(0).value(), "storage level is the 3 rows at rest, stable across the re-run");
-    }
-
     private void meterClosedBucket(String pid, String bucketStart, String granularity) {
         jobs.scheduleDueBuckets(bucketStart, granularity);
         var job = jobs.claimBatch(50, 600).stream()
@@ -347,7 +312,6 @@ record MeteringIntegrationTest(
                 projectId,
                 lane,
                 model,
-                null,
                 funding,
                 in,
                 out,
@@ -370,7 +334,6 @@ record MeteringIntegrationTest(
             long cacheRead,
             long cacheWrite,
             String cost,
-            String platform,
             String byo,
             long unpriced) {
         return new LlmUsageSliceView(
@@ -383,7 +346,6 @@ record MeteringIntegrationTest(
                 cacheWrite,
                 in + out + cacheRead + cacheWrite,
                 new BigDecimal(cost),
-                new BigDecimal(platform),
                 new BigDecimal(byo),
                 unpriced);
     }
@@ -403,39 +365,29 @@ record MeteringIntegrationTest(
     }
 
     private static LlmUsageSliceView windowTotal() {
-        return slice("", null, 4, 1310, 160, 10, 5, "0.3500000000", "0.1000000000", "0.2500000000", 1);
+        return slice("", null, 4, 1310, 160, 10, 5, "0.3500000000", "0.2500000000", 1);
     }
 
     private static LlmUsageSliceView triageSide(String key, @Nullable String label) {
-        return slice(key, label, 3, 310, 160, 10, 5, "0.3500000000", "0.1000000000", "0.2500000000", 0);
+        return slice(key, label, 3, 310, 160, 10, 5, "0.3500000000", "0.2500000000", 0);
     }
 
     /** Unpriced: adds tokens and a blind spot, never cost. */
     private static LlmUsageSliceView observerSide(String key, @Nullable String label) {
-        return slice(key, label, 1, 1000, 0, 0, 0, "0", "0", "0", 1);
+        return slice(key, label, 1, 1000, 0, 0, 0, "0", "0", 1);
     }
 
     /**
-     * The {@code llm_tokens} breakdown by lane, project and model: only this org's calls in the window; unpriced
-     * calls count as unpriced, not free; no model groups under the empty key; an unknown lane keeps its row.
+     * The live usage total: only this org's calls in the window; unpriced calls count as unpriced, not free.
      */
     @Test
-    void theLedgerBreakdownCutsTheOrgsWindowByLaneProjectAndModel() {
+    void theLedgerTotalCountsOnlyTheOrgsWindow() {
         Ledger l = seedLedger();
 
         LlmUsageView view =
                 billing.getLlmUsage(l.owner(), l.orgSlug(), DAY_1, WINDOW_END).data();
 
-        assertEquals(
-                new LlmUsageView(
-                        DAY_1,
-                        WINDOW_END,
-                        view.asOf(),
-                        windowTotal(),
-                        List.of(observerSide("observer", null), triageSide("triage", "Triage")),
-                        List.of(observerSide(l.p2().id(), l.p2().name()), triageSide(l.p1().id(), l.p1().name())),
-                        List.of(observerSide("", null), triageSide("m-1", null))),
-                view);
+        assertEquals(new LlmUsageView(DAY_1, WINDOW_END, view.asOf(), windowTotal()), view);
     }
 
     /**
@@ -533,9 +485,9 @@ record MeteringIntegrationTest(
         String orgId = fix.org().id();
         String pid = fix.project().id();
         String now = Instant.now().toString();
-        rollups.upsert(MetricRollupRow.of(
+        rollups.upsert(new MetricRollupRow(
                 Ids.ulid(), orgId, pid, UsageUnit.INGESTED_SPANS.wire(), 5, "2026-03-10T01:00:00Z", "hour", now));
-        rollups.upsert(MetricRollupRow.of(
+        rollups.upsert(new MetricRollupRow(
                 Ids.ulid(), orgId, pid, UsageUnit.INGESTED_SPANS.wire(), 7, "2026-03-10T00:00:00Z", "day", now));
         TenantContext owner = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
 

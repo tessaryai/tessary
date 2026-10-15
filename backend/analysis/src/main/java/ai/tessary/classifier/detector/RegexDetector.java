@@ -17,8 +17,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * A regex/keyword detector with no per-trace model call. Phrases come only from {@code config_json}, compiled once via
- * {@link NlPhraseCompiler} into a bounded memo cache, and matched within one field per {@link ClassifierField}; a row
- * without phrases matches nothing.
+ * {@link DeterministicNlPhraseCompiler} into a bounded memo cache, and matched within one field per
+ * {@link ClassifierField}; a row without phrases matches nothing.
  */
 public final class RegexDetector implements BuiltInDetector {
 
@@ -28,7 +28,7 @@ public final class RegexDetector implements BuiltInDetector {
     private final ClassifierField defaultField;
     private final String severity;
     private final boolean defaultWordBoundary;
-    private final NlPhraseCompiler compiler;
+    private final DeterministicNlPhraseCompiler compiler;
     private final ObjectMapper mapper;
     private final Map<String, Pattern> compiledCache;
 
@@ -37,7 +37,7 @@ public final class RegexDetector implements BuiltInDetector {
             ClassifierField field,
             String severity,
             boolean wordBoundary,
-            NlPhraseCompiler compiler,
+            DeterministicNlPhraseCompiler compiler,
             ObjectMapper mapper) {
         this.kind = kind;
         this.defaultField = field;

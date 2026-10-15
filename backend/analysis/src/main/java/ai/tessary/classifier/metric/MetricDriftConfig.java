@@ -89,7 +89,7 @@ public record MetricDriftConfig(
     private static final int SETTLE_SECONDS_MAX = 3_600;
     private static final int HIST_BINS_MIN = 64;
     private static final int HIST_BINS_MAX = 1_024;
-    private static final MetricDriftConfig DEFAULTS = new MetricDriftConfig(
+    public static final MetricDriftConfig DEFAULTS = new MetricDriftConfig(
             // Shipping turn without tool would report a symptom it could have named the cause of.
             List.of(Measure.TURN_DURATION, Measure.TOOL_DURATION),
             DEFAULT_WINDOW_TARGET_COUNT,
@@ -110,10 +110,6 @@ public record MetricDriftConfig(
         explainedByFraction = clamp(explainedByFraction, EXPLAINED_BY_FRACTION_MIN, EXPLAINED_BY_FRACTION_MAX);
         settleSeconds = (int) clamp(settleSeconds, SETTLE_SECONDS_MIN, SETTLE_SECONDS_MAX);
         histBins = (int) clamp(histBins, HIST_BINS_MIN, HIST_BINS_MAX);
-    }
-
-    public static MetricDriftConfig defaults() {
-        return DEFAULTS;
     }
 
     public static MetricDriftConfig of(ObjectMapper mapper, @Nullable String configJson) {

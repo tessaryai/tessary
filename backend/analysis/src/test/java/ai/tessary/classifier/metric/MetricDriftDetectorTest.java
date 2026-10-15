@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 class MetricDriftDetectorTest {
 
     /** The shipped operating point, so these tests move when the defaults do. */
-    private static final MetricDriftConfig CONFIG = MetricDriftConfig.defaults();
+    private static final MetricDriftConfig CONFIG = MetricDriftConfig.DEFAULTS;
 
     private static final int SAMPLES = 400;
 

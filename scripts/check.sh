@@ -35,8 +35,7 @@ module-hygiene|scripts/check-module-hygiene.sh|RUN
 license-headers|scripts/check-license-headers.sh|RUN|SPDX header presence over the tree
 pipeline-vocabulary|scripts/check-pipeline-vocabulary.sh|RUN
 contract-consistency|scripts/check-contract-consistency.sh|RUN
-vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:its freshness half fetches tessaryai/plugins and hard-fails on $CI, so per PR it reds on upstream commits; runs via `task contract:plugin`. The offline rules half runs as `vendored-plugin-rules`|declared here only so the completeness assertion can see it
-vendored-plugin-rules|scripts/check-vendored-plugin-rules.sh|RUN|pytest over contract/tests; needs python3 with pyyaml and pytest
+vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:fetches tessaryai/plugins and hard-fails on $CI, so per PR it reds on upstream commits; runs via `task contract:plugin`|declared here only so the completeness assertion can see it
 caddy|scripts/check-caddy.sh|RUN
 compose-artifact|scripts/check-compose-artifact.sh|RUN|docker-compose.yml is also the published OCI install artifact; pure text plus a client-side `docker compose config`
 sandbox-runner|scripts/check-sandbox-runner-launcher.sh|RUN
@@ -160,7 +159,6 @@ if [ -z "$SLICES" ]; then
     _gate pipeline-vocabulary
     _gate contract-consistency
     _gate blob-links
-    _gate vendored-plugin-rules
     _gate caddy
     _gate version-consistency
     _gate compose-artifact

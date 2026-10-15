@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
@@ -185,7 +185,6 @@ function ProjectShell() {
         <Route path="traces/:traceId" element={<TraceDetail />} />
         <Route path="sessions/:sessionId" element={<SessionDetail />} />
         <Route path="classifiers" element={<ClassifiersPage />} />
-        <Route path="classifiers/detectors" element={<CatalogRedirect />} />
         <Route path="classifiers/findings/:findingId" element={<FindingPage />} />
         {/* Static paths above outrank it. */}
         <Route path="classifiers/:classifierId" element={<ClassifierConfigurePage />} />
@@ -205,12 +204,10 @@ function ProjectShell() {
           />
           <Route path="git" element={<GitIntegration />} />
           <Route path="models" element={<Models />} />
-          <Route path="observer" element={<Navigate to="../sources" replace />} />
           <Route
             path="notifications"
             element={<CapabilityGate capability="alerts_enabled"><Notifications /></CapabilityGate>}
           />
-          <Route path="signal-tuning" element={<Navigate to="../../classifiers" replace />} />
           <Route
             path="mcp-tokens"
             element={<CapabilityGate capability="api_access_enabled"><McpTokens /></CapabilityGate>}
@@ -226,44 +223,9 @@ function ProjectShell() {
           <Route path="organization" element={<Organization />} />
           <Route path="workspace" element={<Navigate to="../organization" replace />} />
           <Route path="features" element={<Features />} />
-          <Route path="appearance" element={<Navigate to="../organization" replace />} />
-          <Route path="feature-flags" element={<Navigate to="../features" replace />} />
           {/* Absolute: a relative `to` resolves against the matched splat and loops. */}
           <Route path="*" element={<ToProjectSegment segment="settings/sources" />} />
         </Route>
-
-        <Route path="overview" element={<Navigate to="../triage" replace />} />
-        <Route path="explore" element={<Navigate to="../traces" replace />} />
-        <Route path="pipeline" element={<Navigate to="../triage" replace />} />
-        <Route path="pipeline/*" element={<ToProjectSegment segment="triage" />} />
-        <Route path="behavior-drift" element={<Navigate to="../classifiers" replace />} />
-        <Route path="repo-sync" element={<Navigate to="../triage" replace />} />
-        <Route path="observer" element={<Navigate to="../triage" replace />} />
-        <Route path="graders" element={<Navigate to="../triage" replace />} />
-        <Route path="graders/:graderId" element={<Navigate to="../triage" replace />} />
-        <Route path="review" element={<Navigate to="../triage" replace />} />
-        <Route path="review/:queueId" element={<Navigate to="../triage" replace />} />
-        <Route path="runs/batch/:runId" element={<Navigate to="../triage" replace />} />
-        <Route path="datasets/:datasetId" element={<Navigate to="../triage" replace />} />
-        <Route path="datasets/new" element={<Navigate to="../triage" replace />} />
-        <Route path="runs" element={<Navigate to="../triage" replace />} />
-        <Route path="runs/:runId" element={<Navigate to="../triage" replace />} />
-
-        <Route path="signals" element={<Navigate to="../classifiers" replace />} />
-        <Route path="failure-modes" element={<Navigate to="../triage" replace />} />
-        <Route path="issues" element={<Navigate to="../triage" replace />} />
-        <Route path="intents" element={<Navigate to="../triage" replace />} />
-        <Route path="results" element={<Navigate to="../triage" replace />} />
-        <Route path="entries/:entryId" element={<Navigate to="../traces" replace />} />
-        <Route path="call-sites" element={<Navigate to="../triage" replace />} />
-        <Route path="chains" element={<Navigate to="../triage" replace />} />
-        <Route path="invariants" element={<Navigate to="../triage" replace />} />
-        <Route path="packs" element={<Navigate to="../triage" replace />} />
-        <Route path="taxonomy" element={<Navigate to="../triage" replace />} />
-        <Route path="judge" element={<Navigate to="../triage" replace />} />
-        <Route path="datasets" element={<Navigate to="../triage" replace />} />
-        <Route path="library" element={<Navigate to="../triage" replace />} />
-        <Route path="sources" element={<Navigate to="../settings/sources" replace />} />
 
         {/* Triage is never gated, so this cannot loop. */}
         <Route path="*" element={<ToProjectSegment segment="triage" />} />
@@ -271,13 +233,6 @@ function ProjectShell() {
       </Suspense>
     </ShellChrome>
   );
-}
-
-/** Slack links and bookmarks carry `?classifier=<id>` from the retired catalog. */
-function CatalogRedirect() {
-  const [params] = useSearchParams();
-  const id = params.get("classifier");
-  return <ToProjectSegment segment={id ? `classifiers/${encodeURIComponent(id)}` : "classifiers"} />;
 }
 
 /** Absolute tenant-scoped redirect, for splat routes where relative `..` is ambiguous. */

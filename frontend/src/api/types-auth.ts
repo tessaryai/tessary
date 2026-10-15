@@ -174,7 +174,7 @@ export interface RevokeKeyResponse {
   revoked: boolean;
 }
 
-export type AuditAction = "created" | "rotated" | "revoked";
+type AuditAction = "created" | "rotated" | "revoked";
 
 /** One audit-trail entry; newest-first, capped at 200 rows server-side. */
 export interface ApiKeyAudit {

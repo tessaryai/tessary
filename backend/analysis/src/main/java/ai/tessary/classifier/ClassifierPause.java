@@ -16,9 +16,6 @@ public record ClassifierPause(String reason, Instant pausedAt) {
 
     public static final String NO_PROVIDER = "no_provider";
 
-    /** The org's own key answered 402, or the deployment's provider has no credit left for the org. */
+    /** The org has no credit left on the provider the lane runs on: its own key answered 402. */
     public static final String NO_CREDIT = "no_credit";
-
-    /** Not the org's to fix: lifts when a later call goes through. */
-    public static final String PLATFORM_UNAVAILABLE = "platform_unavailable";
 }

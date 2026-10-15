@@ -116,15 +116,15 @@ function usdDecimals(v: number): number {
   return a >= 1 ? 2 : a >= 0.01 ? 3 : 4;
 }
 
-export function seconds(ms: number, decimals = secondsDecimals(ms)): string {
+function seconds(ms: number, decimals = secondsDecimals(ms)): string {
   return `${(ms / 1000).toFixed(decimals)} s`;
 }
 
-export function dollars(v: number, decimals = usdDecimals(v)): string {
+function dollars(v: number, decimals = usdDecimals(v)): string {
   return `$${v.toFixed(decimals)}`;
 }
 
-export function formatValue(card: ChartCard, v: number): string {
+function formatValue(card: ChartCard, v: number): string {
   if (card.kind === "count") return Math.round(v).toLocaleString("en-US");
   if (card.unit === "ms") return seconds(v);
   if (card.unit === "usd") return dollars(v);
@@ -367,7 +367,7 @@ export function callersText(t: ChartToolOption): string {
   return `All call sites. Called by ${plural(t.callers.length, "call site", "call sites")}.`;
 }
 
-export function waitingWords(reason: string | null): string {
+function waitingWords(reason: string | null): string {
   if (reason === "no_schema" || reason === "waiting_on_schemas") return "Waiting for a schema";
   if (reason === "not_set_up") return "Waiting for setup";
   if (reason === "not_scoring") return "Not scoring";

@@ -13,7 +13,7 @@ export interface ApiResponse<T> {
   data: T | null;
 }
 
-export type ResponseMeta = S["ResponseMeta"];
+type ResponseMeta = S["ResponseMeta"];
 export type ErrorBody = S["ErrorBody"];
 
 export class ApiError extends Error {
@@ -74,7 +74,7 @@ export type ChartCard = Omit<S["ChartCard"], "kind" | "unit" | "arming"> & {
   unit: "fraction" | "ms" | "usd" | "count";
   arming: ChartArming | null;
 };
-export type ChartArming = Omit<S["ArmingView"], "confidence"> & { confidence: "high" | "any" };
+type ChartArming = Omit<S["ArmingView"], "confidence"> & { confidence: "high" | "any" };
 /**
  * A rate or range point merges hours until about 500 items or a day; a count point is a fixed bucket,
  * zero included. `open` marks the last point while it fills.
@@ -202,14 +202,14 @@ export type SearchResults = S["GlobalSearchView"];
 // ---- Findings ----
 // springdoc types these discriminators as bare `string`, so each is narrowed here.
 
-export type BehaviorCauseKind =
+type BehaviorCauseKind =
   | "distribution_shift"
   | "rate_shift"
   | "armed_window"
   | "malformed_rate"
   | "groundedness_rate";
 
-export type BehaviorFindingStatus = "open" | "closed";
+type BehaviorFindingStatus = "open" | "closed";
 
 /** The two acted-on outcomes. The third outcome is doing nothing, which posts nothing. */
 export type BehaviorResolutionAction = "expected" | "not_expected";
@@ -222,16 +222,16 @@ export type BehaviorFindings = Omit<S["BehaviorFindingsView"], "findings"> & {
  * What triage concluded about the claim, never its impact. `positive` opens a case, `negative` closes
  * the finding. A run that could not settle it records no verdict; recurrence recovers a wrong close.
  */
-export type TriageVerdict = "positive" | "negative";
+type TriageVerdict = "positive" | "negative";
 
 /** Sent by the server, which owns the verdict-to-action mapping. */
-export type TriageAction = "opened_case" | "closed";
+type TriageAction = "opened_case" | "closed";
 
 /**
  * `pending` is un-scheduled, not un-ruled. `failed` comes from the triage job: a run that gave up
  * leaves the finding identical to one still running.
  */
-export type TriageStatus = "pending" | "in_flight" | "done" | "failed";
+type TriageStatus = "pending" | "in_flight" | "done" | "failed";
 
 /** A second press lands on the existing job. */
 export type BehaviorAnalysis = S["BehaviorAnalysisView"];

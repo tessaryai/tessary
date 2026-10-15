@@ -26,7 +26,7 @@ export function useSessionSpans(sessionId: string | null | undefined) {
 }
 
 /** Every span, grouped by which trace it belongs to — the shape every session view groups by. */
-export function groupSpansByTrace(spans: Span[]): Map<string, Span[]> {
+function groupSpansByTrace(spans: Span[]): Map<string, Span[]> {
   const out = new Map<string, Span[]>();
   for (const s of spans) {
     const key = s.trace_id;

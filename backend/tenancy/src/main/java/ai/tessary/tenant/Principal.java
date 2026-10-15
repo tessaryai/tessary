@@ -6,7 +6,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Any actor: {@code human} (WorkOS-backed), {@code agent} or {@code service}. The latter two have no WorkOS id or email
- * and may name the {@code parentPrincipalId} they act for. {@code status} gates access.
+ * and may name the {@code parentPrincipalId} they act for.
  */
 public record Principal(
         String id,
@@ -16,7 +16,6 @@ public record Principal(
         @JsonProperty("avatar_url") @Nullable String avatarUrl,
         String kind,
         @JsonProperty("parent_principal_id") @Nullable String parentPrincipalId,
-        String status,
         @Nullable String attributes,
         @JsonProperty("created_at") String createdAt,
         @JsonProperty("last_seen_at") @Nullable String lastSeenAt) {
@@ -29,14 +28,7 @@ public record Principal(
         public static final String SERVICE = "service";
     }
 
-    public static final class Status {
-        private Status() {}
-
-        public static final String ACTIVE = "active";
-        public static final String SUSPENDED = "suspended";
-    }
-
-    /** Active, with no parent. */
+    /** No parent. */
     public static Principal human(
             String id,
             String workosUserId,
@@ -46,16 +38,6 @@ public record Principal(
             String createdAt,
             @Nullable String lastSeenAt) {
         return new Principal(
-                id,
-                workosUserId,
-                email,
-                displayName,
-                avatarUrl,
-                Kind.HUMAN,
-                null,
-                Status.ACTIVE,
-                "{}",
-                createdAt,
-                lastSeenAt);
+                id, workosUserId, email, displayName, avatarUrl, Kind.HUMAN, null, "{}", createdAt, lastSeenAt);
     }
 }

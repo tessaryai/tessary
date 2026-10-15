@@ -29,8 +29,7 @@ public class MeteringController {
 
     /**
      * Both bounds required. {@code granularity} is {@code hour} (default) or {@code day}; {@code unit} is
-     * {@code ingested_spans|l1_evals|l2_evals|llm_tokens|storage}; anything else is 422, including the pre-2026-08
-     * names. {@code storage} is empty unless {@code tessary.metering.storage-enabled}.
+     * {@code ingested_spans|ingested_traces|l1_evals}; anything else is 422.
      */
     @GetMapping("/timeseries")
     public ApiResponse<UsageTimeseriesView> timeseries(

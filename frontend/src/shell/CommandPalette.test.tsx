@@ -100,7 +100,7 @@ describe("opening", () => {
 });
 
 describe("what it offers", () => {
-  it("lists only the settings sections the org's capabilities allow, and roadmap slots as not runnable", async () => {
+  it("lists only the settings sections the org's capabilities allow", async () => {
     renderPalette();
     openPalette();
 
@@ -112,9 +112,6 @@ describe("what it offers", () => {
       expect.stringContaining("Vitals"),
     ]);
     expect(screen.queryByText("Settings · MCP tokens")).toBeNull();
-    const soon = screen.getByText("Experiments").closest("button")!;
-    expect((soon as HTMLButtonElement).disabled).toBe(true);
-    expect(within(soon).getByText("Soon")).toBeTruthy();
   });
 
   it("adds a gated section once its capability is on", async () => {

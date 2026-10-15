@@ -7,7 +7,7 @@ import { SETTINGS_ICON } from "./nav";
 import type { NavItem, SettingsSection } from "./nav";
 import type { RecentEntry } from "./recents";
 
-export type CommandGroup = "Results" | "Recent" | "Navigation" | "Settings" | "Actions" | "Coming soon";
+export type CommandGroup = "Results" | "Recent" | "Navigation" | "Settings" | "Actions";
 
 export type Command = {
   id: string;
@@ -16,9 +16,7 @@ export type Command = {
   icon?: ReactNode;
   hint?: string;
   keywords?: string[];
-  alias?: string;
-  disabled?: boolean;
-  run?: () => void;
+  run: () => void;
   /** Server "Results" commands only. */
   result?: {
     type: SearchHitType;
@@ -33,7 +31,6 @@ export type CommandContext = {
   projectBase: string;
   nav: NavItem[];
   settings: SettingsSection[];
-  reserved: NavItem[];
   isPathReachable: (path: string) => boolean;
   recents: RecentEntry[];
   openProjectSwitcher: () => void;
@@ -66,7 +63,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
       icon: navIcon(n.icon),
       hint: n.description,
       keywords: n.keywords,
-      alias: n.alias,
       run: () => ctx.navigate(`${ctx.projectBase}${n.id}`),
     });
   }
@@ -91,18 +87,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
       run: ctx.openProjectSwitcher,
     },
   );
-
-  for (const r of ctx.reserved) {
-    cmds.push({
-      id: `soon:${r.id}`,
-      label: r.label,
-      group: "Coming soon",
-      icon: navIcon(r.icon),
-      hint: r.description,
-      keywords: r.keywords,
-      disabled: true,
-    });
-  }
 
   return cmds;
 }
@@ -135,7 +119,7 @@ export function searchHitToCommand(
   };
 }
 
-const GROUP_ORDER: CommandGroup[] = ["Results", "Recent", "Navigation", "Settings", "Actions", "Coming soon"];
+const GROUP_ORDER: CommandGroup[] = ["Results", "Recent", "Navigation", "Settings", "Actions"];
 
 export function filterCommands(cmds: Command[], query: string): { group: CommandGroup; items: Command[] }[] {
   const q = query.trim().toLowerCase();

@@ -29,7 +29,7 @@ record TelemetryCountsIntegrationTest(MetricRollupRepository rollups, JdbcClient
     }
 
     private void rollup(TenantFixture.Setup tenant, UsageUnit unit, long value, String bucketStart, String grain) {
-        rollups.upsert(MetricRollupRow.of(
+        rollups.upsert(new MetricRollupRow(
                 Ids.ulid(),
                 tenant.org().id(),
                 tenant.project().id(),

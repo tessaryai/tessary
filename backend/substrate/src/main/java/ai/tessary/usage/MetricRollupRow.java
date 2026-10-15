@@ -17,20 +17,4 @@ public record MetricRollupRow(
         long value,
         @JsonProperty("bucket_start") String bucketStart,
         @JsonProperty("granularity") String granularity,
-        @Nullable String dimensions,
-        @Nullable String attributes,
-        @JsonProperty("created_at") String createdAt) {
-
-    public static MetricRollupRow of(
-            String id,
-            String orgId,
-            @Nullable String projectId,
-            String metric,
-            long value,
-            String bucketStart,
-            String granularity,
-            String createdAt) {
-        return new MetricRollupRow(
-                id, orgId, projectId, metric, value, bucketStart, granularity, "{}", "{}", createdAt);
-    }
-}
+        @JsonProperty("created_at") String createdAt) {}

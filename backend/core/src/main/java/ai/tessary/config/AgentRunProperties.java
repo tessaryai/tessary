@@ -12,7 +12,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = "tessary.agentrun")
 public record AgentRunProperties(
 
-        /** {@code e2b} (the launcher sidecar) or {@code docker}. */
+        /** Which {@code AgentRunSandbox} runs the agent: {@code e2b} (the launcher sidecar). */
         @DefaultValue("e2b") String sandbox,
 
         @DefaultValue("") String launcherUrl,

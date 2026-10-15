@@ -20,11 +20,6 @@ export function timeAgo(iso: string): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()} ${hh}:${mm}`;
 }
 
-/** IDs truncate the tail, never the head (constitution rule 5). */
-export function truncateId(id: string, keep = 8): string {
-  return id.length <= keep ? id : `${id.slice(0, keep)}…`;
-}
-
 /** The detector tag on a case's meta line: the classifiers' own label, so a case and its finding agree. */
 export { detectorLabel } from "../classifiers/shared";
 

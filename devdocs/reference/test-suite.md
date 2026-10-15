@@ -19,8 +19,7 @@ rg -l '@SpringBootTest' backend/app/src/test --glob '*Test.java' | wc -l
 ```
 
 Also gated (not in those counts): ArchUnit under `app/src/test/.../arch/`,
-`packages/mcp` `node --test` (the `mcp-bridge` row),
-`contract/tests` (the `vendored-plugin-rules` row), and live ITs (`*LiveIT.java`).
+`packages/mcp` `node --test` (the `mcp-bridge` row), and live ITs (`*LiveIT.java`).
 `JevDecisionClientLiveIT` (the frustration classifier's decision call) is one of those live ITs: it
 skips unless `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, runs each gateway only with its own
 key, and is run from `backend/` with `mvn test -pl llm-runtime -Dtest=JevDecisionClientLiveIT`.
@@ -33,7 +32,7 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (17 checks): backend `mvn verify`, frontend, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, vendored-plugin-rules, classifier-quality-doc, blob-links, module-hygiene, license-headers, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact. The manifest in `scripts/check.sh` is the authoritative list: 17 RUN rows of the 22 scripts it declares. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header. `docs-links`, `connect-route`, `selfhost-health`, `required-inputs` and `readme-front-door` were deleted under it, so they have no row there | yes |
+| `task check` | The full gate (16 checks): backend `mvn verify`, frontend, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, classifier-quality-doc, blob-links, module-hygiene, license-headers, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact. The manifest in `scripts/check.sh` is the authoritative list: 16 RUN rows of the 21 scripts it declares. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header. `docs-links`, `connect-route`, `selfhost-health`, `required-inputs` and `readme-front-door` were deleted under it, so they have no row there | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, plus repo-wide license-headers/price-book-contract/compose-artifact | no |
@@ -43,11 +42,8 @@ package under `ai.tessary`) or the literal `frontend`.
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
-**One gate needs host Python tooling.** `vendored-plugin-rules` runs `contract/tests` against the
-vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest`; it says so and
-stops if either is missing. The plugin freshness half (a diff against `tessaryai/plugins@main`) is not in `task check`:
-it runs via `task contract:plugin`. See
-[`contract/tests/README.md`](../../contract/tests/README.md).
+The vendored-contract freshness check (a diff against `tessaryai/plugins@main`) is not in
+`task check`: it runs via `task contract:plugin`.
 
 **A narrowed backend slice is not full `mvn verify`.** It runs spotless + test-compile + the
 package's tests. Static analysis bound to the `verify` phase (SpotBugs, forbidden-apis),
@@ -69,10 +65,9 @@ green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) also
 runs on every PR, and `codeql.yml` runs weekly. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
 so a red check has to be respected rather than enforced.
 
-One gate is deliberately not on that per-PR path: `vendored-plugin`'s freshness half fetches
-`tessaryai/plugins` over the network and hard-fails on `$CI`, so per PR it would red pull requests
-over upstream drift unrelated to the diff. Run `task contract:plugin` before a risky merge. Its
-offline rules half runs per PR as the `vendored-plugin-rules` row.
+One gate is deliberately not on that per-PR path: `vendored-plugin` fetches `tessaryai/plugins`
+over the network and hard-fails on `$CI`, so per PR it would red pull requests over upstream drift
+unrelated to the diff. Run `task contract:plugin` before a risky merge.
 
 For a single test class, go straight to Maven — there is no task for it. `-pl` is the module
 that owns the test (`app` for anything `@SpringBootTest`):

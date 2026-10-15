@@ -538,8 +538,7 @@ the reason both metric classifiers are: §9.
 **`Grain.WINDOW`, dispatched to `ToolErrorSweep`** — the scored unit is a stretch of one tool's
 traffic tested against that tool's own earlier stretch, which is what `Grain` describes. The
 `ClassifierWorker` WINDOW branch splits on the detector kind and peels this off ahead of
-`MetricDriftSweep`, the same way SOP conformance is peeled off to `ConformanceSweep`; falling through
-to the metric sweep instead is what once cost a duplicate set of metric baselines and a duplicate
+`MetricDriftSweep`; falling through to the metric sweep instead is what once cost a duplicate set of metric baselines and a duplicate
 finding per drift. This was `Grain.NONE` for as long as the recompute lived in the case source.
 
 `callSiteFactsRead()` is empty and deliberately so. This reads `tool_call`, `observation.attributes`

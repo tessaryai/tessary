@@ -7,7 +7,7 @@ import { cn } from "./cn";
 
 export type Crumb = { label: ReactNode; to?: string };
 
-export function Breadcrumb({ trail }: { trail: Crumb[] }) {
+function Breadcrumb({ trail }: { trail: Crumb[] }) {
   return (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-small text-muted">
       {trail.map((c, i) => {

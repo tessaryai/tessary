@@ -116,21 +116,11 @@ public class MeteringWorker {
         upsertUnit(job, UsageUnit.INGESTED_SPANS, rollups.countIngestedSpans(job.projectId(), from, to), createdAt);
         upsertUnit(job, UsageUnit.INGESTED_TRACES, rollups.countIngestedTraces(job.projectId(), from, to), createdAt);
         upsertUnit(job, UsageUnit.L1_EVALS, rollups.countL1Evals(job.projectId(), from, to), createdAt);
-        meterStorage(job, to, createdAt);
         jobs.markDone(job.id());
     }
 
-    /**
-     * A level, snapshotted as of the bucket boundary, so last-writer-wins is right. Gated off by default while the
-     * billable basis is undecided.
-     */
-    private void meterStorage(MetricRollupJobRow job, String asOf, String createdAt) {
-        if (!props.storageEnabled()) return; // basis-ratification fence
-        upsertUnit(job, UsageUnit.STORAGE, rollups.snapshotStorageRows(job.projectId(), asOf), createdAt);
-    }
-
     private void upsertUnit(MetricRollupJobRow job, UsageUnit unit, long value, String createdAt) {
-        rollups.upsert(MetricRollupRow.of(
+        rollups.upsert(new MetricRollupRow(
                 Ids.ulid(),
                 job.orgId(),
                 job.projectId(),

@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.llm;
 
-import ai.tessary.llmspi.LaneGroup;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.util.Collections;
-import java.util.EnumMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
- * Adding a Bedrock model is one entry here. Rates live in the versioned {@code price_book}. Capability
- * ({@code agentic}) and offer ({@link #offeredFor}) are separate lists.
+ * Adding a Bedrock model is one entry here. Rates live in the versioned {@code price_book}. Which lanes offer an
+ * {@code agentic} model is {@code LanePriority}'s list.
  */
 public final class BedrockModelProfile {
 
@@ -82,33 +78,10 @@ public final class BedrockModelProfile {
                     true,
                     Endpoint.MANTLE));
 
-    /**
-     * AGENT_VM's Luna and Haiku 4.5 are deliberate exceptions for the cost-dominated triage lane. A model removed from
-     * {@link #PROFILES} must also leave this list.
-     */
-    private static final Map<LaneGroup, List<String>> OFFERED_BY_GROUP = offeredByGroup();
-
-    private static Map<LaneGroup, List<String>> offeredByGroup() {
-        Map<LaneGroup, List<String>> m = new EnumMap<>(LaneGroup.class);
-        m.put(
-                LaneGroup.AGENT_VM,
-                List.of(
-                        "anthropic.claude-sonnet-5-5",
-                        "openai.gpt-5.6-terra",
-                        "openai.gpt-5.6-luna",
-                        "anthropic.claude-haiku-4-5"));
-        return Collections.unmodifiableMap(m);
-    }
-
     private BedrockModelProfile() {}
 
     public static List<ModelDescriptor> platformModels() {
         return PROFILES;
-    }
-
-    /** Keys rather than descriptors: the client already has every descriptor. */
-    public static List<String> offeredFor(LaneGroup group) {
-        return OFFERED_BY_GROUP.getOrDefault(group, List.of());
     }
 
     public static Optional<ModelDescriptor> find(String modelKey) {

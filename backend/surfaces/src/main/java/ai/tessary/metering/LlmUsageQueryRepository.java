@@ -21,8 +21,8 @@ public class LlmUsageQueryRepository {
     }
 
     /**
-     * A non-zero {@code unpricedCalls} means the real cost is higher than shown. Platform and BYO spend must not be
-     * added together.
+     * A non-zero {@code unpricedCalls} means the real cost is higher than shown. {@code byoCostUsd} is the part of
+     * {@code costUsd} the customer's own provider keys paid for.
      */
     public record UsageSlice(
             @Nullable String key,
@@ -34,7 +34,6 @@ public class LlmUsageQueryRepository {
             long cacheWriteTokens,
             long totalTokens,
             BigDecimal costUsd,
-            BigDecimal platformCostUsd,
             BigDecimal byoCostUsd,
             long unpricedCalls) {}
 
@@ -60,13 +59,12 @@ public class LlmUsageQueryRepository {
             COALESCE(SUM(c.cache_write_tokens), 0) AS cache_write_tokens,
             COALESCE(SUM(c.total_tokens), 0) AS total_tokens,
             COALESCE(SUM(c.cost_usd), 0) AS cost_usd,
-            COALESCE(SUM(c.cost_usd) FILTER (WHERE c.funding = 'platform'), 0) AS platform_cost_usd,
             COALESCE(SUM(c.cost_usd) FILTER (WHERE c.funding = 'byo'), 0) AS byo_cost_usd,
             COUNT(*) FILTER (WHERE c.cost_usd IS NULL) AS unpriced_calls""";
 
     /**
-     * Lane and model compare against {@code COALESCE(col, '')} because the empty string is a real key that
-     * {@link #byModel} groups under.
+     * Lane and model compare against {@code COALESCE(col, '')} because the empty string is a real key that the model
+     * series groups under.
      */
     private static final String ORG_WINDOW = """
             FROM llm_call c
@@ -86,40 +84,6 @@ public class LlmUsageQueryRepository {
                 to,
                 filter);
         return one.get(0);
-    }
-
-    /**
-     * Unfiltered by design: this lists the filter's choices, so narrowing it would delete every other option. Same for
-     * {@link #byProject} and {@link #byModel}.
-     */
-    public List<UsageSlice> byLane(String orgId, @Nullable String from, @Nullable String to) {
-        return query(
-                "SELECT c.lane AS key, NULL::text AS label, " + AGGREGATES + "\n" + ORG_WINDOW
-                        + "\nGROUP BY c.lane\nORDER BY total_tokens DESC, calls DESC",
-                orgId,
-                from,
-                to,
-                LlmUsageFilter.NONE);
-    }
-
-    public List<UsageSlice> byProject(String orgId, @Nullable String from, @Nullable String to) {
-        return query(
-                "SELECT c.project_id AS key, p.name AS label, " + AGGREGATES + "\n" + ORG_WINDOW
-                        + "\nGROUP BY c.project_id, p.name\nORDER BY total_tokens DESC, calls DESC",
-                orgId,
-                from,
-                to,
-                LlmUsageFilter.NONE);
-    }
-
-    public List<UsageSlice> byModel(String orgId, @Nullable String from, @Nullable String to) {
-        return query(
-                "SELECT COALESCE(c.model, '') AS key, NULL::text AS label, " + AGGREGATES + "\n" + ORG_WINDOW
-                        + "\nGROUP BY COALESCE(c.model, '')\nORDER BY total_tokens DESC, calls DESC",
-                orgId,
-                from,
-                to,
-                LlmUsageFilter.NONE);
     }
 
     /** @param runs more than one means the finding was re-triaged */
@@ -255,7 +219,6 @@ public class LlmUsageQueryRepository {
                         rs.getLong("cache_write_tokens"),
                         rs.getLong("total_tokens"),
                         rs.getBigDecimal("cost_usd"),
-                        rs.getBigDecimal("platform_cost_usd"),
                         rs.getBigDecimal("byo_cost_usd"),
                         rs.getLong("unpriced_calls")))
                 .list();

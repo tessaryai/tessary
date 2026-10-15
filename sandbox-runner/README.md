@@ -329,7 +329,7 @@ to find them.
 ## Deploy
 
 The launcher ships as its own image, built and pushed by
-`.github/workflows/deploy-aws-production.yml`'s `build-sandbox-runner` job from
+`.github/workflows/release.yml`'s `build-sandbox-runner` job from
 `launcher/Dockerfile`, and runs as the `sandbox-runner` service in both compose files. The backend
 reaches it by service DNS at `http://sandbox-runner:8080` and authenticates with `SANDBOX_API_KEY`.
 

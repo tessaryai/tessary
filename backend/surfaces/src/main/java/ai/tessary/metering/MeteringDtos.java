@@ -33,7 +33,7 @@ public final class MeteringDtos {
 
     /**
      * Token buckets are kept apart because they are priced apart. {@code unpricedCalls} is the size of the gap behind
-     * {@code costUsd}. Platform and BYO cost must not be re-added into one figure.
+     * {@code costUsd}. {@code byoCostUsd} is the part of {@code costUsd} the customer's own provider keys paid for.
      */
     public record LlmUsageSliceView(
             String key,
@@ -45,7 +45,6 @@ public final class MeteringDtos {
             @JsonProperty("cache_write_tokens") long cacheWriteTokens,
             @JsonProperty("total_tokens") long totalTokens,
             @JsonProperty("cost_usd") BigDecimal costUsd,
-            @JsonProperty("platform_cost_usd") BigDecimal platformCostUsd,
             @JsonProperty("byo_cost_usd") BigDecimal byoCostUsd,
             @JsonProperty("unpriced_calls") long unpricedCalls) {
 
@@ -60,7 +59,6 @@ public final class MeteringDtos {
                     s.cacheWriteTokens(),
                     s.totalTokens(),
                     s.costUsd(),
-                    s.platformCostUsd(),
                     s.byoCostUsd(),
                     s.unpricedCalls());
         }
@@ -71,10 +69,7 @@ public final class MeteringDtos {
             @Nullable String from,
             @Nullable String to,
             @JsonProperty("as_of") String asOf,
-            LlmUsageSliceView total,
-            @JsonProperty("by_lane") List<LlmUsageSliceView> byLane,
-            @JsonProperty("by_project") List<LlmUsageSliceView> byProject,
-            @JsonProperty("by_model") List<LlmUsageSliceView> byModel) {}
+            LlmUsageSliceView total) {}
 
     /** {@code key} is the empty string both for the ungrouped series and for calls that reported no lane or model. */
     public record LlmUsageCellView(

@@ -4,7 +4,7 @@
 -- and `prj_fix`/`cls_fix`/`org_fix`/`trc_fix`/`ses_fix` anchor rows loaded elsewhere, so keep them stable.
 
 -- ---------------------------------------------------------------- the minimum graph
--- The span-grain CHECKs need a resolvable trace and span, hence the substrate rows.
+-- The span-grain detection rows need a resolvable trace and span, hence the substrate rows.
 
 INSERT INTO organization (id, slug, name, created_at)
 VALUES ('org_fix', 'fixture-org', 'Fixture Org', '2026-01-01T00:00:00Z');
@@ -70,29 +70,6 @@ VALUES ('det_sl_fix', 'prj_fix', 'cls_fix', 'fixture_classifier', 'ses_fix', 'tr
 INSERT INTO user_classifier_detection (id, project_id, classifier_id, classifier_key, subject_session_id,
                                        subject_trace_id, subject_span_id, severity, confidence, created_at)
 VALUES ('det_uc_fix', 'prj_fix', 'cls_fix', 'fixture_classifier', 'ses_fix', 'trc_fix', 'spn_fix', 'warn', 'high', '2026-08-01T00:00:00Z');
-
--- ---------------------------------------------------------------- the three subject grains
--- One annotation per grain, so a re-cut that forgets the session arm fails.
-
-INSERT INTO annotation (id, project_id, subject_kind, session_id, trace_id, span_id,
-                        key, annotator_kind, value_type, passed, created_at)
-VALUES ('ann_fix_ses', 'prj_fix', 'session', 'ses_fix', NULL, NULL,
-        'fixture.helpful', 'human', 'boolean', true, '2026-08-01T00:00:00Z'),
-       ('ann_fix_trc', 'prj_fix', 'trace', 'ses_fix', 'trc_fix', NULL,
-        'fixture.helpful', 'human', 'boolean', true, '2026-08-01T00:00:00Z'),
-       ('ann_fix_spn', 'prj_fix', 'span', 'ses_fix', 'trc_fix', 'spn_fix',
-        'fixture.helpful', 'human', 'boolean', false, '2026-08-01T00:00:00Z');
-
--- failure_mode_instance carries the same grains under its own `ck_fmi_subject`, and `source` is
--- a CHECK-backed vocabulary (clustered / human).
-INSERT INTO failure_mode (id, project_id, key, name, status, created_at, updated_at)
-VALUES ('fm_fix', 'prj_fix', 'fixture_mode', 'Fixture Mode', 'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
-
-INSERT INTO failure_mode_instance (id, project_id, failure_mode_id, subject_kind,
-                                   subject_session_id, subject_trace_id, subject_span_id,
-                                   source, created_at)
-VALUES ('fmi_fix_ses', 'prj_fix', 'fm_fix', 'session', 'ses_fix', NULL, NULL, 'clustered', '2026-08-01T00:00:00Z'),
-       ('fmi_fix_spn', 'prj_fix', 'fm_fix', 'span', 'ses_fix', 'trc_fix', 'spn_fix', 'clustered', '2026-08-01T00:00:00Z');
 
 -- ---------------------------------------------------------------- findings and cases
 -- A live case must have a finding (`ck_eval_case_finding_forward`), so the resolved finding-less case
@@ -181,8 +158,7 @@ VALUES ('pdc_fix', 'prj_fix', 'cls_fix', 'checkout', 'fm_fix', 'medium', 'active
 -- `metric` has no CHECK, so a missed rename reads as zero usage, not an error. One row per metric (unique
 -- on org, project, metric, bucket_start, granularity).
 INSERT INTO metric_rollup (id, org_id, project_id, metric, value, bucket_start, granularity, created_at)
-VALUES ('mr_fix_l1', 'org_fix', 'prj_fix', 'l1_evals', 155, '2026-08-01T00:00:00Z', 'day', '2026-08-01T00:00:00Z'),
-       ('mr_fix_l2', 'org_fix', 'prj_fix', 'l2_evals', 7, '2026-08-01T00:00:00Z', 'day', '2026-08-01T00:00:00Z');
+VALUES ('mr_fix_l1', 'org_fix', 'prj_fix', 'l1_evals', 155, '2026-08-01T00:00:00Z', 'day', '2026-08-01T00:00:00Z');
 
 INSERT INTO metric_baseline (id, project_id, classifier_id, measure, bucket_kind, bucket_key,
                              state, current_count, created_at, updated_at)
@@ -196,16 +172,16 @@ VALUES ('rp_fix_traces', 'prj_fix', 'traces', 30, 7, '2026-08-01T00:00:00Z'),
        ('rp_fix_detections', 'prj_fix', 'detections', 14, NULL, '2026-08-01T00:00:00Z');
 
 -- ---------------------------------------------------------------- model lanes + LLM ledger
-INSERT INTO project_model_setting (project_id, lane, model_key, service_tier, reasoning_effort, created_at, updated_at)
-VALUES ('prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'standard', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
+INSERT INTO project_model_setting (project_id, lane, model_key, created_at, updated_at)
+VALUES ('prj_fix', 'triage', 'anthropic.claude-haiku-4-5', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
 
 -- `lane` has no CHECK, so a missed rewrite would silently drop attribution.
-INSERT INTO llm_call (id, project_id, lane, model, service_tier, funding, input_tokens, output_tokens,
+INSERT INTO llm_call (id, project_id, lane, model, funding, input_tokens, output_tokens,
                       cost_usd, created_at, subject_kind, subject_id)
-VALUES ('llc_fix_trg', 'prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'standard', 'platform',
+VALUES ('llc_fix_trg', 'prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'platform',
         800, 120, 0.0002400000, '2026-08-01T00:00:00Z', NULL, NULL),
 -- `authoring` (0033), which 0039 renames to agent_run and then re-CHECKs.
-       ('llc_fix_agent', 'prj_fix', 'authoring', 'anthropic.claude-sonnet-4-5', 'standard', 'byo',
+       ('llc_fix_agent', 'prj_fix', 'authoring', 'anthropic.claude-sonnet-4-5', 'byo',
         1200, 300, 0.0081000000, '2026-08-01T00:00:00Z', NULL, NULL);
 
 -- ---------------------------------------------------------------- telemetry identity

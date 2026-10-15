@@ -9,11 +9,6 @@ import org.jspecify.annotations.Nullable;
  */
 public record FlagContext(@Nullable String orgId) {
 
-    /** Only a global default or rule can apply. */
-    public static FlagContext global() {
-        return new FlagContext(null);
-    }
-
     public static FlagContext forOrg(@Nullable String orgId) {
         return new FlagContext(orgId);
     }

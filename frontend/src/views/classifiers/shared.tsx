@@ -25,11 +25,6 @@ export const PROVIDER_PAUSES: Record<string, { label: string; explained: string 
     explained:
       "This organization has used all of its credit on the provider this classifier runs on, so no messages are being scored. Top up that provider, or add another key under Settings, Providers, then retry.",
   },
-  platform_unavailable: {
-    label: "Provider unavailable",
-    explained:
-      "The provider this classifier runs on is not accepting requests, so no messages are being scored. Nothing needs to change on your side. It retries on its own.",
-  },
 };
 
 export function Fact({ label, children }: { label: string; children: React.ReactNode }) {

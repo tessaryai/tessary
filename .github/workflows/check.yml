@@ -84,15 +84,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
 
+      # The groundedness gates use uv without syncing classifiers/uv.lock, so there is nothing to
+      # cache. The python3 gates need only the standard library, which the runner image provides.
       - uses: astral-sh/setup-uv@v7
         with:
-          enable-cache: true
-      # vendored-plugin-rules runs pytest over contract/tests with python3 from PATH.
-      - name: Python 3.13 with pyyaml and pytest
-        run: |
-          uv venv --python 3.13 "$RUNNER_TEMP/py"
-          VIRTUAL_ENV="$RUNNER_TEMP/py" uv pip install 'pyyaml~=6.0' 'pytest~=9.0'
-          echo "$RUNNER_TEMP/py/bin" >> "$GITHUB_PATH"
+          enable-cache: false
 
       - name: Install Caddy
         # A pinned release binary is all check-caddy.sh needs (`caddy validate`). The release's

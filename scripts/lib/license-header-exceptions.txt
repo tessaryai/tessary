@@ -18,9 +18,7 @@
 #   - Vendored files: contract/ vendors grader.schema.json, AUTHORING_CONTRACT.md, CHANGELOG.md
 #     and output_format.md verbatim from the public tessaryai/plugins repo (see
 #     scripts/lib/vendored-plugin-files.sh), but none of them carry an extension this scanner
-#     checks (.json/.md), so no row is needed today. contract/pipeline_io.py, contract/validate.py
-#     and contract/tests/ are platform-owned per that same file's header and are NOT exempt — they
-#     get the header like any other source file.
+#     checks (.json/.md), so no row is needed today.
 #   - Test fixtures: audited for anything binary-adjacent or otherwise unable to carry a header:
 #     none found among files carrying an in-scope extension. The secret-scan fixture files
 #     (SecretLeakDetectorTest.java, GithubTokenServiceTest.java,

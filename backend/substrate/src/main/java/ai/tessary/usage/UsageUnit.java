@@ -5,25 +5,15 @@ import ai.tessary.open.errors.MeteringError;
 import ai.tessary.open.errors.TessaryException;
 
 /**
- * The billable units; {@link #wire()} matches the {@code metric_rollup.metric} CHECK. {@link #STORAGE} is a level
- * snapshot gated by {@code tessary.metering.storage-enabled} until a billing basis is ratified.
+ * The billable units; {@link #wire()} matches the {@code metric_rollup.metric} CHECK.
  */
 public enum UsageUnit {
     /** Ingested typed observations (spans), counted from {@code observation}. */
     INGESTED_SPANS("ingested_spans"),
     /** Counted on the hour they arrived. The billable unit. */
     INGESTED_TRACES("ingested_traces"),
-    /** Retired. Kept because {@link #fromWire} 422s on an unknown value and historical rows must still read back. */
-    L2_EVALS("l2_evals"),
     /** Layer 1: cheap classifier evaluations, counted from the per-classifier detection tables. */
-    L1_EVALS("l1_evals"),
-    /** Retired; see {@link #L2_EVALS}. */
-    LLM_TOKENS("llm_tokens"),
-    /** Retired; see {@link #L2_EVALS}. Micro-dollars so {@code long} sums stay exact; divide by 1e6 at display. */
-    LLM_COST_MICRO_USD_PLATFORM("llm_cost_micro_usd_platform"),
-    /** Retired; see {@link #L2_EVALS}. */
-    LLM_COST_MICRO_USD_BYO("llm_cost_micro_usd_byo"),
-    STORAGE("storage");
+    L1_EVALS("l1_evals");
 
     /**
      * The finest grain, and the only one a total over an arbitrary window may sum: a day row covers the same producer
@@ -43,11 +33,6 @@ public enum UsageUnit {
 
     public String wire() {
         return wire;
-    }
-
-    /** Everything but {@link #STORAGE} and the retired units. */
-    public static UsageUnit[] metered() {
-        return new UsageUnit[] {INGESTED_SPANS, INGESTED_TRACES, L1_EVALS};
     }
 
     public static boolean isBucketUnit(String granularity) {

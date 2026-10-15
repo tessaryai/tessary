@@ -6,7 +6,6 @@ import { useCapabilities } from "../capabilities/useCapabilities";
 import type { CapabilityWire } from "../api/types-auth";
 import {
   NAV_GROUPS,
-  RESERVED_NAV,
   SETTINGS_GROUPS,
   TRIAGE_NAV,
   type NavGroup,
@@ -27,8 +26,6 @@ export interface Navigation {
   liveNav: NavItem[];
   settingsGroups: SettingsGroup[];
   settingsSections: SettingsSection[];
-  /** Never gated: "coming soon" is a statement about us, not this org. */
-  reserved: NavItem[];
   /** Anything that is not a known gated surface passes; a deep link is not the IA's business. */
   isPathReachable: (path: string) => boolean;
 }
@@ -60,7 +57,6 @@ export function useNavigation(): Navigation {
       liveNav,
       settingsGroups,
       settingsSections,
-      reserved: RESERVED_NAV,
       isPathReachable: (path: string) => {
         const parts = path.split("/").filter(Boolean);
         const surface = parts[4];
