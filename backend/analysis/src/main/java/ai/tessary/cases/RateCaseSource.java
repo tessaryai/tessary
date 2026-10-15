@@ -31,7 +31,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class RateCaseSource implements CaseSource {
 
-    private record Rate(String detector, String measure, Function<FindingRow, RateDetail> reader, String basis) {}
+    private record Rate(
+            String detector,
+            String measure,
+            Function<FindingRow, RateDetail> reader,
+            String sample,
+            String flagged,
+            String fit,
+            String refSample) {}
+
+    private static final String BASIS = "%d of the %d %s since %s %s. %s rate %s over %d %s.";
 
     private static final Map<String, Rate> RATES = Map.of(
             BuiltInDetector.Kind.MALFORMED_OUTPUT,
@@ -40,19 +49,28 @@ public class RateCaseSource implements CaseSource {
                     MalformedOutputEvidence.MEASURE,
                     // The basis needs the rate, never a specific failing output, so no witnesses are threaded.
                     finding -> MalformedOutputEvidence.rateDetail(finding, List.of()),
-                    "%d of the %d outputs since %s failed their schema. Fitted rate %s over %d calls."),
+                    "outputs",
+                    "failed their schema",
+                    "Fitted",
+                    "calls"),
             BuiltInDetector.Kind.GROUNDEDNESS,
             new Rate(
                     CaseRow.Detector.GROUNDEDNESS,
                     GroundednessEvidence.MEASURE,
                     GroundednessEvidence::rateDetail,
-                    "%d of the %d traces since %s had an answer flagged. Learned rate %s over %d traces."),
+                    "traces",
+                    "had an answer flagged",
+                    "Learned",
+                    "traces"),
             BuiltInDetector.Kind.FRUSTRATION,
             new Rate(
                     CaseRow.Detector.FRUSTRATION,
                     FrustrationEvidence.MEASURE,
                     FrustrationEvidence::rateDetail,
-                    "%d of the %d sessions since %s were frustrated with the agent. Learned rate %s over %d sessions."));
+                    "sessions",
+                    "were frustrated with the agent",
+                    "Learned",
+                    "sessions"));
 
     @Override
     public boolean owns(String classifierKey) {
@@ -72,12 +90,16 @@ public class RateCaseSource implements CaseSource {
                 FindingTitle.of(finding),
                 String.format(
                         Locale.ROOT,
-                        rate.basis(),
+                        BASIS,
                         read.failuresCur(),
                         read.nCur(),
+                        rate.sample(),
                         finding.onsetAt(),
+                        rate.flagged(),
+                        rate.fit(),
                         FindingTitle.pct(read.refRate()),
-                        read.nRef()),
+                        read.nRef(),
+                        rate.refSample()),
                 severity(finding),
                 CaseSource.onset(finding),
                 read.curRate(),
