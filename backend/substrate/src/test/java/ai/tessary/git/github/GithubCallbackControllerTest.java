@@ -17,11 +17,15 @@ import ai.tessary.git.GitIntegrationDtos.ConnectRequest;
 import ai.tessary.git.GitIntegrationRow;
 import ai.tessary.git.GitIntegrationService;
 import ai.tessary.git.github.GithubTokenService.InstalledRepo;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.ResponseEntity;
 
 class GithubCallbackControllerTest {
@@ -60,67 +64,53 @@ class GithubCallbackControllerTest {
         verify(integrations, never()).connect(anyString(), any());
     }
 
-    // ---- fresh install (installation_id present) ---------------------------
+    /**
+     * Each row: the installation id (none on a reuse), the code, the installations the user administers, the repos
+     * installation 111 grants (a dash leaves either unstubbed), where the browser lands, whether the project is bound,
+     * and the bug it catches.
+     */
+    @ParameterizedTest(name = "{6}")
+    @CsvSource(delimiter = '|', nullValues = "-", textBlock = """
+        111 | -    | -    | -       | github_error=GIT.INSTALL_NOT_VERIFIED  | false | a fresh install without a code is bound unverified
+        111 | code | 222  | -       | github_error=GIT.INSTALL_FORBIDDEN    | false | an installation the user does not administer is bound
+        111 | code | 111  | web api | install_select=                       | false | a fresh install granting two repos binds one without asking
+        -   | -    | -    | -       | github_error=GIT.INSTALL_NOT_VERIFIED | false | a reuse without a code is bound unverified
+        -   | code | none | -       | github_error=GIT.NO_ADMIN_INSTALLATIONS | false | a user administering no installation gets no error
+        -   | code | 111  | web     | connected=1                           | true  | a reuse with one installation and one repo is not bound
+        111 | code | 111  | none    | github_error=GIT.NO_INSTALLED_REPOS   | false | an install granting no repos binds an empty integration
+        """)
+    void theCallbackRedirects(
+            @Nullable Long installationId,
+            @Nullable String code,
+            @Nullable String administered,
+            @Nullable String repos,
+            String redirect,
+            boolean connects,
+            String bug) {
+        if (administered != null) {
+            when(tokenService.exchangeUserCode("code")).thenReturn("utok");
+            when(tokenService.listUserInstallations("utok"))
+                    .thenReturn(administered.equals("none") ? Set.of() : Set.of(Long.parseLong(administered)));
+        }
+        if (repos != null) {
+            when(tokenService.listInstallationRepos(111L, HOST))
+                    .thenReturn(
+                            repos.equals("none")
+                                    ? List.of()
+                                    : Arrays.stream(repos.split(" "))
+                                            .map(name -> new InstalledRepo("acme", name, "main"))
+                                            .toList());
+        }
 
-    @Test
-    void freshInstall_missingCode_failsClosed_redirectingWithError() {
-        // Fail-closed on the binding, friendly on the browser: no connect happens, and the user
-        // lands back on the Generate step with the error code instead of a raw JSON body.
-        ResponseEntity<Void> resp = controller.callback(111L, stateFor("p1"), null, "install");
-        assertTrue(location(resp).contains("/settings/git?github_error=GIT.INSTALL_NOT_VERIFIED"));
-        verify(integrations, never()).connect(anyString(), any());
-    }
+        ResponseEntity<Void> resp =
+                controller.callback(installationId, stateFor("p1"), code, installationId == null ? null : "install");
 
-    @Test
-    void freshInstall_userDoesNotAdminister_forbidden_redirectingWithError() {
-        when(tokenService.exchangeUserCode("code")).thenReturn("utok");
-        when(tokenService.listUserInstallations("utok")).thenReturn(Set.of(222L)); // not 111
-        ResponseEntity<Void> resp = controller.callback(111L, stateFor("p1"), "code", "install");
-        assertTrue(location(resp).contains("/settings/git?github_error=GIT.INSTALL_FORBIDDEN"));
-        verify(integrations, never()).connect(anyString(), any());
-    }
-
-    @Test
-    void freshInstall_multipleRepos_redirectsToPicker() {
-        when(tokenService.exchangeUserCode("code")).thenReturn("utok");
-        when(tokenService.listUserInstallations("utok")).thenReturn(Set.of(111L));
-        when(tokenService.listInstallationRepos(111L, HOST))
-                .thenReturn(
-                        List.of(new InstalledRepo("acme", "web", "main"), new InstalledRepo("acme", "api", "main")));
-        ResponseEntity<Void> resp = controller.callback(111L, stateFor("p1"), "code", "install");
-        assertTrue(location(resp).contains("/settings/git?install_select="));
-        verify(integrations, never()).connect(anyString(), any());
-    }
-
-    // ---- invalid state: no verified project, nothing to redirect to ---------
-
-    // ---- reuse (no installation_id) ----------------------------------------
-
-    @Test
-    void reuse_missingCode_failsClosed_redirectingWithError() {
-        ResponseEntity<Void> resp = controller.callback(null, stateFor("p1"), null, null);
-        assertTrue(location(resp).contains("/settings/git?github_error=GIT.INSTALL_NOT_VERIFIED"));
-        verify(integrations, never()).connect(anyString(), any());
-    }
-
-    @Test
-    void reuse_noAdministeredInstallations_redirectsWithNoAdminError() {
-        when(tokenService.exchangeUserCode("code")).thenReturn("utok");
-        when(tokenService.listUserInstallations("utok")).thenReturn(Set.of());
-        ResponseEntity<Void> resp = controller.callback(null, stateFor("p1"), "code", null);
-        assertTrue(location(resp).contains("/settings/git?github_error=GIT.NO_ADMIN_INSTALLATIONS"));
-        verify(integrations, never()).connect(anyString(), any());
-    }
-
-    @Test
-    void reuse_singleInstallationSingleRepo_connects() {
-        when(tokenService.exchangeUserCode("code")).thenReturn("utok");
-        when(tokenService.listUserInstallations("utok")).thenReturn(Set.of(111L));
-        when(tokenService.listInstallationRepos(111L, HOST))
-                .thenReturn(List.of(new InstalledRepo("acme", "web", "main")));
-        ResponseEntity<Void> resp = controller.callback(null, stateFor("p1"), "code", null);
-        assertTrue(location(resp).contains("/settings/git?connected=1"));
-        verify(integrations).connect(eq("p1"), any(ConnectRequest.class));
+        assertTrue(location(resp).contains("/settings/git?" + redirect), bug + ": " + location(resp));
+        if (connects) {
+            verify(integrations).connect(eq("p1"), any(ConnectRequest.class));
+        } else {
+            verify(integrations, never()).connect(anyString(), any());
+        }
     }
 
     @Test
@@ -132,17 +122,5 @@ class GithubCallbackControllerTest {
         verify(integrations, never()).connect(anyString(), any());
         // Multiple installations short-circuit straight to the picker — no per-installation repo listing here.
         verify(tokenService, never()).listInstallationRepos(org.mockito.ArgumentMatchers.anyLong(), anyString());
-    }
-
-    @Test
-    void singleInstallationWithNoRepos_redirectsWithNoInstalledReposInsteadOfBinding() {
-        // An install that granted no repositories has nothing to bind; the user must go back to GitHub and
-        // pick one, so the redirect names that rather than connecting an empty integration.
-        when(tokenService.exchangeUserCode("code")).thenReturn("utok");
-        when(tokenService.listUserInstallations("utok")).thenReturn(Set.of(111L));
-        when(tokenService.listInstallationRepos(111L, HOST)).thenReturn(List.of());
-        ResponseEntity<Void> resp = controller.callback(111L, stateFor("p1"), "code", "install");
-        assertTrue(location(resp).contains("/settings/git?github_error=GIT.NO_INSTALLED_REPOS"), location(resp));
-        verify(integrations, never()).connect(anyString(), any());
     }
 }

@@ -58,16 +58,7 @@ class SessionTimelineServiceTest {
     @Test
     void loadTailReadsNoTraceItThenLeavesOut() {
         stubTraces(List.of(), settled("t3", 3000), settled("t2", 2000), settled("t1", 1000));
-        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
-                .thenAnswer(call -> {
-                    Collection<String> ids = call.getArgument(1);
-                    return ids.stream()
-                            .map(SessionTimelineServiceTest::toolSpan)
-                            .toList();
-                });
-        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+        SessionTimelineService service = serviceOverToolSpans();
 
         SessionTimeline tail = service.loadTail(PID, SID, 1);
 
@@ -90,16 +81,7 @@ class SessionTimelineServiceTest {
     void loadTailReadsOnlyTheTraceRowsOfThePagesItReads() {
         SessionTrace t5 = settled("t5", 5000);
         stubTraces(List.of(), t5, settled("t4", 4000), settled("t3", 3000), settled("t2", 2000), settled("t1", 1000));
-        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
-                .thenAnswer(call -> {
-                    Collection<String> ids = call.getArgument(1);
-                    return ids.stream()
-                            .map(SessionTimelineServiceTest::toolSpan)
-                            .toList();
-                });
-        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+        SessionTimelineService service = serviceOverToolSpans();
 
         service.loadTail(PID, SID, 1);
 
@@ -123,16 +105,7 @@ class SessionTimelineServiceTest {
                 settledFrom("t3", 2990, 3000),
                 settledFrom("t2", 1990, 2000),
                 settledFrom("t1", 990, 1000));
-        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
-                .thenAnswer(call -> {
-                    Collection<String> ids = call.getArgument(1);
-                    return ids.stream()
-                            .map(SessionTimelineServiceTest::toolSpan)
-                            .toList();
-                });
-        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+        SessionTimelineService service = serviceOverToolSpans();
 
         SessionTimeline tail = service.loadTailThrough(PID, SID, Long.MAX_VALUE, T0.plusMillis(3000));
 
@@ -152,16 +125,7 @@ class SessionTimelineServiceTest {
     @Test
     void theLoadLineOfATailCountsTheEventsTheTailReturns() {
         stubTraces(List.of(), settled("t2", 2000), settled("t1", 1000));
-        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
-                .thenAnswer(call -> {
-                    Collection<String> ids = call.getArgument(1);
-                    return ids.stream()
-                            .map(SessionTimelineServiceTest::toolSpan)
-                            .toList();
-                });
-        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
-        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+        SessionTimelineService service = serviceOverToolSpans();
         long newestEvent = service.load(PID, SID).events().get(1).bytes();
         Logger logger = (Logger) LoggerFactory.getLogger(SessionTimelineService.class);
         Level before = logger.getLevel();
@@ -229,6 +193,17 @@ class SessionTimelineServiceTest {
                 timeline.events().stream().map(Event::id).toList(),
                 "a settled trace none of whose spans ended is read as a trace still receiving spans, so the span whose"
                         + " parent never arrived carries no message");
+    }
+
+    /** A service whose every trace holds one tool span ({@link #toolSpan}) and no payload or tool call. */
+    private SessionTimelineService serviceOverToolSpans() {
+        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
+                .thenAnswer(call -> call.<Collection<String>>getArgument(1).stream()
+                        .map(SessionTimelineServiceTest::toolSpan)
+                        .toList());
+        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        return new SessionTimelineService(traces, spans, payloads, toolCalls);
     }
 
     /**

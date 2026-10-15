@@ -26,11 +26,12 @@ import ai.tessary.plan.Capability;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.Organization;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -97,30 +98,54 @@ class ProviderCredentialControllerTest {
         when(resolver.requireOrg(ctx, ORG_SLUG)).thenReturn(resolved);
     }
 
-    private static ProviderCredential cred(
-            String id,
-            ModelProvider provider,
-            @Nullable String baseUrlOverride,
-            @Nullable String apiKeySealed,
-            @Nullable String awsRegion,
-            @Nullable String awsAccessKeySealed,
-            @Nullable String bedrockModelArn,
-            String authMode) {
+    /**
+     * A stored credential as one row: id, org, project, provider, base url, sealed api key, region, sealed access key,
+     * sealed secret key, model arn, custom model, auth mode, created, updated; a dash is null.
+     */
+    private static ProviderCredential row(String columns) {
+        String[] c = Arrays.stream(columns.strip().split(" +"))
+                .map(v -> v.equals("-") ? null : v)
+                .toArray(String[]::new);
         return new ProviderCredential(
-                id,
-                ORG_ID,
-                null,
-                provider,
-                baseUrlOverride,
-                apiKeySealed,
-                awsRegion,
-                awsAccessKeySealed,
-                null,
-                bedrockModelArn,
-                null,
-                authMode,
-                "t0",
-                "t1");
+                c[0],
+                c[1],
+                c[2],
+                ModelProvider.valueOf(c[3]),
+                c[4],
+                c[5],
+                c[6],
+                c[7],
+                c[8],
+                c[9],
+                c[10],
+                c[11],
+                c[12],
+                c[13]);
+    }
+
+    /** Each view as one row in its component order; a dash is null. */
+    private static String table(List<ProviderCredentialController.View> views) {
+        return views.stream()
+                .map(v -> Stream.of(
+                                v.id(),
+                                v.provider(),
+                                v.baseUrlOverride(),
+                                v.hasApiKey(),
+                                v.awsRegion(),
+                                v.hasAwsCredentials(),
+                                v.bedrockModelArn(),
+                                v.customModelName(),
+                                v.authMode(),
+                                v.createdAt(),
+                                v.updatedAt())
+                        .map(x -> x == null ? "-" : x.toString())
+                        .collect(Collectors.joining(" ")))
+                .collect(Collectors.joining("\n", "", "\n"));
+    }
+
+    private ProviderCredentialController controllerWith(ModelCatalogFetchService fetch, Duration deadline) {
+        return new ProviderCredentialController(
+                repo, secretBox, resolver, capabilities, fetch, events, PlatformProviderSupplier.none(), deadline);
     }
 
     // ---- capability gate: list/upsert/delete all 403 the same way the doc says every verb does ----
@@ -188,15 +213,8 @@ class ProviderCredentialControllerTest {
 
     @Test
     void blankFieldsOnUpsertKeepTheExistingCredentialRatherThanClearingIt() {
-        ProviderCredential existing = cred(
-                "cred_1",
-                ModelProvider.OPENAI,
-                "https://existing.example.com",
-                "existing-sealed-key",
-                null,
-                null,
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY);
+        ProviderCredential existing =
+                row("cred_1 org_1 - OPENAI https://existing.example.com existing-sealed-key - - - - - api_key t0 t1");
         when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.OPENAI)).thenReturn(Optional.of(existing));
         // Every field null/blank: "leave the stored value untouched" per the record's own javadoc.
         var req = new ProviderCredentialController.UpsertRequest(null, null, null, null, null, null, null, null);
@@ -211,15 +229,7 @@ class ProviderCredentialControllerTest {
 
     @Test
     void aNonBlankFieldOnUpsertReplacesTheExistingCredential() {
-        ProviderCredential existing = cred(
-                "cred_1",
-                ModelProvider.OPENAI,
-                null,
-                "old-sealed-key",
-                null,
-                null,
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY);
+        ProviderCredential existing = row("cred_1 org_1 - OPENAI - old-sealed-key - - - - - api_key t0 t1");
         when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.OPENAI)).thenReturn(Optional.of(existing));
         when(secretBox.isConfigured()).thenReturn(true);
         when(secretBox.seal("sk-new-key")).thenReturn("new-sealed-key");
@@ -295,76 +305,20 @@ class ProviderCredentialControllerTest {
 
     @Test
     void listShowsEachCredentialWithItsSecretsReducedToWhetherTheyAreSet() {
-        ProviderCredential openai = cred(
-                "c1",
-                ModelProvider.OPENAI,
-                "https://gw.example.com",
-                "sealed",
-                null,
-                null,
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY);
-        ProviderCredential role = cred(
-                "c2",
-                ModelProvider.BEDROCK,
-                null,
-                null,
-                "us-east-1",
-                null,
-                "arn:m",
-                ProviderCredential.AUTH_MODE_IAM_ROLE);
-        ProviderCredential halfKeyed = cred(
-                "c3",
-                ModelProvider.BEDROCK_MANTLE,
-                null,
-                null,
-                "us-west-2",
-                "sealed-ak",
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY);
+        ProviderCredential openai = row("c1 org_1 - OPENAI https://gw.example.com sealed - - - - - api_key t0 t1");
+        ProviderCredential role = row("c2 org_1 - BEDROCK - - us-east-1 - - arn:m - iam_role t0 t1");
+        ProviderCredential halfKeyed = row("c3 org_1 - BEDROCK_MANTLE - - us-west-2 sealed-ak - - - api_key t0 t1");
         when(repo.findByOrg(ORG_ID)).thenReturn(List.of(openai, role, halfKeyed));
 
         var views = controller.list(ctx, ORG_SLUG).data().credentials();
 
         assertEquals(
-                List.of(
-                        new ProviderCredentialController.View(
-                                "c1",
-                                ModelProvider.OPENAI,
-                                "https://gw.example.com",
-                                true,
-                                null,
-                                false,
-                                null,
-                                null,
-                                "api_key",
-                                "t0",
-                                "t1"),
-                        new ProviderCredentialController.View(
-                                "c2",
-                                ModelProvider.BEDROCK,
-                                null,
-                                false,
-                                "us-east-1",
-                                true,
-                                "arn:m",
-                                null,
-                                "iam_role",
-                                "t0",
-                                "t1"),
-                        new ProviderCredentialController.View(
-                                "c3",
-                                ModelProvider.BEDROCK_MANTLE,
-                                null,
-                                false,
-                                "us-west-2",
-                                false,
-                                null,
-                                null,
-                                "api_key",
-                                "t0",
-                                "t1")),
-                views,
+                """
+                c1 OPENAI https://gw.example.com true - false - - api_key t0 t1
+                c2 BEDROCK - false us-east-1 true arn:m - iam_role t0 t1
+                c3 BEDROCK_MANTLE - false us-west-2 false - - api_key t0 t1
+                """,
+                table(views),
                 "an IAM-role credential is configured with no keys; an access key without its secret is not");
     }
 
@@ -435,21 +389,9 @@ class ProviderCredentialControllerTest {
 
     @Test
     void upsertReplacesEverySentFieldAndABlankOneClearsIt() {
-        ProviderCredential existing = new ProviderCredential(
-                "cred_1",
-                ORG_ID,
-                "legacy_project",
-                ModelProvider.BEDROCK,
-                "https://8.8.8.8/old",
-                null,
-                "us-east-1",
-                "old-ak",
-                "old-sk",
-                "arn:old",
-                "old-name",
-                ProviderCredential.AUTH_MODE_API_KEY,
-                "2026-01-01T00:00:00Z",
-                "2026-01-01T00:00:00Z");
+        ProviderCredential existing =
+                row("cred_1 org_1 legacy_project BEDROCK https://8.8.8.8/old - us-east-1 old-ak old-sk arn:old old-name"
+                        + " api_key 2026-01-01T00:00:00Z 2026-01-01T00:00:00Z");
         when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.BEDROCK)).thenReturn(Optional.of(existing));
         when(secretBox.isConfigured()).thenReturn(true);
         when(secretBox.seal("AKIA-NEW")).thenReturn("sealed-ak");
@@ -461,24 +403,10 @@ class ProviderCredentialControllerTest {
 
         ArgumentCaptor<ProviderCredential> written = ArgumentCaptor.forClass(ProviderCredential.class);
         verify(repo).update(written.capture());
-        ProviderCredential row = written.getValue();
         assertEquals(
-                new ProviderCredential(
-                        "cred_1",
-                        ORG_ID,
-                        "legacy_project",
-                        ModelProvider.BEDROCK,
-                        null,
-                        null,
-                        "eu-west-1",
-                        "sealed-ak",
-                        "sealed-sk",
-                        null,
-                        "new-name",
-                        ProviderCredential.AUTH_MODE_IAM_ROLE,
-                        "2026-01-01T00:00:00Z",
-                        row.updatedAt()),
-                row,
+                row("cred_1 org_1 legacy_project BEDROCK - - eu-west-1 sealed-ak sealed-sk - new-name iam_role"
+                        + " 2026-01-01T00:00:00Z " + written.getValue().updatedAt()),
+                written.getValue(),
                 "sent values replace, a blank string clears, the id, project and creation time are kept");
     }
 
@@ -509,15 +437,7 @@ class ProviderCredentialControllerTest {
             new CountDownLatch(1).await();
             return List.of();
         });
-        var fast = new ProviderCredentialController(
-                repo,
-                secretBox,
-                resolver,
-                capabilities,
-                hanging,
-                events,
-                PlatformProviderSupplier.none(),
-                Duration.ofMillis(100));
+        var fast = controllerWith(hanging, Duration.ofMillis(100));
 
         var models = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> fast.catalog(ctx, ORG_SLUG))
                 .data()
@@ -536,15 +456,7 @@ class ProviderCredentialControllerTest {
             new CountDownLatch(1).await();
             return List.of();
         });
-        var fast = new ProviderCredentialController(
-                repo,
-                secretBox,
-                resolver,
-                capabilities,
-                hanging,
-                events,
-                PlatformProviderSupplier.none(),
-                Duration.ofMillis(200));
+        var fast = controllerWith(hanging, Duration.ofMillis(200));
 
         Thread.currentThread().interrupt();
         boolean stillInterrupted;

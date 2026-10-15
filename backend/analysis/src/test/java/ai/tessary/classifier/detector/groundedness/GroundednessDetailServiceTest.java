@@ -200,34 +200,8 @@ class GroundednessDetailServiceTest {
 
         assertEquals(
                 List.of(
-                        new FlaggedAnswerView(
-                                "tr_1",
-                                "sp_1",
-                                "sess_1",
-                                "2026-09-23T14:41:00Z",
-                                null,
-                                QUESTION,
-                                ANSWER,
-                                List.of(),
-                                List.of(
-                                        new RetrievedDocumentView(null, DOCUMENTS.get(0)),
-                                        new RetrievedDocumentView(null, DOCUMENTS.get(1))),
-                                true,
-                                true,
-                                false),
-                        new FlaggedAnswerView(
-                                "tr_2",
-                                "sp_2",
-                                "sess_1",
-                                "2026-09-23T14:40:00Z",
-                                null,
-                                otherQuestion,
-                                otherAnswer,
-                                List.of(),
-                                List.of(new RetrievedDocumentView(null, otherDocuments.get(0))),
-                                true,
-                                true,
-                                false)),
+                        stored("tr_1", "sp_1", "2026-09-23T14:41:00Z", QUESTION, ANSWER, DOCUMENTS),
+                        stored("tr_2", "sp_2", "2026-09-23T14:40:00Z", otherQuestion, otherAnswer, otherDocuments)),
                 page.rows());
     }
 
@@ -316,6 +290,15 @@ class GroundednessDetailServiceTest {
                 null,
                 "2026-09-23T14:41:00Z",
                 null);
+    }
+
+    private static FlaggedAnswerView stored(
+            String traceId, String spanId, String flaggedAt, String question, String answer, List<String> documents) {
+        List<RetrievedDocumentView> retrieved = documents.stream()
+                .map(content -> new RetrievedDocumentView(null, content))
+                .toList();
+        return new FlaggedAnswerView(
+                traceId, spanId, "sess_1", flaggedAt, null, question, answer, List.of(), retrieved, true, true, false);
     }
 
     private static CitedAnswer cited(String traceId) {
