@@ -97,7 +97,7 @@ public class TraceDetectionRepository {
      * <p>The classifier ids are looked up first and bound as values, never joined in the clause. Bound, the planner
      * reads the detection table's statistics for that classifier and picks the plan that fits its flag density;
      * joined through {@code classifier}, it cannot, and on a dense project it hashed every flag before returning a
-     * page (887 ms against 43 ms over 2,000,000 traces, {@code TraceDetectionQueryPlanIT}).
+     * page (887 ms against 43 ms over 2,000,000 traces).
      */
     public void appendFilter(String projectId, StringBuilder where, Map<String, Object> params, String detectedBy) {
         boolean any = ANY.equals(detectedBy);

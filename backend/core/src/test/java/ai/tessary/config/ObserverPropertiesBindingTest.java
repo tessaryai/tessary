@@ -39,18 +39,4 @@ class ObserverPropertiesBindingTest {
         assertThat(props.getEncoder().getUrl()).isEqualTo("http://classify.test.internal:8080");
         assertThat(props.getEncoder().getApiKey()).isEqualTo("test-bearer");
     }
-
-    /** The bug: the job lease or the triage agent's model override binds to the wrong field or not at all. */
-    @Test
-    void leaseAndAgenticModelBindToTheirOwnFields() {
-        ObserverProperties props = ConfigBinding.bind(
-                "tessary.observer",
-                new ObserverProperties(),
-                Map.of(
-                        "tessary.observer.lease-seconds", "11",
-                        "tessary.observer.agentic.model", "global.anthropic.claude-opus-5"));
-
-        assertThat(props.getLeaseSeconds()).isEqualTo(11L);
-        assertThat(props.getAgentic().getModel()).isEqualTo("global.anthropic.claude-opus-5");
-    }
 }

@@ -760,26 +760,20 @@ public final class SubstrateV2Fixtures {
         private @Nullable String parentSpanId;
         private @Nullable String sessionId;
         private @Nullable String threadId;
-        private @Nullable String userId;
         private @Nullable String projectVersionId;
         private @Nullable String callSiteId;
-        private @Nullable String traceName;
         private String kind = "llm";
         private @Nullable String name = "chat";
         private @Nullable String status;
-        private @Nullable String level;
         private @Nullable String errorType;
-        private @Nullable String errorMessage;
         private Instant startedAt = Instant.now();
         private @Nullable Instant endedAt;
         private boolean unterminated;
         private @Nullable String providedModelName;
-        private @Nullable String modelId;
         private @Nullable Long inputTokens;
         private @Nullable Long outputTokens;
         private @Nullable Long cacheReadTokens;
         private @Nullable Long cacheWriteTokens;
-        private @Nullable Long reasoningTokens;
         private @Nullable String inputCost;
         private @Nullable String outputCost;
         private String costSource = SpanRow.CostSource.UNPRICED;
@@ -821,11 +815,6 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        public SpanSeed userId(@Nullable String v) {
-            this.userId = v;
-            return this;
-        }
-
         public SpanSeed projectVersionId(@Nullable String v) {
             this.projectVersionId = v;
             return this;
@@ -833,11 +822,6 @@ public final class SubstrateV2Fixtures {
 
         public SpanSeed callSiteId(@Nullable String v) {
             this.callSiteId = v;
-            return this;
-        }
-
-        public SpanSeed traceName(@Nullable String v) {
-            this.traceName = v;
             return this;
         }
 
@@ -856,20 +840,9 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        public SpanSeed level(@Nullable String v) {
-            this.level = v;
-            return this;
-        }
-
         /** The error class, a short label such as "TimeoutError". */
         public SpanSeed errorType(@Nullable String v) {
             this.errorType = v;
-            return this;
-        }
-
-        /** The error prose, in its own column so the class stays a facet key. */
-        public SpanSeed errorMessage(@Nullable String v) {
-            this.errorMessage = v;
             return this;
         }
 
@@ -898,11 +871,6 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        public SpanSeed modelId(@Nullable String v) {
-            this.modelId = v;
-            return this;
-        }
-
         /** Token buckets; null makes the totals read NULL. */
         public SpanSeed usage(@Nullable Long inputTokens, @Nullable Long outputTokens) {
             this.inputTokens = inputTokens;
@@ -913,11 +881,6 @@ public final class SubstrateV2Fixtures {
         public SpanSeed cacheUsage(@Nullable Long cacheReadTokens, @Nullable Long cacheWriteTokens) {
             this.cacheReadTokens = cacheReadTokens;
             this.cacheWriteTokens = cacheWriteTokens;
-            return this;
-        }
-
-        public SpanSeed reasoningTokens(@Nullable Long v) {
-            this.reasoningTokens = v;
             return this;
         }
 
@@ -948,11 +911,6 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
-        /** The identity this seed will write, available before {@link #write()}. */
-        public SpanRef ref() {
-            return new SpanRef(traceId, spanId);
-        }
-
         public SpanRow write() {
             fx.trace(projectId, traceId, sessionId, threadId, projectVersionId, startedAt);
             SpanRow row = row();
@@ -974,28 +932,28 @@ public final class SubstrateV2Fixtures {
                     parentSpanId,
                     null,
                     sessionId,
-                    userId,
+                    null,
                     projectVersionId,
                     callSiteId,
-                    traceName,
+                    null,
                     kind,
                     name,
                     parentSpanId == null,
                     status,
-                    level,
+                    null,
                     errorType,
-                    errorMessage,
+                    null,
                     startedAt.toString(),
                     end == null ? null : end.toString(),
                     null,
                     null,
                     providedModelName,
-                    modelId,
+                    null,
                     inputTokens,
                     outputTokens,
                     cacheReadTokens,
                     cacheWriteTokens,
-                    reasoningTokens,
+                    null,
                     inputCost,
                     outputCost,
                     null,
@@ -1016,7 +974,7 @@ public final class SubstrateV2Fixtures {
 
         public SpanRef writeRef() {
             write();
-            return ref();
+            return new SpanRef(traceId, spanId);
         }
     }
 }
