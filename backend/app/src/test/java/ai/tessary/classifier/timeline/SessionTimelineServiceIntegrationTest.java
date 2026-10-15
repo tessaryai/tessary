@@ -24,6 +24,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -450,6 +451,7 @@ class SessionTimelineServiceIntegrationTest {
     private String table(SessionTimeline timeline, Seeded s) {
         return timeline.events().stream()
                 .map(e -> String.format(
+                        Locale.ROOT,
                         "%-14s %-15s %2d %4d %d %-2s %-5s %-11s %-2s %s %s",
                         named(e.id(), s),
                         e.kind(),
