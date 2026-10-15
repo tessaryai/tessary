@@ -4,33 +4,15 @@
  * row shows the strongest sentence and how many more, an aged-out or cleared answer says so, and the list
  * reads its next page and one cause's answers from the server.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import type { FlaggedAnswer, FlaggedAnswerPage } from "../../api/types";
+import type { FlaggedAnswer } from "../../api/types";
 import { FlaggedAnswers } from "./FlaggedAnswers";
 import { dateTime } from "./groundedness";
+import { api } from "../../test/api";
 
-const getFlaggedAnswers =
-  vi.fn<
-    (id: string, params?: { cursor?: string | null; cause?: { rcaReport: string; index: number } }) => Promise<FlaggedAnswerPage>
-  >();
-
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({
-      orgSlug: "acme",
-      projectSlug: "default",
-      api: { base: "/api/orgs/acme/projects/default", getFlaggedAnswers },
-    }),
-  };
-});
-
-afterEach(() => {
-  getFlaggedAnswers.mockReset();
-});
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const ANSWER =
   "Yes. Refunds are available for up to 60 days after purchase. " +
@@ -244,7 +226,7 @@ describe("FlaggedAnswers", () => {
   });
 
   it("reads the next page of answers and adds it below the first", async () => {
-    getFlaggedAnswers.mockResolvedValue({
+    api.getFlaggedAnswers.mockResolvedValue({
       rows: [
         answer({
           traceId: "t-9",
@@ -262,13 +244,13 @@ describe("FlaggedAnswers", () => {
     fireEvent.click(screen.getByRole("button", { name: /Load more answers/ }));
 
     await screen.findByRole("button", { name: /Nonprofits get 50% off every plan/ });
-    expect(getFlaggedAnswers).toHaveBeenCalledWith("f-1", expect.objectContaining({ cursor: "50", limit: 50 }));
+    expect(api.getFlaggedAnswers).toHaveBeenCalledWith("f-1", expect.objectContaining({ cursor: "50", limit: 50 }));
     expect(screen.getByText("2 traces")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Load more answers/ })).toBeNull();
   });
 
   it("reads one cause's answers from the server rather than the first page", async () => {
-    getFlaggedAnswers.mockResolvedValue({
+    api.getFlaggedAnswers.mockResolvedValue({
       rows: [
         answer({
           traceId: "t-7",
@@ -283,7 +265,7 @@ describe("FlaggedAnswers", () => {
     renderList([answer()], 1, "50", { rcaReport: "rca-1", index: 1 });
 
     await screen.findByRole("button", { name: /The API allows 1,000 requests/ });
-    expect(getFlaggedAnswers).toHaveBeenCalledWith(
+    expect(api.getFlaggedAnswers).toHaveBeenCalledWith(
       "f-1",
       expect.objectContaining({ cursor: null, cause: { rcaReport: "rca-1", index: 1 } }),
     );

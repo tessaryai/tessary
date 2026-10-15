@@ -3,28 +3,17 @@
  * ClassifierResetModal: a reset spends money and deletes history, so it takes two steps, and the second
  * one sends nothing until the classifier's name is typed back exactly.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderRoute } from "../../test/render";
 import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import type { Classifier } from "../../api/types";
 import { ClassifierResetModal } from "./ClassifierResetModal";
+import { api } from "../../test/api";
 
-const resetClassifier = vi.fn(async (id: string) => ({ id }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({
-      orgSlug: "acme",
-      projectSlug: "default",
-      api: { base: "/api/orgs/acme/projects/default", resetClassifier },
-    }),
-  };
-});
-
-afterEach(() => resetClassifier.mockClear());
+beforeEach(() => api.resetClassifier.mockImplementation(async (id: string) => ({ id })));
 
 function classifier(overrides: Partial<Classifier>): Classifier {
   return {
@@ -60,13 +49,13 @@ describe("ClassifierResetModal", () => {
     fireEvent.change(input, { target: { value: "frustration" } });
     expect(reset).toHaveProperty("disabled", true);
     fireEvent.click(reset);
-    expect(resetClassifier).not.toHaveBeenCalled();
+    expect(api.resetClassifier).not.toHaveBeenCalled();
 
     fireEvent.change(input, { target: { value: "Frustration" } });
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(resetClassifier.mock.calls).toEqual([["clf-1"]]);
+    expect(api.resetClassifier.mock.calls).toEqual([["clf-1"]]);
   });
 
   // Bug: after a reset the Classifiers cards still draw the deleted detections and the old baseline.

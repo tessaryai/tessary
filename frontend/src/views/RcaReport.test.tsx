@@ -4,46 +4,27 @@
  * own heading; on a current one, every cause together with its confidence. A groundedness cause counts flagged
  * answers and links its traces; a frustration cause counts sessions and links the sessions and their turns.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../test/render";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { RcaReport as RcaReportData } from "../api/types";
-import type { Me } from "../api/types-auth";
 import { AuthProvider } from "../auth/AuthContext";
 import { RcaReport } from "./RcaReport";
 import { CURRENT_GROUNDEDNESS_REPORT, GROUNDEDNESS_REPORT } from "../test/groundednessFixtures";
+import { api, auth } from "../test/api";
 
-const { me } = vi.hoisted(() => ({ me: vi.fn<() => Promise<Me>>() }));
-
-vi.mock("../api/client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../api/client")>();
-  return { ...actual, auth: { ...actual.auth, me } };
-});
+vi.mock("../api/client", () => import("../test/api"));
+vi.mock("../tenant/TenantContext", () => import("../test/api"));
 
 let report: RcaReportData = GROUNDEDNESS_REPORT;
-const api = {
-  base: "/api/orgs/acme/projects/default",
-  getRcaReport: vi.fn(async (_id: string) => report),
-  getGitIntegration: vi.fn(async () => null),
-  rerunRca: vi.fn(),
-};
-
-vi.mock("../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-    useProjectApi: () => api,
-  };
-});
-
-afterEach(() => {
+beforeEach(() => {
   report = GROUNDEDNESS_REPORT;
-  api.rerunRca.mockReset();
+  api.getRcaReport.mockImplementation(async () => report);
+  api.getGitIntegration.mockResolvedValue(null);
 });
 
 function renderReport(role: "owner" | "member" = "member") {
-  me.mockResolvedValue({
+  auth.me.mockResolvedValue({
     id: "user-1",
     email: "a@example.com",
     orgs: [{ id: "org-1", slug: "acme", name: "Acme", role }],

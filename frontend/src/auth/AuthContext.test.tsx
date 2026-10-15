@@ -10,15 +10,16 @@ import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "../api/types";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { ProtectedRoute } from "./ProtectedRoute";
+import { auth } from "../test/api";
 
-const auth = vi.hoisted(() => ({ me: vi.fn(), loginUrl: vi.fn((r?: string) => `/auth/login?returnTo=${r}`) }));
-vi.mock("../api/client", () => ({ auth }));
+vi.mock("../api/client", () => import("../test/api"));
 vi.mock("../lib/routePreload", () => ({ preloadRouteChunk: vi.fn() }));
 
 const ME = { id: "u-1", email: "dana@example.com", orgs: [], platform_staff: false };
 
 beforeEach(() => {
   auth.me.mockResolvedValue(ME);
+  auth.loginUrl.mockImplementation((r?: string) => `/auth/login?returnTo=${r}`);
 });
 
 const guarded = (route = "/orgs/acme/projects/default/traces?q=refund") =>

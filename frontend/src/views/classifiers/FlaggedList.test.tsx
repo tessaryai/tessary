@@ -7,7 +7,7 @@
  * swaps it for the skeleton, which then holds (#109). Then as a general list: it draws the marks a row
  * carries and reads every page through the loader it was given.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -21,27 +21,9 @@ import type {
 } from "../../api/types";
 import { ConversationFilter, FlaggedList, type FlaggedLoader, type FlaggedRow } from "./FlaggedList";
 import { FRUSTRATION_LIST_COPY, frustrationLoader, frustrationRows } from "./frustrationStory";
+import { api } from "../../test/api";
 
-const getTrace = vi.fn<(id: string) => Promise<TraceDetailView>>();
-const getFrustratedSessions =
-  vi.fn<
-    (id: string, params?: { cursor?: string | null; cause?: { rcaReport: string; index: number } }) => Promise<FrustratedSessionPage>
-  >();
-
-const api = { base: "/api/orgs/acme/projects/default", getTrace, getFrustratedSessions };
-
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-  };
-});
-
-afterEach(() => {
-  getTrace.mockReset();
-  getFrustratedSessions.mockReset();
-});
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 function conversation(over: Partial<FrustratedConversation> = {}): FrustratedConversation {
   return {
@@ -119,7 +101,7 @@ function renderList(
 
 describe("FlaggedList", () => {
   it("draws the flagged turn after the turns before it, from the traces, with the flagged message marked", async () => {
-    getTrace.mockImplementation(async (id) =>
+    api.getTrace.mockImplementation(async (id) =>
       id === "t-1"
         ? trace("t-1", "policy no PRG-8298-1753", "I need your full name.", "2026-07-27T16:55:00Z")
         : id === "t-2"
@@ -130,7 +112,7 @@ describe("FlaggedList", () => {
 
     expect(screen.getByText("1 of 71 sessions")).toBeTruthy();
     await screen.findByText("policy holder anjali patil");
-    expect(getTrace.mock.calls.map((c) => c[0])).toEqual(["t-1", "t-2", "t-3"]);
+    expect(api.getTrace.mock.calls.map((c) => c[0])).toEqual(["t-1", "t-2", "t-3"]);
 
     // The list's preview and the flagged turn both carry the message; the flagged one is in a bubble.
     const flagged = screen
@@ -151,7 +133,7 @@ describe("FlaggedList", () => {
       const bottom = this.dataset.flagged === "true" ? 1500 : 820;
       return { top: 0, bottom, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
     });
-    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
     renderList([conversation()]);
 
     await screen.findByText("message t-3");
@@ -164,7 +146,7 @@ describe("FlaggedList", () => {
   });
 
   it("reads another conversation's traces when it is selected", async () => {
-    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
     renderList([
       conversation(),
       conversation({ conversationId: "conv-2", traceId: "t-9", contextTraceIds: ["t-9"], message: "second" }),
@@ -174,12 +156,12 @@ describe("FlaggedList", () => {
     fireEvent.click(screen.getByRole("button", { name: /second/ }));
 
     await screen.findByText("message t-9");
-    expect(getTrace).toHaveBeenCalledWith("t-9");
+    expect(api.getTrace).toHaveBeenCalledWith("t-9");
   });
 
   it("reads the next page of sessions and adds it below the first", async () => {
-    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
-    getFrustratedSessions.mockResolvedValue({
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getFrustratedSessions.mockResolvedValue({
       rows: [conversation({ conversationId: "conv-2", traceId: "t-9", contextTraceIds: ["t-9"], message: "older" })],
       total: 2,
       nextCursor: null,
@@ -190,14 +172,14 @@ describe("FlaggedList", () => {
     fireEvent.click(screen.getByRole("button", { name: /Load more sessions/ }));
 
     await screen.findByRole("button", { name: /older/ });
-    expect(getFrustratedSessions).toHaveBeenCalledWith("f-1", expect.objectContaining({ cursor: "1" }));
+    expect(api.getFrustratedSessions).toHaveBeenCalledWith("f-1", expect.objectContaining({ cursor: "1" }));
     expect(screen.getByText("2 sessions")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Load more sessions/ })).toBeNull();
   });
 
   it("reads one cause's sessions from the server rather than the first page", async () => {
-    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
-    getFrustratedSessions.mockResolvedValue({
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getFrustratedSessions.mockResolvedValue({
       rows: [conversation({ conversationId: "conv-7", traceId: "t-7", contextTraceIds: ["t-7"], message: "caused" })],
       total: 1,
       nextCursor: null,
@@ -205,7 +187,7 @@ describe("FlaggedList", () => {
     renderList([conversation()], 80, "50", { rcaReport: "rca-1", index: 2 });
 
     await screen.findByRole("button", { name: /caused/ });
-    expect(getFrustratedSessions).toHaveBeenCalledWith(
+    expect(api.getFrustratedSessions).toHaveBeenCalledWith(
       "f-1",
       expect.objectContaining({ cursor: null, cause: { rcaReport: "rca-1", index: 2 } }),
     );
@@ -213,14 +195,14 @@ describe("FlaggedList", () => {
   });
 
   it("says so when the session's traces are no longer stored", async () => {
-    getTrace.mockRejectedValue(new Error("not found"));
+    api.getTrace.mockRejectedValue(new Error("not found"));
     renderList([conversation()]);
 
     await waitFor(() => expect(screen.getByText(/traces are no longer stored/)).toBeTruthy());
   });
 
   it("marks a cleared conversation and falls back to its id when the message aged out", async () => {
-    getTrace.mockImplementation(async (id) => trace(id, "hello", "hi", "2026-07-27T16:00:00Z"));
+    api.getTrace.mockImplementation(async (id) => trace(id, "hello", "hi", "2026-07-27T16:00:00Z"));
     renderList([conversation({ cleared: true, message: null })]);
 
     expect(screen.getAllByText("conv-1").length).toBeGreaterThan(0);
@@ -231,9 +213,9 @@ describe("FlaggedList", () => {
   // and the page jumped. The last list must stand in for 200ms, then a skeleton that holds 400ms.
   it("keeps the last list up while a switched filter loads, then shows a skeleton that holds", async () => {
     vi.useFakeTimers();
-    getTrace.mockReturnValue(new Promise(() => {}));
+    api.getTrace.mockReturnValue(new Promise(() => {}));
     let resolveCause!: (page: FrustratedSessionPage) => void;
-    getFrustratedSessions.mockReturnValue(new Promise((resolve) => (resolveCause = resolve)));
+    api.getFrustratedSessions.mockReturnValue(new Promise((resolve) => (resolveCause = resolve)));
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const ui = (filter?: { rcaReport: string; index: number }) => (
       <QueryClientProvider client={qc}>
@@ -298,7 +280,7 @@ describe("FlaggedList", () => {
   // A general caller's marks must reach the traces they name: the judged part on one trace, a matched
   // part on another, and the rest of those two traces dimmed, while the trace with no mark is left alone.
   it("draws the emphasis a row carries on the traces it names", async () => {
-    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, `reply ${id}`, "2026-07-27T16:00:00Z"));
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, `reply ${id}`, "2026-07-27T16:00:00Z"));
     renderRoute(
       <FlaggedList
         {...COPY}
@@ -336,7 +318,7 @@ describe("FlaggedList", () => {
   // The list must read through the caller's loader, not one classifier's endpoint: the first page with
   // no cursor when no page came with the finding, then the next from the cursor that page returned.
   it("reads pages through the loader it was given", async () => {
-    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
     const loadPage = vi.fn<FlaggedLoader>(async (_filter, cursor) =>
       cursor == null
         ? { rows: [row()], nextCursor: "p2", total: 2 }
@@ -354,7 +336,7 @@ describe("FlaggedList", () => {
       [undefined, "p2"],
     ]);
     expect(screen.getByText("2 items")).toBeTruthy();
-    expect(getFrustratedSessions).not.toHaveBeenCalled();
+    expect(api.getFrustratedSessions).not.toHaveBeenCalled();
   });
 });
 

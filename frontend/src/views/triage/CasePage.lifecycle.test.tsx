@@ -32,6 +32,7 @@ import {
   GROUNDEDNESS_DETAIL,
   GROUNDEDNESS_REPORT,
 } from "../../test/groundednessFixtures";
+import { api, auth } from "../../test/api";
 
 const OWNER: Me = {
   id: "user-1",
@@ -40,39 +41,8 @@ const OWNER: Me = {
   platform_staff: false,
 };
 
-const { me, getCapabilities } = vi.hoisted(() => ({
-  me: vi.fn<() => Promise<Me>>(),
-  getCapabilities: vi.fn<() => Promise<CapabilitiesView>>(),
-}));
-
-vi.mock("../../api/client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../api/client")>();
-  return { ...actual, auth: { ...actual.auth, me, getCapabilities } };
-});
-
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getCase: vi.fn(),
-  getRcaReport: vi.fn(),
-  getFlaggedAnswers: vi.fn(),
-  getFrustratedSessions: vi.fn(),
-  getBehaviorFindingEvidence: vi.fn(),
-  getGitIntegration: vi.fn(),
-  getTrace: vi.fn(),
-  closeCase: vi.fn(),
-  absorbCase: vi.fn(),
-  runCaseRca: vi.fn(),
-  rerunRca: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-    useProjectApi: () => api,
-  };
-});
+vi.mock("../../api/client", () => import("../../test/api"));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 // ---- fixtures -------------------------------------------------------------------------------
 
@@ -241,8 +211,8 @@ const driftCase = (metric: Partial<NonNullable<CaseDetail["metric"]>> = {}): Cas
 // ---- harness --------------------------------------------------------------------------------
 
 beforeEach(() => {
-  me.mockResolvedValue(OWNER);
-  getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: true } as CapabilitiesView["capabilities"] });
+  auth.me.mockResolvedValue(OWNER);
+  auth.getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: true } as CapabilitiesView["capabilities"] });
   api.getCase.mockResolvedValue(BASE);
   api.getGitIntegration.mockResolvedValue({ provider: "github" });
   api.getFlaggedAnswers.mockResolvedValue({ rows: [], total: 0, nextCursor: null });
@@ -903,12 +873,12 @@ describe("CasePage, groundedness", () => {
   });
 
   it("hides the RCA controls when the organization does not have RCA", async () => {
-    getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: false } as CapabilitiesView["capabilities"] });
+    auth.getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: false } as CapabilitiesView["capabilities"] });
     renderPage();
 
     // The finished report still reads: only running it again is withheld.
     await screen.findByText(TITLE_1);
-    await settled(getCapabilities);
+    await settled(auth.getCapabilities);
     expect(screen.queryByRole("button", { name: "Re-run RCA" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Connect repository" })).toBeNull();
   });

@@ -10,10 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MalformedOutputDetail, MalformedOutputRow } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { HowOutputsBroke } from "./malformedStory";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getMalformedOutputs: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ api }) }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const DETAIL = {
   fields: [

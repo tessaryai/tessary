@@ -15,13 +15,9 @@ import type { TraceDetailView } from "../../api/types";
 import { span, traceItem, type SpanView } from "../../test/fixtures";
 import { currentParams, renderRoute } from "../../test/render";
 import { TraceDetail } from "./TraceDetail";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getTrace: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const j = (v: unknown) => JSON.stringify(v);
 const HISTORY = [

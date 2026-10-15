@@ -14,23 +14,9 @@ import { GROUNDEDNESS_DETAIL, GROUNDEDNESS_FINDING_DETAIL } from "../../test/gro
 import { FindingPage } from "./FindingPage";
 import { dateTime } from "./groundedness";
 import { stamp } from "./shared";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getBehaviorFinding: vi.fn(),
-  getBehaviorFindingEvidence: vi.fn(),
-  analyzeBehaviorFinding: vi.fn(),
-  resolveBehaviorFinding: vi.fn(),
-  getFrustratedSessions: vi.fn(),
-  getMalformedOutputs: vi.fn(),
-  getFlaggedAnswers: vi.fn(),
-  getTrace: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return { ...actual, useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }) };
-});
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const BASE = GROUNDEDNESS_FINDING_DETAIL;
 type Finding = BehaviorFindingDetail["finding"];

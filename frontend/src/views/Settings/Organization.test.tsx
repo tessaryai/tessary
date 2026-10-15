@@ -12,13 +12,14 @@ import type { OrgMember, OrgRole, Organization as Org, Project } from "../../api
 import { renderRoute } from "../../test/render";
 import { DensityProvider } from "../../ui/density";
 import { Organization } from "./Organization";
-import { auth } from "../../test/api";
+import { auth, tenant } from "../../test/api";
 
 const session = vi.hoisted(() => ({ role: "owner" as OrgRole }));
 
 vi.mock("../../api/client", () => import("../../test/api"));
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "support" }) }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: "u-me" } }) }));
+tenant.projectSlug = "support";
 
 const ORG: Org = {
   id: "org_0123",

@@ -10,12 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Vitals as VitalsData, VitalsGroup } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { Vitals } from "./Vitals";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getVitals: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const group = (
   key: string | null,

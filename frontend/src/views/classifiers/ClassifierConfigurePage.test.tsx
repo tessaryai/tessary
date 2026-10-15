@@ -13,9 +13,8 @@
  * The status beside the switch says whether the sweep is failing, whether the classifier has anything to judge yet,
  * and what it found in 7 days, and never reads "quiet" when the volume is unknown.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach } from "vitest";
 import type {
   BehaviorFinding,
   Classifier,
@@ -24,67 +23,24 @@ import type {
   ClassifierHealth,
   GroundednessStatus,
 } from "../../api/types";
-import { currentLocation, renderRoute } from "../../test/render";
+import { currentLocation, pending, renderRoute } from "../../test/render";
 import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import { ClassifierConfigurePage, DetectionRow } from "./ClassifierConfigurePage";
 import { ago } from "./shared";
 import { clockTime } from "./groundedness";
+import { api, orgApi } from "../../test/api";
 
-const listClassifiers = vi.fn<() => Promise<Classifier[]>>();
-const setClassifierEnabled = vi.fn();
-const getGroundednessStatus = vi.fn<(id: string) => Promise<GroundednessStatus>>();
 const EMPTY_VOLUME: ClassifierDailyVolume = { days: [], trace_totals: [], classifiers: [] };
-const getClassifierDailyVolume = vi.fn<() => Promise<ClassifierDailyVolume>>(async () => EMPTY_VOLUME);
-const listClassifierHealth = vi.fn<() => Promise<ClassifierHealth[]>>(async () => []);
-const listClassifierEvents = vi.fn<(id: string, limit?: number) => Promise<ClassifierEvent[]>>(async () => []);
-const listBehaviorFindings = vi.fn();
-const analyzeBehaviorFinding = vi.fn();
-const resolveBehaviorFinding = vi.fn();
-const getClassifierTuning = vi.fn(() => new Promise(() => {}));
-const listClassifierCallSites = vi.fn(() => new Promise(() => {}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
-vi.mock("../../tenant/TenantContext", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
-  return {
-    ...actual,
-    useTenant: () => ({
-      orgSlug: "acme",
-      projectSlug: "default",
-      api: {
-        base: "/api/orgs/acme/projects/default",
-        listClassifiers,
-        getClassifierDailyVolume,
-        listClassifierHealth,
-        setClassifierEnabled,
-        getGroundednessStatus,
-        listClassifierEvents,
-        listBehaviorFindings,
-        analyzeBehaviorFinding,
-        resolveBehaviorFinding,
-        getClassifierTuning,
-        listClassifierCallSites,
-        getClassifierDebug: () => new Promise(() => {}),
-        getModelSettings: () => new Promise(() => {}),
-      },
-      orgApi: { base: "/api/orgs/acme", listProviderCredentials: () => new Promise(() => {}) },
-    }),
-  };
+beforeEach(() => {
+  api.getClassifierDailyVolume.mockResolvedValue(EMPTY_VOLUME);
+  api.listClassifierHealth.mockResolvedValue([]);
+  api.listClassifierEvents.mockResolvedValue([]);
+  for (const read of [api.getClassifierTuning, api.listClassifierCallSites, api.getClassifierDebug, api.getModelSettings, orgApi.listProviderCredentials])
+    read.mockReturnValue(pending());
 });
-
-afterEach(() => {
-  listClassifiers.mockReset();
-  setClassifierEnabled.mockReset();
-  getGroundednessStatus.mockReset();
-  window.localStorage.clear();
-  getClassifierDailyVolume.mockImplementation(async () => EMPTY_VOLUME);
-  listClassifierHealth.mockImplementation(async () => []);
-  listClassifierEvents.mockImplementation(async () => []);
-  listBehaviorFindings.mockReset();
-  analyzeBehaviorFinding.mockReset();
-  resolveBehaviorFinding.mockReset();
-  getClassifierTuning.mockClear();
-  listClassifierCallSites.mockClear();
-});
+afterEach(() => window.localStorage.clear());
 
 function classifier(overrides: Partial<Classifier>): Classifier {
   return {
@@ -119,7 +75,7 @@ const maybeSection = (title: string) => screen.queryByRole("heading", { level: 2
 describe("the configure page", () => {
   // Bug: a page that names another classifier, or a breadcrumb that leads anywhere but back to Classifiers.
   it("names the classifier with its description, under a breadcrumb back to Classifiers", async () => {
-    listClassifiers.mockResolvedValue([
+    api.listClassifiers.mockResolvedValue([
       classifier({ id: "clf-0", name: "Tool errors", detector: "tool_error" }),
       classifier({ description: "Conversations where the user grew frustrated with the agent." }),
     ]);
@@ -135,7 +91,7 @@ describe("the configure page", () => {
 
   // Bug: an old bookmark or a deleted classifier's id renders a blank page with no way back.
   it("says when no classifier has that id, and links back to Classifiers", async () => {
-    listClassifiers.mockResolvedValue([classifier({})]);
+    api.listClassifiers.mockResolvedValue([classifier({})]);
     renderPage("clf-gone");
 
     expect(await screen.findByText("No classifier with this id in this project.")).toBeTruthy();
@@ -145,7 +101,7 @@ describe("the configure page", () => {
   });
 
   it("says why the classifiers could not be read", async () => {
-    listClassifiers.mockRejectedValue(new Error("classifiers unavailable"));
+    api.listClassifiers.mockRejectedValue(new Error("classifiers unavailable"));
     renderPage();
 
     expect(await screen.findByText("classifiers unavailable")).toBeTruthy();
@@ -155,57 +111,57 @@ describe("the configure page", () => {
   // Bug: Tool errors offered a call-site list the server refuses (it buckets by tool), or a classifier other than
   // the two drift ones given the drift form.
   it("shows the call-site form and the tuning form only where they apply", async () => {
-    listClassifiers.mockResolvedValue([classifier({ id: "clf-t", name: "Tool errors", detector: "tool_error" })]);
+    api.listClassifiers.mockResolvedValue([classifier({ id: "clf-t", name: "Tool errors", detector: "tool_error" })]);
     renderPage("clf-t");
     await screen.findByRole("heading", { level: 1, name: "Tool errors" });
     await within(section("Status")).findByText("Every tool");
     expect(maybeSection("Call sites")).toBeNull();
     expect(maybeSection("Tuning")).toBeNull();
-    expect(listClassifierCallSites).not.toHaveBeenCalled();
+    expect(api.listClassifierCallSites).not.toHaveBeenCalled();
   });
 
   // Bug: Frustration given a picker of its own (its list is gone; it shares call_site_ids), or no word on what
   // limiting it is for.
   it("gives Frustration the shared call-site list, with a tip on which call sites to keep", async () => {
-    listClassifiers.mockResolvedValue([classifier({})]);
+    api.listClassifiers.mockResolvedValue([classifier({})]);
     renderPage();
 
     const callSites = await waitFor(() => section("Call sites"));
     expect(within(callSites).getByText(/limit it to the call sites that reply to the user/)).toBeTruthy();
-    expect(listClassifierCallSites).toHaveBeenCalled();
+    expect(api.listClassifierCallSites).toHaveBeenCalled();
     expect(maybeSection("Tuning")).toBeNull();
   });
 
   // Bug: Status says nothing about where Frustration runs, as if it still kept a list of its own.
   it("says where Frustration runs in Status, like every other classifier", async () => {
-    listClassifiers.mockResolvedValue([classifier({})]);
+    api.listClassifiers.mockResolvedValue([classifier({})]);
     renderPage();
     expect(await within(await waitFor(() => section("Status"))).findByText("Every call site")).toBeTruthy();
   });
 
   it("counts Frustration's call sites in Status when it is limited", async () => {
-    listClassifiers.mockResolvedValue([classifier({ call_site_ids: ["a", "b"] })]);
+    api.listClassifiers.mockResolvedValue([classifier({ call_site_ids: ["a", "b"] })]);
     renderPage();
     expect(await within(await waitFor(() => section("Status"))).findByText("2 call sites")).toBeTruthy();
   });
 
   // Bug: Status said "0 call sites" where the Configure menu says "On, no call sites" for the same classifier.
   it("says no call sites in Status when the list is empty, as the Configure menu does", async () => {
-    listClassifiers.mockResolvedValue([classifier({ call_site_ids: [] })]);
+    api.listClassifiers.mockResolvedValue([classifier({ call_site_ids: [] })]);
     renderPage();
     expect(await within(await waitFor(() => section("Status"))).findByText("No call sites")).toBeTruthy();
   });
 
   it("gives a drift classifier the call-site list and the tuning form", async () => {
-    listClassifiers.mockResolvedValue([
+    api.listClassifiers.mockResolvedValue([
       classifier({ id: "clf-c", name: "Cost drift", detector: "cost_drift", call_site_ids: ["a", "b"] }),
     ]);
-    listBehaviorFindings.mockResolvedValue({ findings: [] });
+    api.listBehaviorFindings.mockResolvedValue({ findings: [] });
     renderPage("clf-c");
 
     await screen.findByRole("heading", { level: 2, name: "Tuning" });
-    expect(getClassifierTuning).toHaveBeenCalledWith("clf-c");
-    expect(listClassifierCallSites).toHaveBeenCalled();
+    expect(api.getClassifierTuning).toHaveBeenCalledWith("clf-c");
+    expect(api.listClassifierCallSites).toHaveBeenCalled();
     expect(within(section("Status")).getByText("2 call sites")).toBeTruthy();
   });
 
@@ -217,15 +173,15 @@ describe("the configure page", () => {
     ["secret_leak", /enough detections land within one window/],
     ["regex", /enough detections land within one window/],
   ])("explains how %s opens a finding", async (detector, words) => {
-    listClassifiers.mockResolvedValue([classifier({ detector, name: "Watch" })]);
-    listBehaviorFindings.mockResolvedValue({ findings: [] });
+    api.listClassifiers.mockResolvedValue([classifier({ detector, name: "Watch" })]);
+    api.listBehaviorFindings.mockResolvedValue({ findings: [] });
     renderPage();
 
     expect(await within(await waitFor(() => section("How a finding opens"))).findByText(words)).toBeTruthy();
   });
 
   it("names a provider pause beside the switch and links to Providers", async () => {
-    listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
+    api.listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
     renderPage();
 
     const label = await screen.findByText("Provider rejected the key");
@@ -233,7 +189,7 @@ describe("the configure page", () => {
   });
 
   it("names a missing key", async () => {
-    listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "no_provider" })]);
+    api.listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "no_provider" })]);
     renderPage();
 
     await screen.findByText("No provider key");
@@ -243,7 +199,7 @@ describe("the configure page", () => {
     ["no_credit", "No credit left", /used all of its credit/],
     ["platform_unavailable", "Provider unavailable", /Nothing needs to change on your side/],
   ])("names a %s pause and explains it in Status", async (readiness, label, explained) => {
-    listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness })]);
+    api.listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness })]);
     renderPage();
 
     await screen.findByText(label);
@@ -251,8 +207,8 @@ describe("the configure page", () => {
   });
 
   it("renders a refused toggle's error", async () => {
-    listClassifiers.mockResolvedValue([classifier({ classifier_key: "tool_error", name: "Tool error", detector: "tool_error" })]);
-    setClassifierEnabled.mockRejectedValue(new Error("the switch was refused"));
+    api.listClassifiers.mockResolvedValue([classifier({ classifier_key: "tool_error", name: "Tool error", detector: "tool_error" })]);
+    api.setClassifierEnabled.mockRejectedValue(new Error("the switch was refused"));
     renderPage();
 
     fireEvent.click(await screen.findByRole("switch", { name: "Enable Tool error" }));
@@ -261,20 +217,20 @@ describe("the configure page", () => {
   });
 
   it("turns a classifier off with the switch", async () => {
-    listClassifiers.mockResolvedValue([classifier({ name: "Tool error", detector: "tool_error", enabled: true })]);
-    setClassifierEnabled.mockResolvedValue({});
+    api.listClassifiers.mockResolvedValue([classifier({ name: "Tool error", detector: "tool_error", enabled: true })]);
+    api.setClassifierEnabled.mockResolvedValue({});
     renderPage();
 
     fireEvent.click(await screen.findByRole("switch", { name: "Disable Tool error" }));
 
-    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-1", false));
-    await waitFor(() => expect(listClassifiers).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.setClassifierEnabled).toHaveBeenCalledWith("clf-1", false));
+    await waitFor(() => expect(api.listClassifiers).toHaveBeenCalledTimes(2));
   });
 
   // Bug: back on Classifiers within the staleTime, the Configure menu still says "On" and the card still draws.
   it("marks the Classifiers charts and menu stale when the switch flips", async () => {
-    listClassifiers.mockResolvedValue([classifier({ name: "Tool error", detector: "tool_error", enabled: true })]);
-    setClassifierEnabled.mockResolvedValue({});
+    api.listClassifiers.mockResolvedValue([classifier({ name: "Tool error", detector: "tool_error", enabled: true })]);
+    api.setClassifierEnabled.mockResolvedValue({});
     const qc = renderPage();
     seedChartReads(qc);
 
@@ -284,7 +240,7 @@ describe("the configure page", () => {
   });
 
   it("carries the mode and the call sites in Status", async () => {
-    listClassifiers.mockResolvedValue([
+    api.listClassifiers.mockResolvedValue([
       classifier({ name: "Secret leak", detector: "secret_leak", mode: "blocking", call_site_ids: ["a"] }),
     ]);
     renderPage();
@@ -312,9 +268,9 @@ describe("the status beside the switch", () => {
 
   // Bug: a classifier whose sweep is failing reads as healthy, with its detections and nothing else.
   it("flags a failing sweep, and explains it in Status", async () => {
-    listClassifiers.mockResolvedValue([TOOL_ERROR]);
-    listClassifierHealth.mockResolvedValue([health("clf-a", "failed"), health("clf-b", "pending")]);
-    getClassifierDailyVolume.mockResolvedValue({
+    api.listClassifiers.mockResolvedValue([TOOL_ERROR]);
+    api.listClassifierHealth.mockResolvedValue([health("clf-a", "failed"), health("clf-b", "pending")]);
+    api.getClassifierDailyVolume.mockResolvedValue({
       ...EMPTY_VOLUME,
       classifiers: [
         { classifier_id: "clf-a", counts: [2, 1] },
@@ -329,9 +285,9 @@ describe("the status beside the switch", () => {
   });
 
   it("does not flag a healthy sweep, and counts one detection in the singular", async () => {
-    listClassifiers.mockResolvedValue([TOOL_ERROR]);
-    listClassifierHealth.mockResolvedValue([health("clf-a", "pending")]);
-    getClassifierDailyVolume.mockResolvedValue({ ...EMPTY_VOLUME, classifiers: [{ classifier_id: "clf-a", counts: [0, 1] }] });
+    api.listClassifiers.mockResolvedValue([TOOL_ERROR]);
+    api.listClassifierHealth.mockResolvedValue([health("clf-a", "pending")]);
+    api.getClassifierDailyVolume.mockResolvedValue({ ...EMPTY_VOLUME, classifiers: [{ classifier_id: "clf-a", counts: [0, 1] }] });
     renderPage("clf-a");
 
     await screen.findByText("1 detection 7d");
@@ -340,8 +296,8 @@ describe("the status beside the switch", () => {
 
   // Bug: a classifier with nothing to judge yet reads "quiet 7d", which says it looked and found nothing.
   it("reads a classifier waiting on schemas as waiting, and a silent one as quiet", async () => {
-    listClassifiers.mockResolvedValue([{ ...TOOL_ERROR, readiness: "waiting_on_schemas" }]);
-    getClassifierDailyVolume.mockResolvedValue({ ...EMPTY_VOLUME, classifiers: [{ classifier_id: "clf-a", counts: [0, 0] }] });
+    api.listClassifiers.mockResolvedValue([{ ...TOOL_ERROR, readiness: "waiting_on_schemas" }]);
+    api.getClassifierDailyVolume.mockResolvedValue({ ...EMPTY_VOLUME, classifiers: [{ classifier_id: "clf-a", counts: [0, 0] }] });
     renderPage("clf-a");
 
     await screen.findByText("waiting on schemas");
@@ -350,8 +306,8 @@ describe("the status beside the switch", () => {
   });
 
   it("reads a silent classifier as quiet", async () => {
-    listClassifiers.mockResolvedValue([TOOL_ERROR]);
-    getClassifierDailyVolume.mockResolvedValue({ ...EMPTY_VOLUME, classifiers: [{ classifier_id: "clf-a", counts: [0, 0] }] });
+    api.listClassifiers.mockResolvedValue([TOOL_ERROR]);
+    api.getClassifierDailyVolume.mockResolvedValue({ ...EMPTY_VOLUME, classifiers: [{ classifier_id: "clf-a", counts: [0, 0] }] });
     renderPage("clf-a");
 
     await screen.findByText("quiet 7d");
@@ -359,8 +315,8 @@ describe("the status beside the switch", () => {
 
   // Bug: when the volume read fails, the classifier reads "quiet 7d" instead of unknown.
   it("shows a dash, not quiet, when the 7-day volume could not be read", async () => {
-    listClassifiers.mockResolvedValue([TOOL_ERROR]);
-    getClassifierDailyVolume.mockRejectedValue(new Error("volume unavailable"));
+    api.listClassifiers.mockResolvedValue([TOOL_ERROR]);
+    api.getClassifierDailyVolume.mockRejectedValue(new Error("volume unavailable"));
     const qc = renderPage("clf-a");
 
     await screen.findByRole("heading", { level: 1, name: "Tool error" });
@@ -462,8 +418,8 @@ describe("Groundedness", () => {
   it("keeps the detection count while on in dev, and drops the setting-up flag", async () => {
     // A dev row can carry a caught-up time too, and this browser copied a setup prompt earlier.
     window.localStorage.setItem("tsy-groundedness-setup:acme/default", "2026-09-23T14:00:00Z");
-    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(
+    api.listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    api.getGroundednessStatus.mockResolvedValue(
       status({ state: "on", configured: true, available: true, ever_swept: true, last_caught_up_at: todayAt(14, 3) }),
     );
     renderPage("clf-g");
@@ -477,8 +433,8 @@ describe("Groundedness", () => {
 
   it("names the last run while on in production, and the model's facts in Status", async () => {
     const caughtUp = todayAt(14, 3);
-    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(
+    api.listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    api.getGroundednessStatus.mockResolvedValue(
       status({ state: "on", mode: "production", configured: true, ever_swept: true, last_caught_up_at: caughtUp }),
     );
     renderPage("clf-g");
@@ -490,8 +446,8 @@ describe("Groundedness", () => {
   });
 
   it("shows the restart notice while not scoring, and links it at the running version", async () => {
-    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(
+    api.listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    api.getGroundednessStatus.mockResolvedValue(
       status({
         state: "not_scoring",
         configured: true,
@@ -512,23 +468,23 @@ describe("Groundedness", () => {
   });
 
   it("says off for a disabled classifier that was set up, and switching it on enables it directly", async () => {
-    listClassifiers.mockResolvedValue([groundednessRow()]);
-    getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true, ever_swept: true }));
-    setClassifierEnabled.mockResolvedValue(groundednessRow({ enabled: true }));
+    api.listClassifiers.mockResolvedValue([groundednessRow()]);
+    api.getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true, ever_swept: true }));
+    api.setClassifierEnabled.mockResolvedValue(groundednessRow({ enabled: true }));
     renderPage("clf-g");
 
     await screen.findByText("off");
     fireEvent.click(screen.getByRole("switch", { name: "Enable Groundedness" }));
 
-    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true));
+    await waitFor(() => expect(api.setClassifierEnabled).toHaveBeenCalledWith("clf-g", true));
     expect(screen.queryByText("Enable Groundedness", { selector: "h2" })).toBeNull();
   });
 
   it("marks setup under way once the prompt is copied, and clears it when the model answers and it enables", async () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(async () => {}) }, configurable: true });
-    listClassifiers.mockResolvedValue([groundednessRow()]);
-    getGroundednessStatus.mockResolvedValue(status({}));
-    setClassifierEnabled.mockResolvedValue(groundednessRow({ enabled: true }));
+    api.listClassifiers.mockResolvedValue([groundednessRow()]);
+    api.getGroundednessStatus.mockResolvedValue(status({}));
+    api.setClassifierEnabled.mockResolvedValue(groundednessRow({ enabled: true }));
     const qc = renderPage("clf-g");
 
     await screen.findByText("needs setup");
@@ -539,11 +495,11 @@ describe("Groundedness", () => {
     await waitFor(() => expect(window.localStorage.getItem("tsy-groundedness-setup:acme/default")).not.toBeNull());
     expect(screen.getByText("Setting up...")).toBeTruthy();
 
-    getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
+    api.getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
     // Only the status: the call-site list on this page never answers here, and awaiting every query would hang.
     await qc.invalidateQueries({ queryKey: ["groundedness-status"] });
 
-    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true));
+    await waitFor(() => expect(api.setClassifierEnabled).toHaveBeenCalledWith("clf-g", true));
     expect(await within(modal).findByText("Groundedness enabled")).toBeTruthy();
     expect(window.localStorage.getItem("tsy-groundedness-setup:acme/default")).toBeNull();
     fireEvent.click(within(modal).getByRole("button", { name: "Done" }));
@@ -551,35 +507,35 @@ describe("Groundedness", () => {
   });
 
   it("closes the turn-off question without turning it off", async () => {
-    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
+    api.listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    api.getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
     renderPage("clf-g");
 
     fireEvent.click(await screen.findByRole("switch", { name: "Disable Groundedness" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(setClassifierEnabled).not.toHaveBeenCalled();
+    expect(api.setClassifierEnabled).not.toHaveBeenCalled();
   });
 
   // Bug: Groundedness turned off here still draws its card on Classifiers, with no "off" chip, until the staleTime ends.
   it("marks the Classifiers charts and menu stale when it is turned off", async () => {
-    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
-    setClassifierEnabled.mockResolvedValue({});
+    api.listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    api.getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
+    api.setClassifierEnabled.mockResolvedValue({});
     const qc = renderPage("clf-g");
     seedChartReads(qc);
 
     fireEvent.click(await screen.findByRole("switch", { name: "Disable Groundedness" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Turn off" }));
 
-    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", false));
+    await waitFor(() => expect(api.setClassifierEnabled).toHaveBeenCalledWith("clf-g", false));
     await waitFor(() => expect(chartReadsStale(qc)).toEqual([true, true]));
   });
 
   it("closes the restart guide", async () => {
-    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
-    getGroundednessStatus.mockResolvedValue(
+    api.listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    api.getGroundednessStatus.mockResolvedValue(
       status({ state: "not_scoring", configured: true, ever_swept: true, last_scored_at: todayAt(14, 2) }),
     );
     renderPage("clf-g");
@@ -593,24 +549,24 @@ describe("Groundedness", () => {
 
   // Bug: the status read fires for every classifier and 422s, since only Groundedness has one.
   it("reads the model's status only for Groundedness", async () => {
-    listClassifiers.mockResolvedValue([classifier({ name: "Tool error", detector: "tool_error" })]);
+    api.listClassifiers.mockResolvedValue([classifier({ name: "Tool error", detector: "tool_error" })]);
     renderPage();
 
     await screen.findByRole("heading", { level: 1, name: "Tool error" });
-    expect(getGroundednessStatus).not.toHaveBeenCalled();
+    expect(api.getGroundednessStatus).not.toHaveBeenCalled();
   });
 });
 
 describe("Frustration", () => {
   it("closes the enable modal without enabling", async () => {
-    listClassifiers.mockResolvedValue([classifier({})]);
+    api.listClassifiers.mockResolvedValue([classifier({})]);
     renderPage();
 
     fireEvent.click(await screen.findByRole("switch", { name: "Enable Frustration" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(setClassifierEnabled).not.toHaveBeenCalled();
+    expect(api.setClassifierEnabled).not.toHaveBeenCalled();
   });
 });
 
@@ -637,27 +593,27 @@ describe("a drift classifier's findings, detections and reset", () => {
     }) as BehaviorFinding;
 
   it("lists only this classifier's findings, and says when it has none", async () => {
-    listClassifiers.mockResolvedValue([COST]);
-    listBehaviorFindings.mockResolvedValue({ findings: [] });
+    api.listClassifiers.mockResolvedValue([COST]);
+    api.listBehaviorFindings.mockResolvedValue({ findings: [] });
     renderPage("clf-c");
 
     expect(await within(await waitFor(() => section("Findings"))).findByText(/Nothing has drifted/)).toBeTruthy();
-    expect(listBehaviorFindings).toHaveBeenCalledWith("cost_drift");
+    expect(api.listBehaviorFindings).toHaveBeenCalledWith("cost_drift");
   });
 
   // Bug: a classifier that opens no drift findings given a Findings section that is empty forever.
   it("has no Findings section for a classifier that is not a drift one", async () => {
-    listClassifiers.mockResolvedValue([classifier({ name: "Secret leak", detector: "secret_leak" })]);
+    api.listClassifiers.mockResolvedValue([classifier({ name: "Secret leak", detector: "secret_leak" })]);
     renderPage();
 
     await screen.findByRole("heading", { level: 2, name: "Recent detections" });
     expect(maybeSection("Findings")).toBeNull();
-    expect(listBehaviorFindings).not.toHaveBeenCalled();
+    expect(api.listBehaviorFindings).not.toHaveBeenCalled();
   });
 
   it("offers triage and the verdicts on an untriaged finding, and only the ruling on a triaged one", async () => {
-    listClassifiers.mockResolvedValue([COST]);
-    listBehaviorFindings.mockResolvedValue({
+    api.listClassifiers.mockResolvedValue([COST]);
+    api.listBehaviorFindings.mockResolvedValue({
       findings: [
         finding("f-2", {
           triageStatus: "done",
@@ -668,8 +624,8 @@ describe("a drift classifier's findings, detections and reset", () => {
         finding("f-3", { triageStatus: "in_flight" }),
       ],
     });
-    analyzeBehaviorFinding.mockRejectedValueOnce(new Error("no sandbox")).mockResolvedValue({});
-    resolveBehaviorFinding.mockRejectedValueOnce(new Error("locked")).mockResolvedValue({});
+    api.analyzeBehaviorFinding.mockRejectedValueOnce(new Error("no sandbox")).mockResolvedValue({});
+    api.resolveBehaviorFinding.mockRejectedValueOnce(new Error("locked")).mockResolvedValue({});
     renderPage("clf-c");
 
     const first = (await screen.findByText("Cost rose on f-1")).parentElement!;
@@ -691,22 +647,22 @@ describe("a drift classifier's findings, detections and reset", () => {
     fireEvent.click(within(first).getByRole("button", { name: "Run triage" }));
     expect(await within(findings).findByText("no sandbox")).toBeTruthy();
     fireEvent.click(within(first).getByRole("button", { name: "Run triage" }));
-    await waitFor(() => expect(analyzeBehaviorFinding).toHaveBeenLastCalledWith("f-1"));
+    await waitFor(() => expect(api.analyzeBehaviorFinding).toHaveBeenLastCalledWith("f-1"));
 
     const verbs = within(first).getAllByRole("button").filter((b) => b.textContent !== "Run triage");
     fireEvent.click(verbs[0]);
     expect(await within(findings).findByText("locked")).toBeTruthy();
     fireEvent.click(verbs[1]);
-    await waitFor(() => expect(resolveBehaviorFinding).toHaveBeenLastCalledWith("f-1", "not_expected"));
-    expect(resolveBehaviorFinding.mock.calls[0]).toEqual(["f-1", "expected"]);
+    await waitFor(() => expect(api.resolveBehaviorFinding).toHaveBeenLastCalledWith("f-1", "not_expected"));
+    expect(api.resolveBehaviorFinding.mock.calls[0]).toEqual(["f-1", "expected"]);
   });
 
   // Bug: Triage, reached from the breadcrumb within the staleTime, still lists a finding just ruled or triaged here.
   it("marks Triage's findings stale when a finding is triaged or ruled here", async () => {
-    listClassifiers.mockResolvedValue([COST]);
-    listBehaviorFindings.mockResolvedValue({ findings: [finding("f-1")] });
-    analyzeBehaviorFinding.mockResolvedValue({});
-    resolveBehaviorFinding.mockResolvedValue({});
+    api.listClassifiers.mockResolvedValue([COST]);
+    api.listBehaviorFindings.mockResolvedValue({ findings: [finding("f-1")] });
+    api.analyzeBehaviorFinding.mockResolvedValue({});
+    api.resolveBehaviorFinding.mockResolvedValue({});
     const qc = renderPage("clf-c");
     const triageKey = ["behavior-findings", "/api/orgs/acme/projects/default", "all"];
     const triageStale = () => qc.getQueryState(triageKey)?.isInvalidated ?? false;
@@ -722,25 +678,25 @@ describe("a drift classifier's findings, detections and reset", () => {
       fireEvent.click(verb);
       await waitFor(() => expect(triageStale()).toBe(true));
     }
-    expect(resolveBehaviorFinding.mock.calls).toEqual([
+    expect(api.resolveBehaviorFinding.mock.calls).toEqual([
       ["f-1", "expected"],
       ["f-1", "not_expected"],
     ]);
   });
 
   it("says when the findings could not be read", async () => {
-    listClassifiers.mockResolvedValue([COST]);
-    listBehaviorFindings.mockRejectedValue(new Error("findings unavailable"));
+    api.listClassifiers.mockResolvedValue([COST]);
+    api.listBehaviorFindings.mockRejectedValue(new Error("findings unavailable"));
     renderPage("clf-c");
 
     expect(await screen.findByText("findings unavailable")).toBeTruthy();
   });
 
   it("summarises each detection's evidence, and opens its trace when it has one", async () => {
-    listClassifiers.mockResolvedValue([COST]);
-    listBehaviorFindings.mockResolvedValue({ findings: [] });
+    api.listClassifiers.mockResolvedValue([COST]);
+    api.listBehaviorFindings.mockResolvedValue({ findings: [] });
     const detection = (id: string, over: Partial<ClassifierEvent>) => event({ id, ...over });
-    listClassifierEvents.mockResolvedValue([
+    api.listClassifierEvents.mockResolvedValue([
       detection("d1", {
         trace_id: "trace-1",
         evidence_json: JSON.stringify({ matched_value: ["a", "b"], pattern: "x".repeat(100), empty: "", none: [], gone: null }),
@@ -762,19 +718,19 @@ describe("a drift classifier's findings, detections and reset", () => {
     expect(within(r).getByText("42")).toBeTruthy();
     expect(within(r).getByText("low confidence")).toBeTruthy();
     expect(within(r).getByText("25 most recent · select one to open its session")).toBeTruthy();
-    expect(listClassifierEvents).toHaveBeenCalledWith("clf-c", 25);
+    expect(api.listClassifierEvents).toHaveBeenCalledWith("clf-c", 25);
   });
 
   it("says a disabled classifier is not sweeping when it has no detections", async () => {
-    listClassifiers.mockResolvedValue([classifier({ id: "clf-t", name: "Tool error", detector: "tool_error" })]);
+    api.listClassifiers.mockResolvedValue([classifier({ id: "clf-t", name: "Tool error", detector: "tool_error" })]);
     renderPage("clf-t");
 
     expect(await screen.findByText(/Disabled, so it isn't sweeping/)).toBeTruthy();
   });
 
   it("retries a paused classifier from Status, and says why a retry was refused", async () => {
-    listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
-    setClassifierEnabled.mockRejectedValueOnce(new Error("key still rejected")).mockResolvedValue({});
+    api.listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
+    api.setClassifierEnabled.mockRejectedValueOnce(new Error("key still rejected")).mockResolvedValue({});
     renderPage();
 
     const s = await waitFor(() => section("Status"));
@@ -782,15 +738,15 @@ describe("a drift classifier's findings, detections and reset", () => {
     fireEvent.click(within(s).getByRole("button", { name: "Retry" }));
     expect(await within(s).findByText("key still rejected")).toBeTruthy();
     fireEvent.click(within(s).getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledTimes(2));
-    expect(setClassifierEnabled).toHaveBeenLastCalledWith("clf-1", true);
-    await waitFor(() => expect(listClassifiers).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.setClassifierEnabled).toHaveBeenCalledTimes(2));
+    expect(api.setClassifierEnabled).toHaveBeenLastCalledWith("clf-1", true);
+    await waitFor(() => expect(api.listClassifiers).toHaveBeenCalledTimes(2));
   });
 
   // Bug: a paused classifier retried here still reads "Waiting" in the Configure menu on Classifiers.
   it("marks the Classifiers charts and menu stale when a retry lands", async () => {
-    listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
-    setClassifierEnabled.mockResolvedValue({});
+    api.listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
+    api.setClassifierEnabled.mockResolvedValue({});
     const qc = renderPage();
     seedChartReads(qc);
 
@@ -800,8 +756,8 @@ describe("a drift classifier's findings, detections and reset", () => {
   });
 
   it("opens the reset question from Reset", async () => {
-    listClassifiers.mockResolvedValue([COST]);
-    listBehaviorFindings.mockResolvedValue({ findings: [] });
+    api.listClassifiers.mockResolvedValue([COST]);
+    api.listBehaviorFindings.mockResolvedValue({ findings: [] });
     renderPage("clf-c");
 
     fireEvent.click(await within(await waitFor(() => section("Reset"))).findByRole("button", { name: "Reset classifier" }));

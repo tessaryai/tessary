@@ -9,10 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EvidenceSpan } from "../../api/types";
 import { pending, renderRoute } from "../../test/render";
 import { EvidenceTable } from "./EvidenceTable";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getBehaviorFindingEvidence: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ api }) }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const span = (over: Partial<EvidenceSpan>) =>
   ({

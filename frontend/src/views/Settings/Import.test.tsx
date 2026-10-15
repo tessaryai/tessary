@@ -9,13 +9,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityDiff, ImportResult } from "../../api/client";
 import { currentLocation, renderRoute } from "../../test/render";
 import { ImportYaml } from "./Import";
+import { api, tenant } from "../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/support-bot", importEvalsDirectory: vi.fn() }));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "support-bot" }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
+tenant.projectSlug = "support-bot";
 
 /** A file as a directory picker hands it over: its path within the chosen directory on webkitRelativePath. */
 const picked = (path: string) => {

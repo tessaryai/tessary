@@ -9,10 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Classifier, ClassifierDebug } from "../../../api/types";
 import { pending, renderRoute } from "../../../test/render";
 import DebugSection from "./DebugSection";
+import { api } from "../../../test/api";
 
-const api = vi.hoisted(() => ({ base: "/api/orgs/acme/projects/default", getClassifierDebug: vi.fn() }));
-
-vi.mock("../../../tenant/TenantContext", () => ({ useTenant: () => ({ api }) }));
+vi.mock("../../../tenant/TenantContext", () => import("../../../test/api"));
 
 const SWEEP = {
   status: "running",
