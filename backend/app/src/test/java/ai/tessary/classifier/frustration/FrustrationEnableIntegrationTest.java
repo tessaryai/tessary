@@ -80,24 +80,12 @@ record FrustrationEnableIntegrationTest(
         assertNull(classifierService.readiness(pid, enabled));
     }
 
-    @Test
-    void readinessNamesThePauseOnAnEnabledFrustration() {
-        TenantFixture.Setup t = tenant("fr-readiness");
-        String pid = t.project().id();
-        ClassifierRow signal = frustration(t);
-        classifiers.setEnabled(pid, signal.id(), true);
-        classifiers.pause(pid, signal.id(), ClassifierPause.NO_PROVIDER, Instant.now());
-
-        ClassifierRow row =
-                ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
-        assertEquals(ClassifierPause.NO_PROVIDER, classifierService.readiness(pid, row));
-    }
-
     /** The column's check constraint lists the reasons it accepts; a reason missing there fails the sweep's write. */
     @ParameterizedTest
-    @ValueSource(strings = {ClassifierPause.NO_CREDIT, ClassifierPause.PLATFORM_UNAVAILABLE})
-    void aPlatformProviderPauseIsStoredAndNamedByReadiness(String reason) {
-        TenantFixture.Setup t = tenant("fr-platform-" + reason.replace('_', '-'));
+    @ValueSource(
+            strings = {ClassifierPause.NO_PROVIDER, ClassifierPause.NO_CREDIT, ClassifierPause.PLATFORM_UNAVAILABLE})
+    void aPauseIsStoredAndNamedByReadinessOnAnEnabledFrustration(String reason) {
+        TenantFixture.Setup t = tenant("fr-pause-" + reason.replace('_', '-'));
         String pid = t.project().id();
         ClassifierRow signal = frustration(t);
         classifiers.setEnabled(pid, signal.id(), true);

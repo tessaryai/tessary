@@ -54,19 +54,6 @@ record FindingRulingIntegrationTest(
     }
 
     @Test
-    @DisplayName("triage negative closes the finding")
-    void triageNegativeCloses() {
-        Project p = project("ruling-triage-negative");
-        String findingId = firing(p, GRAM);
-
-        behaviorTriage.recordVerdict(p.id(), findingId, verdict("negative", "an artifact"), null, now());
-
-        FindingRow row = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(FindingRow.Status.CLOSED, row.status());
-        assertEquals(FindingRow.TriageVerdict.NEGATIVE, row.triageVerdict());
-    }
-
-    @Test
     @DisplayName("a firing after a ruling opens a fresh row rather than mutating the settled one")
     void aFiringAfterRulingOpensAFreshRow() {
         Project p = project("ruling-refire");
@@ -80,7 +67,9 @@ record FindingRulingIntegrationTest(
         assertEquals(FindingRow.Status.OPEN, refired.status());
         assertNull(refired.triageVerdict(), "the new row starts unruled, exactly like a first firing");
         FindingRow closed = findings.findById(p.id(), first).orElseThrow();
-        assertEquals(FindingRow.Status.CLOSED, closed.status(), "the earlier ruling is untouched");
+        assertEquals(
+                FindingRow.Status.CLOSED, closed.status(), "triage negative closed it, and the ruling is untouched");
+        assertEquals(FindingRow.TriageVerdict.NEGATIVE, closed.triageVerdict());
     }
 
     @Test
