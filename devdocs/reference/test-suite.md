@@ -63,8 +63,9 @@ bound to the `compile` phase instead, so they run on every narrowed slice too �
 loop; use the full gate before merging.
 
 **CI runs the same gate on every pull request.** There is still no pre-commit hook, but
-`.github/workflows/check.yml` calls `scripts/check.sh` — the same manifest `task check` runs — on
-`pull_request:`, so local green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) also
+`.github/workflows/check.yml` runs the same gates as `task check` on `pull_request:`, split into three
+parallel jobs: `check-backend.sh tests`, `check-backend.sh lint` and `check.sh --skip-backend`, so local
+green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) also
 runs on every PR, and `codeql.yml` runs weekly. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
 so a red check has to be respected rather than enforced.
 
@@ -154,25 +155,22 @@ inner-loop speed is not.
 ## Coverage posture (intentional coldspots)
 
 Dense today: `ingest`, `classifier`, `judge`, `mcp`, `tenant`. Frontend has a vitest runner
-(`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build): component and
+(`pnpm run coverage`, wired into `scripts/check-frontend.sh` between lint and build): component and
 unit tests plus a route-render smoke test that mounts every view in the route manifest
 (and the case, finding and RCA pages once more on real payloads, since the manifest pass only
-reaches their not-found branch) and fails on a render error or un-allowlisted console.error. Every
-frontend line is covered (`pnpm run coverage` reports it); the gate runs OpenAPI/route-manifest drift +
-`tsc` + vitest + vite build. Auth filter/device-link paths
+reaches their not-found branch) and fails on a render error or un-allowlisted console.error. The gate runs OpenAPI/route-manifest drift + `tsc` + vitest with a 96.8% line-coverage floor
+(`vite.config.ts`) + vite build. Auth filter/device-link paths
 are covered lightly (crypto + path resolver + MCP bearer integration) rather than per-filter
 classes; treat deeper auth coverage as product work, not a docs-audit obligation. Packages with
 near-zero tests are thin wrappers or UI-facing glue; a test there has to name the bug it catches
 (root `AGENTS.md` § Tests).
 
-### JaCoCo baseline
+### JaCoCo floor
 
 `jacoco-maven-plugin` is wired into exactly the **10 open backend modules** — `shared`,
 `contract`, `core`, `tenancy`, `substrate`, `product`, `llm-runtime`, `analysis`,
-`surfaces`, `app` — as a `mvn verify` side effect. (It was 11 until `evaluation` was deleted.) It is a **baseline, not a gate**: no threshold
-is enforced anywhere, and nothing fails the build on a coverage number. The point is to have a
-number before further module extractions continue, so a module being pulled out of the reactor can be
-checked against what it actually exercised rather than what its tests merely claim to.
+`surfaces`, `app` — as a `mvn verify` side effect. `scripts/check-backend.sh` (modes `all` and `tests`) fails when the
+aggregate line coverage is below 0.958.
 
 Per-module HTML/XML reports land at `backend/<module>/target/site/jacoco/`. Each one credits only
 that module's own tests, so code the `app` module's `@SpringBootTest` suite runs shows as uncovered
@@ -180,8 +178,7 @@ in the module that owns it. The aggregate report at `backend/app/target/site/jac
 merges every module's exec data against every open module's classes; read that one for a module's
 real number. Refresh them locally
 with `task backend:check`. CI additionally uploads the reports as a build artifact
-(`backend-jacoco-coverage`), from `check.yml`'s single job, so it lands on every pull request rather
-than on the old weekly cron. `if: always()`, so a red run still leaves a baseline.
+(`backend-jacoco-coverage`) from `check.yml`'s backend-tests job, `if: always()`, so a red run still leaves them.
 
 `backend/test-support` carries no `<build><plugins>` block and no `*Test.java` files, so it isn't
 instrumented — there's nothing to measure.
