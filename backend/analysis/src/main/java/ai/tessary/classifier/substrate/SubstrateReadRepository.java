@@ -149,7 +149,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * them with {@code tessary.call_site.id}. Powers the onboarding/pipeline "instrument your call
      * sites" nudge; capped at {@value #UNTAGGED_CAP} via a LIMIT subquery since the UI renders
      * "{cap}+" beyond it and an exact count over an unbounded substrate is never worth paying for a
-     * banner.
+     * banner. Served by {@code ix_span_untagged}, which holds only untagged spans, so a project that tags
+     * everything answers zero without reading its spans.
      */
     public long untaggedSpans(String projectId) {
         return jdbc.sql("""

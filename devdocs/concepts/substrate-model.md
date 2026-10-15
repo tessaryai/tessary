@@ -838,6 +838,8 @@ CREATE INDEX ix_span_llm_usage         ON span (project_id, started_at)
                                           INCLUDE (call_site_id, provided_model_name, trace_id,
                                                    total_tokens, total_cost, cost_source)
                                           WHERE kind = 'llm' AND NOT is_deleted;  -- 0041, vitals spend
+CREATE INDEX ix_span_untagged          ON span (project_id)
+                                          WHERE call_site_id IS NULL;  -- 0043, substrate status
 
 -- span_payload (btree_gin puts the project beside the words; 0035 replaced ix_span_payload_fts, the same
 -- words without the project)
