@@ -16,32 +16,9 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Gets the rate file bundled in the jar into the database, on every boot.
- *
- * <p><b>Why an importer rather than a seed migration.</b> Rates change; a changeset is immutable and runs
- * once. Seeding rates in SQL would mean every refreshed snapshot needs a new migration, and a mistake in
- * one could only be corrected by another. Here a refresh is a reviewed diff to the vendored file, and the
- * deploy that carries it imports it — no schema change, and the same code path repairs a book that failed
- * to import on a previous boot.
- *
- * <p><b>Boot only.</b> The bundled file is inside the jar, so it cannot change while the process runs and there
- * is nothing for a timer to pick up. A newer book reaches a running install from home.tessary.ai instead
- * ({@link PriceBookFetcher}, on the telemetry heartbeat's tick).
- *
- * <p><b>Idempotent by content, not by bookkeeping.</b> A snapshot's version is a hash of its bytes
- * ({@link PriceSnapshot}), so re-importing the same file is a no-op that costs one indexed lookup, and a
- * changed file is a new version and therefore a new book rather than an edit to the old one. Rows already
- * priced keep pointing at the book they were priced under, which is the whole point of versioning them.
- *
- * <p><b>Dated by the build, not the boot.</b> The newest {@code published_at} is the book in force, and a book
- * fetched from home is dated by when home published it. Dating the bundled book by import time would let any
- * restart put an older bundled file back in force over a newer fetched one. The jar's build time is when its
- * file was last taken from {@code main}: a book home published after that came from a {@code main} at least as
- * new (or is the same bytes, which share a version), and one published before it is at least as old.
- *
- * <p><b>One book.</b> The vendored LiteLLM file is imported as {@code source='litellm'}. A
- * hand-maintained {@code source='manual'} file used to layer corrections over it; every row it carried is now
- * either reconciled upstream or a genuine gap this platform prices as unpriced rather than guessed.
+ * Imports the jar's bundled rate file on every boot, rather than seeding by migration, since rates change and a
+ * changeset is immutable. Idempotent by content: the version is a hash of the bytes. Dated by the jar's build time, not
+ * boot time, so a restart cannot put an older bundled book in force over a newer fetched one.
  */
 @Component
 public class PriceBookImporter {
@@ -65,9 +42,8 @@ public class PriceBookImporter {
     }
 
     /**
-     * On boot, and never fatally. A listener on {@code ApplicationReadyEvent} that throws fails the whole
-     * context, and rates the substrate can already survive not having must not be able to stop the platform
-     * starting — a model with no rate reads as unpriced, which every surface renders honestly.
+     * Never fatal: a throwing {@code ApplicationReadyEvent} listener fails the context, and a missing rate already
+     * reads as unpriced.
      */
     @EventListener(ApplicationReadyEvent.class)
     public void importOnBoot() {
@@ -78,16 +54,13 @@ public class PriceBookImporter {
         }
     }
 
-    /** Import the vendored rate file. Returns nothing: what happened is in the log, where an operator reads it. */
+    /** What happened is in the log. */
     public void importSnapshots() {
         if (!props.isEnabled()) return;
         importSnapshot(PriceBook.SOURCE_LITELLM, PriceSnapshot.LITELLM_RESOURCE);
     }
 
-    /**
-     * When the bundled file was taken from {@code main}: the jar's build time from {@code build-info}, or now
-     * outside a packaged build (an IDE run), where there is no build to date it by.
-     */
+    /** The jar's {@code build-info} time, or now outside a packaged build. */
     Instant bundledPublishedAt() {
         BuildProperties info = build.getIfAvailable();
         if (info == null || info.getTime() == null) return Instant.now();
@@ -102,8 +75,7 @@ public class PriceBookImporter {
         Instant publishedAt = bundledPublishedAt();
 
         if (books.hasBook(snapshot.version())) {
-            // Fills a digest an earlier boot could not record, and dates the row by the build if an earlier
-            // boot dated it later. See PriceBookRepository#reconcile.
+            // See PriceBookRepository#reconcile.
             books.reconcile(snapshot.version(), snapshot.digest(), publishedAt);
             log.debug(
                     "price book {} already imported, {} models unchanged",

@@ -9,41 +9,25 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The case list's paging vocabulary: the opaque keyset cursor, and the over-fetch-by-one next-page detection
- * that mints it. The trace list's {@code TracePageCodec} is the model, down to the separator character.
- *
- * <p><b>The cursor carries the order it was minted under, and a mismatch discards it.</b> A page of cases is
- * ranked one of two ways depending on the {@code state} filter ({@link CaseRepository#orderFor}), and the two
- * keys are not the same columns — the live key is {@code (severity, opened_at, id)}, the resolved key is
- * {@code (resolved_at, id)}. So a cursor minted on {@code state=open} and replayed against
- * {@code state=resolved} does not describe a point on the new ordering at all: resumed blindly it would
- * compare an {@code opened_at} against {@code resolved_at} and return an arbitrary slice that reads like a
- * page. Stamping the order and dropping a token that disagrees turns that into the one failure a feed can
- * absorb quietly — restarting at page one.
+ * The case list's keyset cursor, modelled on {@code TracePageCodec}. The cursor carries the order it was minted under
+ * ({@link CaseRepository#orderFor}); one replayed under the other order is discarded rather than compare
+ * {@code opened_at} against {@code resolved_at}.
  */
 final class CasePageCodec {
 
-    /**
-     * Cursor key separator: the unit-separator control char, which cannot appear in an ISO-8601 timestamp, a
-     * ULID, or a formatted double, so the split is unambiguous. Same character the trace and session cursors
-     * pack with — "which control char was it" should never be a question two files answer separately.
-     */
+    /** Cannot appear in a timestamp, ULID or formatted double. The same character as the trace and session cursors. */
     private static final char SEP = '\u001f';
 
-    /** The cursor generation. A token from any other shape is unreadable rather than mis-resumed. */
+    /** A token from any other shape is unreadable rather than mis-resumed. */
     private static final String VERSION = "v1";
 
     private CasePageCodec() {}
 
-    /** A trimmed page and the cursor that resumes after it — null when this was the last page. */
     record Page(List<CaseRow> rows, @Nullable String nextCursor) {}
 
     /**
-     * The keyset key a cursor resumes from, or null for "start at the top".
-     *
-     * <p>Null covers every unusable token — absent, corrupt, a foreign generation, and a cursor minted under
-     * the other ordering — because there is nothing a caller could do differently about any of them and page
-     * one is a correct answer to all four.
+     * Null for every unusable token (absent, corrupt, foreign generation, other ordering): page one is correct for all
+     * of them.
      */
     static @Nullable PageKey decode(@Nullable String cursor, PageOrder order) {
         String token = PreviewCursor.decode(cursor).token();
@@ -62,8 +46,7 @@ final class CasePageCodec {
                 return null;
             }
         }
-        // The live order ranks by severity first, so a token for it that carries none names no point on the
-        // ordering. Page one rather than a query with a null bound, which Postgres would answer with nothing.
+        // A null bound would make Postgres return nothing.
         if (order == PageOrder.LIVE_RANK && severity == null) {
             return null;
         }
@@ -74,12 +57,8 @@ final class CasePageCodec {
     }
 
     /**
-     * Trim an over-fetched result to {@code pageSize} and mint the cursor for the next page.
-     *
-     * <p>The caller asked the repository for {@code pageSize + 1} rows. More than {@code pageSize} came back,
-     * so there is another page and the cursor is seeded from the LAST ROW OF THIS PAGE (index
-     * {@code pageSize - 1}), never from the extra row — the extra row is the first row of the next page, and
-     * seeding from it would skip it.
+     * Trim a {@code pageSize + 1} result. The cursor is seeded from the last row of this page, never the extra row,
+     * which is the next page's first.
      */
     static Page trim(List<CaseRow> overFetched, int pageSize, PageOrder order) {
         if (overFetched.size() <= pageSize) {

@@ -34,21 +34,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * The launcher-backed {@link AgentRunSandbox}: one {@code POST /runs} to the sidecar is one
- * fresh sandbox that materializes the caller's files under {@code dossier/}, clones the repository
- * when the request names one, runs the agent against them and the platform's MCP surface, and tears
- * down. The body is triage's plus {@code clone_url}/{@code head_sha} when present; {@code
- * system_prompt} always rides, which is what selects the custom agent and the MCP relay in the VM.
- *
- * <p>The credential and the two tokens on the request travel to the launcher and nowhere else:
- * never a log line, never a span attribute. The launcher keeps them off the sandbox disk.
- *
- * <p>Every failure is a thrown {@link AgentRunError}, split the way {@code E2bTriageSandbox} splits
- * its own: a launcher that cannot be reached or failed before the run started is
- * {@code LAUNCHER_UNAVAILABLE}, a 401/403/404 is {@code LAUNCHER_MISCONFIGURED} because the next
- * request will be refused identically, and a run the launcher started and could not finish is this
- * run's own fault, read off the {@code kind} in its error body. Usage is booked on both paths,
- * since a failed run spends tokens exactly as a completed one does.
+ * The launcher-backed {@link AgentRunSandbox}: one {@code POST /runs} is one fresh sandbox. The credential and tokens
+ * go to the launcher only, never to a log or span. Unreachable is {@code LAUNCHER_UNAVAILABLE}, 401/403/404 is
+ * {@code LAUNCHER_MISCONFIGURED}, and a started run's failure is read off its error {@code kind}. Usage is booked on
+ * failure too.
  */
 @Component
 public class E2bAgentRunSandbox implements AgentRunSandbox {
@@ -57,12 +46,11 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     private static final Logger log = LoggerFactory.getLogger(E2bAgentRunSandbox.class);
 
-    /** Telemetry name for the run's root span and Langfuse trace; the lane rides as an attribute. */
+    /** The lane rides as an attribute. */
     static final String OPERATION = "agent-run";
 
     private static final String ROUTE = "/runs";
 
-    /** Why nothing is sent when neither this lane nor the observer names a launcher. */
     static final String NO_LAUNCHER = "tessary.agentrun.launcher-url and tessary.observer.agentic.launcher-url are both"
             + " unset; set TESSARY_AGENTRUN_LAUNCHER_URL";
 
@@ -173,8 +161,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
             markError(span, e.getMessage() == null ? e.error().code() : e.getMessage());
             throw e;
         } catch (JsonProcessingException e) {
-            // Jackson's message echoes the body it could not parse: it rides as the cause for a debugger
-            // and stays off the span and off every log line this class writes.
+            // Jackson's message echoes the body, so it stays off the span and every log line.
             markError(span, "unparseable launcher answer");
             throw new TessaryException(AgentRunError.BAD_OUTPUT, e, "the launcher's answer did not parse");
         } finally {
@@ -182,7 +169,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
         }
     }
 
-    /** The launcher an agent lane posts to: this lane's own, else the observer's, which every agent lane rides. */
+    /** This lane's own, else the observer's. */
     static String launcherUrl(AgentRunProperties props, ObserverProperties observerProps) {
         String own = props.getLauncherUrl();
         return own == null || own.isBlank()
@@ -190,7 +177,6 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
                 : own;
     }
 
-    /** The bearer key for {@link #launcherUrl}: this lane's own, else the observer's. */
     static String launcherApiKey(AgentRunProperties props, ObserverProperties observerProps) {
         String own = props.getLauncherApiKey();
         return own == null || own.isBlank()
@@ -226,11 +212,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
         return body;
     }
 
-    /**
-     * One {@code POST /runs}; the 2xx body, or a thrown {@link AgentRunError}. A non-2xx body is
-     * booked against the ledger before the throw, since the launcher carries the run's usage in its
-     * error body whenever the agent spent tokens before failing.
-     */
+    /** A non-2xx body is booked before the throw, since it carries usage when the agent spent tokens. */
     private String postLauncher(String bodyJson, String launcherUrl, Request req) {
         HttpRequest httpReq = HttpRequest.newBuilder(URI.create(launcherUrl + ROUTE))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
@@ -290,12 +272,9 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
     }
 
     /**
-     * Who is at fault for one non-2xx answer, pure so a table can drive every status/kind pair.
-     * 401/403/404 are refusals a retry cannot change. A 502 is split by the launcher's own
-     * {@code kind}: {@code timeout}, {@code script_exit}/{@code bad_request} and {@code bad_output}
-     * are this run's, and {@code orchestration}, a missing or unknown kind (a proxy's own page) and
-     * every other 5xx are the launcher's. Every remaining 4xx is a payload the launcher understood
-     * and refused, a fact about this request.
+     * Pure so a table can drive every status/kind pair. A 502 with {@code timeout}, {@code script_exit},
+     * {@code bad_request} or {@code bad_output} is this run's; any other or missing kind is the launcher's. Other 4xx
+     * are facts about this request.
      */
     static AgentRunError classify(int status, String body) {
         if (status == 401 || status == 403 || status == 404) return AgentRunError.LAUNCHER_MISCONFIGURED;
@@ -313,7 +292,6 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     private static final ObjectMapper KIND_MAPPER = new ObjectMapper();
 
-    /** The {@code kind} of a launcher error body, empty when it has none or is not JSON. */
     static String kindOf(String body) {
         try {
             return KIND_MAPPER.readTree(body).path("kind").asText("");
@@ -338,7 +316,6 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
                 req.subject());
     }
 
-    /** What a refused or failed launcher answer means for the operator, naming the route a 404 is missing. */
     static String launcherDiagnosis(int status, String launcherUrl, String diag, String route) {
         String remedy =
                 switch (status) {
@@ -351,7 +328,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
         return "status " + status + " from " + launcherUrl + remedy;
     }
 
-    /** The launcher's own {@code kind}, {@code detail} and sandbox id from an error body; never the rest of it. */
+    /** Never the rest of the body. */
     static String describeLauncherError(String body) {
         try {
             JsonNode n = KIND_MAPPER.readTree(body);

@@ -22,23 +22,10 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 /**
- * Runs the actual channel fan-out for a fired alert, off the publisher thread. Split out of
- * {@code AlertDeliveryListener} so the {@code @Async} hand-off goes through a Spring proxy (a
- * self-invocation inside the listener would bypass the proxy and still run inline) — the same
- * post-commit-listener → async-executor idiom used elsewhere.
- *
- * <p><b>A withheld transport is skipped here, not only at configuration time.</b> Slack is a capability of
- * its own and is off for launch; refusing new Slack channels at the API would leave every channel created
- * before the flag flipped still delivering. Same reasoning segment D applies to a withdrawn classifier's
- * output — a flag going off has to reach what already exists or it is a half-measure. Resolved once per
- * fan-out rather than per channel: one capability read, however many channels a project has.
- *
- * <p>Per channel the flow is: claim the {@code (alert_event, channel)} slot in the
- * delivery-attempt log (idempotent insert — a re-fire never double-sends), open the SecretBox-sealed
- * config, dispatch through {@link ChannelFactory} to the right SPI, then record the outcome. Each
- * channel is isolated — a failure (or a thrown bad-config) on one never aborts the fan-out to the
- * others. Delivery is best-effort and synchronous within the async task: there is no retry/DLQ; the
- * delivery-attempt row IS the visibility surface.
+ * Channel fan-out for a fired alert, split from {@code AlertDeliveryListener} so {@code @Async} goes through a proxy. A
+ * withheld transport is skipped here too, so a flag going off reaches channels created before it. Each channel claims
+ * its {@code (alert_event, channel)} slot first and is isolated from the others; there is no retry, and the attempt row
+ * is the visibility surface.
  */
 @Component
 public class AlertDeliveryDispatcher {
@@ -70,12 +57,7 @@ public class AlertDeliveryDispatcher {
         this.projects = projects;
     }
 
-    /**
-     * Fan a fired alert out to every enabled channel for its project. Runs on the bounded
-     * virtual-thread {@code alertDeliveryExecutor} pool (see {@code config/AsyncConfig}) so the N
-     * blocking HTTP POSTs (each up to the 30s {@link ChannelHttp} timeout) never stall the
-     * publishing {@code @Scheduled} AlertWorker thread.
-     */
+    /** Runs on {@code alertDeliveryExecutor} so blocking POSTs never stall the AlertWorker thread. */
     @Async("alertDeliveryExecutor")
     public void deliverAll(AlertEventRow row) {
         List<AlertChannelRow> enabled = destinations.listEnabledByProject(row.projectId());
@@ -83,9 +65,7 @@ public class AlertDeliveryDispatcher {
         boolean slackAllowed = allows(row.projectId(), Capability.SLACK);
         for (AlertChannelRow channel : enabled) {
             if (!slackAllowed && AlertChannelKind.SLACK.wire().equals(channel.kind())) {
-                // No delivery-attempt row: nothing was attempted. A withheld transport is not a failed
-                // send, and recording it as one would put a permanent red line in the delivery log for a
-                // channel the org simply may not use.
+                // No attempt row: a withheld transport is not a failed send.
                 log.info(
                         Markers.OPS,
                         "alert delivery skipped — slack withheld projectId={} channel={}",
@@ -97,7 +77,7 @@ public class AlertDeliveryDispatcher {
         }
     }
 
-    /** Unknown project → not allowed, matching {@code AlertWorker}'s fail-closed entitlement read. */
+    /** Fail-closed, as in {@code AlertWorker}. */
     private boolean allows(String projectId, Capability capability) {
         return projects.findById(projectId)
                 .map(p -> capabilities.isEnabled(p.orgId(), capability))
@@ -106,7 +86,7 @@ public class AlertDeliveryDispatcher {
 
     private void deliverOne(AlertEventRow event, AlertChannelRow channel) {
         String attemptId = Ids.ulid();
-        // Reserve the slot first — a re-fired event (or fallback double-dispatch) finds it taken and skips.
+        // A re-fired event finds the slot taken and skips.
         if (!attempts.claim(attemptId, event.id(), channel.id(), event.projectId())) {
             return;
         }
@@ -127,15 +107,9 @@ public class AlertDeliveryDispatcher {
                         result.error());
             }
         } catch (RuntimeException e) {
-            // A bad config (missing url/credential) or any unexpected error: record and continue the fan-out.
-            // NB: log categorically with NO throwable attached. The cause of an open-config failure is a
-            // Jackson parse failure on the *decrypted* config, whose message embeds the plaintext config
-            // JSON (signing secret / API key / routing key); attaching `e` would ship those bytes to Loki
-            // (the OTEL appender captures the throwable's message + stack on WARN+). See AGENTS.md
-            // "WARN+ egress to Loki is a data-egress surface". The stored reason uses only the top-level
-            // `getMessage()` (always our own categorical wrapper text — `openConfig` re-wraps the Jackson
-            // cause as "could not open channel config", connectors throw TessaryException with static
-            // messages), never the cause chain, so the decrypted config never reaches the DB row either.
+            // Log with NO throwable: an open-config failure's cause is a Jackson error embedding the decrypted config
+            // (secrets), and WARN+ egresses to Loki. The stored reason is only our own top-level message, never the
+            // cause chain.
             attempts.markFailed(attemptId, null, e.getMessage() == null ? "delivery error" : e.getMessage());
             log.warn(
                     Markers.OPS,
