@@ -30,19 +30,9 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Multipart-only ingest for the sharded {@code .tessary/} bundle emitted by the
- * evals plugin. Shard parsing lives in {@link BundleAssembler}; this controller
- * handles auth, the multipart→body decode, the commit, and stamping the project
- * version the bundle declares.
- *
- * <p>Modes: <b>upsert</b> (default) inserts/updates by id, never deletes;
- * <b>replace</b> is a full sync that deletes entities absent from the upload.
- * Both commit inside one transaction so a partial-import state is never observable.
- *
- * <p><b>No capability gate.</b> This surface was gated on {@code GRADERS} until that
- * capability was retired; bundle import is now plain pipeline authoring, and the sibling pipeline write surfaces
- * ({@code PipelineController}) carry no gate either. Re-pointing it at another capability would have
- * been an arbitrary choice, not a preserved one.
+ * Multipart import of a sharded {@code .tessary/} bundle; parsing lives in {@link BundleAssembler}. Upsert (default)
+ * never deletes; replace deletes absent entities. Both commit in one transaction. No capability gate, matching the
+ * sibling pipeline write surfaces.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/import")
@@ -107,9 +97,7 @@ public class ImportController {
 
     private Resolved resolveAndAuthorize(TenantContext ctx, String orgSlug, String projectSlug) {
         Resolved r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        // Members + viewers can curate, only owners can mutate the pipeline.
-        // Project bearer tokens are exempt — the skill/plugin needs to push
-        // regenerated pipelines without a human in the loop.
+        // Only owners mutate the pipeline; project bearer tokens are exempt so the plugin can push without a human.
         if (!"owner".equals(r.role()) && !ctx.isMcpToken()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "owner role required to import");
         }
@@ -132,10 +120,7 @@ public class ImportController {
             diff = pipelineService.upsert(projectId, pipeline);
         }
 
-        // Bind the pipeline to the commit it was synthesized against (when the
-        // bundle declares one), materializing that project version. A bundle
-        // without a declared commit leaves the project unbound until a git
-        // integration is connected.
+        // Without a declared commit the project stays unbound until a git integration connects.
         pipelineService.stampVersion(projectId, bundle.commitSha(), bundle.repoOwner(), bundle.repoName());
 
         log.info(

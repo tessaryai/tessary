@@ -6,14 +6,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A project inside an organization ({@code project} table). {@code isDefault} marks the one guaranteed
- * default project per organization (an organization always has exactly one). {@code archivedAt} is the
- * reversible soft-archive marker; {@code settings} is a per-project JSON blob for extensible prefs.
- *
- * <p>{@code deletingAt} is the one-way marker, and it is deliberately not a second meaning for
- * {@code archivedAt}: a project comes back from archived, and only ever leaves this state by ceasing to
- * exist. It is set by the delete endpoint before it returns, so the window where a project is doomed but
- * still present is visible to the API and to settings rather than being a request that appears to hang.
+ * An organization always has exactly one {@code isDefault} project. {@code archivedAt} is reversible;
+ * {@code deletingAt} is one-way, set before the delete endpoint returns so a doomed project is visible rather than a
+ * hanging request.
  */
 public record Project(
         String id,
@@ -31,21 +26,15 @@ public record Project(
         return archivedAt != null;
     }
 
-    /** True once the delete endpoint has accepted; the purge worker owns this project's data from here. */
+    /** The purge worker owns this project's data from here. */
     @JsonIgnore
     public boolean isDeleting() {
         return deletingAt != null;
     }
 
     /**
-     * True for the quiet, lazily-created "sample project" every org can start with from the connect
-     * gate — a real project row, marked by {@code {"sample": true}} in its own {@code settings}
-     * blob rather than a dedicated column, the same "reuse the existing extensible blob" move
-     * {@link #isArchived} and {@link #isDeleting} would have taken had {@code archived_at}/{@code
-     * deleting_at} not already existed. A parse failure (malformed settings, written by hand or by a
-     * future feature reusing the same blob) is read as "not a sample project" rather than thrown — this
-     * flag gates only which shell chrome renders and whether default-project resolution skips a row, so
-     * false-negative is the safe direction, never a 500 on an otherwise ordinary project.
+     * Marked by {@code {"sample": true}} in {@code settings}. A parse failure reads as not a sample: it only gates
+     * chrome and default resolution, so false is the safe direction.
      */
     @JsonIgnore
     public boolean isSample() {
@@ -58,7 +47,7 @@ public record Project(
         }
     }
 
-    /** Parses {@link #settings} only for {@link #isSample}; the rest of the app treats it opaquely. */
+    /** Only for {@link #isSample}; the rest of the app treats settings opaquely. */
     private static final com.fasterxml.jackson.databind.ObjectMapper SETTINGS_MAPPER =
             new com.fasterxml.jackson.databind.ObjectMapper();
 }

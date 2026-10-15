@@ -13,21 +13,16 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * {@code frustration_assessment}: one row per user turn sent to the decision model. Insert only, and
- * idempotent on {@code (project_id, classifier_id, trace_id, scorer_version)}, so a page re-sent after a
- * hold writes each turn once. Every read lists its columns; nothing here selects {@code *}, because
- * {@code request} and {@code response} are most of the table's bytes.
+ * One row per turn sent to the decision model; idempotent on
+ * {@code (project_id, classifier_id, trace_id, scorer_version)}, so a re-sent page writes each turn once. Reads never
+ * select {@code *}: {@code request} and {@code response} are most of the bytes.
  */
 @Repository
 public class FrustrationAssessmentRepository {
 
     /**
-     * One assessment row.
-     *
-     * @param conversationId the turn's {@code trace.session_id}
-     * @param frustrated whether the score exceeded the threshold when the turn was scored
-     * @param requestJson the exact body sent; retention nulls it with the turn's span payload
-     * @param responseJson the exact body received
+     * @param conversationId the turn's {@code trace.session_id} @param requestJson the exact body sent; retention nulls
+     * it with the span payload
      */
     public record Assessment(
             String id,
@@ -48,11 +43,7 @@ public class FrustrationAssessmentRepository {
             @Nullable BigDecimal costUsd,
             @Nullable Integer latencyMs) {}
 
-    /**
-     * What a turn's trace says about it.
-     *
-     * @param conversationId the trace's {@code session_id}; null for a trace in no session
-     */
+    /** @param conversationId null for a trace in no session */
     public record TurnFacts(@Nullable String conversationId, Instant startedAt) {}
 
     private final JdbcClient jdbc;
@@ -61,7 +52,7 @@ public class FrustrationAssessmentRepository {
         this.jdbc = jdbc;
     }
 
-    /** Delete every assessment this classifier made, and the shadow rows that hang off them. */
+    /** Including the shadow rows that hang off them. */
     public int deleteByClassifier(String projectId, String classifierId) {
         return jdbc.sql("DELETE FROM frustration_assessment WHERE project_id = :pid AND classifier_id = :cid")
                 .param("pid", projectId)
@@ -69,7 +60,7 @@ public class FrustrationAssessmentRepository {
                 .update();
     }
 
-    /** Insert {@code a} unless this scorer already assessed its turn. Returns whether it was written. */
+    /** Returns whether it was written. */
     public boolean insert(Assessment a) {
         return jdbc.sql("""
                         INSERT INTO frustration_assessment (id, project_id, classifier_id, trace_id, span_id,
@@ -101,7 +92,6 @@ public class FrustrationAssessmentRepository {
                 > 0;
     }
 
-    /** The conversation key and start time of each of {@code traceIds} that still exists. */
     public Map<String, TurnFacts> turnFacts(String projectId, Collection<String> traceIds) {
         if (traceIds.isEmpty()) return Map.of();
         List<Map.Entry<String, TurnFacts>> rows = jdbc.sql("""

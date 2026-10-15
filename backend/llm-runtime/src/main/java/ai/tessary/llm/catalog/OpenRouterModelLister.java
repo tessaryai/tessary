@@ -14,17 +14,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Lists {@code GET https://openrouter.ai/api/v1/models} — confirmed live and unauthenticated as of
- * 2026-09-04: the endpoint needs no key to enumerate models (only to
- * run one), and every id observed was namespaced {@code <maker>/<slug>} (e.g. {@code openai/gpt-5.5},
- * {@code anthropic/claude-...}, {@code moonshotai/kimi-...}, {@code z-ai/glm-...}, {@code
- * x-ai/grok-...}), plus a small set of {@code ~<maker>/<slug>-latest} pointer aliases. {@code
- * name} carries a human-readable label (e.g. {@code "Meta: Muse Spark 1.3"}).
- *
- * <p>Unlike the single-maker listers, OpenRouter hosts dozens of makers — Meta, Mistral, DeepSeek,
- * Cohere and more, none of them a supported maker — so every entry is run through
- * {@link SupportedMaker#fromOpenRouterPrefix} and dropped on a miss. This is the intersection step
- * the corrective brief specifies for OpenRouter: its reported catalog intersected with the supported makers.
+ * Lists {@code GET https://openrouter.ai/api/v1/models} (needs no key, confirmed 2026-09-04). OpenRouter hosts many
+ * unsupported makers, so every entry goes through {@link SupportedMaker#fromOpenRouterPrefix} and is dropped on a miss.
  */
 public final class OpenRouterModelLister implements ProviderModelLister {
 
@@ -35,8 +26,7 @@ public final class OpenRouterModelLister implements ProviderModelLister {
     private final String url;
     private final Duration timeout;
 
-    /** @param timeout per-call ceiling on the {@code GET /models} request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
+    /** @param timeout per-call ceiling on the {@code GET /models} request */
     public OpenRouterModelLister(HttpClient http, ObjectMapper mapper, Duration timeout) {
         this(http, mapper, DEFAULT_URL, timeout);
     }
@@ -52,12 +42,8 @@ public final class OpenRouterModelLister implements ProviderModelLister {
     public List<ProviderModel> list(ResolvedCredential credential) {
         HttpRequest.Builder request =
                 HttpRequest.newBuilder(URI.create(url)).timeout(timeout).GET();
-        // OpenRouter's /models needs no auth to enumerate, but a caller with a key sends it anyway —
-        // some gateways vary the listing by account (e.g. org-specific model access), and there is no
-        // reason to ask unauthenticated when a key is sitting right there. A local rather than
-        // repeated credential.apiKey() calls: spotbugs cannot correlate two invocations of the same
-        // accessor as returning the same (or non-null) value, and flags the second as a possible NPE
-        // even though this null-check already guards it.
+        // Sends a key when present, since a gateway may vary the listing by account. A local because spotbugs flags a
+        // repeated accessor call as a possible NPE.
         String apiKey = credential.apiKey();
         if (apiKey != null && !apiKey.isBlank()) {
             request.header("Authorization", "Bearer " + apiKey);
@@ -97,8 +83,7 @@ public final class OpenRouterModelLister implements ProviderModelLister {
         return List.copyOf(models);
     }
 
-    /** {@link SupportedMaker} → the same display-vendor spelling {@code ModelCatalog}'s static entries
-     *  already use, so a live-merged OpenRouter entry groups in the UI next to its static siblings. */
+    /** Matches {@code ModelCatalog}'s static vendor spelling so live entries group with static ones. */
     private static String vendorLabel(SupportedMaker maker) {
         return switch (maker) {
             case OPENAI -> "OpenAI";

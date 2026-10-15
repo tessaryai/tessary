@@ -16,18 +16,9 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A regex/keyword detector: the cheapest signal class. A natural-language phrase is compiled
- * <b>once</b>, at signal-definition time, into a {@link Pattern} via the {@link NlPhraseCompiler} seam,
- * and that pattern is matched literally over the observation's text (input, output, or both — per
- * {@link ClassifierField}) at evaluation time with <b>no per-trace model call</b>. A literal keyword
- * match is a per-observation, field-restricted search: "the OUTPUT contains X" must stay the output, not
- * leak into prior turns. Backs user-authored regex signals; the one-time NL→regex {@code compile} step
- * is the only work beyond {@link Matcher#find}.
- *
- * <p>The phrases come only from a classifier's per-project {@code config_json}
- * ({@code {"phrases":[...], "field":"OUTPUT", "word_boundary":true}}); a row without them matches
- * nothing. They are compiled lazily and memoized in a bounded cache (keyed by phrase + word-boundary),
- * so evaluation never recompiles per observation and never calls a model.
+ * A regex/keyword detector with no per-trace model call. Phrases come only from {@code config_json}, compiled once via
+ * {@link NlPhraseCompiler} into a bounded memo cache, and matched within one field per {@link ClassifierField}; a row
+ * without phrases matches nothing.
  */
 public final class RegexDetector implements BuiltInDetector {
 
@@ -98,7 +89,6 @@ public final class RegexDetector implements BuiltInDetector {
         return compiledCache.computeIfAbsent(key, k -> compiler.compile(phrase, wordBoundary));
     }
 
-    /** The field-restricted clean text of one observation: user input, agent output, or both. */
     private static String fieldText(SubstrateObservation obs, ClassifierField field) {
         return switch (field) {
             case INPUT -> obs.inputText();
@@ -138,12 +128,8 @@ public final class RegexDetector implements BuiltInDetector {
     }
 
     /**
-     * The keys this detector owns. {@code ignoreUnknown} is load-bearing, not politeness: a classifier's
-     * {@code config_json} is shared with features that key off the same blob (the pre-deploy loop
-     * reads {@code surfaces} from it), and the platform mapper is a bare {@code new ObjectMapper()}
-     * with {@code FAIL_ON_UNKNOWN_PROPERTIES} left ON. Without this, one foreign key made {@link
-     * #parse} throw, the catch returned null, and the detector had no phrases — so the signal silently
-     * matched nothing, with no error anywhere.
+     * {@code ignoreUnknown} is load-bearing: {@code config_json} is shared with other features and the platform mapper
+     * fails on unknown properties, which once left the detector silently matching nothing.
      */
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     private record ConfigShape(

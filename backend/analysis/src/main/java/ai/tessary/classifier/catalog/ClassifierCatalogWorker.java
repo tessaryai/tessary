@@ -16,20 +16,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Keeps every active project's built-in classifier catalog matching what its org is entitled to:
- * {@link ClassifierService#resyncBuiltIns} on a heartbeat, over {@code ProjectRepository#findActive()}.
- * The second of catalog provisioning's two triggers; {@link ClassifierSeedListener} is the first and
- * fires once, at project creation.
- *
- * <p>This scans the project table rather than the sweep tick's list of projects with observations,
- * because catalog membership must not wait on trace ingestion: a project with zero spans would
- * otherwise keep a stale catalog until its first span landed. It runs on its own schedule
- * ({@code tessary.classifier.catalog-resync-ms}) rather than widening the sweep tick, since nothing
- * downstream waits on a reconcile and the two want different cadences as the project count grows.
- *
- * <p>Sweep enqueue still keys on projects with observations: a job row per classifier on a project
- * that has never sent a span would be claimed and dispatched to sweep an empty window every tick,
- * which is the load this split avoids.
+ * Re-syncs every active project's built-in catalog to its entitlements on a heartbeat ({@link ClassifierSeedListener}
+ * handles creation). Scans projects rather than ones with observations, so catalog membership does not wait on
+ * ingestion; sweep enqueue still keys on observations.
  */
 @Component
 public class ClassifierCatalogWorker {
@@ -72,9 +61,7 @@ public class ClassifierCatalogWorker {
             try {
                 seeded += classifiers.resyncBuiltIns(project);
             } catch (RuntimeException e) {
-                // One project's catalog failing must not strand every other project's; the next tick
-                // simply tries again. Without this line a project that fails every tick is invisible,
-                // and its symptom looks like a flag problem rather than a backend one.
+                // One project failing must not strand others; counted so a project that fails every tick is visible.
                 failed++;
                 StructuredLog.warn(log, Markers.OPS, "classifier.catalog.resync-failed")
                         .field("project", project.id())
@@ -84,9 +71,7 @@ public class ClassifierCatalogWorker {
             }
         }
 
-        // The steady state is "scanned N, changed nothing", every minute, forever: DEBUG. A pass
-        // that actually provisioned something, or failed on a project, is the outcome an operator
-        // wants at INFO.
+        // The steady state "changed nothing" is DEBUG; provisioning or failure is INFO.
         StructuredLog.Builder line = seeded > 0 || failed > 0
                 ? StructuredLog.info(log, Markers.OPS, "classifier.catalog.reconciled")
                 : StructuredLog.debug(log, "classifier.catalog.reconciled");

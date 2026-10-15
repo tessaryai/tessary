@@ -10,19 +10,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * JdbcClient repository for the {@code media_ref} join table — which span's payload references which
- * {@code media_object}.
- *
- * <p><b>Why the table exists.</b> An externalized image is referenced by an {@code image_ref} node inside
- * the payload JSON and by nothing else: a string, invisible to foreign keys, joins and cascades. Media
- * therefore grew without bound and no cleanup could reclaim it, while "delete this project's data" left
- * every one of their images behind. A row here is the reference made visible to the database, and
- * it is what {@code RetentionRepository.deleteOrphanedMedia} reads to decide that bytes are collectable.
- *
- * <p><b>Written in the payload's transaction, and keyed on the payload.</b> The FK is to
- * {@code span_payload} rather than to {@code span}, ON DELETE CASCADE, because media's lifetime IS the
- * payload's: retention ages payloads out ahead of spans by design, and the {@code image_ref} strings go
- * with them. A ref that outlived its payload would pin bytes nobody could ever name again.
+ * The {@code media_ref} join table: makes an {@code image_ref} string inside a payload visible to the database, so
+ * {@code RetentionRepository.deleteOrphanedMedia} can collect unreferenced bytes. The FK is to {@code span_payload}, ON
+ * DELETE CASCADE, because media lives exactly as long as the payload.
  */
 @Repository
 public class MediaRefRepository {
@@ -35,11 +25,7 @@ public class MediaRefRepository {
         this.named = named;
     }
 
-    /**
-     * File one span's media references. Idempotent on the full key, so an at-least-once redelivery — or
-     * two spans of the same batch carrying the same deduplicated image — is a no-op rather than a
-     * conflict. Must run after the payload row exists; the FK is the reason.
-     */
+    /** Idempotent on the full key. Must run after the payload row exists, because of the FK. */
     public void insertAll(String projectId, String traceId, String spanId, List<String> mediaIds) {
         for (String mediaId : mediaIds) {
             jdbc.sql("""
@@ -55,10 +41,9 @@ public class MediaRefRepository {
         }
     }
 
-    /** One span's references, for {@link #insertAllForSpans}. */
     public record SpanMedia(String traceId, String spanId, List<String> mediaIds) {}
 
-    /** Every reference of a whole batch in one JDBC batch; same key and idempotence as {@link #insertAll}. */
+    /** Same key and idempotence as {@link #insertAll}. */
     public void insertAllForSpans(String projectId, List<SpanMedia> spans) {
         List<SqlParameterSource> rows = new ArrayList<>();
         for (SpanMedia span : spans) {
