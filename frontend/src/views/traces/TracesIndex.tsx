@@ -8,7 +8,7 @@
  * verdicts never color this table. Row click → ?trace=<id>, a rail floating
  * over this same page (not a route change) so the table stays visible behind it.
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { Search, ChevronRight } from "lucide-react";
@@ -129,7 +129,7 @@ function TracesList() {
     clearAll();
   };
 
-  const columns = COLUMN_DEFS.filter((c) => visible.has(c.key));
+  const columns = useMemo(() => COLUMN_DEFS.filter((c) => visible.has(c.key)), [visible]);
 
   // Flat vs grouped-by-session — a view mode, not a filter, so it lives in its own param rather than
   // inside useTraceQueryState. Session grouping pages through sessions server-side (see
@@ -216,6 +216,12 @@ function TracesList() {
     next.set("trace", row.id);
     setSearchParams(next);
   };
+  // A stable handle, so a page landing re-renders only its own rows rather than every row above it.
+  const openTraceRef = useRef(openTrace);
+  useLayoutEffect(() => {
+    openTraceRef.current = openTrace;
+  });
+  const onOpenRow = useCallback((row: TraceListItem) => openTraceRef.current(row), []);
   const openTraceById = (traceId: string) => {
     const next = new URLSearchParams(searchParams);
     next.set("trace", traceId);
@@ -453,21 +459,7 @@ function TracesList() {
                     />
                   );
                 })
-              : rows.map((row) => (
-                  <TR
-                    key={row.id}
-                    interactive
-                    tabIndex={0}
-                    onClick={() => openTrace(row)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") openTrace(row);
-                    }}
-                  >
-                    {columns.map((col) => (
-                      <Cell key={col.key} col={col.key} row={row} />
-                    ))}
-                  </TR>
-                ))}
+              : rows.map((row) => <TraceRow key={row.id} row={row} columns={columns} onOpen={onOpenRow} />)}
           </TBody>
         </Table>
       )}
@@ -838,6 +830,31 @@ function Detected({ names }: { names: string[] }) {
     </TD>
   );
 }
+
+const TraceRow = memo(function TraceRow({
+  row,
+  columns,
+  onOpen,
+}: {
+  row: TraceListItem;
+  columns: ColumnDef[];
+  onOpen: (row: TraceListItem) => void;
+}) {
+  return (
+    <TR
+      interactive
+      tabIndex={0}
+      onClick={() => onOpen(row)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onOpen(row);
+      }}
+    >
+      {columns.map((col) => (
+        <Cell key={col.key} col={col.key} row={row} />
+      ))}
+    </TR>
+  );
+});
 
 function Cell({ col, row, outside = false }: { col: ColumnKey; row: TraceListItem; outside?: boolean }) {
   switch (col) {
