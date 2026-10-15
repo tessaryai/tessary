@@ -3,7 +3,7 @@
 /*
  * Node launcher sidecar. The tessary backend (Java, no E2B SDK) calls
  * this over HTTP; we wrap the E2B SDK. One request == one FRESH microVM: create
- * a sandbox from the runner template, run run.js, tear the sandbox down. No
+ * a sandbox from the runner template, run lane.js, tear the sandbox down. No
  * sandbox is ever reused across requests or tenants. The one exception is a launcher session
  * (POST /sessions): one sandbox runs session.js for the life of that session and serves its
  * messages, and is still never shared with another session.
@@ -900,14 +900,14 @@ function safeDetail(err, cls, meta) {
   return scrubToken(String((err && err.message) || err || 'unknown')).slice(0, DETAIL_MAX);
 }
 
-// F1: the numeric fields triage.js/rca.js's failure envelope carries (agent-stream.js's sumUsage
+// F1: the numeric fields lane.js's failure envelope carries (agent-stream.js's sumUsage
 // shape). Named once so usageFromFailureStdout and buildErrorBody's re-validation of `err.usage`
 // (belt and braces — see there) can never drift into allow-listing different keys.
 const USAGE_FIELDS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens', 'cost_usd'];
 
-// F1: triage.js/rca.js write `{is_error:true, error, usage}` to stdout before exiting non-zero, so a
-// failing agentic run's spend is not silently discarded (agent-stream.js's sumUsage/the two scripts'
-// catch blocks). Extract ONLY the numeric usage fields, allow-listed by key AND type — this is
+// F1: lane.js writes `{is_error:true, error, usage}` to stdout before exiting non-zero, so a
+// failing agentic run's spend is not silently discarded (agent-stream.js's sumUsage/lane.js's
+// catch block). Extract ONLY the numeric usage fields, allow-listed by key AND type — this is
 // launcher-controlled stdout, not arbitrary sandbox output, but the HARD RULE above is absolute: a
 // malformed or truncated frame must never let a string reach the response, so nothing here is
 // trusted merely because we recognise the shape.
@@ -953,7 +953,7 @@ function buildErrorBody(err) {
   // Opaque E2B identifier, not a secret: it is the join key between this 502 and the launcher's
   // own console output / the E2B dashboard for the same run.
   if (meta.sandbox_id) body.sandbox_id = String(meta.sandbox_id).slice(0, 64);
-  // F1: what a failing agentic run spent, when its stdout carried triage.js/rca.js's envelope —
+  // F1: what a failing agentic run spent, when its stdout carried lane.js's envelope —
   // set directly on the error at the throw site (like exitCode above), never through launcherMeta,
   // so it survives every wrapping layer between there and here undisturbed. Re-validated here
   // regardless (see numericUsageOnly) rather than trusted from the throw site.
@@ -1282,9 +1282,9 @@ function removeOrphanWorkDirs(reapedWork, keptWork) {
 // identical (see the Env-block comment at the top of this file).
 // Every surviving route passes AGENT_POSTURE. UNTRUSTED_POSTURE has no caller since removing
 // /grade and /lint — see the posture block above for why the constant stays anyway.
-function runScriptInDocker(scriptName, payload, timeoutMs, posture, credential) {
+function runScriptInDocker(lane, payload, timeoutMs, posture, credential) {
   requirePosture(posture, 'runScriptInDocker');
-  return dockerSemaphore.run(() => runScriptInDockerInner(scriptName, payload, timeoutMs, posture, credential));
+  return dockerSemaphore.run(() => runScriptInDockerInner(lane, payload, timeoutMs, posture, credential));
 }
 
 // The create body of every sibling agent container, one-shot or session, so the hardening is one
@@ -1332,9 +1332,9 @@ function agentContainerBody({ cmd, env, labels, workSubpath, networkMode }) {
   };
 }
 
-async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, credential) {
+async function runScriptInDockerInner(lane, payload, timeoutMs, posture, credential) {
   const startedAt = Date.now();
-  const withMeta = (e) => stampFailure(e, { launcherMeta: { script: scriptName, elapsed_ms: Date.now() - startedAt, timeout_ms: timeoutMs } });
+  const withMeta = (e) => stampFailure(e, { launcherMeta: { script: lane, elapsed_ms: Date.now() - startedAt, timeout_ms: timeoutMs } });
 
   // workDir is a path INSIDE this container, under the shared LAUNCHER_WORK_DIR mount — see that
   // constant's comment for why it cannot be os.tmpdir() here.
@@ -1358,9 +1358,9 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
   try {
     await ensureAgentImage();
     const created = await dockerJson('POST', '/containers/create', agentContainerBody({
-      cmd: ['node', scriptName, '/work/input.json'],
+      cmd: ['node', 'lane.js', lane, '/work/input.json'],
       env: envList,
-      labels: { 'tessary.sandbox.script': scriptName, [SANDBOX_LABEL_TIMEOUT_MS]: String(timeoutMs) },
+      labels: { 'tessary.sandbox.script': lane, [SANDBOX_LABEL_TIMEOUT_MS]: String(timeoutMs) },
       workSubpath,
       // A non-agent posture gets no network at all; see agentContainerBody for the agent's.
       networkMode: posture === AGENT_POSTURE ? await sandboxNetwork() : 'none',
@@ -1410,26 +1410,26 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
 
     const elapsedMs = Date.now() - startedAt;
     if (overflowed) {
-      throw new Error(`${scriptName} stdout exceeded ${MAX_STDOUT_BYTES} bytes`);
+      throw new Error(`${lane} stdout exceeded ${MAX_STDOUT_BYTES} bytes`);
     }
     if (killedForTimeout) {
-      const e = new Error(`${scriptName} timed out after ${elapsedMs}ms`);
+      const e = new Error(`${lane} timed out after ${elapsedMs}ms`);
       e.launcherKind = 'timeout';
       throw e;
     }
     const exitCode = result && result.StatusCode;
     if (exitCode !== 0) {
-      console.error(`${scriptName} exit ${exitCode} after ${elapsedMs}ms of ${timeoutMs}ms (container ${containerId})`);
+      console.error(`${lane} exit ${exitCode} after ${elapsedMs}ms of ${timeoutMs}ms (container ${containerId})`);
       if (stderr) console.error('--- container stderr ---\n' + scrubToken(stderr).slice(-4000));
       if (stdout) console.error('--- container stdout ---\n' + scrubToken(stdout).slice(0, 2000));
-      const e = new Error(`${scriptName} exit ${exitCode}`);
+      const e = new Error(`${lane} exit ${exitCode}`);
       e.exitCode = exitCode;
       // F1: same failure-envelope extraction pattern as the E2B backend below.
       const usage = usageFromFailureStdout(stdout);
       if (usage) e.usage = usage;
       throw e;
     }
-    return parseScriptOutput(scriptName, stdout);
+    return parseScriptOutput(lane, stdout);
   } catch (e) {
     if (timer) clearTimeout(timer);
     throw withMeta(e);
@@ -1460,9 +1460,9 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
 // apiKey/region and fail deep inside the agent run as an opaque auth error with no clue what was
 // actually wrong.
 const KNOWN_CREDENTIAL_PROVIDERS = new Set(['BEDROCK', 'BEDROCK_MANTLE', ...Object.keys(REQUEST_PROVIDER_TO_MODE)]);
-function requireCredential(credential, scriptName) {
+function requireCredential(credential, lane) {
   const bad = (why) => {
-    const e = new Error(`${scriptName}: missing or invalid credential (${why})`);
+    const e = new Error(`${lane}: missing or invalid credential (${why})`);
     e.launcherKind = 'bad_request';
     throw e;
   };
@@ -1503,7 +1503,7 @@ async function logSandboxDiagnostics(sandboxId) {
   }
 }
 
-async function runAgenticScript(scriptName, rawPayload) {
+async function runAgenticScript(lane, rawPayload) {
   const timeoutMs = Number(rawPayload.timeout_ms || SANDBOX_TIMEOUT_MS);
   // `credential` is the org's own ProviderCredential row, decrypted by the backend and
   // sent ONLY on this field — see the file-header doc for its shape. It is destructured OUT of
@@ -1515,26 +1515,26 @@ async function runAgenticScript(scriptName, rawPayload) {
   // agent ONLY via env vars (agentEnvs(), below and in containerEnvFor/runScriptInDockerInner),
   // the same channel every provider secret has always traveled on.
   const { credential, ...rest } = rawPayload;
-  requireCredential(credential, scriptName);
+  requireCredential(credential, lane);
   // One place qualifies the model, so both backends address the same provider.
   const payload = { ...rest, model: toProviderModel(rest.model, credential) };
   // The qualified id is the one thing about a run that is decided HERE rather than by the backend,
   // and a wrong provider prefix surfaces as an agent-side 404 with no clue where it came from.
   // A model id is neither a secret nor model output, so it is safe on this console.
-  console.log(`${scriptName}: model ${rest.model} -> ${payload.model} (provider ${credential.provider})`);
+  console.log(`${lane}: model ${rest.model} -> ${payload.model} (provider ${credential.provider})`);
   if (credential.egress_secret && BACKEND !== 'e2b') {
-    const e = new Error(`${scriptName}: an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
+    const e = new Error(`${lane}: an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
     e.launcherKind = 'bad_request';
     throw e;
   }
-  if (BACKEND === 'docker') return runScriptInDocker(scriptName, payload, timeoutMs, AGENT_POSTURE, credential);
+  if (BACKEND === 'docker') return runScriptInDocker(lane, payload, timeoutMs, AGENT_POSTURE, credential);
   // Both surviving scripts carry an `mcp.url` (see the endpoint doc comment at the top of this
   // file). Reject a missing or localhost-pointed callback URL BEFORE spending an E2B sandbox create
   // call: on this backend the microVM cannot reach the host's localhost at all, so letting the run
   // proceed only guarantees a slower, more expensive version of the same failure.
   const mcpUrl = payload.mcp && payload.mcp.url;
   if (!mcpUrl || pointsAtLocalhost(mcpUrl)) {
-    const e = new Error(`${scriptName}: mcp.url is missing or unreachable from an E2B microVM `
+    const e = new Error(`${lane}: mcp.url is missing or unreachable from an E2B microVM `
       + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
       + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
       + 'SANDBOX_BACKEND to docker for development');
@@ -1544,7 +1544,7 @@ async function runAgenticScript(scriptName, rawPayload) {
   const startedAt = Date.now();
   // Diagnostics ride on the thrown error (see buildErrorBody) so the backend stops seeing a
   // context-free 502: which script, which sandbox, how long, against what deadline.
-  const meta = { script: scriptName, timeout_ms: timeoutMs };
+  const meta = { script: lane, timeout_ms: timeoutMs };
   const fail = (e) => stampFailure(e, { launcherMeta: { ...meta, elapsed_ms: Date.now() - startedAt } });
   let sbx;
   try {
@@ -1552,12 +1552,12 @@ async function runAgenticScript(scriptName, rawPayload) {
   } catch (e) {
     // No microVM ever existed (quota, missing template, E2B outage). Previously indistinguishable
     // from an agent that ran and crashed, since both ended as the same bare 502.
-    console.error(`${scriptName}: sandbox create failed after ${Date.now() - startedAt}ms: ${(e && e.name) || 'Error'}: ${scrubToken(String((e && e.message) || e)).slice(0, 500)}`);
+    console.error(`${lane}: sandbox create failed after ${Date.now() - startedAt}ms: ${(e && e.name) || 'Error'}: ${scrubToken(String((e && e.message) || e)).slice(0, 500)}`);
     throw fail(e);
   }
   const sandboxId = sbx.sandboxId;
   meta.sandbox_id = sandboxId;
-  console.log(`${scriptName}: sandbox ${sandboxId} created (timeoutMs=${timeoutMs})`);
+  console.log(`${lane}: sandbox ${sandboxId} created (timeoutMs=${timeoutMs})`);
   // Capture streamed output ourselves — the severed-stream error path discards the buffers.
   let outBuf = '';
   let errBuf = '';
@@ -1565,7 +1565,7 @@ async function runAgenticScript(scriptName, rawPayload) {
     await sbx.files.write('/home/user/input.json', JSON.stringify(payload));
     let res;
     try {
-      res = await sbx.commands.run(`node /home/user/${scriptName} /home/user/input.json`, {
+      res = await sbx.commands.run(`node /home/user/lane.js ${lane} /home/user/input.json`, {
         timeoutMs,
         envs: agentEnvs(credential, payload.model, payload.model_cost),
         onStdout: (d) => { outBuf += d; },
@@ -1582,7 +1582,7 @@ async function runAgenticScript(scriptName, rawPayload) {
       // (the "terminated" SandboxError drops them, so our capture is the only copy).
       const stderr = (err.stderr ?? err.result?.stderr ?? errBuf ?? '').toString();
       const stdout = (err.stdout ?? err.result?.stdout ?? outBuf ?? '').toString();
-      console.error(`${scriptName} ${cls.kind} after ${elapsedMs}ms of ${timeoutMs}ms (sandbox ${sandboxId}): ${err.name || 'Error'}: ${scrubToken(String(err.message || '')).slice(0, 500)}`);
+      console.error(`${lane} ${cls.kind} after ${elapsedMs}ms of ${timeoutMs}ms (sandbox ${sandboxId}): ${err.name || 'Error'}: ${scrubToken(String(err.message || '')).slice(0, 500)}`);
       if (stderr) console.error('--- sandbox stderr ---\n' + scrubToken(stderr).slice(-4000));
       if (stdout) console.error('--- sandbox stdout ---\n' + scrubToken(stdout).slice(0, 2000));
       await logSandboxDiagnostics(sandboxId);
@@ -1593,7 +1593,7 @@ async function runAgenticScript(scriptName, rawPayload) {
       if (usage && e && typeof e === 'object') e.usage = usage;
       throw e;
     }
-    return parseScriptOutput(scriptName, res.stdout);
+    return parseScriptOutput(lane, res.stdout);
   } catch (e) {
     throw fail(e);
   } finally {
@@ -1608,7 +1608,7 @@ async function runAgenticScript(scriptName, rawPayload) {
 // where a located change lives, but an evidence-only project still gets its investigation.
 // Read-only: no working-tree change collection.
 function runRca(payload) {
-  return runAgenticScript('rca.js', payload);
+  return runAgenticScript('rca', payload);
 }
 
 // Layer-2 triage: one fresh microVM materializes the finding's two-file dossier and runs the agent
@@ -1617,7 +1617,7 @@ function runRca(payload) {
 // rules on whether a claim about production traffic is true, which no repository can settle, so this
 // route must never grow a clone_url leg back.
 function runTriage(payload) {
-  return runAgenticScript('triage.js', payload);
+  return runAgenticScript('triage', payload);
 }
 
 // The generic agent run: one fresh microVM materializes the caller's files, clones the repo at the
@@ -1626,7 +1626,7 @@ function runTriage(payload) {
 // key in payload.mcp (scrubbed from all output, never returned to the backend). json_schema is
 // optional here: without one the agent answers in prose.
 function runAgentRun(payload) {
-  return runAgenticScript('run.js', payload);
+  return runAgenticScript('run', payload);
 }
 
 // ---------------------------------------------------------------------------

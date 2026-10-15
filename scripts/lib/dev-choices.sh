@@ -228,7 +228,7 @@ dev_launcher_key() {
 #
 # Rebuilt on every run rather than once: Docker's own layer cache makes a no-op rebuild a
 # sub-second check, and the alternative (build once, then silently drift from the checkout as
-# rca.js/triage.js/agent-stream.js change underneath it) is exactly the staleness this exists to
+# lane.js/agent-stream.js change underneath it) is exactly the staleness this exists to
 # prevent — see AGENT_IMAGE's own doc comment in server.js.
 dev_docker_agent_image_ensure() {
     [ "$TESSARY_DEV_SANDBOX" = "docker" ] || return 0

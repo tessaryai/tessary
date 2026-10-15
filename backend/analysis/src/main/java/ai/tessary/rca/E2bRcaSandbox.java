@@ -322,7 +322,7 @@ public class E2bRcaSandbox implements RcaSandbox {
      *
      * <p>F1: {@code projectId}/{@code reportId} are here only so a failing run's body can be booked
      * (see {@link #bookUsage}) before the {@link TessaryException} below propagates — server.js's {@code
-     * buildErrorBody} carries a {@code usage} object whenever rca.js's failure envelope reached it,
+     * buildErrorBody} carries a {@code usage} object whenever lane.js's failure envelope reached it,
      * and {@code bookUsage} already no-ops on a body with nothing usable.
      */
     @ExcludeFromJacocoGeneratedReport(
@@ -390,7 +390,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                     diag.isBlank() ? "" : " " + diag);
             // F1: book what the run spent before it failed (a launcher outage carries no usage —
             // bookUsage no-ops on a body with nothing parseable — but today's always-502 run failure
-            // does, whenever rca.js reached its catch block).
+            // does, whenever lane.js reached its catch block).
             // postLauncher's signature is pinned by its test overrides, so the funding flag is read
             // back from the body this run actually sent rather than threaded as a parameter.
             bookUsage(projectId, reportId, resp.body(), platformFunded(bodyJson));

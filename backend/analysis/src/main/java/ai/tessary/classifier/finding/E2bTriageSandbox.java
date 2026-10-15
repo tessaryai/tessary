@@ -208,7 +208,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             // A soft turn cap; see Agentic#maxTurns's javadoc for the mechanism and caveat.
             body.put("max_turns", cfg.getMaxTurns());
             // BehaviorTriageEngine always sends its one shared system prompt; the sandbox-side runner
-            // (triage.js/agent-stream.js) treats a missing/null system_prompt as "run exactly as before
+            // (lane.js/agent-stream.js) treats a missing/null system_prompt as "run exactly as before
             // this field existed" — no custom agent, no MCP relay — which stays true for any other
             // caller of this interface with nothing agent-specific to send.
             body.put("system_prompt", req.systemPrompt());

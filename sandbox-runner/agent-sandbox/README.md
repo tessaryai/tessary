@@ -9,32 +9,25 @@ as the Docker backend's agent image.
 - `template.ts` — the image definition (base image, `git`, the `opencode-ai` CLI +
   `@opencode-ai/sdk` pinned in lockstep, and the in-VM scripts).
 - `agent-stream.js` — the shared OpenCode runner: starts `opencode` as a server and drives it
-  through the SDK. Required by `rca.js`, `triage.js`, `run.js` and `session.js`.
+  through the SDK. Required by `lane.js` and `session.js`.
 - `mcp-relay.js` — a loopback MCP proxy with named upstreams: each name is served at
   `/mcp/<name>` and forwards to its own URL with its own bearer token, so no token reaches
   OpenCode's config. Every `tools/call` result is saved whole to `checks/mcp/NNN-<tool>.json` (one
   counter across all upstreams), and a large one comes back to the agent as a summary. Used by
   `agent-stream.js` on the system-prompt path, and by `session.js` for the session's named servers.
-- `rca.js` — the finding-anchored root-cause lane: materialize the finding's dossier (`finding.md`,
-  `evidence.md`, `method.md` when the classifier has one, `tools.md`) → read-only agent run wired to
-  the platform's MCP surface → emit verdict + summary + causes + the markdown investigation. It reads
-  every trace it cites through MCP, so the door is required; the clone is OPTIONAL and adds `./repo/`
-  for the projects that have an integration. With a clone, it fills the prompt's `{onset_commit}` with
-  the newest commit before `onset_at`, or `unknown`. Read-only by permission rule: it may never edit
-  the clone. (Node builtins only.)
-- `triage.js` — the Layer-2 ruling: materialize the finding's dossier (`finding.md`,
-  `method.md` when the detector has a card, `detections.md` for groundedness) → agent run wired to the platform's MCP surface → emit verdict + citations. The
-  one script that never clones: triage audits a claim, and no repository says whether a claim about
-  production traffic is true. It reads the substrate through MCP instead, and may edit anywhere
-  under the work dir — `checks/` is where its own scripts go, beside every saved tool result, so it
-  computes what is mechanical rather than eyeballing it. (Node builtins only.)
-- `run.js` — the generic agent run behind the backend's `AgentRunService` (the `AGENT_RUN`
-  lane): materialize the caller's files under `dossier/`, clone the repository at the requested
-  commit when a `clone_url` is sent (quarantined like RCA's), run the agent under the caller's own
-  system prompt wired to the platform's MCP surface, and emit the schema-constrained answer, or
-  prose when no `json_schema` was sent. The repository is read-only (`edit` denied under `repo/`);
-  everywhere else under the work dir is writable, so the agent can draft a builder and run it with
-  `node`. (Node builtins only.)
+- `lane.js` — the three one-shot lanes, run as `node lane.js <rca|triage|run> <input.json>`. Each
+  materializes the caller's dossier under `dossier/` and runs the agent wired to the platform's MCP
+  surface, emitting the schema-constrained answer (or prose, for `run` with no `json_schema`). (Node
+  builtins only.)
+  - `rca` — the finding-anchored root cause. The clone is optional and read-only; with one, the
+    prompt's `{onset_commit}` becomes the newest commit before `onset_at`, or `unknown`. It may never
+    edit.
+  - `triage` — the Layer-2 ruling. It never clones: no repository says whether a claim about
+    production traffic is true. It may edit anywhere under the work dir; `checks/` is where its own
+    scripts go.
+  - `run` — the generic run behind the backend's `AgentRunService` (the `AGENT_RUN` lane), under
+    the caller's own system prompt. The clone is optional and read-only (`edit` denied under
+    `repo/`); everywhere else under the work dir is writable.
 - `session.js` — one long-lived agent session: reads and deletes `session.json`, starts the relay
   with the session's named MCP servers and one `opencode serve`, and serves `POST /message`,
   `POST /abort`, `GET /events` and `GET /healthz` to the launcher behind a per-session secret. It

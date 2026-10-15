@@ -14,7 +14,7 @@
 #
 #   docker build -f sandbox-runner/agent-sandbox/Dockerfile -t <tag> .
 #
-# No CMD/ENTRYPOINT: the docker driver runs `node <script>.js /work/input.json` per lane invocation
+# No CMD/ENTRYPOINT: the docker driver runs `node lane.js <lane> /work/input.json` per lane invocation
 # (see runScriptInDocker), or a long-lived `/usr/local/bin/node-sealed session.js /work/session.json`
 # for an agent session (see the node-sealed RUN below).
 #
@@ -133,14 +133,12 @@ WORKDIR /home/user
 RUN npm install @opencode-ai/sdk@1.18.30 undici@^6.28.0 \
     && npm cache clean --force
 
-# Shared OpenCode runner required by rca.js/triage.js/run.js/session.js — must be baked beside
+# Shared OpenCode runner required by lane.js and session.js — must be baked beside
 # them or their `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same
-# way, by agent-stream.js on the system-prompt (triage.js, run.js) path and by session.js.
+# way, by agent-stream.js on the system-prompt path and by session.js.
 COPY --chown=node:node sandbox-runner/agent-sandbox/agent-stream.js /home/user/agent-stream.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/mcp-relay.js /home/user/mcp-relay.js
-COPY --chown=node:node sandbox-runner/agent-sandbox/rca.js /home/user/rca.js
-COPY --chown=node:node sandbox-runner/agent-sandbox/triage.js /home/user/triage.js
-COPY --chown=node:node sandbox-runner/agent-sandbox/run.js /home/user/run.js
+COPY --chown=node:node sandbox-runner/agent-sandbox/lane.js /home/user/lane.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/session.js /home/user/session.js
 
 # The image's version identity: same convention and same "dev" fallback as backend/Dockerfile,

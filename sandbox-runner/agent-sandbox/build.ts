@@ -53,9 +53,7 @@ const RECIPE_INPUTS = [
   'template.ts',
   'agent-stream.js',
   'mcp-relay.js',
-  'rca.js',
-  'triage.js',
-  'run.js',
+  'lane.js',
   'session.js',
 ];
 
@@ -221,8 +219,7 @@ async function verify(version: string) {
       ['jq runs', 'jq --version'],
       [
         'agent scripts are baked',
-        'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/run.js'
-          + ' && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js'
+        'test -f /home/user/lane.js && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js'
           + ' && test -f /home/user/session.js',
       ],
       ['the session node is executable', `test -x ${SEALED_NODE}`],

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Decision 2, end to end: with `opencode` unreachable, triage.js's own process must exit fast and
+ * Decision 2, end to end: with `opencode` unreachable, the triage lane's own process must exit fast and
  * clean, not hang until the launcher's own deadline. agent-stream.test.js covers the same failure
  * in-process (a fake opencode that exits before announcing, and an assertion the relay refuses
  * connections afterwards) — this spawns the REAL script instead, because the bug this guards is
@@ -26,12 +26,12 @@ const TRIAGE_INPUT = {
   system_prompt: 'You are the triage agent.',
 };
 
-test('triage.js exits fast and clean when opencode is unreachable, instead of hanging', async (t) => {
+test('the triage lane exits fast and clean when opencode is unreachable, instead of hanging', async (t) => {
   // An empty PATH is what makes the `opencode` lookup fail with ENOENT — agent-stream.js's
   // spawnOpencodeServer spawns the bare name `opencode`, resolved against the child's PATH. node
   // itself is found via process.execPath, an absolute path, so the empty PATH cannot break
   // the spawn of this test's own child process.
-  const { result, elapsedMs, cleanup } = await runLane('triage.js', TRIAGE_INPUT, { pathFor: () => '' });
+  const { result, elapsedMs, cleanup } = await runLane('triage', TRIAGE_INPUT, { pathFor: () => '' });
   t.after(cleanup);
 
   assert.notEqual(result.signal, 'SIGTERM', 'must exit on its own well inside the 15s spawn timeout, not be killed by it');
@@ -53,14 +53,14 @@ test('triage.js exits fast and clean when opencode is unreachable, instead of ha
 });
 
 /**
- * Run triage.js against test/fixtures/fake-opencode, which IGNORES SIGTERM — the shape of a live
+ * Run the triage lane against test/fixtures/fake-opencode, which IGNORES SIGTERM — the shape of a live
  * opencode that has just served a session. Before the fix, runAgent's close sent that one SIGTERM
- * and returned; the child and its stdio pipes then held triage.js open until its 5s exit guard
+ * and returned; the child and its stdio pipes then held lane.js open until its 5s exit guard
  * fired (`still alive ... PipeWrap, ProcessWrap`). Now the close escalates to SIGKILL and releases
  * the pipes before runAgent returns, so the guard never fires and the child is gone.
  */
 function runTriageAgainstStubbornOpencode(reply) {
-  return runLane('triage.js', TRIAGE_INPUT, {
+  return runLane('triage', TRIAGE_INPUT, {
     reply,
     env: { FAKE_OPENCODE_IGNORE_SIGTERM: '1' },
     pathFor: (bin) => bin, // only the fake: a real opencode on the host must not be the one started
@@ -85,7 +85,7 @@ function assertCleanExit({ result, elapsedMs, pids }) {
   assert.equal(isAlive(pids[0]), false, 'the opencode child is gone, not orphaned');
 }
 
-test('triage.js exits clean after a failed run even when opencode ignores SIGTERM', async (t) => {
+test('the triage lane exits clean after a failed run even when opencode ignores SIGTERM', async (t) => {
   const run = await runTriageAgainstStubbornOpencode('');
   t.after(run.cleanup);
   assertCleanExit(run);
@@ -93,7 +93,7 @@ test('triage.js exits clean after a failed run even when opencode ignores SIGTER
   assert.match(JSON.parse(run.result.stdout).error, /opencode produced no usable reply/);
 });
 
-test('triage.js exits clean after a successful run even when opencode ignores SIGTERM', async (t) => {
+test('the triage lane exits clean after a successful run even when opencode ignores SIGTERM', async (t) => {
   const run = await runTriageAgainstStubbornOpencode('{"verdict":"positive"}');
   t.after(run.cleanup);
   assertCleanExit(run);

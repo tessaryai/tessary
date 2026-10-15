@@ -41,7 +41,7 @@ E2B; nothing in this tree can delete it.
 
 - `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below and the
   [launcher sessions](#launcher-sessions).
-- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `run.js`, the long-lived agent
+- `agent-sandbox/` — the agent sandbox: `lane.js` (the rca, triage and run lanes), the long-lived agent
   session `session.js` (see [Agent sessions](#agent-sessions-sessionjs)), the shared
   `agent-stream.js` OpenCode runner and `mcp-relay.js`, and TWO INDEPENDENTLY MAINTAINED RECIPES for
   one runtime — `template.ts` (the E2B template, published by `build.ts`) and `Dockerfile` (the
@@ -474,7 +474,7 @@ the egress rule.
 
 ### Manual end-to-end proof (2026-09-01, against a real Docker daemon)
 
-Reproduced with a minimal stub agent image (a `triage.js` that echoes its input) standing in for
+Reproduced with a minimal stub agent image (a lane script that echoes its input) standing in for
 the published `AGENT_IMAGE`, both as a bare host process and as a genuinely containerized launcher
 (matching the compose deployment shape) — real Docker (`docker info`), no E2B key set anywhere:
 

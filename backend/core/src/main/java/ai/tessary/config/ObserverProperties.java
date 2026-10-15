@@ -131,7 +131,7 @@ public class ObserverProperties {
         private long timeoutMs = 1_800_000;
 
         // The turn budget for the TRIAGE lane only. E2bTriageSandbox threads it into the launcher POST
-        // body as `max_turns`, which triage.js forwards into agent-stream.js's
+        // body as `max_turns`, which lane.js forwards into agent-stream.js's
         // `config.agent.build.maxSteps` — the SDK's own
         // documented mechanism for forcing a text-only reply once the cap is hit (see
         // @opencode-ai/sdk's AgentConfig.maxSteps: "Maximum number of agentic iterations before

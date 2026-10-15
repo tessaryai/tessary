@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Shared OpenCode runner for the agent lanes (rca.js, triage.js, run.js) and the long-lived
+ * Shared OpenCode runner for the agent lanes (lane.js) and the long-lived
  * session.js. ONE source of truth for:
  *   - starting `opencode serve` and driving it over the SDK, and the config it starts with
  *     (basePermission, customAgent, remoteMcp),
@@ -182,7 +182,7 @@ const QUARANTINED = ['.opencode', 'opencode.json', 'opencode.jsonc', 'AGENTS.md'
 
 // Strip embedded secrets before they can reach a log: clone tokens
 // (https://x-access-token:TOKEN@host) and platform API keys (tsy_<scope>_<random> —
-// the ephemeral MCP key rca.js wires into the sandbox has this shape).
+// the ephemeral MCP key lane.js wires into the sandbox has this shape).
 function scrubToken(s) {
   return String(s)
     .replace(/x-access-token:[^@\s]+@/g, 'x-access-token:***@')
@@ -191,7 +191,7 @@ function scrubToken(s) {
 
 // Node's fetch (undici) throws `TypeError: fetch failed` for every transport failure —
 // DNS, connection refused, TLS, a reset mid-response — and buries the actual cause one
-// level down in `.cause`. rca.js's top-level catch used to log only `.message`, so a run
+// level down in `.cause`. lane.js's top-level catch used to log only `.message`, so a run
 // that died talking to the local opencode server or a Bedrock endpoint left nothing in the
 // launcher logs but the word "failed": undebuggable. Walk the cause chain and any
 // code/errno/syscall Node attaches, so the real failure (e.g. ECONNREFUSED, ENOTFOUND,
@@ -323,7 +323,7 @@ function quarantineRepo() {
 // WHY NOT THE SDK'S OWN: its close() is a single fire-and-forget SIGTERM. No wait for the exit, no
 // SIGKILL if the process ignores it, and the child's stdio pipes stay referenced. An opencode that
 // has just served a session does not always exit on SIGTERM, so the lane's node process was held
-// open by the child and its pipes after main() returned, until triage.js's 5s exit guard killed it
+// open by the child and its pipes after main() returned, until lane.js's 5s exit guard killed it
 // (`still alive ... PipeWrap, ProcessWrap`). The SDK hands back no process handle, so the only way
 // to stop the child deterministically is to own the spawn.
 
@@ -663,7 +663,7 @@ function describeSchemaMiss(text, turns, jsonSchema) {
  *
  * F1: a failing lane USED TO reach only this line — its tokens never reached the launcher, and the
  * backend booked NOTHING for it (a run could burn its whole wall-clock and whole bill and leave a
- * ledger that said it cost zero). triage.js/rca.js now also write `sumUsage(e.turns)` into a small
+ * ledger that said it cost zero). lane.js now also writes `sumUsage(e.turns)` into a small
  * JSON envelope on stdout before exiting non-zero, which server.js's buildErrorBody carries into the
  * 502 body as `usage`, and E2bTriageSandbox/E2bRcaSandbox book it from there. This line stays as the
  * human-readable copy on the launcher console — the two must never disagree, hence both read sumUsage.
@@ -674,7 +674,7 @@ function describeSchemaMiss(text, turns, jsonSchema) {
  */
 /**
  * Sum a turns[] array into one numeric-only usage object — the ONE place both the success envelope
- * (toEnvelope) and a failing run's stdout envelope (triage.js/rca.js's catch block, via this same
+ * (toEnvelope) and a failing run's stdout envelope (lane.js's catch block, via this same
  * exported name) compute spend, so the two can never drift apart.
  *
  * Every field here is a plain number, on purpose: this crosses into sandbox-runner/launcher/server.js's
@@ -698,7 +698,7 @@ function sumUsage(turns) {
 function usageLine(turns) {
   const u = sumUsage(turns);
   return (
-    `spend (booked on failure by the caller — see triage.js/rca.js): in=${u.input_tokens} out=${u.output_tokens} ` +
+    `spend (booked on failure by the caller — see lane.js): in=${u.input_tokens} out=${u.output_tokens} ` +
     `cache_read=${u.cache_read_input_tokens} cache_write=${u.cache_creation_input_tokens} cost_usd=${u.cost_usd} ` +
     `turns=${(turns || []).length}`
   );
@@ -840,7 +840,7 @@ function remoteMcp(urls) {
  *   - model: a `provider/model` id (see toProviderModel in the launcher); split for the wire.
  *   - jsonSchema: the reply is schema-constrained and lands in `structured_output`. The run
  *     rejects when it produced no usable reply, or no reply that satisfies the schema: its VALUE
- *     is that reply. Null (run.js, asked for prose) drops the constraint: no schema
+ *     is that reply. Null (the run lane, asked for prose) drops the constraint: no schema
  *     instruction, no schema-miss retry, and the reply's text is the answer, with
  *     `structured_output` present only when that text happened to carry a JSON object.
  *   - permission: the lane's OpenCode permission rules. Every lane passes one — an agent that
@@ -1018,7 +1018,7 @@ async function runAgent(spec) {
       }
       // Both halves matter. A schema with no `required` list makes missingKeys vacuously empty,
       // so "we parsed an object at all" is the check that carries the prose case. No schema at all
-      // (run.js, asked for prose) means any non-empty reply is the answer.
+      // (the run lane, asked for prose) means any non-empty reply is the answer.
       const missing = missingKeys(structured, spec.jsonSchema);
       if (!spec.jsonSchema || (structured && missing.length === 0)) break;
       if (attempt === 0) console.error(describeSchemaMiss(text, turns, spec.jsonSchema));
@@ -1042,7 +1042,7 @@ async function runAgent(spec) {
     // top-level catch, all four of which now go through describeError.
     //
     // F1: every throw below carries `.turns = finalTurns` — a plain data property on the Error,
-    // never a string field derived from model output — so triage.js/rca.js's catch block can book
+    // never a string field derived from model output — so lane.js's catch block can book
     // what this run actually spent instead of the backend recording a $0 failure.
     const empty = finalTurns.length === 0;
     const unusable = empty || (!structured && !text);

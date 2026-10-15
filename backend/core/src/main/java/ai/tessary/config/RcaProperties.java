@@ -54,7 +54,7 @@ public class RcaProperties {
         private long timeoutMs = 900_000;
 
         // The turn budget for this lane. E2bRcaSandbox threads it into the launcher POST
-        // body as `max_turns`, which rca.js forwards into agent-stream.js's `config.agent.build.
+        // body as `max_turns`, which lane.js forwards into agent-stream.js's `config.agent.build.
         // maxSteps` — the SDK's own documented mechanism for forcing a text-only reply once the cap
         // is hit ("Maximum number of agentic iterations before forcing text-only response"), rather
         // than a hard kill that discards a partial verdict. See ObserverProperties.Agentic#maxTurns

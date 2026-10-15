@@ -2,7 +2,7 @@
 'use strict';
 /*
  * A loopback JSON-RPC proxy in front of one or more named MCP upstreams. agent-stream.js starts one
- * on the system-prompt path (triage.js, run.js) with the single upstream `tessary-evals`; session.js
+ * on the system-prompt path (the triage and run lanes) with the single upstream `tessary-evals`; session.js
  * starts one with every server its session names. RCA never sees it.
  *
  * WHY: triage's prompt tells the agent to read every evidence row rather than a sampled preview,
