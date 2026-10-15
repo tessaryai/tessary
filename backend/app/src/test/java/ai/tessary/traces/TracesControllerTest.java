@@ -45,11 +45,7 @@ import org.springframework.web.server.ResponseStatusException;
  * carries the rollup numbers intact, keeping unsettled, no-usage, and unpriced distinct; a pre-cutover deep link (a
  * v1 ULID) still resolves; and a pre-cutover cursor degrades to page one.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class TracesControllerTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();

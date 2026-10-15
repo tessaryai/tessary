@@ -36,11 +36,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * <p>The worker and reaper are built here and run once synchronously, with the scheduler off, because a live worker
  * claims due traces globally. Time is Postgres's: tests backdate the deadline rather than use an app-side clock.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class TraceRollupWorkerIntegrationTest {
 
     @Autowired

@@ -58,11 +58,7 @@ import org.springframework.transaction.PlatformTransactionManager;
  * <p>The resolvers and rollup worker are off: several assertions are about what the write path did not derive, and
  * the worker claims due traces globally.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class SpanBatchWriterIntegrationTest {
 
     @Autowired

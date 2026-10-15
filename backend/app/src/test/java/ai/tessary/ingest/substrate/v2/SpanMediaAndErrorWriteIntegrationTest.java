@@ -25,15 +25,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * gets a {@code media_ref} row (hung off the payload, not the span, so it cascades with the
  * payload's text), and a failing span splits its class into {@code error_type} from its prose
  * into {@code error_message}.
- *
- * <p>Shares {@link SpanBatchWriterIntegrationTest}'s property fingerprint (same context, same
- * database, no second Liquibase run).
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class SpanMediaAndErrorWriteIntegrationTest {
 
     @Autowired

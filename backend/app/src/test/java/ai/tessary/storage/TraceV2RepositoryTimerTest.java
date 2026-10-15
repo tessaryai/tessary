@@ -23,14 +23,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * armed, and fires again, refreshing a long turn every ten seconds. Backwards, a busy trace never rolls up, and the
  * only fix is a cap that makes {@code is_settled} mean "we gave up waiting".
  *
- * <p>Claim and settle are smoke-checked here; the worker battery is {@code TraceRollupWorkerIntegrationTest}'s. The
- * schedulers are off and the property fingerprint matches the write-path test, so they share a context.
+ * <p>Claim and settle are smoke-checked here; the worker battery is {@code TraceRollupWorkerIntegrationTest}'s.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class TraceV2RepositoryTimerTest {
 
     @Autowired

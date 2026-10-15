@@ -17,6 +17,7 @@ import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.OrganizationRepository;
 import ai.tessary.tenant.PrincipalRepository;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.AuthEnforcedContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.List;
@@ -27,13 +28,9 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -44,20 +41,9 @@ import org.springframework.web.context.WebApplicationContext;
  * a listed domain is admitted, and existing members keep signing in. The policy is instance-wide
  * (the install's first organization's), so the methods run in order on one shared database.
  */
-@SpringBootTest
+@AuthEnforcedContext
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-// Own context on purpose: it holds the instance-wide signup policy at `invite`/`domain` across ordered methods, which
-// would refuse every other class's signup while it is held.
-@TestPropertySource(properties = "test.context-group=signup-policy")
 class SignupPolicyIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.auth.cookie-password", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        r.add("workos.api-key", () -> "");
-        r.add("workos.client-id", () -> "");
-        r.add("tessary.auth.disabled", () -> "false");
-    }
 
     private static final String OWNER = "owner-1226@example.com";
     private static final String PASSWORD = "a-good-password";

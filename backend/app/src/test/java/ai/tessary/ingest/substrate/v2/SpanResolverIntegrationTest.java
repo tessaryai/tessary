@@ -24,7 +24,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * The ancestry fixpoint (§6.4) and correlation backfill (§6.3), and the terminal states that keep their partial
@@ -32,14 +31,7 @@ import org.springframework.test.context.TestPropertySource;
  * missing parent, anonymous traffic) stays forever unless retired, and once such rows outnumber the limit, no real
  * work is reached. The starvation test catches that. The schedulers are off so counted passes are the ones that ran.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false",
-            "tessary.ingest.substrate.resolver-batch-size=500"
-        })
-// Own context: both resolvers read a global partial index, so another class's spans would consume the batch limit.
-@TestPropertySource(properties = "test.context-group=span-resolver")
+@SpringBootTest
 class SpanResolverIntegrationTest {
 
     @Autowired

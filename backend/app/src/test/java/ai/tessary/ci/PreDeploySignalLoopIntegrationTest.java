@@ -37,8 +37,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * The production-signal to pre-deploy loop against real Postgres: with it enabled, a new signal found by the {@link
@@ -47,11 +45,6 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 class PreDeploySignalLoopIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.predeploy.enabled", () -> "true"); // activate the loop
-    }
 
     @Autowired
     ClassifierWorker worker;

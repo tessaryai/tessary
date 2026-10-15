@@ -42,23 +42,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * A down groundedness model pauses its sweep without costing attempts, against Postgres and a loopback {@code
  * serve.py}: nothing enqueues while down, a pre-claimed job is handed back unchanged, refused connections never dead-
  * letter, and a 500 still counts. Production sleeps after a caught-up sweep; dev never does.
  *
- * <p>Own context with the heartbeat and probe out of reach: this class moves shared beans' URL and mode and drives
- * each sweep itself.
+ * <p>The heartbeat and probe are parked suite-wide, so each sweep here is one this class drove. It moves shared beans'
+ * URL and mode, and puts them back after each test.
  */
 @SpringBootTest
-@TestPropertySource(
-        properties = {
-            "test.context-group=classifier-encoder-gate",
-            "tessary.classifier.heartbeat-ms=86400000",
-            "tessary.observer.encoder.probe-interval-ms=86400000"
-        })
 class ClassifierWorkerEncoderGateIntegrationTest {
 
     private static final long COOLDOWN_SECONDS = 1_800;

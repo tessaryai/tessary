@@ -56,11 +56,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * test -Dtest=TraceSearchQueryPlanIT -Dsurefire.failIfNoSpecifiedTests=false}. {@code TRACE_SEARCH_PLAN_SCALE=30}
  * divides the volume for a small Docker disk; the full scale needs about 30 GB free.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 @EnabledIfEnvironmentVariable(named = "TRACE_SEARCH_PLAN_IT", matches = ".+")
 class TraceSearchQueryPlanIT {
 

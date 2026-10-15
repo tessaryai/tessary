@@ -34,11 +34,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * <p>Still pinned: a container span's cumulative usage must not double the bill, an unpriced model is counted rather
  * than valued at zero, and a stuck turn is reported rather than dropped, so the card reconciles with its drill-down.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class VitalsServiceIntegrationTest {
 
     @Autowired

@@ -42,8 +42,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Usage metering against real Postgres: seeds billable rows into a closed hour bucket and drives {@link
@@ -57,11 +55,6 @@ class MeteringIntegrationTest {
 
     // The subject kind E2bTriageSandbox books a triage run under.
     private static final String SUBJECT_KIND = "behavior_finding";
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.metering.storage-enabled", () -> "true");
-    }
 
     @Autowired
     TenantService tenants;

@@ -20,11 +20,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * The v2 trace list against real Postgres: a filter, a sort, and a page over columns a writer already wrote, never an
  * aggregate computed during the request.
  */
-@SpringBootTest(
-        properties = {
-            "tessary.ingest.substrate.resolvers-enabled=false",
-            "tessary.ingest.substrate.rollup-enabled=false"
-        })
+@SpringBootTest
 class TraceSubstrateRepositoryTest {
 
     private static final TraceV2Repository.TraceQuery NO_FILTER =
