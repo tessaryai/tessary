@@ -19,33 +19,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Handles the JSON-RPC 2.0 methods MCP requires.
- *
- * <p>Implemented today:</p>
- * <ul>
- *   <li>{@code initialize} — version handshake; returns server capabilities + info.</li>
- *   <li>{@code ping} — round-trip heartbeat.</li>
- *   <li>{@code tools/list} — returns every {@link McpTool} the registry holds.</li>
- *   <li>{@code tools/call} — dispatches a single tool invocation; tool errors are
- *       reported in the {@code result} as {@code {isError: true, content: [...]}}
- *       per the MCP spec (not as JSON-RPC errors).</li>
- * </ul>
- *
- * <p>Notifications ({@code notifications/initialized}, etc.) are accepted and
- * silently dropped. Unknown methods produce a {@code -32601 Method not found}
- * JSON-RPC error.</p>
+ * JSON-RPC 2.0 for MCP: {@code initialize}, {@code ping}, {@code tools/list}, {@code tools/call}. Tool errors go in the
+ * {@code result} as {@code isError: true} per the spec; notifications are dropped; unknown methods get {@code -32601}.
  */
 @Component
 public class McpDispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(McpDispatcher.class);
 
-    /**
-     * Most recent MCP spec revision we implement. Clients send their own version
-     * in {@code initialize}; we echo it back if recognised, else fall back to ours.
-     * Spec versions are date-stamped strings (e.g. {@code 2025-06-18}); the server
-     * just needs to advertise something a client will accept.
-     */
+    /** A recognised client version is echoed back, else ours. */
     private static final String PROTOCOL_VERSION = "2025-06-18";
 
     private final McpToolRegistry registry;
@@ -56,7 +38,7 @@ public class McpDispatcher {
         this.mapper = mapper;
     }
 
-    /** Returns null when the request is a notification (no response expected). */
+    /** Null for a notification. */
     public JsonRpc.@Nullable Response dispatch(JsonRpc.@Nullable Request req, TenantContext ctx) {
         if (req == null || !"2.0".equals(req.jsonrpc())) {
             return JsonRpc.Response.err(idOrNull(req), JsonRpc.INVALID_REQUEST, "jsonrpc must be \"2.0\"", null);
@@ -99,8 +81,6 @@ public class McpDispatcher {
         return id == null ? NullNode.getInstance() : id;
     }
 
-    // --------------------------------------------------------------- initialize
-
     private Map<String, Object> initialize(@Nullable JsonNode params) {
         String clientVersion = params != null && params.hasNonNull("protocolVersion")
                 ? params.get("protocolVersion").asText()
@@ -119,15 +99,8 @@ public class McpDispatcher {
     }
 
     /**
-     * The server's own description of itself, written from the tools the registry actually holds.
-     *
-     * <p>A fixed string here would tell an agent to use a tool its {@code tools/list} does not contain — the
-     * instructions are read as authoritative and would be describing a different product. Built from
-     * {@code tools()} instead, so the prose and the catalogue cannot disagree.
-     *
-     * <p>The read-only sentence is the one thing here that is NOT conditional on the catalogue, because it is
-     * a property of the surface rather than of a tool: no tool in this catalogue writes. Saying it once up front is cheaper than an agent discovering it by
-     * planning a write and failing to find the tool for it.
+     * Built from the tools the registry actually holds, since agents treat the instructions as authoritative. The
+     * read-only sentence is unconditional: no tool writes.
      */
     private String instructions() {
         Set<String> available = new LinkedHashSet<>();
@@ -180,8 +153,6 @@ public class McpDispatcher {
         return sb.toString().trim();
     }
 
-    // --------------------------------------------------------------- tools/list
-
     private Map<String, Object> listTools() {
         List<Map<String, Object>> tools = new ArrayList<>();
         for (McpTool t : registry.tools()) {
@@ -193,8 +164,6 @@ public class McpDispatcher {
         }
         return Map.of("tools", tools);
     }
-
-    // --------------------------------------------------------------- tools/call
 
     private Map<String, Object> callTool(@Nullable JsonNode params, TenantContext ctx) {
         if (params == null || !params.isObject() || !params.hasNonNull("name")) {
@@ -222,9 +191,7 @@ public class McpDispatcher {
     }
 
     private Map<String, Object> toolSuccessResult(Object payload) {
-        // The MCP "tools/call" reply requires `content` (list of content blocks).
-        // We emit a single text block carrying the JSON-encoded payload, plus
-        // `structuredContent` for clients that prefer typed access.
+        // MCP requires `content`; a single text block carries the JSON, plus `structuredContent` for typed clients.
         String text;
         try {
             text = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(payload);

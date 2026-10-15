@@ -2,23 +2,14 @@
 package ai.tessary.llm;
 
 /**
- * A hosting platform we can reach a model through. This is the <i>platform</i>
- * axis only — the model (and its vendor) is the orthogonal {@code model_name}
- * axis carried by {@link ModelCatalog}. Bedrock and OpenRouter host many
- * vendors' models, so the value is never a vendor+platform combo (the old
- * {@code ANTHROPIC_BEDROCK} is now just {@code BEDROCK}).
- *
- * <p>Per-platform connection metadata (label, auth kind, default base URL)
- * lives in {@link PlatformCatalog}.
+ * A hosting platform we reach a model through: the platform axis only, never a vendor+platform combo; the model is the
+ * orthogonal {@code model_name} axis. Connection metadata lives in {@link PlatformCatalog}.
  */
 public enum ModelProvider {
     OPENAI,
     ANTHROPIC,
     OPENROUTER,
-    // OLLAMA was removed: it was the platform's sole credential-free, AUTH_NONE
-    // provider, and the maker filter (OpenAI, Anthropic, Google, Moonshot, Zhipu, xAI) drops it —
-    // Meta is not a supported maker. Every provider in this list requires an org credential except
-    // PLATFORM below.
+    // Every provider here requires an org credential except PLATFORM.
     MOONSHOT,
     BEDROCK,
     /** Google's Gemini line over its OpenAI-compatible endpoint. */
@@ -28,36 +19,23 @@ public enum ModelProvider {
     /** xAI's Grok line, served OpenAI-compatible from api.x.ai. */
     GROK,
     /**
-     * Any other OpenAI-compatible endpoint a user points us at — a self-hosted vLLM/LiteLLM
-     * gateway, a provider not worth a named entry, or an internal proxy. {@link PlatformCatalog}
-     * carries no default base URL for this one; the user must supply one. See
-     * {@link ProviderCredential#customModelName()} for the free-text model id this provider needs
-     * (the catalog holds one representative entry, not a real model list).
+     * Any other OpenAI-compatible endpoint. {@link PlatformCatalog} has no default base URL for it; see
+     * {@link ProviderCredential#customModelName()} for its free-text model id.
      */
     CUSTOM,
 
     /**
-     * AWS's second Bedrock endpoint. Deliberately its own value rather than a flag on {@link #BEDROCK}:
-     * it has a different host, a different SigV4 service name and IAM namespace, a different wire
-     * (OpenAI Responses rather than Converse), bare model ids with no cross-region inference profile,
-     * its own quota pool and its own region. Every one of those is something {@link PlatformCatalog}
-     * and the sandbox launcher already dispatch on, so the alternative was a boolean threaded
-     * through all of them.
+     * Its own value rather than a flag on {@link #BEDROCK}: a different host, SigV4 service, wire (OpenAI Responses),
+     * model ids, quota pool and region, all of which the catalog and launcher dispatch on.
      */
     BEDROCK_MANTLE,
 
-    /**
-     * TypeSafe's hosted decision models (Jev). Never a chat model: it answers typed questions about a
-     * state in one POST, so it is reached only through {@code llm/decisions/}.
-     */
+    /** Never a chat model: reached only through {@code llm/decisions/}. */
     TYPESAFE,
 
     /**
-     * A provider the deployment itself supplies, with no org credential behind it. Offered only when
-     * a {@link PlatformProviderSupplier} says so for the org; the default supplier offers it to no
-     * one, so an install that registers no supplier never lists, selects or runs it. Its
-     * {@link PlatformCatalog} descriptor is a placeholder the supplier's label and detail replace.
-     * Tessary Cloud offers it as Tessary AI; nothing in this repo does, and that is deliberate.
+     * Supplied by the deployment with no org credential, offered only when a {@link PlatformProviderSupplier} says so;
+     * the default supplier offers it to no one.
      */
     PLATFORM
 }

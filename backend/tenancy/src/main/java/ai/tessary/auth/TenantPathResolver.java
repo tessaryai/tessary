@@ -14,20 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-/**
- * Resolves {orgSlug, projectSlug} from URL path variables into IDs while
- * enforcing the requester's org membership. Centralises the 'this user can
- * see this project' check so every controller doesn't re-implement it.
- *
- * <p>Resolution shapes:</p>
- * <ul>
- *   <li>{@link #requireOrg(TenantContext, String)} — user must belong to org</li>
- *   <li>{@link #requireProject(TenantContext, String, String)} — same + project exists and is not
- *       being deleted</li>
- *   <li>{@link #requireProjectIncludingDeleting(TenantContext, String, String)} — same, but also
- *       sees a project on its way out</li>
- * </ul>
- */
+/** Resolves org and project slugs into IDs while enforcing org membership, so no controller re-implements it. */
 @Service
 public class TenantPathResolver {
 
@@ -42,7 +29,7 @@ public class TenantPathResolver {
         this.projects = projects;
     }
 
-    /** Resolves an org slug to a {@link Resolved} record carrying org + role. 403 on no membership. */
+    /** 403 on no membership. */
     public OrgResolved requireOrg(TenantContext ctx, String orgSlug) {
         Organization org = orgs.findBySlug(orgSlug).orElseThrow(() -> notFound("org not found: " + orgSlug));
         // MCP tokens are pre-bound to a project; we verify the requested org matches.
@@ -55,12 +42,7 @@ public class TenantPathResolver {
         return new OrgResolved(org, m.role());
     }
 
-    /**
-     * The project-scoped resolution every controller uses. A project accepted for deletion resolves as
-     * NOT FOUND here — one gate, rather than each of the ~40 project-scoped controllers remembering to
-     * check. The row still exists, and will until the purge worker reaches it, but the only honest answer
-     * to "read/write this project" once its data is being deleted underneath the caller is 404.
-     */
+    /** A project accepted for deletion is 404 here: one gate rather than each of ~40 controllers checking. */
     public Resolved requireProject(TenantContext ctx, String orgSlug, String projectSlug) {
         Resolved r = requireProjectIncludingDeleting(ctx, orgSlug, projectSlug);
         if (r.project().isDeleting()) {
@@ -70,11 +52,8 @@ public class TenantPathResolver {
     }
 
     /**
-     * Resolution that sees a project on its way out.
-     *
-     * <p>Two callers, both of which need the row precisely because it is being deleted: the DELETE
-     * endpoint, so a retry confirms rather than 404s, and the org's project list, so settings can render
-     * the {@code deleting} state instead of the row silently vanishing while its data drains.
+     * Used by the DELETE endpoint, so a retry confirms rather than 404s, and by the project list, so settings can show
+     * {@code deleting}.
      */
     public Resolved requireProjectIncludingDeleting(TenantContext ctx, String orgSlug, String projectSlug) {
         OrgResolved o = requireOrg(ctx, orgSlug);
@@ -99,17 +78,12 @@ public class TenantPathResolver {
             return RolePermissions.allows(roleEnum(), permission);
         }
 
-        /** Throw 403 unless the resolved role holds {@code permission}. {@code action} fills the message. */
         public void require(Permission permission, String action) {
             requirePermission(roleEnum(), permission, action);
         }
     }
 
-    /**
-     * Org-only resolution result (no project in scope). Kept separate from
-     * {@link Resolved} so the project-scoped contract can keep {@code project}
-     * non-null — callers that only resolved an org never have a project to read.
-     */
+    /** Separate from {@link Resolved} so the project-scoped contract keeps {@code project} non-null. */
     public record OrgResolved(Organization org, String role) {
         public boolean isOwner() {
             return "owner".equals(role);
@@ -119,18 +93,12 @@ public class TenantPathResolver {
             return Role.fromWireOrMember(role);
         }
 
-        /** Throw 403 unless the resolved role holds {@code permission}. {@code action} fills the message. */
         public void require(Permission permission, String action) {
             requirePermission(roleEnum(), permission, action);
         }
     }
 
-    /**
-     * Central RBAC gate: throws 403 unless {@code role} holds {@code permission}. Every
-     * sensitive controller path funnels through here (via {@code Resolved#require} /
-     * {@code OrgResolved#require}) so the enforced policy lives in exactly one place —
-     * {@link RolePermissions} — and a viewer/billing role can never slip a mutation through.
-     */
+    /** The one RBAC gate; the policy lives only in {@link RolePermissions}. */
     public static void requirePermission(Role role, Permission permission, String action) {
         if (!RolePermissions.allows(role, permission)) {
             throw forbidden("insufficient role (" + role.wire() + ") to " + action);

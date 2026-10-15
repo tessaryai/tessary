@@ -13,38 +13,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Materializes span ancestry — {@code span.path} — as a micro-batch fixpoint over
- * {@code ix_span_unresolved_path} (substrate-model.md §6.4).
- *
- * <h2>Why this is a job and not part of the write</h2>
- *
- * <p>A batch exporter flushes a span when it ENDS, so a parent always ships after its children and a root
- * ships last. {@code parent_span_id} is never in doubt — it is the producer's statement, stored verbatim
- * on arrival — but the DERIVED ancestry cannot be computed until the parent's own path exists. Each tick
- * resolves one level; because chains arrive deepest-first, a chain of depth <i>n</i> converges in at most
- * <i>n</i> ticks, and each pass is a small indexed scan rather than a scan over everything already done.
- *
- * <p><b>A null path means "not resolved yet", never "root".</b> Root is {@code parent_span_id IS NULL},
- * and roots are given their one-label path by the same tick. Subtree reads (§9) are complete once the
- * trace has settled.
- *
- * <h2>The orphan state</h2>
- *
- * <p>Some parents are never shipped at all. Without a retired state their children sit in the partial
- * index forever, and once those permanent residents outnumber the batch limit the fixpoint stops selecting
- * anything that could still make progress — a starvation bug that looks like a resolver quietly doing
- * nothing. Marking them {@code path_state = 'orphan'} once their trace has settled takes them out of the
- * index and keeps the spec's "near-empty by construction" claim true. "Never" is decided at settle time,
- * and a parent that outlives its children by more than the settle window arrives after they were retired:
- * its write puts them back to {@code pending} ({@code SpanRepository#upsertAll}), and this fixpoint then
- * resolves them as if they had arrived in order.
- *
- * <h2>The kill switch</h2>
- *
- * <p>These two are the only {@code @Scheduled} beans in the backend that tick every second, so they carry
- * one — default ON, the same shape a background job worker would. It is not a rollout flag: it exists so
- * an operator can stop a background job competing with ingest for connections, and so a test that counts
- * fixpoint passes is not racing a scheduler while it does.
+ * Materializes {@code span.path} as a micro-batch fixpoint over {@code ix_span_unresolved_path}: parents ship after
+ * children, so a depth-n chain converges in n ticks. Null path means unresolved, never root. Children of never-shipped
+ * parents are marked {@code orphan} at settle so they cannot starve the batch; a late parent puts them back to
+ * {@code pending}. The kill switch lets an operator stop a once-a-second job competing with ingest.
  */
 @Component
 @ConditionalOnProperty(
@@ -64,7 +36,6 @@ public class PathResolver {
         this.props = props;
     }
 
-    /** One tick's work: roots given their own label, one level of the fixpoint, and orphan retirement. */
     public record Pass(int roots, int children, int orphans) {
 
         int total() {
@@ -79,8 +50,7 @@ public class PathResolver {
         try {
             runOnce();
         } catch (RuntimeException e) {
-            // Categorical only: a Postgres error can echo span content into its message, and OPS WARN
-            // egresses. Detail stays local. The rows are durable and unchanged; the next tick retries.
+            // Categorical only: a Postgres error can echo span content, and OPS WARN egresses. The next tick retries.
             log.warn(
                     Markers.OPS,
                     "span path resolution pass failed error={}",
@@ -89,11 +59,7 @@ public class PathResolver {
         }
     }
 
-    /**
-     * Run one pass synchronously and report what it did. Public so the fixpoint can be driven
-     * deterministically — a test that asserts "a depth-n chain converges in n passes" has to be able to
-     * count the passes rather than race a scheduler.
-     */
+    /** Public so a test can count passes rather than race the scheduler. */
     public Pass runOnce() {
         Instant started = Instant.now();
         int limit = props.getResolverBatchSize();
