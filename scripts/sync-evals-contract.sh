@@ -95,9 +95,6 @@ $license_line
 # would fail twice over: check-vendored-plugin.sh cmp's every vendored file byte-for-byte against
 # plugins@main so the header reads as drift, and this script would erase it on the next refresh.
 # A LICENSE file beside the copies travels with them and is re-proved on every check.
-# validate.py and pipeline_io.py are NOT vendored: they are platform-owned (the plugin
-# dropped its validator with synthesis in v0.23.0) and only happen to live here so the
-# contract tests and the E2B analyzer bake share one copy.
 EOF
 
 echo "synced ${#VENDORED_PLUGIN_FILES[@]} files from $plugin_path → $dest"

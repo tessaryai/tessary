@@ -46,7 +46,7 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 | [`frontend/`](./frontend/) | The React app — conventions in [`frontend/AGENTS.md`](./frontend/AGENTS.md) |
 | [`sandbox-runner/`](./sandbox-runner/) | The launcher that runs every agentic lane (RCA, Layer-2 triage) in a fresh E2B microVM — see its README |
 | [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`) and the OTLP trace emitter the boot check uses (`classifiers/data_gen/`). Training and research code lives in `tessaryai/experiments`, not here |
-| [`contract/`](./contract/) | Vendored evals-synth output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `contract/tests/` is OURS — the gate for the vendored validator, since the plugin repo is public and runs no CI |
+| [`contract/`](./contract/) | Vendored evals-plugin output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `scripts/check-vendored-plugin.sh` proves they still match the plugin |
 | [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill) |
 | [`docs/`](./docs/) | Reference, concepts, guides — start at [`devdocs/README.md`](./devdocs/README.md) |
 | `scripts/`, `observability/` | The shared check and deploy scripts; Grafana dashboards |

@@ -242,8 +242,8 @@ substrate on demand through MCP.** Neither hydrates traces into its prompt.
 The **evals plugin** is a Claude Code plugin maintained in a separate repo. It runs inside a Claude
 Code session against a target repo, produces a `.tessary/` bundle (sharded pipeline YAML + grader
 files + `report.md`), and exits. The plugin — **not** this repo — owns the bundle schema; the
-platform is a *consumer*. The plugin's contract (`output_format.md`, `pipeline_io.py`, the JSON
-schemas) is vendored into `contract/` (repo root) by `scripts/sync-evals-contract.sh`, and
+platform is a *consumer*. The plugin's contract (`output_format.md`, `AUTHORING_CONTRACT.md`, the grader
+JSON schema) is vendored into `contract/` (repo root) by `scripts/sync-evals-contract.sh`, and
 `contract/VERSION` records the plugin commit + schema version we support. When the plugin ships a
 release that changes the output, re-vendor and absorb it following
 [upgrade-contract.md](../guides/upgrade-contract.md) — the order is contract → backend records →
