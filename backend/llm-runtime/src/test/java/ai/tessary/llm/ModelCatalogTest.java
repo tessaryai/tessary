@@ -11,8 +11,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The static table's shape invariants (every entry names a real platform, vendor never blank) and {@link
- * ModelCatalog#mergeLive}'s per-model overlay (OPENROUTER's static rows carry different {@code effortLevels} per
- * model). Which models exist is {@code ModelCatalogFetchService}'s question now, not a fact pinned here.
+ * ModelCatalog#mergeLive}'s per-model overlay. Which models exist is {@code ModelCatalogFetchService}'s question now, not a fact pinned here.
  */
 class ModelCatalogTest {
 
@@ -45,7 +44,7 @@ class ModelCatalogTest {
 
     @Test
     void mergeLiveOverlaysDisplayNameAndVendorOntoAMatchingStaticEntry_capabilityFieldsUnchanged() {
-        // gpt-5.5's strictJsonSchema and efforts are static; a vendor's /models carries no capability data.
+        // gpt-5.5's agentic flag is static; a vendor's /models carries no capability data.
         ModelCatalog.CatalogEntry before =
                 ModelCatalog.find(ModelProvider.OPENAI, "gpt-5.5").orElseThrow();
         List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(
@@ -57,8 +56,6 @@ class ModelCatalogTest {
 
         assertEquals("GPT-5.5 (live)", after.displayName(), "live display name overlays the static one");
         assertEquals("OpenAI (live)", after.vendor(), "live vendor label overlays the static one");
-        assertEquals(before.strictJsonSchema(), after.strictJsonSchema(), "capability fields are NOT overlaid");
-        assertEquals(before.effortLevels(), after.effortLevels(), "capability fields are NOT overlaid");
         assertEquals(before.agentic(), after.agentic(), "capability fields are NOT overlaid");
     }
 
@@ -72,8 +69,6 @@ class ModelCatalogTest {
                 .orElseThrow();
 
         assertFalse(synthesized.agentic(), "a model this table has never evaluated must not be agentic");
-        assertTrue(synthesized.effortLevels().isEmpty());
-        assertFalse(synthesized.strictJsonSchema());
         assertEquals("OpenAI", synthesized.vendor());
         assertEquals("GPT-6 Preview", synthesized.displayName());
     }

@@ -112,8 +112,8 @@ of grading before the migration history was squashed into the current `0000-base
 - **Bundle-schema records live in `model/`; feature-owned records live with the feature.**
   A record that exists only to serve one feature lives in that feature's package.
 - **`llm/` is LLM provider/model configuration**
-  (`ProviderCredential{,Controller,Repository}`, `ModelCatalog`, `PlatformCatalog`; the vendor-neutral half — `ModelLane`,
-  `ServiceTier` — sits one layer down in `core`'s `llmspi/`, and rates sit in
+  (`ProviderCredential{,Controller,Repository}`, `ModelCatalog`, `PlatformCatalog`; the vendor-neutral half — `ModelLane`
+  — sits one layer down in `core`'s `llmspi/`, and rates sit in
   `substrate`'s `pricing/`; `EmbeddingModelFactory` and `TextEmbedder` were removed with the rest
   of the vector substrate). `model/` is the bundle graph. The two share a word and nothing else —
   never conflate them.
@@ -322,7 +322,7 @@ holds. A package appears in exactly one module.
 | `ingest/` | `substrate` | normalizing raw trace data on the write path. | `/v1/traces` |
 | `llm/` | `llm-runtime` | LLM provider/model configuration (see *Hard rules*): `ProviderCredential{,Controller,Repository}`,… | — |
 | `llm/decisions/` | `llm-runtime` | hosted decision-model calls (TypeSafe's Jev, direct or over OpenRouter): `DecisionClient`, `JevDecisionClient` (retry, GenAI span, book pricing under `typesafe/<id>`, `llm_call` row), `DecisionProviderResolver` (project to the decision lane's provider and model, then the org's key for it). Not chat completions: they never go through `ChatModel`. | — |
-| `llmspi/` | `core` | the provider-agnostic model seam — `ModelLane`, `LaneGroup`, `ServiceTier` (`TextEmbedder` sat here too, until it was removed with the rest of the vector substrate). Everything above `llm-runtime` reaches a model through these types and never sees a vendor class. There is no per-lane default model: `llm/LanePriority` (in `llm-runtime`, since it names `ModelProvider`) orders the providers each lane reaches and the models it offers on each, and the org's configured credentials pick from that. Rates are NOT here — they are rows, in `substrate`'s `pricing/`. | — |
+| `llmspi/` | `core` | the provider-agnostic model seam — `ModelLane`, `LaneGroup` (`TextEmbedder` sat here too, until it was removed with the rest of the vector substrate). Everything above `llm-runtime` reaches a model through these types and never sees a vendor class. There is no per-lane default model: `llm/LanePriority` (in `llm-runtime`, since it names `ModelProvider`) orders the providers each lane reaches and the models it offers on each, and the org's configured credentials pick from that. Rates are NOT here — they are rows, in `substrate`'s `pricing/`. | — |
 | `mcp/` | `surfaces` | Model Context Protocol server (Streamable HTTP). | [auth-and-mcp.md](./auth-and-mcp.md) |
 | `metering/` | `surfaces` | usage metering: rollup worker + validated read API, plus the per-call `llm_call` ledger (token buckets + cost per lane) the org LLM-usage read aggregates. | `/v1/usage` |
 | `model/` | `core` | the pure record graph mirroring the plugin's bundle schema (`Pipeline`, `CallSite`, `Chain`, `FailureMode`, `TaxonomyNode`,… | — |

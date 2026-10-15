@@ -46,7 +46,7 @@ platform LLM spend, and `billing` is now a thin read over it — since self-serv
 a platform primitive underneath it.
 
 **`llm` splits into `llm-spi` (L0) and `llm-runtime` (L4).** `storage` needs
-the `llmspi` vocabulary (`ModelLane`, `ServiceTier`) — two pure enums, for usage/pricing
+the `llmspi` vocabulary (`ModelLane`), a pure enum, for usage/pricing
 attribution (`LlmUsageAccountant`, `PlatformCallPricer`) — but no provider clients. Splitting is
 what lets that vocabulary live in the substrate without dragging the LLM runtime under it. (This
 used to also carry `EmbeddingModelFactory`, the embedding lane's own provider factory; that class,

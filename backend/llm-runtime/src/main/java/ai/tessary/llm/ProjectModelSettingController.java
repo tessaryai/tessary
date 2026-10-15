@@ -5,7 +5,6 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.pricing.ModelResolver;
 import ai.tessary.pricing.PriceBookRepository;
 import ai.tessary.web.ApiResponse;
@@ -186,15 +185,8 @@ public class ProjectModelSettingController {
              */
             @JsonProperty("configured_providers") Set<ModelProvider> configuredProviders) {}
 
-    /**
-     * {@code model_key}. {@code service_tier} and {@code reasoning_effort} are accepted and ignored:
-     * no lane has a request of ours for either to ride on, so every row is stored at Standard with no
-     * effort.
-     */
     public record SetLaneModelRequest(
-            @JsonProperty("model_key") @NotBlank String modelKey,
-            @JsonProperty("service_tier") ServiceTier serviceTier,
-            @JsonProperty("reasoning_effort") @Nullable String reasoningEffort) {}
+            @JsonProperty("model_key") @NotBlank String modelKey) {}
 
     @GetMapping
     public ApiResponse<ModelSettingsView> get(
