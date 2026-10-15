@@ -109,10 +109,9 @@ image-detection shapes mirror the backend `ContentExtractor` — keep them in sy
 
 ## New view
 
-1. Declare the surface once in `shell/nav.tsx` — as an item inside the right `NAV_GROUPS`
-   entry (`Monitor` or `Calibrate`), or in `RESERVED` for a coming-soon slot (`id` = route
-   segment, `label`, `icon`, `description`, `keywords`). `NAV` / `LIVE_NAV` / `RESERVED_NAV`
-   are **derived** from those — never append to them directly. Sidebar and ⌘K both read the
+1. Declare the surface once in `shell/nav.tsx`, as an item inside the right `NAV_GROUPS`
+   entry (`id` = route segment, `label`, `icon`, `description`, `keywords`). `LIVE_NAV` is
+   **derived** from those — never append to it directly. Sidebar and ⌘K both read the
    derived lists, so one declaration lights up both.
 2. Add the lazy import at the top of `App.tsx` via the `named(() => import("./views/X"), "X")`
    helper, and a plain `<Route path="segment" element={<X/>} />` inside `ProjectShell`'s
