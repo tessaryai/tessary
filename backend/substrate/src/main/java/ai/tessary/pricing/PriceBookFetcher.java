@@ -20,24 +20,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Pulls the price book home.tessary.ai publishes, when it is newer than what this install holds.
- *
- * <p><b>Called only from the telemetry heartbeat's tick, after its enabled-gate.</b> This class does not check
- * {@code TESSARY_TELEMETRY_ENABLED} itself and must never be scheduled on its own: the gate living in one place
- * is what keeps the contract's "zero outbound calls when disabled" true. An opted-out install prices from the
- * book bundled in its jar, exactly as before.
- *
- * <p><b>The manifest is the hash check.</b> {@code GET /v1/pricing/manifest.json} is a few hundred bytes naming
- * the current book's sha256. When a book with that digest is already imported, which is almost every tick,
- * nothing else is requested. Only a new digest costs the ~2 MB {@code GET /v1/pricing/<digest>.json}, and
- * home publishes tessary's vendored LiteLLM file byte for byte, so the downloaded bytes parse exactly as the
- * bundled file does and a book that is already in the jar is recognised by digest without a download.
- *
- * <p><b>Nothing home returns is trusted past what it can prove.</b> The artifact URL must be home's own path for
- * that digest, the body must hash to the digest it was fetched by, and it must be under a size limit and parse
- * to at least one priced model. Anything else is logged and skipped, and the install keeps the book it has.
- *
- * <p><b>Never throws.</b> A failed fetch is the next tick's retry. Pricing must never depend on home being up.
+ * Pulls home.tessary.ai's price book when newer. Called only from the telemetry tick after its enabled-gate, never
+ * scheduled alone. The manifest names the book's sha256, so an already-held book costs no download. The URL, digest,
+ * size and parse are all verified. Never throws.
  */
 @Component
 public class PriceBookFetcher {
@@ -46,17 +31,16 @@ public class PriceBookFetcher {
 
     static final String MANIFEST_PATH = "/v1/pricing/manifest.json";
 
-    /** The manifest shape this client parses: {@code {schema, digest, url, published_at}}. */
+    /** The manifest shape: {@code {schema, digest, url, published_at}}. */
     public static final int SUPPORTED_SCHEMA = 1;
 
     private static final int MAX_MANIFEST_BYTES = 64 * 1024;
 
-    /** The file is about 2 MB. Anything past this is not the file. */
+    /** The file is about 2 MB. */
     static final int MAX_BOOK_BYTES = 32 * 1024 * 1024;
 
     private static final Pattern SHA256_HEX = Pattern.compile("^[0-9a-f]{64}$");
 
-    /** What one refresh did, for the tick's log and for tests. */
     public enum Outcome {
         DISABLED,
         UNREACHABLE,
@@ -82,7 +66,6 @@ public class PriceBookFetcher {
         this.mapper = mapper;
     }
 
-    /** Check home's manifest and import its book if this install does not hold it yet. */
     public Outcome refresh() {
         if (!props.isEnabled()) return Outcome.DISABLED;
         Instant started = Instant.now();
@@ -113,8 +96,7 @@ public class PriceBookFetcher {
                 return Outcome.UNREACHABLE;
             }
             String actual = PriceSnapshot.sha256Hex(body.body());
-            // Constant-time: the digest is public, but SpotBugs holds every hash comparison to it and a
-            // timing-safe compare costs nothing here.
+            // Constant-time: SpotBugs holds every hash comparison to it.
             if (!MessageDigest.isEqual(
                     actual.getBytes(StandardCharsets.US_ASCII), digest.getBytes(StandardCharsets.US_ASCII))) {
                 log.warn("price book fetched as {} hashes to {}; keeping the book in force", digest, actual);
@@ -153,7 +135,7 @@ public class PriceBookFetcher {
         }
     }
 
-    /** home's own path for a digest, which is the only URL a manifest may name. */
+    /** The only URL a manifest may name. */
     static String artifactPath(String digest) {
         return "/v1/pricing/" + digest + ".json";
     }

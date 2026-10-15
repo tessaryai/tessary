@@ -15,13 +15,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Enqueue one RCA. <b>The finding id is the whole input</b> — everything the job and its pending report
- * carry is read off the finding row here, never accepted from the caller.
- *
- * <p>Its own service because the press lives on the CASE surface now ({@code POST
- * /cases/{id}/rca}): a person reads the case, including everything triage wrote on it, and decides. The
- * decision is a human one and the id is all of it that crosses — see {@link RcaAnalysisService} on the
- * firewall that makes that the load-bearing sentence.
+ * Enqueue one RCA. The finding id is the whole input; everything else is read off the finding row, never from the
+ * caller (see {@link RcaAnalysisService} on the firewall).
  */
 @Service
 public class RcaTriggerService {
@@ -47,23 +42,15 @@ public class RcaTriggerService {
         this.adapters = adapters;
     }
 
-    /**
-     * Snapshot the finding into a job + pending report and return that report. {@code runNonce} is null
-     * for a first trigger (re-presses coalesce onto the one report for the finding) and a fresh id for an
-     * explicit re-run (which must get its own analysis).
-     */
+    /** {@code runNonce} is null for a first trigger (re-presses coalesce) and fresh for an explicit re-run. */
     public RcaReportView trigger(String projectId, String findingId, String userId, @Nullable String runNonce) {
         FindingClaim finding = findings.findClaim(projectId, findingId).orElseThrow(() -> {
-            // A 4xx ends the press with a log line GlobalExceptionHandler writes at DEBUG — invisible in
-            // prod. Without this, "Run RCA does nothing" leaves no server-side trace at all. Codes only:
-            // bounded, PII-free, countable (backend/AGENTS.md § Logging).
+            // GlobalExceptionHandler logs 4xx at DEBUG, invisible in prod. Codes only: bounded and PII-free.
             log.info(Markers.OPS, "rca rejected project={} code=SUBJECT_NOT_FOUND", projectId);
             return new TessaryException(RcaError.SUBJECT_NOT_FOUND, findingId);
         });
 
-        // The window columns describe the finding's own span: created → onset → last seen. They are
-        // trigger-time truth for the report to render, not a query window — the analysis reads the
-        // finding's evidence rows, which are not time-sliced.
+        // Trigger-time truth for rendering, not a query window.
         Instant from = parse(finding.createdAt(), finding.onsetAt());
         Instant split = parse(finding.onsetAt(), finding.createdAt());
         Instant to = parse(finding.lastSeenAt(), finding.onsetAt());
@@ -78,8 +65,7 @@ public class RcaTriggerService {
             current = finding.payloadNumber("current_rate");
             prior = finding.payloadNumber("baseline_rate");
         } else {
-            // The severity is what the classifier asserted about the cause; there is no "before" number to
-            // compare it against, and inventing one would put a movement on the page that nobody measured.
+            // No "before" number exists; inventing one would show a movement nobody measured.
             Double asserted = finding.severity();
             current = asserted == null ? 0.0 : asserted;
             prior = 0.0;
@@ -117,14 +103,12 @@ public class RcaTriggerService {
         return reportReads.getByJobId(projectId, jobId);
     }
 
-    /** ISO-8601 text off a finding row, falling back to a sibling column and finally to now — a report
-     *  window is a rendering detail, and a malformed one must not refuse the analysis. */
+    /** Falls back to a sibling column, then now: a malformed window must not refuse the analysis. */
     private static Instant parse(String value, String fallback) {
         for (String candidate : new String[] {value, fallback}) {
             try {
                 return Instant.parse(candidate);
             } catch (RuntimeException ignored) {
-                // try the next one
             }
         }
         return Instant.now();

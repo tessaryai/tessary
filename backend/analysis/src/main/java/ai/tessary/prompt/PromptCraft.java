@@ -10,26 +10,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.core.io.ClassPathResource;
 
 /**
- * Reads prompt prose from {@code prompt-craft/<purpose>/<file>} on the classpath.
- *
- * <p><b>Why prose does not live in Java.</b> These strings are sent to a model. As text blocks they
- * sat in the middle of engine classes, where they were invisible to review (a prompt change and a
- * control-flow change look the same in a diff), impossible to read as prose, and subject to
- * incidental-whitespace rules that make "just reindent it" a semantic change. As markdown they are
- * diffable, reviewable by someone who does not read Java, and pinned byte-for-byte by
- * {@code PromptResourceParityTest}.
- *
- * <p><b>What stays in Java.</b> Only the prose moves. Which paragraph applies to a given finding is
- * logic, and logic belongs in code — the engines still choose and concatenate. The rule of thumb: if
- * a human would edit it to change what the model reads, it is prose; if a human would edit it to
- * change when the model reads it, it is code.
- *
- * <p><b>Static on purpose.</b> The prompt builders are static and pure so tests can call them
- * without a Spring context ({@code AgenticRcaPromptTest} does exactly that), so their inputs have to
- * be reachable statically too.
- *
- * <p>Resources resolve across the whole classpath, so each module ships its own prompts:
- * {@code analysis} owns {@code prompt-craft/triage/} without {@code evaluation} knowing it exists.
+ * Reads prompt prose from {@code prompt-craft/<purpose>/<file>} on the classpath, so prompts are reviewable as prose
+ * and pinned by {@code PromptResourceParityTest}. Which paragraph applies stays in Java. Static so prompt builders stay
+ * testable without Spring; each module ships its own prompts.
  */
 public final class PromptCraft {
 
@@ -37,12 +20,7 @@ public final class PromptCraft {
 
     private PromptCraft() {}
 
-    /**
-     * One prompt file, verbatim.
-     *
-     * <p>Verbatim is the contract. Do not trim, normalise line endings, or tidy a blank line: a
-     * whitespace change here is a prompt change, and the parity test is the only thing that notices.
-     */
+    /** Verbatim is the contract: a whitespace change is a prompt change. */
     public static String text(String purpose, String file) {
         return CACHE.computeIfAbsent(purpose + "/" + file, key -> {
             try (InputStream in = new ClassPathResource("prompt-craft/" + key).getInputStream()) {
