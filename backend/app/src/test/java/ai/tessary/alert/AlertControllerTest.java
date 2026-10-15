@@ -27,12 +27,10 @@ import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
-import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -119,14 +117,23 @@ record AlertControllerTest(
 
     /** A rule the worker cannot evaluate is refused by name, and nothing is half-written. */
     @ParameterizedTest(name = "{0}")
-    @MethodSource("unrunnableRules")
+    @CsvSource(delimiter = '|', nullValues = "-", textBlock = """
+        a rule type nothing evaluates                | anomaly   | -        | -           | -    | ALERT.UNSUPPORTED_RULE_TYPE
+        threshold with no classifier                 | threshold | -        | event_count | -    | ALERT.MISSING_CLASSIFIER
+        threshold with a blank classifier            | threshold | ' '      | event_count | -    | ALERT.MISSING_CLASSIFIER
+        threshold on a classifier not in the project | threshold | cls_nope | event_count | -    | CLASSIFIER.NOT_FOUND
+        threshold with no basis                      | threshold | seeded   | -           | -    | ALERT.INVALID_BASIS
+        threshold with an unknown basis              | threshold | seeded   | median      | -    | ALERT.INVALID_BASIS
+        brief with no cron                           | brief     | -        | -           | -    | ALERT.MISSING_CRON
+        brief with a blank cron                      | brief     | -        | -           | '  ' | ALERT.MISSING_CRON
+        """)
     void aRuleTheWorkerCannotEvaluateIsRefusedByName(
             String why,
             String ruleType,
             @Nullable String classifier,
             @Nullable String basis,
             @Nullable String briefCron,
-            ErrorCode expected) {
+            String expected) {
         var fix = TenantFixture.bootstrap(tenants, "alert-refuse");
         capabilities.grant(fix.org().id(), Capability.ALERTS);
         String classifierId =
@@ -134,10 +141,17 @@ record AlertControllerTest(
         UpsertAlertRuleRequest req = new UpsertAlertRuleRequest(
                 ruleType, "r", classifierId, null, basis, null, null, null, null, null, null, briefCron, null);
 
-        assertError(
+        assertEquals(
                 expected,
-                () -> controller.upsertRule(
-                        owner(fix), fix.org().slug(), fix.project().slug(), req));
+                assertThrows(
+                                TessaryException.class,
+                                () -> controller.upsertRule(
+                                        owner(fix),
+                                        fix.org().slug(),
+                                        fix.project().slug(),
+                                        req))
+                        .error()
+                        .code());
         assertEquals(
                 List.of(AlertRuleRow.RuleType.CASE_OPENED),
                 requireNonNull(controller
@@ -150,43 +164,6 @@ record AlertControllerTest(
                         .map(AlertRuleView::ruleType)
                         .toList(),
                 "only the seeded rule exists");
-    }
-
-    static Stream<Arguments> unrunnableRules() {
-        return Stream.of(
-                Arguments.of(
-                        "a rule type nothing evaluates", "anomaly", null, null, null, AlertError.UNSUPPORTED_RULE_TYPE),
-                Arguments.of(
-                        "threshold with no classifier",
-                        "threshold",
-                        null,
-                        "event_count",
-                        null,
-                        AlertError.MISSING_CLASSIFIER),
-                Arguments.of(
-                        "threshold with a blank classifier",
-                        "threshold",
-                        " ",
-                        "event_count",
-                        null,
-                        AlertError.MISSING_CLASSIFIER),
-                Arguments.of(
-                        "threshold on a classifier not in the project",
-                        "threshold",
-                        "cls_nope",
-                        "event_count",
-                        null,
-                        ClassifierError.NOT_FOUND),
-                Arguments.of("threshold with no basis", "threshold", "seeded", null, null, AlertError.INVALID_BASIS),
-                Arguments.of(
-                        "threshold with an unknown basis",
-                        "threshold",
-                        "seeded",
-                        "median",
-                        null,
-                        AlertError.INVALID_BASIS),
-                Arguments.of("brief with no cron", "brief", null, null, null, AlertError.MISSING_CRON),
-                Arguments.of("brief with a blank cron", "brief", null, null, "  ", AlertError.MISSING_CRON));
     }
 
     /** Defaults on create; a second upsert reconfigures in place with the same id and creation time. */

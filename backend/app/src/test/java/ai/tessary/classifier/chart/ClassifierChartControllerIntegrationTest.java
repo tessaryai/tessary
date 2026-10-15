@@ -32,8 +32,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -57,13 +60,19 @@ record ClassifierChartControllerIntegrationTest(
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    @Test
-    void days30_is422InvalidChartDays() throws Exception {
-        Signed me = signUp("chart-days@example.com");
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', textBlock = """
+        a 30-day card                      | /charts?callSiteId=cs-a&days=30                 | CLASSIFIER.INVALID_CHART_DAYS
+        a 30-day menu                      | /chart-scopes?days=30                           | CLASSIFIER.INVALID_CHART_DAYS
+        a call site and a tool at once     | /charts?callSiteId=cs-a&tool=tool:search&days=7 | CLASSIFIER.CHART_SCOPE
+        neither a call site nor a tool     | /charts?days=7                                  | CLASSIFIER.CHART_SCOPE
+        a call site the bundle never named | /charts?callSiteId=cs-typo&days=7               | CLASSIFIER.UNKNOWN_CALL_SITE
+        """)
+    void aChartRequestOutsideTheContractIs422WithItsCode(String bug, String path, String code) throws Exception {
+        Signed me = signUp("chart-" + UUID.randomUUID() + "@example.com");
         declare(me.project().id(), "cs-a", null);
 
-        assertError(me, "/charts?callSiteId=cs-a&days=30", 422, "CLASSIFIER.INVALID_CHART_DAYS");
-        assertError(me, "/chart-scopes?days=30", 422, "CLASSIFIER.INVALID_CHART_DAYS");
+        assertError(me, path, 422, code);
     }
 
     /**
@@ -128,23 +137,6 @@ record ClassifierChartControllerIntegrationTest(
         for (String unset : List.of("reached", "checked", "flagged", "n", "p50", "p95")) {
             assertTrue(hit.path(unset).isNull() || hit.path(unset).isMissingNode(), unset);
         }
-    }
-
-    @Test
-    void bothOrNeitherScope_is422ChartScope() throws Exception {
-        Signed me = signUp("chart-scope@example.com");
-        declare(me.project().id(), "cs-a", null);
-
-        assertError(me, "/charts?callSiteId=cs-a&tool=tool:search&days=7", 422, "CLASSIFIER.CHART_SCOPE");
-        assertError(me, "/charts?days=7", 422, "CLASSIFIER.CHART_SCOPE");
-    }
-
-    @Test
-    void unknownCallSite_is422UnknownCallSite() throws Exception {
-        Signed me = signUp("chart-unknown@example.com");
-        declare(me.project().id(), "cs-a", null);
-
-        assertError(me, "/charts?callSiteId=cs-typo&days=7", 422, "CLASSIFIER.UNKNOWN_CALL_SITE");
     }
 
     /**

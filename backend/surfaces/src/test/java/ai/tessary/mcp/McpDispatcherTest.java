@@ -144,16 +144,16 @@ class McpDispatcherTest {
                 error(dispatcher.dispatch(req(1, "tools/call", params), ctx())).code());
     }
 
-    @Test
-    void toolsCall_argumentsNull_callsHandlerWithEmptyMap() throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"echo\",\"arguments\":null}");
+    /** Arguments null or left out entirely are the same request as an empty object, not a -32602. */
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"name\":\"echo\",\"arguments\":null}", "{\"name\":\"echo\"}"})
+    void toolsCall_argumentsNullOrAbsent_callsHandlerWithEmptyMap(String paramsJson) throws Exception {
+        JsonNode params = mapper.readTree(paramsJson);
         JsonRpc.Response r = require(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
         assertNull(r.error());
         Map<String, Object> result = resultMap(r);
         assertEquals(Boolean.FALSE, result.get("isError"));
-        @SuppressWarnings("unchecked")
-        Map<String, Object> structured = (Map<String, Object>) Objects.requireNonNull(result.get("structuredContent"));
-        assertEquals(Map.of(), structured.get("echoed"));
+        assertEquals(Map.of("echoed", Map.of()), result.get("structuredContent"));
     }
 
     @Test
@@ -193,16 +193,6 @@ class McpDispatcherTest {
                 JsonRpc.INVALID_PARAMS,
                 error(dispatcher.dispatch(req(1, "tools/call", mapper.readTree(paramsJson)), ctx()))
                         .code());
-    }
-
-    /** Arguments left out entirely are the same request as an empty object, not a -32602. */
-    @Test
-    void toolsCall_argumentsAbsent_callsHandlerWithEmptyMap() throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"echo\"}");
-
-        Map<String, Object> result = resultMap(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
-
-        assertEquals(Map.of("echoed", Map.of()), result.get("structuredContent"));
     }
 
     /** A batch element decoding to null is an invalid request with a null id, not an NPE failing the whole batch. */
