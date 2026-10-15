@@ -64,10 +64,8 @@ public class MetricRollupRepository {
      */
     public void upsert(MetricRollupRow row) {
         jdbc.sql("""
-            INSERT INTO metric_rollup (id, org_id, project_id, metric, value,
-                                      bucket_start, granularity, dimensions, attributes, created_at)
-            VALUES (:id, :org, :pid, :unit, :value, :bstart, :bunit, :dimensions::jsonb,
-                    :attributes::jsonb, :createdAt)
+            INSERT INTO metric_rollup (id, org_id, project_id, metric, value, bucket_start, granularity, created_at)
+            VALUES (:id, :org, :pid, :unit, :value, :bstart, :bunit, :createdAt)
             ON CONFLICT (org_id, project_id, metric, bucket_start, granularity)
             DO UPDATE SET value = EXCLUDED.value
             """)
@@ -78,8 +76,6 @@ public class MetricRollupRepository {
                 .param("value", row.value())
                 .param("bstart", row.bucketStart())
                 .param("bunit", row.granularity())
-                .param("dimensions", row.dimensions())
-                .param("attributes", row.attributes())
                 .param("createdAt", row.createdAt())
                 .update();
     }
@@ -138,30 +134,6 @@ public class MetricRollupRepository {
                 .param("pid", projectId)
                 .param("from", from)
                 .param("to", to)
-                .query(Long.class)
-                .optional()
-                .orElse(0L);
-    }
-
-    /**
-     * {@code COUNT(*)} of span rows AT REST for a project as of {@code asOf} (the bucket's
-     * exclusive end) — the {@code storage} usage LEVEL. Unlike the event-stream counts above this is NOT
-     * a {@code [from, to)} window: storage is a level, so it snapshots everything ingested up to (and not
-     * including) the bucket boundary, making the snapshot stable AS-OF a CLOSED bucket — re-running the
-     * bucket recomputes the same count, and the worker's last-writer-wins upsert overwrites it
-     * idempotently. Like the window counts, {@code asOf} bounds the INGEST clock.
-     *
-     * <p>The billable basis is ingested span rows; bytes-at-rest / retention-weighting are deferred
-     * billing product decisions. The worker only calls this when {@code tessary.metering.storage-enabled}
-     * is set.
-     */
-    public long snapshotStorageRows(String projectId, String asOf) {
-        return jdbc.sql("""
-            SELECT COUNT(*) FROM span s
-            WHERE s.project_id = :pid AND s.created_at < :asOf::timestamptz
-            """)
-                .param("pid", projectId)
-                .param("asOf", asOf)
                 .query(Long.class)
                 .optional()
                 .orElse(0L);

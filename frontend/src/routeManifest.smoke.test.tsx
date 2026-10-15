@@ -330,11 +330,6 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     getTriage: () => Promise.resolve(EMPTY_TRIAGE),
     getClassifierChartScopes: () => Promise.resolve(EMPTY_CHART_SCOPES),
   },
-  // The old catalog redirects to Classifiers, so it issues Classifiers' reads.
-  "classifiers/detectors": {
-    listClassifiers: EMPTY,
-    getClassifierChartScopes: () => Promise.resolve(EMPTY_CHART_SCOPES),
-  },
   // No classifier has the fake id: the configure page's not-found state.
   "classifiers/:classifierId": {
     listClassifiers: EMPTY,
@@ -1009,24 +1004,6 @@ describe("app entry redirects", () => {
     const { container } = renderApp("/orgs/fake-orgSlug");
 
     await waitFor(() => expect(container.textContent).toContain("New project"));
-  });
-
-  // Bug: a bookmark or Slack link to the old catalog rail (`?classifier=<id>`) lands on the Classifiers charts
-  // instead of the classifier it named.
-  it("sends an old catalog link for one classifier to that classifier's configure page", async () => {
-    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...CONFIGURE_PAGE_READS };
-    const { container } = renderApp(
-      `${resolveUrl("/orgs/:orgSlug/projects/:projectSlug/classifiers/detectors")}?classifier=fake-classifierId`,
-    );
-
-    await waitFor(() => within(container).getByRole("heading", { level: 1, name: "Secret leak" }));
-  });
-
-  it("sends the old catalog itself to Classifiers", async () => {
-    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...CONFIGURE_PAGE_READS };
-    const { container } = renderApp(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/classifiers/detectors"));
-
-    await waitFor(() => within(container).getByRole("heading", { level: 1, name: "Classifiers" }));
   });
 
   it("puts a project with no tagged span behind the connect gate", async () => {

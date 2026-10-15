@@ -307,32 +307,32 @@ tasks:
       - bash scripts/check-migrations-populated.sh {{.CLI_ARGS}}
 
   contract:check:
-    desc: Assert the vendored evals contract is internally consistent (schema $id parses; validator files present; VERSION names a release).
+    desc: Assert the vendored evals contract is internally consistent (schema $id parses; VERSION names a release).
     cmds:
       - bash scripts/check-contract-consistency.sh
 
   contract:plugin:
-    desc: "Gate the vendored evals plugin: run the validator's rules (contract/tests) and prove the vendored copy still matches tessaryai/plugins@main. The plugins repo is public and runs no PR CI on purpose, so this is where that enforcement lives. Offline the freshness half warns and passes; in CI it fails."
+    desc: "Prove the vendored evals contract still matches tessaryai/plugins@main. The plugins repo is public and runs no PR CI on purpose, so this is where that enforcement lives. Offline it warns and passes; in CI it fails."
     cmds:
       - bash scripts/check-vendored-plugin.sh
 
   # ---- combined ----
   # The project gate. CI is a per-PR gate: .github/workflows/check.yml runs `bash scripts/check.sh`
   # on `pull_request:`, which is this same manifest, so local green => CI green on the same script.
-  # drift-checks.yml holds the one gate check.sh does NOT run (vendored-plugin's freshness half),
+  # drift-checks.yml holds the one gate check.sh does NOT run (vendored-plugin),
   # dispatch-only. Merge-blocking is still not possible: branch protection is plan-gated on this
   # repo.
   # Each target here and CI invoke the SAME scripts/check-*.sh, so the gate is defined once. There
   # are no per-gate CI JOBS to pair with: check.yml runs one job calling check.sh:
   #   contract:check        -> scripts/check-contract-consistency.sh (vendored contract drift)
-  #   contract:plugin       -> scripts/check-vendored-plugin.sh (validator rules + freshness; drift-checks.yml)
+  #   contract:plugin       -> scripts/check-vendored-plugin.sh (freshness vs plugins@main; drift-checks.yml)
   #   backend:check         -> scripts/check-backend.sh  (mvn -B -T 2 verify)
   #   frontend:check        -> scripts/check-frontend.sh (pnpm run lint + pnpm run test [the route
   #                            render smoke test] + pnpm run build)
   #   caddy:validate        -> scripts/check-caddy.sh    (caddy validate + spec route coverage)
   #   check:license-headers -> scripts/check-license-headers.sh (SPDX header presence)
   #   migrations:populated (not in `check`) -> scripts/check-migrations-populated.sh
-  # These are THREE gate sets, not one. `task check` (i.e. scripts/check.sh) runs 17 of the 30
+  # These are THREE gate sets, not one. `task check` (i.e. scripts/check.sh) runs 16 of the 29
   # scripts/check-*.sh. The 13 it does not run each carry an EXCLUDED manifest row, so the
   # completeness assertion covers them: check-migrations-populated.sh (wants a populated
   # Postgres), check-vendored-plugin.sh (network; drift-checks.yml), the boot, self-host, egress,

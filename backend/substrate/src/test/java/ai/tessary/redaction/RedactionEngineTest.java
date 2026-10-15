@@ -18,22 +18,22 @@ import org.junit.jupiter.api.parallel.Isolated;
 @Isolated
 class RedactionEngineTest {
 
-    private static CompiledRule rule(String name, String regex, String replacement) {
-        CompiledRule r = RedactionEngine.compile(name, regex, replacement);
+    private static CompiledRule rule(String regex, String replacement) {
+        CompiledRule r = RedactionEngine.compile(regex, replacement);
         assertNotNull(r, "regex should compile: " + regex);
         return r;
     }
 
     @Test
     void apply_nullAndEmptyArePassedThrough() {
-        CompiledRule any = rule("any", ".", "x");
+        CompiledRule any = rule(".", "x");
         assertNull(RedactionEngine.apply(null, List.of(any), null));
         assertEquals("", RedactionEngine.apply("", List.of(any), null));
     }
 
     @Test
     void apply_replacementIsLiteralNotRegexReplacement() {
-        CompiledRule r = rule("r", "secret", "$1\\n[X]");
+        CompiledRule r = rule("secret", "$1\\n[X]");
         assertEquals(
                 "$1\\n[X]",
                 RedactionEngine.apply("secret", List.of(r), null),
@@ -46,7 +46,7 @@ class RedactionEngineTest {
         RedactionRuleRow bad = new RedactionRuleRow("2", "p", "b", "(", "#", true, false, 20, "t", "t");
         List<CompiledRule> compiled = RedactionEngine.compileAll(List.of(good, bad));
         assertEquals(1, compiled.size(), "the malformed rule is silently skipped, never fatal");
-        assertEquals("g", compiled.get(0).name());
+        assertEquals("#", RedactionEngine.apply("42", compiled, null), "the surviving rule is the good one");
     }
 
     /**
@@ -182,7 +182,7 @@ class RedactionEngineTest {
                 .findFirst()
                 .orElseThrow()
                 .pattern();
-        return rule("phone", pattern, "[REDACTED_PHONE]");
+        return rule(pattern, "[REDACTED_PHONE]");
     }
 
     private static CompiledRule builtInEmail() {
@@ -191,7 +191,7 @@ class RedactionEngineTest {
                 .findFirst()
                 .orElseThrow()
                 .pattern();
-        return rule("email", pattern, "[REDACTED_EMAIL]");
+        return rule(pattern, "[REDACTED_EMAIL]");
     }
 
     @Test

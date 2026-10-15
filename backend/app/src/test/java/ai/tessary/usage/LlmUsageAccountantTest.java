@@ -76,7 +76,6 @@ class LlmUsageAccountantTest {
                         pid,
                         "rca",
                         PRICED_MODEL,
-                        null,
                         LlmCallRow.CostFunding.BYO,
                         1_000_000,
                         null,
@@ -103,7 +102,7 @@ class LlmUsageAccountantTest {
 
         String decisions = project();
         accountant.recordDecisionCall(
-                decisions, "decision", "jev-latest", false, 10, 20, new BigDecimal("0.0123"), "book-v1", 250);
+                decisions, "decision", "jev-latest", 10, 20, new BigDecimal("0.0123"), "book-v1", 250);
         LlmCallRow call = only(decisions);
         assertEquals(
                 new LlmCallRow(
@@ -111,7 +110,6 @@ class LlmUsageAccountantTest {
                         decisions,
                         "decision",
                         "jev-latest",
-                        null,
                         LlmCallRow.CostFunding.BYO,
                         10,
                         20,
@@ -126,22 +124,11 @@ class LlmUsageAccountantTest {
                 call);
     }
 
-    /** A decision call on the deployment's own provider is what the credit debit reads; booked BYO it is free. */
-    @Test
-    void aPlatformFundedDecisionCallIsBookedAsPlatform() {
-        String pid = project();
-
-        accountant.recordDecisionCall(
-                pid, "frustration", "typesafe/jev-latest", true, 10, 0, new BigDecimal("0.00000042"), "book-v1", 90);
-
-        assertEquals(LlmCallRow.CostFunding.PLATFORM, only(pid).funding());
-    }
-
     @Test
     void aRunTheLedgerCannotRecordIsDroppedWithoutFailingTheCaller() {
         String lane = "lane-" + UUID.randomUUID();
-        accountant.recordDecisionCall(null, lane, "jev-latest", false, 1, 1, null, null, 1);
-        accountant.recordDecisionCall("  ", lane, "jev-latest", false, 1, 1, null, null, 1);
+        accountant.recordDecisionCall(null, lane, "jev-latest", 1, 1, null, null, 1);
+        accountant.recordDecisionCall("  ", lane, "jev-latest", 1, 1, null, null, 1);
         assertEquals(
                 0,
                 jdbc.sql("SELECT count(*) FROM llm_call WHERE lane = :lane")
@@ -185,7 +172,6 @@ class LlmUsageAccountantTest {
                         rs.getString("project_id"),
                         rs.getString("lane"),
                         rs.getString("model"),
-                        rs.getString("service_tier"),
                         rs.getString("funding"),
                         (Integer) rs.getObject("input_tokens"),
                         (Integer) rs.getObject("output_tokens"),

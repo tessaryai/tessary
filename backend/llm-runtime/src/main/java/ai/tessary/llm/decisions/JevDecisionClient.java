@@ -41,9 +41,6 @@ import org.springframework.stereotype.Component;
  * {@code Retry-After}; 401, 402 and 403 are not, since only a new key, or funds on it, can change the
  * answer. 402 is its own error, so a key with no credit reads differently from a refused one.
  *
- * <p>A call on {@link ModelProvider#PLATFORM} is booked platform-funded: the deployment pays the provider
- * and recovers it from the org's credit. Every other call is on the org's own key.
- *
  * <p><b>Pricing.</b> A call to OpenRouter costs what OpenRouter reports in {@code usage.cost}: its own
  * bill, never TypeSafe's rate for the same model. A response without one leaves the call unpriced.
  * Every other call is priced from the book under {@code typesafe/<bare model id>}, on the REQUESTED
@@ -384,7 +381,6 @@ public class JevDecisionClient implements DecisionClient {
                 projectId,
                 lane,
                 answer.requestedModel(),
-                answer.provider() == ModelProvider.PLATFORM,
                 answer.inputTokens(),
                 answer.outputTokens(),
                 answer.costUsd(),

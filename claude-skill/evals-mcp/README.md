@@ -160,13 +160,13 @@ the UI where a person is the one asking. So a new tool that writes is not one mo
 decision that an agent may act on a customer's project, and it invalidates a sentence this server tells every
 client on connect. `McpCapabilityGateTest` pins that invariant by name.
 
-## Relationship to synthesis
+## Relationship to the evals plugin
 
-This MCP server is **not** part of evals-synth. Synthesis runs in the plugin's Claude Code
+This MCP server is **not** part of the evals plugin. The plugin runs in its own Claude Code
 session and writes a `.tessary/` bundle on disk. MCP is a **post-import** read surface: inspect the
 imported pipeline, read the cases and findings raised on the project's traffic, page and read its
-traces and spans, and query the aggregates. Details on the two synthesis paths:
-[`devdocs/reference/architecture.md`](../../devdocs/reference/architecture.md) § *Synthesis (two paths)*.
+traces and spans, and query the aggregates. How the bundle gets in:
+[`devdocs/reference/architecture.md`](../../devdocs/reference/architecture.md) § *The bundle (one path in, none out)*.
 
 ## Wire details
 

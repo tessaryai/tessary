@@ -14,7 +14,6 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.llm.catalog.ModelCatalogFetchService;
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import java.util.ArrayList;
@@ -102,8 +101,8 @@ class ProjectModelSettingsTest {
                 "t0");
     }
 
-    private static ProjectModelSetting row(ModelLane lane, String model, ServiceTier tier) {
-        return new ProjectModelSetting(PID, lane, model, tier, null, "t0", "t0");
+    private static ProjectModelSetting row(ModelLane lane, String model) {
+        return new ProjectModelSetting(PID, lane, model, "t0", "t0");
     }
 
     @Test
@@ -114,7 +113,6 @@ class ProjectModelSettingsTest {
         var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
         assertEquals(SONNET, rca.modelKey());
         assertTrue(rca.automatic());
-        assertEquals(ServiceTier.STANDARD, rca.serviceTier());
         var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
         assertEquals(SONNET, triage.modelKey(), "TRIAGE is exactly RCA's list, so it lands on the same default");
         assertTrue(triage.automatic());
@@ -161,7 +159,7 @@ class ProjectModelSettingsTest {
         configured();
         platformOffered = true;
         settings.set(PID, ORG, ModelLane.RCA, PLATFORM_SONNET);
-        verify(repo).upsert(PID, ModelLane.RCA, PLATFORM_SONNET, ServiceTier.STANDARD, null);
+        verify(repo).upsert(PID, ModelLane.RCA, PLATFORM_SONNET);
     }
 
     @Test
@@ -179,9 +177,9 @@ class ProjectModelSettingsTest {
     void triageAcceptsTheSameFrontierModelRcaDoes() {
         // Sonnet 5 is the default on both lanes, and an explicit PUT naming it succeeds on either.
         settings.set(PID, ORG, ModelLane.TRIAGE, SONNET);
-        verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET, ServiceTier.STANDARD, null);
+        verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET);
         settings.set(PID, ORG, ModelLane.RCA, SONNET);
-        verify(repo).upsert(PID, ModelLane.RCA, SONNET, ServiceTier.STANDARD, null);
+        verify(repo).upsert(PID, ModelLane.RCA, SONNET);
     }
 
     @Test
@@ -212,7 +210,6 @@ class ProjectModelSettingsTest {
         var both = settings.resolve(PID, ModelLane.FRUSTRATION).orElseThrow();
         assertEquals("TYPESAFE:jev-latest", both.modelKey());
         assertTrue(both.automatic());
-        assertEquals(ServiceTier.STANDARD, both.serviceTier());
 
         configured(ModelProvider.OPENROUTER);
         assertEquals(
@@ -248,8 +245,7 @@ class ProjectModelSettingsTest {
     @Test
     void aPinnedOpenRouterBeatsTypeSafeOnTheFrustrationLane() {
         when(repo.findByProject(PID))
-                .thenReturn(
-                        List.of(row(ModelLane.FRUSTRATION, "OPENROUTER:~typesafe/jev-latest", ServiceTier.STANDARD)));
+                .thenReturn(List.of(row(ModelLane.FRUSTRATION, "OPENROUTER:~typesafe/jev-latest")));
 
         assertEquals(
                 new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "~typesafe/jev-latest"),
@@ -278,12 +274,12 @@ class ProjectModelSettingsTest {
     @Test
     void aDecisionModelSavesOnTheFrustrationLaneWithNoTierOrEffort() {
         settings.set(PID, ORG, ModelLane.FRUSTRATION, "OPENROUTER:~typesafe/jev-latest");
-        verify(repo).upsert(PID, ModelLane.FRUSTRATION, "OPENROUTER:~typesafe/jev-latest", ServiceTier.STANDARD, null);
+        verify(repo).upsert(PID, ModelLane.FRUSTRATION, "OPENROUTER:~typesafe/jev-latest");
     }
 
     @Test
     void anExplicitChoiceBeatsTheOrder() {
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU, ServiceTier.STANDARD)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU)));
 
         var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
         assertEquals(HAIKU, rca.modelKey());
@@ -298,7 +294,7 @@ class ProjectModelSettingsTest {
     void anExplicitChoiceWhoseProviderIsGoneFallsBackToTheOrder() {
         // The credential was deleted after the choice: the lane keeps running and the row survives for when the key
         // returns.
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6", ServiceTier.STANDARD)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6")));
         configured(ModelProvider.BEDROCK);
 
         var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
@@ -334,17 +330,6 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void aStoredPairThatIsNoLongerSupportedFallsBackToTheOrder() {
-        // A retired tier would otherwise fail every call in the lane.
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU, ServiceTier.FLEX)));
-
-        assertTrue(
-                settings.resolve(PID, ModelLane.RCA).orElseThrow().automatic(),
-                "unsupported pair must not reach Bedrock");
-        assertEquals(1, settings.list(PID).size(), "but the row is still reported to the settings UI");
-    }
-
-    @Test
     void readsAreCachedAndInvalidatedOnWrite() {
         // Cached on the LLM call path, but a change applies on the next call, not after a TTL.
         settings.resolve(PID, ModelLane.RCA);
@@ -359,7 +344,7 @@ class ProjectModelSettingsTest {
     @Test
     void clearingALaneDeletesTheRowRatherThanWritingADefault() {
         // No default is written: the lane returns to its priority order.
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU, ServiceTier.STANDARD)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU)));
         settings.clear(PID, ModelLane.RCA);
         verify(repo).delete(PID, ModelLane.RCA);
 
@@ -380,7 +365,7 @@ class ProjectModelSettingsTest {
         "RCA, amazon.nova-2-lite, anthropic.claude-sonnet-5-5"
     })
     void aStoredRowTheLaneCannotRunFallsBackToTheOrder(ModelLane lane, String stored, String fallback) {
-        when(repo.findByProject(PID)).thenReturn(List.of(row(lane, stored, ServiceTier.STANDARD)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(lane, stored)));
 
         var resolved = settings.resolve(PID, lane).orElseThrow();
 
@@ -391,7 +376,7 @@ class ProjectModelSettingsTest {
     @Test
     void aNonBedrockAgenticCatalogModelOnTheSandboxLane_isAccepted() {
         settings.set(PID, ORG, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview");
-        verify(repo).upsert(PID, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview", ServiceTier.STANDARD, null);
+        verify(repo).upsert(PID, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview");
     }
 
     @Test
@@ -404,7 +389,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void resolveAgenticModel_forABedrockRow_returnsBedrockAndTheFullInferenceProfileId() {
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU, ServiceTier.STANDARD)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU)));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.BEDROCK, resolved.provider());
         assertEquals("global.anthropic.claude-haiku-4-5-20251001-v1:0", resolved.modelId());
@@ -416,7 +401,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void resolveAgenticModel_forAMantleRow_returnsBedrockMantle() {
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, TERRA, ServiceTier.STANDARD)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, TERRA)));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.BEDROCK_MANTLE, resolved.provider());
         assertEquals(
@@ -429,7 +414,7 @@ class ProjectModelSettingsTest {
     void resolveAgenticModel_forACatalogRow_modelsDevIdNamesTheModelsDevProvider() {
         // modelId stays the name a person chose; the models.dev id carries models.dev's provider id, or the run's
         // rates are never found and it books unpriced.
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6", ServiceTier.STANDARD)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6")));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.GROK, resolved.provider());
         assertEquals("grok-4.6", resolved.modelId());
@@ -440,10 +425,9 @@ class ProjectModelSettingsTest {
     void aCustomProviderCatalogKey_acceptsAnyModelNameSuffix() {
         // CUSTOM has no catalog: any non-blank suffix round-trips as the user's name.
         settings.set(PID, ORG, ModelLane.RCA, "CUSTOM:my-self-hosted-model");
-        verify(repo).upsert(PID, ModelLane.RCA, "CUSTOM:my-self-hosted-model", ServiceTier.STANDARD, null);
+        verify(repo).upsert(PID, ModelLane.RCA, "CUSTOM:my-self-hosted-model");
 
-        when(repo.findByProject(PID))
-                .thenReturn(List.of(row(ModelLane.RCA, "CUSTOM:my-self-hosted-model", ServiceTier.STANDARD)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "CUSTOM:my-self-hosted-model")));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.CUSTOM, resolved.provider());
         assertEquals("my-self-hosted-model", resolved.modelId());

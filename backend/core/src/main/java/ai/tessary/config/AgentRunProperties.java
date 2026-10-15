@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "tessary.agentrun")
 public class AgentRunProperties {
 
-    /** Which {@code AgentRunSandbox} runs the agent: {@code e2b} (the launcher sidecar) or {@code docker}. */
+    /** Which {@code AgentRunSandbox} runs the agent: {@code e2b} (the launcher sidecar). */
     private String sandbox = "e2b";
 
     /** Base URL of the launcher sidecar; blank rides the observer's. */

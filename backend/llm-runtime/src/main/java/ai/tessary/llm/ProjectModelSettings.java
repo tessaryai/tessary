@@ -4,7 +4,6 @@ package ai.tessary.llm;
 import ai.tessary.llm.catalog.ModelCatalogFetchService;
 import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
-import ai.tessary.llmspi.ServiceTier;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -112,9 +111,9 @@ public class ProjectModelSettings {
      * settings page asks for a provider before it asks for a model.
      *
      * <p>An explicit row is dropped back to the automatic answer, rather than served, whenever it has
-     * stopped being runnable: its provider's credential was deleted, its (model, tier) pair is no
-     * longer supported, it names a model that has left this lane's offer list, or it points a sandbox
-     * lane at a model that cannot drive one. {@link #validate} refuses all four on write, but a row
+     * stopped being runnable: its provider's credential was deleted, its model is no longer supported,
+     * it names a model that has left this lane's offer list, or it points a sandbox lane at a model
+     * that cannot drive one. {@link #validate} refuses all four on write, but a row
      * written before a capability moved would otherwise fail every call in the lane. The row is left
      * in the table, so re-adding the credential brings the choice back.
      */
@@ -127,15 +126,11 @@ public class ProjectModelSettings {
     }
 
     /**
-     * One lane's answer: the model to run, how, and whether the project picked it or
+     * One lane's answer: the model to run, and whether the project picked it or
      * {@link LanePriority} did. {@code automatic} is what lets the settings page say which of the two
      * it is showing without asking a second question the server would have to answer consistently.
      */
-    public record LaneSelection(
-            @JsonProperty("model_key") String modelKey,
-            @JsonProperty("service_tier") ServiceTier serviceTier,
-            @JsonProperty("reasoning_effort") @Nullable String reasoningEffort,
-            boolean automatic) {}
+    public record LaneSelection(@JsonProperty("model_key") String modelKey, boolean automatic) {}
 
     /** The explicit row, if this org can still run it. See {@link #resolve} for each rejection. */
     private Optional<LaneSelection> usable(
@@ -149,11 +144,6 @@ public class ProjectModelSettings {
         if (providerFor(row.modelKey()).filter(configured::contains).isEmpty()) {
             return Optional.empty();
         }
-        // Every platform Bedrock model runs at Standard only, so a row stored at another tier is stale.
-        if (bedrock.isPresent() && row.serviceTier() != ServiceTier.STANDARD) {
-            return Optional.empty();
-        }
-        // A catalog (non-Bedrock) row carries no tier concept at all: set() always stores STANDARD.
         // A decision row on a chat lane, or a chat row on a decision lane, fails isOfferedOn below.
         boolean agentic = bedrock.map(BedrockModelProfile.ModelDescriptor::agentic)
                 .orElseGet(() -> catalog.map(ModelCatalog.CatalogEntry::agentic).orElse(false));
@@ -163,22 +153,18 @@ public class ProjectModelSettings {
         if (!isOfferedOn(lane, row.modelKey())) {
             return Optional.empty();
         }
-        return Optional.of(new LaneSelection(row.modelKey(), row.serviceTier(), null, false));
+        return Optional.of(new LaneSelection(row.modelKey(), false));
     }
 
     /**
      * Provider first, model second: the first provider in this lane's {@link LanePriority} order that
      * the org holds a credential for, running that provider's default model for the lane.
-     *
-     * <p>Standard tier and no reasoning effort, always: every lane that exists is
-     * {@link LaneGroup#AGENT_VM} or {@link LaneGroup#DECISION_CALLS}, neither of which has either
-     * control.
      */
     private Optional<LaneSelection> autoSelect(Set<ModelProvider> configured, ModelLane lane) {
         return LanePriority.of(lane).stream()
                 .filter(o -> configured.contains(o.provider()))
                 .findFirst()
-                .map(o -> new LaneSelection(o.defaultModelKey(), ServiceTier.STANDARD, null, true));
+                .map(o -> new LaneSelection(o.defaultModelKey(), true));
     }
 
     /**
@@ -329,15 +315,11 @@ public class ProjectModelSettings {
      * only offers models the org has a key for, so reaching this is a bug in the picker's filter
      * rather than a normal user path, but it is also the boundary a raw PUT crosses, and a row
      * written past it would be a stored choice the lane could never serve.
-     *
-     * <p>The row is stored at Standard with no reasoning effort: no lane has a request of ours for
-     * either to ride on. The agent lanes hand the agent a model id and nothing else, and a decision
-     * lane asks one typed question.
      */
     public void set(String projectId, String orgId, ModelLane lane, String modelKey) {
         requireConfiguredProvider(orgId, modelKey);
         validate(orgId, lane, modelKey);
-        repo.upsert(projectId, lane, modelKey, ServiceTier.STANDARD, null);
+        repo.upsert(projectId, lane, modelKey);
         invalidate(projectId);
     }
 

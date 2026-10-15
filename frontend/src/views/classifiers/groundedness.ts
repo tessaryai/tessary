@@ -15,7 +15,7 @@ export const GROUNDEDNESS_DETECTOR = "groundedness";
 /** The model the setup guides install, as the configure page names it. */
 export const GROUNDEDNESS_MODEL = "groundedness-classifier-v1";
 
-export const GROUNDEDNESS_MAC_MD =
+const GROUNDEDNESS_MAC_MD =
   "https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md";
 export const GROUNDEDNESS_AWS_MD =
   "https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md";
@@ -102,7 +102,7 @@ export function dateTime(iso: string): string {
  * The newest sign of scoring: the last score, or in production a later caught-up sweep, since a run
  * that found nothing new to score still ran.
  */
-export function lastSignOfScoring(status: GroundednessStatus): string | null {
+function lastSignOfScoring(status: GroundednessStatus): string | null {
   const scored = status.last_scored_at;
   const caughtUp = status.mode === "production" ? status.last_caught_up_at : null;
   if (scored && caughtUp) return Date.parse(caughtUp) > Date.parse(scored) ? caughtUp : scored;

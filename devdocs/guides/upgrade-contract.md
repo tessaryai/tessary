@@ -10,9 +10,9 @@ one PR.
 The upstream source of truth for the contract DOCUMENTS is the plugin repo's
 `output_format.md`, `contract/AUTHORING_CONTRACT.md`, and `contract/grader.schema.json`
 (vendored here — see `scripts/lib/vendored-plugin-files.sh`); the `schema_version`
-recorded in `contract/VERSION` is the version we currently support. The bundle
-VALIDATOR (`contract/validate.py` + `pipeline_io.py`) is **platform-owned** since
-plugin v0.23.0 — a contract change edits it here directly, no sync involved.
+recorded in `contract/VERSION` is the version we currently support. The platform
+runs no bundle validator: `BundleAssembler` and the Java records are the only
+reading of the contract this repo does.
 
 ## When to run this
 
@@ -46,9 +46,8 @@ matter.
 
 ### 2. Decide what changed at the layout level
 
-Open `contract/output_format.md` side-by-side with the previous version (and
-update the platform-owned `contract/validate.py` / `pipeline_io.py` to enforce
-the change). Categorise each change:
+Open `contract/output_format.md` side-by-side with the previous version.
+Categorise each change:
 
 - **New shard** (e.g. `pipeline/foo.yaml`) — add a `Shard.FOO` enum case in
   `pipeline/BundleAssembler.classify`, a new branch in `applyShard`, and a slot on

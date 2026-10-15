@@ -103,35 +103,23 @@ public class MeteringService {
 
     /**
      * The org's platform LLM consumption over {@code [from, to)} (either bound may be open), read LIVE
-     * off the per-call ledger: one total, plus the same total cut by product lane, by project and by
-     * model, with the four token buckets kept apart.
+     * off the per-call ledger as one total, with the four token buckets kept apart.
      *
      * <p>Deliberately not the {@code metric_rollup} path {@link #orgTotals} reads. That one meters
-     * closed buckets of a single {@code llm_tokens} scalar — right for an invoice, useless for "which
-     * part of the product is burning this, and is it cache or output". Both remain: the rollup is the
-     * billing basis, this is the breakdown behind it.
+     * closed buckets of a single scalar; this is the live figure behind it.
      */
     public LlmUsageView orgLlmUsage(String orgId, @Nullable String from, @Nullable String to) {
         return new LlmUsageView(
                 from,
                 to,
                 Instant.now().toString(),
-                LlmUsageSliceView.of(llmCalls.orgTotal(orgId, from, to, LlmUsageFilter.NONE), null),
-                llmCalls.byLane(orgId, from, to).stream()
-                        .map(s -> LlmUsageSliceView.of(s, laneLabel(s.key())))
-                        .toList(),
-                llmCalls.byProject(orgId, from, to).stream()
-                        .map(s -> LlmUsageSliceView.of(s, s.label()))
-                        .toList(),
-                llmCalls.byModel(orgId, from, to).stream()
-                        .map(s -> LlmUsageSliceView.of(s, null))
-                        .toList());
+                LlmUsageSliceView.of(llmCalls.orgTotal(orgId, from, to, LlmUsageFilter.NONE), null));
     }
 
     /**
      * The org's triage spend broken down per ruling — launch H2's "attributable per triage".
      *
-     * <p>The lane breakdown in {@link #orgLlmUsage} says how much the triage agent cost; this says across
+     * <p>The triage lane's total says how much the triage agent cost; this says across
      * how many rulings, and therefore what one ruling costs. That unit price is the number H3 asks about:
      * after decision D14 a ruling is a microVM rather than a chat call, so whether the filter is worth its
      * price is an empirical question, and this is where the answer is read.
@@ -215,20 +203,6 @@ public class MeteringService {
             return OffsetDateTime.parse(value).toInstant();
         } catch (DateTimeParseException notIso) {
             throw new TessaryException(MeteringError.INVALID_RANGE, notIso);
-        }
-    }
-
-    /**
-     * The human label for a ledger lane. Resolved from {@link ModelLane} so the usage page and the
-     * per-lane model settings always name a lane the same way; a lane with no {@code ModelLane} behind
-     * it (the observer sandbox) or one written by a newer build falls back to its wire value, which the
-     * client titleizes rather than dropping the row.
-     */
-    private static @Nullable String laneLabel(@Nullable String wire) {
-        try {
-            return ModelLane.fromWire(wire).label();
-        } catch (TessaryException unknownLane) {
-            return null;
         }
     }
 }

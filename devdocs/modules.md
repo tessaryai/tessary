@@ -46,7 +46,7 @@ platform LLM spend, and `billing` is now a thin read over it — since self-serv
 a platform primitive underneath it.
 
 **`llm` splits into `llm-spi` (L0) and `llm-runtime` (L4).** `storage` needs
-the `llmspi` vocabulary (`ModelLane`, `ServiceTier`) — two pure enums, for usage/pricing
+the `llmspi` vocabulary (`ModelLane`), a pure enum, for usage/pricing
 attribution (`LlmUsageAccountant`, `PlatformCallPricer`) — but no provider clients. Splitting is
 what lets that vocabulary live in the substrate without dragging the LLM runtime under it. (This
 used to also carry `EmbeddingModelFactory`, the embedding lane's own provider factory; that class,
@@ -115,34 +115,10 @@ share a lifecycle — but a package split, so the module boundary stops it regre
 9 files stay at the root — `Classifier{Controller,Service,Repository,Row,Field,Dtos,DetectionRepository,DetectionWriteRepository}`
 plus `EncoderDependencyReporter`, the classifier concept itself. The test tree mirrors the same shape.
 
-**Two classifiers left this table entirely.** SOP conformance moved out of `classifier/` in full —
-the compiled-SOP schema and parser, the rows, repositories, artifact bundle and fit report, the
-scoring engine, the ONNX serving implementation and the compile client, plus `cases/ConformanceCaseSource` and the conversation-intent-resolution
-subpackage that used to sit beside the since-removed `encoder/`. `ConformanceController`, `ConformanceDtos` and
-the `FitReportSource` port stayed open for a while for one reason: **the checked-in OpenAPI spec is
-generated from the OPEN application context**, so a controller behind the boundary is a path deleted
-from the document, exactly as the four `/plan` paths vanished when `PaidPlanController` moved. That
-exception was itself reversed once the open spec shed the `/conformance` route entirely, and those
-last few files moved out too. `classifier/` has no `conformance/` subpackage left at all.
-
-**`behavior/` is not in that table any more.** All of it moved out of this tree — the epoch store, the
-fit and sweep, the detector, and the four adapters that attach it to `finding/` and `debug/`, plus
-`cases/BehaviorDriftSource`. Nothing open names any of them; the classifier attaches through
-`ClassifierSweep` and `CaseSource`. `ProfileSource` is
-no longer one of these cross-boundary attachments either: it and its one route, `/behavior/profiles`,
-moved out too, along with the `BehaviorProfileView` wire record that route alone served — that record
-is no longer in the checked-in OpenAPI spec. Its jar is discovered off the runtime classpath by
-`BehaviorDriftAutoConfiguration`. Its catalog entry has left the open tree as well; only the
-`Behavior*` wire records for findings and their resolution stay open.
-
-**One package per feature.** `behavior/` used to hold the shared findings and triage
-feature as well as behaviour drift, because drift shipped first and the generic parts inherited its
-name — 19 of its 34 files served every classifier. Eighteen now live in `finding/` and the
-nineteenth, the trace/action reader all three drift classifiers share, in `substrate/`. Each package is
-now one feature: `metric/` and `toolerror/` are the classifiers that remain here, behaviour drift and SOP
-conformance are classifiers in the overlay, `finding/` is the store and pipeline they all serve through,
-and the direction between them is one-way. The `behavior/` ↔ `conformance/` import cycle that made
-either one unextractable is gone — which is what let both move out as plain `git mv`s.
+**One package per feature.** `metric/` and `toolerror/` are the drift classifiers, `finding/` is
+the store and pipeline every classifier serves through, `substrate/` holds the trace/action reader
+the drift classifiers share, and the direction between them is one-way. A classifier outside this
+tree attaches through `ClassifierSweep`, `TriageSource`, `FindingAdapter` and `CaseSource`.
 
 **The `Behavior`/`Metric` prefixes stay, marking wire lineage rather than package
 membership.** `BehaviorDtos` and `BehaviorTriage*` sit in `finding/` and are named for the classifier
@@ -285,10 +261,10 @@ gate builds and tests the open edition directly.
 When open code needs paid behaviour, the move is the same one the layering already uses: an SPI
 interface in the open module with a working open default, implemented by a paid module. That is
 what makes `analysis` able to ship its default classifiers with the paid ones absent. Paid code
-reaches a running backend through a Spring Boot `AutoConfiguration.imports` inside the paid jar,
-read off the **runtime** classpath, which Boot honours from any jar regardless of package. This is
-not the classifier extension registry, which is a separate seam for classifiers and does not load
-beans.
+reaches a running backend by component scan: the paid jars live in `ai.tessary.paid.*`, under
+`TessaryApplication`'s package, and the paid image puts them on the classpath beside the open jar
+(`-cp /app/app.jar:/app/paid/*`). This is not the classifier extension registry, which is a separate
+seam for classifiers and does not load beans.
 
 ## Decisions taken
 

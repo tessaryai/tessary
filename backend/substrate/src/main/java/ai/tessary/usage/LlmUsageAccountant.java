@@ -99,14 +99,11 @@ public class LlmUsageAccountant {
      *
      * @param lane the lane's wire value
      * @param model the model id as requested, e.g. {@code jev-latest}
-     * @param platformFunded true when the call ran on the deployment's own provider rather than the org's
-     *     key, which is the row a credit debit reads
      */
     public void recordDecisionCall(
             @Nullable String projectId,
             String lane,
             String model,
-            boolean platformFunded,
             @Nullable Integer inputTokens,
             @Nullable Integer outputTokens,
             @Nullable BigDecimal costUsd,
@@ -116,7 +113,7 @@ public class LlmUsageAccountant {
                 projectId,
                 lane,
                 model,
-                platformFunded,
+                false,
                 inputTokens,
                 outputTokens,
                 null,
@@ -147,7 +144,6 @@ public class LlmUsageAccountant {
                     projectId,
                     lane,
                     model,
-                    null,
                     platformFunded ? LlmCallRow.CostFunding.PLATFORM : LlmCallRow.CostFunding.BYO,
                     inputTokens,
                     outputTokens,

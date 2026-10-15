@@ -53,8 +53,7 @@ class MeteringServiceTest {
     }
 
     private static UsageSlice slice(@Nullable String key, @Nullable String label, long calls, String cost) {
-        return new UsageSlice(
-                key, label, calls, 10, 20, 30, 40, 100, new BigDecimal(cost), BigDecimal.ZERO, new BigDecimal(cost), 0);
+        return new UsageSlice(key, label, calls, 10, 20, 30, 40, 100, new BigDecimal(cost), new BigDecimal(cost), 0);
     }
 
     /**

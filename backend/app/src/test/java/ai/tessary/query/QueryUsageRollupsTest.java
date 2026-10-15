@@ -56,7 +56,7 @@ class QueryUsageRollupsTest {
     }
 
     private void seed(String orgId, String pid, String unit, long value, String bucketStart, String granularity) {
-        rollups.upsert(MetricRollupRow.of(
+        rollups.upsert(new MetricRollupRow(
                 Ids.ulid(),
                 orgId,
                 pid,

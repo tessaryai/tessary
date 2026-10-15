@@ -20,13 +20,6 @@ provider refuses, a key with no funds left, or no key at all pauses the classifi
 `no_credit`, `no_provider`); a paused sweep sends nothing and skips what it passes, and saving the key or
 pressing Retry lifts the pause.
 
-A build that supplies `PLATFORM` (see [provider-keys.md](../guides/provider-keys.md)) can also run the
-lane on its own key, last in the lane's order, so an org's own key always wins. Those calls are booked
-platform-funded. An org with no credit left for it pauses as `no_credit`, the same pause as its own key
-running dry, and a refusal of the deployment's key, or that key running dry, pauses as
-`platform_unavailable`, which also logs an error for the operator. This build supplies no `PLATFORM`,
-so `platform_unavailable` never happens here.
-
 It is not a per-observation LLM call in the catalog's cost sense: it is a hosted classifier call, and
 only a filtered subset of turns reaches it.
 

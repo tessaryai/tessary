@@ -86,7 +86,7 @@ export function Link() {
 
   useEffect(() => {
     if (!confirm.isSuccess || !projectSlug) return;
-    const go = () => nav(`/orgs/${orgSlug}/projects/${projectSlug}/overview`);
+    const go = () => nav(`/orgs/${orgSlug}/projects/${projectSlug}/triage`);
     if (pipelineReady) {
       go();
       return;

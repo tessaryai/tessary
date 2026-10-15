@@ -21,7 +21,6 @@ import { useCapabilities } from "../capabilities/useCapabilities";
 import type { CapabilityWire } from "../api/types-auth";
 import {
   NAV_GROUPS,
-  RESERVED_NAV,
   SETTINGS_GROUPS,
   TRIAGE_NAV,
   type NavGroup,
@@ -49,8 +48,6 @@ export interface Navigation {
   settingsGroups: SettingsGroup[];
   /** Every settings section the org has, flat — the palette's Settings group. */
   settingsSections: SettingsSection[];
-  /** Roadmap slots. Never gated: "coming soon" is a statement about us, not about this org. */
-  reserved: NavItem[];
   /**
    * Whether an absolute in-app path still leads somewhere this org can go. Anything that isn't a
    * known gated surface passes — a case or trace deep link is not the IA's business.
@@ -88,7 +85,6 @@ export function useNavigation(): Navigation {
       liveNav,
       settingsGroups,
       settingsSections,
-      reserved: RESERVED_NAV,
       isPathReachable: (path: string) => {
         const parts = path.split("/").filter(Boolean);
         // /orgs/:org/projects/:project/<surface>[/<settings-section>]

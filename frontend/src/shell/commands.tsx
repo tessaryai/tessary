@@ -21,7 +21,7 @@ import { SETTINGS_ICON } from "./nav";
 import type { NavItem, SettingsSection } from "./nav";
 import type { RecentEntry } from "./recents";
 
-export type CommandGroup = "Results" | "Recent" | "Navigation" | "Settings" | "Actions" | "Coming soon";
+export type CommandGroup = "Results" | "Recent" | "Navigation" | "Settings" | "Actions";
 
 export type Command = {
   id: string;
@@ -32,12 +32,8 @@ export type Command = {
   hint?: string;
   /** Extra terms to match on. */
   keywords?: string[];
-  /** Right-aligned dim old-name alias (one release only), e.g. `was "Pipeline"`. */
-  alias?: string;
-  /** Reserved/coming-soon commands are listed but not actionable. */
-  disabled?: boolean;
-  /** What running the command does. Omitted for disabled commands. */
-  run?: () => void;
+  /** What running the command does. */
+  run: () => void;
   /**
    * Present only on server "Results" commands — the raw search hit metadata the palette
    * needs to render the elevated result row (hit-type icon + color, type badge, matched-term
@@ -63,8 +59,6 @@ export type CommandContext = {
   nav: NavItem[];
   /** The settings sections this org HAS — same filtering. */
   settings: SettingsSection[];
-  /** Roadmap slots ("Coming soon"). Never gated. */
-  reserved: NavItem[];
   /** Whether a project-relative path is still reachable — see `useNavigation().isPathReachable`. */
   isPathReachable: (path: string) => boolean;
   recents: RecentEntry[];
@@ -77,7 +71,7 @@ function navIcon(Icon: NavItem["icon"]): ReactNode {
 
 /**
  * Build the full client-side command list, newest-relevant first within each group.
- * Groups are ordered Recent → Navigation → Settings → Actions → Coming soon by the
+ * Groups are ordered Recent → Navigation → Settings → Actions by the
  * palette's renderer, not here.
  */
 export function buildCommands(ctx: CommandContext): Command[] {
@@ -105,7 +99,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
       icon: navIcon(n.icon),
       hint: n.description,
       keywords: n.keywords,
-      alias: n.alias,
       run: () => ctx.navigate(`${ctx.projectBase}${n.id}`),
     });
   }
@@ -132,19 +125,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
       run: ctx.openProjectSwitcher,
     },
   );
-
-  // Coming soon — roadmap surfaces, discoverable but not navigable (no dead-end clicks).
-  for (const r of ctx.reserved) {
-    cmds.push({
-      id: `soon:${r.id}`,
-      label: r.label,
-      group: "Coming soon",
-      icon: navIcon(r.icon),
-      hint: r.description,
-      keywords: r.keywords,
-      disabled: true,
-    });
-  }
 
   return cmds;
 }
@@ -187,7 +167,7 @@ export function searchHitToCommand(
   };
 }
 
-const GROUP_ORDER: CommandGroup[] = ["Results", "Recent", "Navigation", "Settings", "Actions", "Coming soon"];
+const GROUP_ORDER: CommandGroup[] = ["Results", "Recent", "Navigation", "Settings", "Actions"];
 
 /**
  * Filter by a query (case-insensitive substring over label + hint + keywords) and group,

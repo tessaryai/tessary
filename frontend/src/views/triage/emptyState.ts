@@ -86,7 +86,7 @@ export interface ProviderFacts {
 }
 
 /** "3 classifiers", "1 call site" — the copy is prose, so its counts have to be. */
-export function plural(n: number, noun: string): string {
+function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 

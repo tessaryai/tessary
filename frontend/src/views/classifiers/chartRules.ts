@@ -142,17 +142,17 @@ function usdDecimals(v: number): number {
 }
 
 /** Milliseconds as seconds: one decimal from a second up, two below it. */
-export function seconds(ms: number, decimals = secondsDecimals(ms)): string {
+function seconds(ms: number, decimals = secondsDecimals(ms)): string {
   return `${(ms / 1000).toFixed(decimals)} s`;
 }
 
 /** Dollars at the precision a per-turn cost needs: cents from a dollar up, finer below. */
-export function dollars(v: number, decimals = usdDecimals(v)): string {
+function dollars(v: number, decimals = usdDecimals(v)): string {
   return `$${v.toFixed(decimals)}`;
 }
 
 /** A card's own value (a rate fraction, milliseconds or dollars) as the reader sees it. */
-export function formatValue(card: ChartCard, v: number): string {
+function formatValue(card: ChartCard, v: number): string {
   if (card.kind === "count") return Math.round(v).toLocaleString("en-US");
   if (card.unit === "ms") return seconds(v);
   if (card.unit === "usd") return dollars(v);
@@ -428,7 +428,7 @@ export function callersText(t: ChartToolOption): string {
 }
 
 /** Why a classifier that is on cannot judge yet, as a short status. */
-export function waitingWords(reason: string | null): string {
+function waitingWords(reason: string | null): string {
   if (reason === "no_schema" || reason === "waiting_on_schemas") return "Waiting for a schema";
   if (reason === "not_set_up") return "Waiting for setup";
   if (reason === "not_scoring") return "Not scoring";

@@ -11,6 +11,8 @@ import ai.tessary.tenant.PrincipalRepository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.web.ApiResponse;
 import ai.tessary.web.ErrorBody;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -44,7 +46,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.view.RedirectView;
 
 /**
  * The WorkOS AuthKit dance + {@code /auth/me}:
@@ -170,14 +171,19 @@ public class AuthController {
     }
 
     @GetMapping("/login")
-    public RedirectView login(
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "302",
+            description = "Redirect to the identity provider, or to the frontend login page when the provider has"
+                    + " no redirect flow.",
+            headers = @Header(name = HttpHeaders.LOCATION, schema = @Schema(type = "string")))
+    public ResponseEntity<Void> login(
             @RequestParam(value = "returnTo", required = false) String returnTo, HttpServletResponse res) {
         // A provider with no OAuth dance to run (PasswordAuthProvider) cannot answer
         // authorizationUrl(), so bounce to the frontend's own /login screen rather than the app
         // root, since the app root is itself behind ProtectedRoute, which sends an unauthenticated
         // visitor right back to this same GET (an infinite redirect loop).
         if (!provider.supportsRedirectFlow()) {
-            return new RedirectView(entryPageUrl(returnTo));
+            return redirect(entryPageUrl(returnTo));
         }
         if (isSafeReturnTo(returnTo)) {
             res.addHeader(
@@ -190,7 +196,11 @@ public class AuthController {
         res.addHeader(
                 HttpHeaders.SET_COOKIE,
                 buildCookie(STATE_COOKIE, state, STATE_TTL).toString());
-        return new RedirectView(provider.authorizationUrl(state));
+        return redirect(provider.authorizationUrl(state));
+    }
+
+    private static ResponseEntity<Void> redirect(String url) {
+        return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(url)).build();
     }
 
     @GetMapping("/callback")

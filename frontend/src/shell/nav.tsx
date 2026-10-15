@@ -14,9 +14,6 @@
  * Old surface names live on here as palette keywords so a bookmark or habit
  * still finds the current one.
  *
- *   - `live` surfaces render in the sidebar AND the palette, and own a <Route>.
- *   - `reserved` surfaces are roadmap slots: palette-only "Coming soon", no route.
- *
  * Icons are lucide-react components: `icon` holds the component itself, not
  * a rendered element, so callers can size/style it consistently at each call site.
  */
@@ -29,7 +26,6 @@ import {
   Database,
   Filter,
   FileUp,
-  FlaskConical,
   GitBranch,
   Inbox,
   KeyRound,
@@ -38,7 +34,6 @@ import {
   Settings as SettingsIcon,
   Shield,
   ToggleRight,
-  TrendingUp,
   Users,
   Zap,
   type LucideIcon,
@@ -59,17 +54,10 @@ export type NavItem = {
   /** Extra terms the palette matches on, including each surface's old name as an alias. */
   keywords?: string[];
   /**
-   * Rendered old-name alias, shown right-aligned and dim in the palette for ONE release
-   * (sheets/ask-palette.md), e.g. `was "Pipeline"`. Distinct from `keywords`, which only match.
-   */
-  alias?: string;
-  /**
    * Routes that should also light this item up in the sidebar (e.g. detail pages). A route named here wins over
    * another item whose own route it sits under.
    */
   match?: string[];
-  /** "live" (default) renders in the sidebar; "reserved" is a roadmap-only palette slot. */
-  state?: SurfaceState;
   /**
    * The capability that has to be on for this surface to exist at all. Absent means ungated.
    *
@@ -89,7 +77,6 @@ export const TRIAGE_NAV: NavItem = {
   label: "Triage",
   description: "Open cases, worst first, and the findings that are not a case yet.",
   keywords: ["cases", "findings", "inbox", "home", "overview", "worklist", "triage"],
-  alias: 'was "Overview"',
   // A finding page lives under classifiers/, but Triage lists findings and the page's breadcrumb leads back here.
   match: ["cases", "classifiers/findings"],
   icon: Inbox,
@@ -105,7 +92,6 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Traces",
         description: "Every trace, span, and conversation Tessary has received.",
         keywords: ["explore", "telemetry", "spans", "otel", "conversation", "session", "logs"],
-        alias: 'was "Explore"',
         // An execution path, not a waveform: Vitals already owns the pulse
         // silhouette, and a route reads as "the path the agent took."
         icon: RouteIcon,
@@ -125,8 +111,6 @@ export const NAV_GROUPS: NavGroup[] = [
           "baseline",
           "monitoring",
         ],
-        // en-US per constitution rule 5 (the prototype printed "Behaviour").
-        alias: 'absorbed "Behavior drift"',
         // Sorting/detecting traces against a criterion: a filter, not a guard.
         icon: Filter,
       },
@@ -141,42 +125,8 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-// --- Reserved roadmap surfaces. Palette-only "Coming soon"; no route, no sidebar slot. ---
-const RESERVED: NavItem[] = [
-  {
-    id: "experiments",
-    label: "Experiments",
-    state: "reserved",
-    description: "A/B prompt and model experiments.",
-    keywords: ["ab", "compare", "trials"],
-    icon: FlaskConical,
-  },
-  {
-    id: "predictions",
-    label: "Predictions",
-    state: "reserved",
-    description: "Predicted quality impact of code changes.",
-    keywords: ["forecast", "impact", "regressions", "changes"],
-    icon: TrendingUp,
-  },
-  {
-    id: "alerts",
-    label: "Notifications",
-    state: "reserved",
-    description: "Notifications on regressions and drift.",
-    keywords: ["alerts", "warnings", "monitors"],
-    icon: Bell,
-  },
-];
-
-/** Flat IA: Triage, then every grouped surface, then reserved slots. */
-export const NAV: NavItem[] = [TRIAGE_NAV, ...NAV_GROUPS.flatMap((g) => g.items), ...RESERVED];
-
-/** The surfaces that own a route and render in the sidebar. */
-export const LIVE_NAV: NavItem[] = NAV.filter((n) => (n.state ?? "live") === "live");
-
-/** Roadmap surfaces shown only in the palette as non-navigable "Coming soon" hints. */
-export const RESERVED_NAV: NavItem[] = NAV.filter((n) => n.state === "reserved");
+/** The surfaces that own a route and render in the sidebar: Triage, then every grouped surface. */
+export const LIVE_NAV: NavItem[] = [TRIAGE_NAV, ...NAV_GROUPS.flatMap((g) => g.items)];
 
 export const SETTINGS_ICON: LucideIcon = SettingsIcon;
 
