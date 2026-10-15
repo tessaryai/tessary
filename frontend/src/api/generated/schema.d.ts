@@ -2490,114 +2490,6 @@ export interface components {
             data?: unknown;
             meta: components["schemas"]["ResponseMeta"];
         };
-        ApplicationContext: {
-            applicationName?: string;
-            autowireCapableBeanFactory?: components["schemas"]["AutowireCapableBeanFactory"];
-            /** Format: int32 */
-            beanDefinitionCount?: number;
-            beanDefinitionNames?: string[];
-            classLoader?: {
-                defaultAssertionStatus?: boolean;
-                definedPackages?: {
-                    annotations?: unknown[];
-                    declaredAnnotations?: unknown[];
-                    implementationTitle?: string;
-                    implementationVendor?: string;
-                    implementationVersion?: string;
-                    name?: string;
-                    sealed?: boolean;
-                    specificationTitle?: string;
-                    specificationVendor?: string;
-                    specificationVersion?: string;
-                }[];
-                name?: string;
-                parent?: {
-                    defaultAssertionStatus?: boolean;
-                    definedPackages?: {
-                        annotations?: unknown[];
-                        declaredAnnotations?: unknown[];
-                        implementationTitle?: string;
-                        implementationVendor?: string;
-                        implementationVersion?: string;
-                        name?: string;
-                        sealed?: boolean;
-                        specificationTitle?: string;
-                        specificationVendor?: string;
-                        specificationVersion?: string;
-                    }[];
-                    name?: string;
-                    registeredAsParallelCapable?: boolean;
-                    unnamedModule?: {
-                        annotations?: unknown[];
-                        classLoader?: {
-                            defaultAssertionStatus?: boolean;
-                            definedPackages?: {
-                                annotations?: unknown[];
-                                declaredAnnotations?: unknown[];
-                                implementationTitle?: string;
-                                implementationVendor?: string;
-                                implementationVersion?: string;
-                                name?: string;
-                                sealed?: boolean;
-                                specificationTitle?: string;
-                                specificationVendor?: string;
-                                specificationVersion?: string;
-                            }[];
-                            name?: string;
-                            registeredAsParallelCapable?: boolean;
-                        };
-                        declaredAnnotations?: unknown[];
-                        descriptor?: {
-                            automatic?: boolean;
-                            open?: boolean;
-                        };
-                        layer?: unknown;
-                        name?: string;
-                        named?: boolean;
-                        nativeAccessEnabled?: boolean;
-                        packages?: string[];
-                    };
-                };
-                registeredAsParallelCapable?: boolean;
-                unnamedModule?: {
-                    annotations?: unknown[];
-                    classLoader?: {
-                        defaultAssertionStatus?: boolean;
-                        definedPackages?: {
-                            annotations?: unknown[];
-                            declaredAnnotations?: unknown[];
-                            implementationTitle?: string;
-                            implementationVendor?: string;
-                            implementationVersion?: string;
-                            name?: string;
-                            sealed?: boolean;
-                            specificationTitle?: string;
-                            specificationVendor?: string;
-                            specificationVersion?: string;
-                        }[];
-                        name?: string;
-                        registeredAsParallelCapable?: boolean;
-                    };
-                    declaredAnnotations?: unknown[];
-                    descriptor?: {
-                        automatic?: boolean;
-                        open?: boolean;
-                    };
-                    layer?: unknown;
-                    name?: string;
-                    named?: boolean;
-                    nativeAccessEnabled?: boolean;
-                    packages?: string[];
-                };
-            };
-            displayName?: string;
-            environment?: components["schemas"]["Environment"];
-            id?: string;
-            parent?: components["schemas"]["ApplicationContext"];
-            parentBeanFactory?: components["schemas"]["BeanFactory"];
-            /** Format: int64 */
-            startupDate?: number;
-        };
         ArmedWindowDetail: {
             basis: string;
             confidence: string | null;
@@ -2637,8 +2529,6 @@ export interface components {
             subject_id: string | null;
             subject_kind: string;
         };
-        AutowireCapableBeanFactory: unknown;
-        BeanFactory: unknown;
         BehaviorAnalysisView: {
             alreadyEscalated: boolean;
             jobId: string;
@@ -2862,11 +2752,9 @@ export interface components {
             decision: boolean;
             default_base_url: string;
             display_name: string;
-            effort_levels: string[];
             model_name: string;
             /** @enum {string} */
             provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
-            strict_json_schema: boolean;
             vendor: string;
         };
         CatalogView: {
@@ -3162,7 +3050,6 @@ export interface components {
         CredentialListView: {
             credentials: components["schemas"]["View"][];
         };
-        DefaultHttpStatusCode: components["schemas"]["HttpStatusCode"];
         DeleteResponse: {
             deleted: boolean;
         };
@@ -3209,10 +3096,6 @@ export interface components {
             removed: number;
             /** Format: int32 */
             updated: number;
-        };
-        Environment: {
-            activeProfiles?: string[];
-            defaultProfiles?: string[];
         };
         ErrorBody: {
             code: string;
@@ -3332,15 +3215,6 @@ export interface components {
             /** @enum {string} */
             severity: "low" | "medium" | "high";
             taxonomy_node_id: string | null;
-        };
-        FilterRegistration: {
-            className?: string;
-            initParameters?: {
-                [key: string]: string;
-            };
-            name?: string;
-            servletNameMappings?: string[];
-            urlPatternMappings?: string[];
         };
         FindingEvidenceSpanPage: {
             counts: {
@@ -3505,16 +3379,6 @@ export interface components {
             /** Format: double */
             value: number | null;
         };
-        /** @enum {unknown} */
-        HttpStatus: "100 CONTINUE" | "101 SWITCHING_PROTOCOLS" | "102 PROCESSING" | "103 EARLY_HINTS" | "200 OK" | "201 CREATED" | "202 ACCEPTED" | "203 NON_AUTHORITATIVE_INFORMATION" | "204 NO_CONTENT" | "205 RESET_CONTENT" | "206 PARTIAL_CONTENT" | "207 MULTI_STATUS" | "208 ALREADY_REPORTED" | "226 IM_USED" | "300 MULTIPLE_CHOICES" | "301 MOVED_PERMANENTLY" | "302 FOUND" | "303 SEE_OTHER" | "304 NOT_MODIFIED" | "307 TEMPORARY_REDIRECT" | "308 PERMANENT_REDIRECT" | "400 BAD_REQUEST" | "401 UNAUTHORIZED" | "402 PAYMENT_REQUIRED" | "403 FORBIDDEN" | "404 NOT_FOUND" | "405 METHOD_NOT_ALLOWED" | "406 NOT_ACCEPTABLE" | "407 PROXY_AUTHENTICATION_REQUIRED" | "408 REQUEST_TIMEOUT" | "409 CONFLICT" | "410 GONE" | "411 LENGTH_REQUIRED" | "412 PRECONDITION_FAILED" | "413 CONTENT_TOO_LARGE" | "413 PAYLOAD_TOO_LARGE" | "414 URI_TOO_LONG" | "415 UNSUPPORTED_MEDIA_TYPE" | "416 REQUESTED_RANGE_NOT_SATISFIABLE" | "417 EXPECTATION_FAILED" | "418 I_AM_A_TEAPOT" | "421 MISDIRECTED_REQUEST" | "422 UNPROCESSABLE_CONTENT" | "422 UNPROCESSABLE_ENTITY" | "423 LOCKED" | "424 FAILED_DEPENDENCY" | "425 TOO_EARLY" | "426 UPGRADE_REQUIRED" | "428 PRECONDITION_REQUIRED" | "429 TOO_MANY_REQUESTS" | "431 REQUEST_HEADER_FIELDS_TOO_LARGE" | "451 UNAVAILABLE_FOR_LEGAL_REASONS" | "500 INTERNAL_SERVER_ERROR" | "501 NOT_IMPLEMENTED" | "502 BAD_GATEWAY" | "503 SERVICE_UNAVAILABLE" | "504 GATEWAY_TIMEOUT" | "505 HTTP_VERSION_NOT_SUPPORTED" | "506 VARIANT_ALSO_NEGOTIATES" | "507 INSUFFICIENT_STORAGE" | "508 LOOP_DETECTED" | "509 BANDWIDTH_LIMIT_EXCEEDED" | "510 NOT_EXTENDED" | "511 NETWORK_AUTHENTICATION_REQUIRED";
-        HttpStatusCode: {
-            error?: boolean;
-            is1xxInformational?: boolean;
-            is2xxSuccessful?: boolean;
-            is3xxRedirection?: boolean;
-            is4xxClientError?: boolean;
-            is5xxServerError?: boolean;
-        };
         ImplicitInvariant: {
             applies_to: unknown;
             /** @enum {string} */
@@ -3555,25 +3419,6 @@ export interface components {
             name: string;
         };
         JsonNode: unknown;
-        JspConfigDescriptor: {
-            jspPropertyGroups?: components["schemas"]["JspPropertyGroupDescriptor"][];
-            taglibs?: components["schemas"]["TaglibDescriptor"][];
-        };
-        JspPropertyGroupDescriptor: {
-            buffer?: string;
-            defaultContentType?: string;
-            deferredSyntaxAllowedAsLiteral?: string;
-            elIgnored?: string;
-            errorOnELNotFound?: string;
-            errorOnUndeclaredNamespace?: string;
-            includeCodas?: string[];
-            includePreludes?: string[];
-            isXml?: string;
-            pageEncoding?: string;
-            scriptingInvalid?: string;
-            trimDirectiveWhitespaces?: string;
-            urlPatterns?: string[];
-        };
         LaneView: {
             automatic: boolean;
             description: string;
@@ -3634,7 +3479,6 @@ export interface components {
             label: string | null;
             /** Format: int64 */
             output_tokens: number;
-            platform_cost_usd: number;
             /** Format: int64 */
             total_tokens: number;
             /** Format: int64 */
@@ -3642,9 +3486,6 @@ export interface components {
         };
         LlmUsageView: {
             as_of: string;
-            by_lane: components["schemas"]["LlmUsageSliceView"][];
-            by_model: components["schemas"]["LlmUsageSliceView"][];
-            by_project: components["schemas"]["LlmUsageSliceView"][];
             from: string | null;
             to: string | null;
             total: components["schemas"]["LlmUsageSliceView"];
@@ -3910,9 +3751,6 @@ export interface components {
             lane: "rca" | "triage" | "agent_run" | "frustration";
             model_key: string;
             project_id: string;
-            reasoning_effort: string | null;
-            /** @enum {string} */
-            service_tier: "standard" | "flex" | "priority" | "batch";
             updated_at: string;
         };
         ProjectVersionView: {
@@ -3991,37 +3829,6 @@ export interface components {
             window_from: string;
             window_split: string;
             window_to: string;
-        };
-        RedirectView: {
-            applicationContext?: components["schemas"]["ApplicationContext"];
-            attributes?: {
-                [key: string]: string;
-            };
-            attributesCSV?: string;
-            attributesMap?: {
-                [key: string]: unknown;
-            };
-            beanName?: string;
-            contentType?: string;
-            contextRelative?: boolean;
-            encodingScheme?: string;
-            expandUriTemplateVariables?: boolean;
-            exposeContextBeansAsAttributes?: boolean;
-            exposeModelAttributes?: boolean;
-            exposePathVariables?: boolean;
-            exposedContextBeanNames?: string[];
-            hosts?: string[];
-            http10Compatible?: boolean;
-            propagateQueryParams?: boolean;
-            propagateQueryProperties?: boolean;
-            redirectView?: boolean;
-            requestContextAttribute?: string;
-            servletContext?: components["schemas"]["ServletContext"];
-            staticAttributes?: {
-                [key: string]: unknown;
-            };
-            statusCode?: components["schemas"]["DefaultHttpStatusCode"] | components["schemas"]["HttpStatus"];
-            url?: string;
         };
         RepoOption: {
             defaultBranch: string;
@@ -4192,154 +3999,6 @@ export interface components {
             repoOwner: string;
             token: string;
         };
-        ServletContext: {
-            attributeNames?: unknown;
-            classLoader?: {
-                defaultAssertionStatus?: boolean;
-                definedPackages?: {
-                    annotations?: unknown[];
-                    declaredAnnotations?: unknown[];
-                    implementationTitle?: string;
-                    implementationVendor?: string;
-                    implementationVersion?: string;
-                    name?: string;
-                    sealed?: boolean;
-                    specificationTitle?: string;
-                    specificationVendor?: string;
-                    specificationVersion?: string;
-                }[];
-                name?: string;
-                parent?: {
-                    defaultAssertionStatus?: boolean;
-                    definedPackages?: {
-                        annotations?: unknown[];
-                        declaredAnnotations?: unknown[];
-                        implementationTitle?: string;
-                        implementationVendor?: string;
-                        implementationVersion?: string;
-                        name?: string;
-                        sealed?: boolean;
-                        specificationTitle?: string;
-                        specificationVendor?: string;
-                        specificationVersion?: string;
-                    }[];
-                    name?: string;
-                    registeredAsParallelCapable?: boolean;
-                    unnamedModule?: {
-                        annotations?: unknown[];
-                        classLoader?: {
-                            defaultAssertionStatus?: boolean;
-                            definedPackages?: {
-                                annotations?: unknown[];
-                                declaredAnnotations?: unknown[];
-                                implementationTitle?: string;
-                                implementationVendor?: string;
-                                implementationVersion?: string;
-                                name?: string;
-                                sealed?: boolean;
-                                specificationTitle?: string;
-                                specificationVendor?: string;
-                                specificationVersion?: string;
-                            }[];
-                            name?: string;
-                            registeredAsParallelCapable?: boolean;
-                        };
-                        declaredAnnotations?: unknown[];
-                        descriptor?: {
-                            automatic?: boolean;
-                            open?: boolean;
-                        };
-                        layer?: unknown;
-                        name?: string;
-                        named?: boolean;
-                        nativeAccessEnabled?: boolean;
-                        packages?: string[];
-                    };
-                };
-                registeredAsParallelCapable?: boolean;
-                unnamedModule?: {
-                    annotations?: unknown[];
-                    classLoader?: {
-                        defaultAssertionStatus?: boolean;
-                        definedPackages?: {
-                            annotations?: unknown[];
-                            declaredAnnotations?: unknown[];
-                            implementationTitle?: string;
-                            implementationVendor?: string;
-                            implementationVersion?: string;
-                            name?: string;
-                            sealed?: boolean;
-                            specificationTitle?: string;
-                            specificationVendor?: string;
-                            specificationVersion?: string;
-                        }[];
-                        name?: string;
-                        registeredAsParallelCapable?: boolean;
-                    };
-                    declaredAnnotations?: unknown[];
-                    descriptor?: {
-                        automatic?: boolean;
-                        open?: boolean;
-                    };
-                    layer?: unknown;
-                    name?: string;
-                    named?: boolean;
-                    nativeAccessEnabled?: boolean;
-                    packages?: string[];
-                };
-            };
-            contextPath?: string;
-            defaultSessionTrackingModes?: ("COOKIE" | "URL" | "SSL")[];
-            /** Format: int32 */
-            effectiveMajorVersion?: number;
-            /** Format: int32 */
-            effectiveMinorVersion?: number;
-            effectiveSessionTrackingModes?: ("COOKIE" | "URL" | "SSL")[];
-            filterRegistrations?: {
-                [key: string]: components["schemas"]["FilterRegistration"];
-            };
-            initParameterNames?: unknown;
-            jspConfigDescriptor?: components["schemas"]["JspConfigDescriptor"];
-            /** Format: int32 */
-            majorVersion?: number;
-            /** Format: int32 */
-            minorVersion?: number;
-            requestCharacterEncoding?: string;
-            responseCharacterEncoding?: string;
-            serverInfo?: string;
-            servletContextName?: string;
-            servletRegistrations?: {
-                [key: string]: components["schemas"]["ServletRegistration"];
-            };
-            sessionCookieConfig?: components["schemas"]["SessionCookieConfig"];
-            /** Format: int32 */
-            sessionTimeout?: number;
-            sessionTrackingModes?: ("COOKIE" | "URL" | "SSL")[];
-            virtualServerName?: string;
-        };
-        ServletRegistration: {
-            className?: string;
-            initParameters?: {
-                [key: string]: string;
-            };
-            mappings?: string[];
-            name?: string;
-            runAsRole?: string;
-        };
-        SessionCookieConfig: {
-            attributes?: {
-                [key: string]: string;
-            };
-            /** @deprecated */
-            comment?: string;
-            domain?: string;
-            httpOnly?: boolean;
-            /** Format: int32 */
-            maxAge?: number;
-            name?: string;
-            path?: string;
-            secure?: boolean;
-        };
         SessionDetail: {
             detections: components["schemas"]["DetectionMark"][];
             /** Format: int64 */
@@ -4416,9 +4075,6 @@ export interface components {
         };
         SetLaneModelRequest: {
             model_key: string;
-            reasoning_effort?: string | null;
-            /** @enum {string} */
-            service_tier?: "standard" | "flex" | "priority" | "batch";
         };
         SetModeRequest: {
             mode: string;
@@ -4584,10 +4240,6 @@ export interface components {
             lease_owner: string | null;
             status: string | null;
             updated_at: string | null;
-        };
-        TaglibDescriptor: {
-            taglibLocation?: string;
-            taglibURI?: string;
         };
         TaxonomyNode: {
             description: string;
@@ -8586,14 +8238,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Redirect to the identity provider, or to the frontend login page when the provider has no redirect flow. */
+            302: {
                 headers: {
+                    Location?: string;
                     [name: string]: unknown;
                 };
-                content: {
-                    "*/*": components["schemas"]["RedirectView"];
-                };
+                content?: never;
             };
         };
     };
