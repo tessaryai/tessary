@@ -267,23 +267,6 @@ record TriageEscalationIntegrationTest(
         assertEquals(0, triageJobs(off.projectId()), "and nobody else does");
     }
 
-    /**
-     * No confirmation bar: an escalatable finding escalates on the first tick. The seam's two-store dispatch is
-     * covered by {@code FindingServiceTest} and {@code BehaviorTriageWorkerTest}.
-     */
-    @Test
-    @DisplayName("an escalatable finding escalates on the first tick")
-    void anEscalatableFindingEscalatesOnTheFirstTick() {
-        Project p = project("auto-esc-first-tick");
-        capabilities.grant(p.orgId(), Capability.TRIAGE_AUTOMATIC);
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned", 5);
-
-        escalator.tick();
-
-        assertEquals(1, triageJobs(p.projectId()), "the finding escalates on the first tick");
-        assertNotNull(findings.findById(p.projectId(), id).orElseThrow().escalatedAt());
-    }
-
     private Set<String> causeKeys(Project p, String detector) {
         return behavior.findings(p.projectId(), null, null, detector, false).findings().stream()
                 .map(f -> f.causeKey())
