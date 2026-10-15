@@ -50,7 +50,10 @@ record TenantPathResolverTest(TenantPathResolver resolver, TenantService tenants
         // Alice's project slug under Bob's own org: the slug must be looked up within Bob's org only.
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> resolver.requireProject(sessionFor(bob.user()), bob.org().slug(), alice.project().slug()));
+                () -> resolver.requireProject(
+                        sessionFor(bob.user()),
+                        bob.org().slug(),
+                        alice.project().slug()));
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
     }
 
