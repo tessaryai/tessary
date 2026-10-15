@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import type { FlaggedAnswer } from "../../api/types";
 import { FlaggedAnswers } from "./FlaggedAnswers";
 import { dateTime } from "./groundedness";
@@ -79,41 +79,16 @@ describe("FlaggedAnswers", () => {
     expect(screen.getByText(`Flagged with a score of 0.99 on ${on}. 2 sentences marked.`)).toBeTruthy();
   });
 
-  it("marks what the offsets say, even mid-word", () => {
-    renderList([answer({ answer: "abcdef", flaggedSentences: [{ start: 1, end: 3, score: 0.98 }] })]);
+  it.each([
+    ["marks what the offsets say, even mid-word", [{ start: 1, end: 3, score: 0.98 }], ["bc"]],
+    ["draws overlapping ranges once, as the first mark", [{ start: 2, end: 6, score: 0.98 }, { start: 0, end: 4, score: 0.99 }], ["abcd"]],
+    ["cuts a range that runs past the end at the end", [{ start: 3, end: 99, score: 0.98 }], ["def"]],
+    ["draws no mark for a range that starts past the end", [{ start: 0, end: 2, score: 0.98 }, { start: 10, end: 20, score: 0.99 }], ["ab"]],
+  ])("%s", (_case, flaggedSentences, marked) => {
+    renderList([answer({ answer: "abcdef", flaggedSentences })]);
     const { text, marks } = drawnAnswer();
-    expect(marks.map((m) => m.textContent)).toEqual(["bc"]);
+    expect(marks.map((m) => m.textContent)).toEqual(marked);
     expect(text).toBe("abcdef");
-  });
-
-  it("draws overlapping ranges once, as the first mark", () => {
-    renderList([
-      answer({
-        answer: "abcdef",
-        flaggedSentences: [{ start: 2, end: 6, score: 0.98 }, { start: 0, end: 4, score: 0.99 }],
-      }),
-    ]);
-    const { text, marks } = drawnAnswer();
-    expect(marks.map((m) => m.textContent)).toEqual(["abcd"]);
-    expect(text).toBe("abcdef");
-  });
-
-  it("cuts a range that runs past the end at the end, and draws none for one that starts past it", () => {
-    renderList([answer({ answer: "abcdef", flaggedSentences: [{ start: 3, end: 99, score: 0.98 }] })]);
-    let drawn = drawnAnswer();
-    expect(drawn.marks.map((m) => m.textContent)).toEqual(["def"]);
-    expect(drawn.text).toBe("abcdef");
-    cleanup();
-
-    renderList([
-      answer({
-        answer: "abcdef",
-        flaggedSentences: [{ start: 0, end: 2, score: 0.98 }, { start: 10, end: 20, score: 0.99 }],
-      }),
-    ]);
-    drawn = drawnAnswer();
-    expect(drawn.marks.map((m) => m.textContent)).toEqual(["ab"]);
-    expect(drawn.text).toBe("abcdef");
   });
 
   it("shows the strongest sentence on the row and how many more were flagged", () => {
