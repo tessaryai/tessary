@@ -846,7 +846,7 @@ CREATE INDEX ix_span_payload_project_fts ON span_payload USING gin (project_id, 
                                           left(coalesce(output,''),100000)));  -- traces search, Global Search
 
 -- trace: the primary list surface, plus the rollup queue
-CREATE INDEX ix_trace_project_started  ON trace (project_id, started_at DESC);
+CREATE INDEX ix_trace_project_started_id ON trace (project_id, started_at DESC, id DESC);  -- 0042
 CREATE INDEX ix_trace_session          ON trace (project_id, session_id, started_at)
                                           WHERE session_id IS NOT NULL;
 CREATE INDEX ix_trace_session_ended    ON trace (project_id, session_id, ended_at DESC,

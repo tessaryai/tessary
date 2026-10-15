@@ -102,7 +102,7 @@ public class CaseSubstrateRepository {
      * headline, so that no headline can deny traffic the reader is looking at.
      *
      * <p>Unbounded on purpose, where {@code spansReceived} and its neighbours cap at a thousand. What
-     * makes an all-time count expensive is not the rows but the predicate: {@code ix_trace_project_started}
+     * makes an all-time count expensive is not the rows but the predicate: {@code ix_trace_project_started_id}
      * carries no {@code is_deleted}, so Postgres had to visit the heap for every candidate row to decide
      * whether it counted. {@code ix_trace_project_live} (migration 0021) is a partial index whose
      * definition is exactly this WHERE clause, which makes this an index-only scan and the cap
