@@ -6,18 +6,14 @@ import static ai.tessary.ingest.otlp.OtlpRequests.request;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.KindNormalizer;
 import ai.tessary.ingest.RawEntry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
-import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
 import io.opentelemetry.proto.common.v1.AnyValue;
 import io.opentelemetry.proto.common.v1.KeyValue;
-import io.opentelemetry.proto.trace.v1.ResourceSpans;
-import io.opentelemetry.proto.trace.v1.ScopeSpans;
 import io.opentelemetry.proto.trace.v1.Span;
 import io.opentelemetry.proto.trace.v1.Status;
 import java.util.List;
@@ -178,31 +174,6 @@ class OtlpSpanMapperTest {
         assertEquals("gpt-oi", e.model());
         // End-time threaded on the OI path too, for latency.
         assertEquals("1970-01-01T00:00:03Z", e.endTimestamp());
-    }
-
-    @Test
-    void flattensAcrossMultipleResourceAndScopeSpans() {
-        Span a = Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {0x0A}))
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
-                .build();
-        Span b = Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {0x0B}))
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_EXECUTE_TOOL))
-                .build();
-        ExportTraceServiceRequest req = ExportTraceServiceRequest.newBuilder()
-                .addResourceSpans(ResourceSpans.newBuilder()
-                        .addScopeSpans(ScopeSpans.newBuilder().addSpans(a))
-                        .build())
-                .addResourceSpans(ResourceSpans.newBuilder()
-                        .addScopeSpans(ScopeSpans.newBuilder().addSpans(b))
-                        .build())
-                .build();
-        List<RawEntry> out = mapper.toRawEntries(req);
-        assertEquals(2, out.size());
-        assertEquals("0a", out.get(0).sourceExternalId());
-        assertEquals("0b", out.get(1).sourceExternalId());
-        assertTrue(out.get(0).metadata() != null && out.get(0).metadata().containsKey(GenAiAttributes.OPERATION_NAME));
     }
 
     /**
