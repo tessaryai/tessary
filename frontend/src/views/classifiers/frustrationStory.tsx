@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * A frustration finding told as a rate of conversations: the share of this call site's conversations
- * frustrated with the agent since the onset, against the rate the call site learned as its normal. The
- * conversations themselves are a {@link FlaggedList}, shared with the case page, fed by
- * {@link frustrationRows} and {@link frustrationLoader}.
- *
- * <h2>Ruled at filing</h2>
- * A frustration finding never goes through triage: it is ruled positive when it is filed and opens its
- * case in the same step. So the header shows the ruling and the case it opened, never a triage button.
- */
+// A frustration finding is ruled positive when filed and opens its case in the same step, so the
+// header shows the ruling, never a triage button.
 import { Link } from "react-router-dom";
 import type { ProjectApi } from "../../api/client";
 import type { BehaviorFinding, FrustratedConversation, FrustrationDetail } from "../../api/types";
@@ -63,12 +55,7 @@ export function FrustrationHeader({
   );
 }
 
-/**
- * "What changed" for a rate of flagged trials: the rate chart tool error uses, then two pins. Pin 1 is the
- * current rate in the caller's noun; pin 2 is the reference rate, with the caller's reference words, how far
- * the current rate sits from it, and the caller's line on when a trial counts. Every word that differs by
- * classifier comes from the caller.
- */
+/** Every word that differs by classifier comes from the caller. */
 export function RateFigure({
   rate,
   label,
@@ -80,9 +67,7 @@ export function RateFigure({
   thresholdLine,
 }: {
   rate: FrustrationDetail["rate"];
-  /** The chart's name. */
   label: string;
-  /** What the rate counts, plural: "sessions". */
   unit: string;
   /** Pin 1's claim after "N% of <unit>": "are frustrated". */
   flagged: string;
@@ -115,7 +100,6 @@ export function RateFigure({
   );
 }
 
-/** "What changed": the rate figure in sessions, with frustration's words. */
 export function FrustrationRate({ detail }: { detail: FrustrationDetail }) {
   return (
     <RateFigure
@@ -131,10 +115,8 @@ export function FrustrationRate({ detail }: { detail: FrustrationDetail }) {
   );
 }
 
-/** Sessions read per page past the first. */
 const PAGE_SIZE = 50;
 
-/** A frustrated session as a flagged row: the flagged trace's question is the part the classifier judged. */
 function frustrationRow(c: FrustratedConversation): FlaggedRow {
   return {
     id: c.conversationId,
@@ -149,7 +131,6 @@ function frustrationRow(c: FrustratedConversation): FlaggedRow {
   };
 }
 
-/** The frustrated sessions a finding came with, as the list's first page. */
 export function frustrationRows(detail: FrustrationDetail): FlaggedPage {
   return {
     rows: detail.conversations.map(frustrationRow),
@@ -158,7 +139,6 @@ export function frustrationRows(detail: FrustrationDetail): FlaggedPage {
   };
 }
 
-/** Reads a finding's frustrated sessions a page at a time, the whole list or one cause's. */
 export function frustrationLoader(api: ProjectApi, findingId: string): FlaggedLoader {
   return async (filter, cursor) => {
     const page = await api.getFrustratedSessions(findingId, { limit: PAGE_SIZE, cursor, cause: filter });
@@ -166,10 +146,6 @@ export function frustrationLoader(api: ProjectApi, findingId: string): FlaggedLo
   };
 }
 
-/**
- * The words frustration's list uses. Its pane draws only the flagged message's mark and dims nothing, so
- * it reads as a conversation rather than as one part judged among others.
- */
 export const FRUSTRATION_LIST_COPY: {
   listLabel: string;
   unit: [string, string];

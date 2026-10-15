@@ -1,34 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Settings → Git integration.
- *
- * The repository connection is administration — a credential binding the whole
- * project depends on — so it lives in Settings with the other credentials.
- *
- * Every Run RCA is refused without it, because the sandboxed agent has no repo
- * to clone, and it UPGRADES Layer-2 triage. Layer-2 triage runs
- * either way: with a repo it rules a finding against the committed spec and the
- * code, and without one it rules from the finding's own trace evidence. The
- * difference is the strength of the ruling, not whether there is one, and the
- * Classifiers page says which lane it got rather than sending anyone here.
- *
- * Three connect paths, all server-verified:
- *   1. Install the GitHub App (the hosted or BYO redirect) — the backend
- *      callback returns with ?connected=1, with ?install_select=<token> when it
- *      resolved more than one candidate repo and a human has to pick, or with
- *      ?github_error=<code> when it failed. Every one of those used to land on
- *      the Setup page; that page is gone, and this is the only surface that
- *      binds a repository, so the callbacks land here.
- *   2. Bind an owner/name directly, for a repo the app already reaches — or,
- *      with a pasted personal access token, a repo no App installation
- *      reaches at all (the PAT fallback).
- *   3. No App configured anywhere yet: "Set up your own GitHub App" runs
- *      GitHub's manifest flow to register one interactively and store
- *      its credentials, landing back here with ?github_app_connected=1 —
- *      then path 1 installs it on the repos to observe.
- * The picker's choice is re-validated against the sealed token server-side, so
- * the list is a convenience and a tampered pick is rejected.
- */
+// The only surface that binds a repository, so the GitHub App install and manifest callbacks land
+// here (?connected, ?install_select, ?github_error, ?github_app_connected). The picker's choice is
+// re-validated server-side, so a tampered pick is rejected.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -49,8 +22,7 @@ export function GitIntegration() {
     void qc.invalidateQueries({ queryKey: ["git-integration", api.base] });
   };
 
-  // The install callback lands back here. Refresh, say so once, and strip the flag
-  // so a reload doesn't re-toast.
+  // Strip the flag so a reload does not re-toast.
   const justConnected = params.get("connected") === "1";
   useEffect(() => {
     if (!justConnected) return;
@@ -62,10 +34,7 @@ export function GitIntegration() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justConnected]);
 
-  // The manifest wizard's callback lands back here once GitHub hands over the newly-registered
-  // App's credentials and GithubAppConfigService has persisted + live-applied them. The App
-  // is now configured deployment-wide, but THIS project still has no repo bound — nudge straight
-  // into the install redirect the App-configured install-url now serves instead of dead-ending.
+  // The App is now configured deployment-wide but this project has no repo, so go straight to install.
   const justSetUpApp = params.get("github_app_connected") === "1";
   useEffect(() => {
     if (!justSetUpApp) return;
@@ -76,8 +45,6 @@ export function GitIntegration() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justSetUpApp]);
 
-  // A failed connect redirects back here with ?github_error=<code> rather than dying on a raw JSON
-  // error page. Surface it and leave the user on the page that can retry.
   const githubError = params.get("github_error");
   useEffect(() => {
     if (!githubError) return;
@@ -91,7 +58,6 @@ export function GitIntegration() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [githubError]);
 
-  // More than one candidate repo behind the installation — the human picks.
   const selectToken = params.get("install_select");
   const optionsQ = useQuery({
     queryKey: ["git-installation-options", api.base, selectToken],
@@ -100,8 +66,7 @@ export function GitIntegration() {
   });
 
   const [connectOpen, setConnectOpen] = useState(false);
-  // The App routes stay one disclosure back. A token works on every deployment; an App needs one
-  // registered first, so leading with it is what sent self-hosters through three dead buttons.
+  // A token works on every deployment; leading with the App sent self-hosters through dead buttons.
   const [appOpen, setAppOpen] = useState(false);
 
   const installRedirect = useMutation({
@@ -109,8 +74,6 @@ export function GitIntegration() {
     onSuccess: (res) => {
       window.location.href = res.url;
     },
-    // No hosted app configured (self-hosted, or the app isn't set up): fall back
-    // to binding a repo by name rather than dead-ending.
     onError: () => setConnectOpen(true),
   });
 
@@ -122,9 +85,7 @@ export function GitIntegration() {
     onError: () => setConnectOpen(true),
   });
 
-  // GitHub's manifest flow needs a POSTed `manifest` form field — too large for a query string —
-  // so this can't be a window.location.href redirect like the two above. Build a throwaway <form>,
-  // fill it, submit it, and let the browser navigate away; nothing here runs after that.
+  // The manifest must be POSTed (too large for a query string), so submit a throwaway form.
   const manifestSetup = useMutation({
     mutationFn: api.getGithubManifestStart,
     onSuccess: (res) => {

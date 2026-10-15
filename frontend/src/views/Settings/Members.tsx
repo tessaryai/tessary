@@ -31,7 +31,6 @@ const ROLE_LABELS: Record<OrgRole, string> = {
   billing: "Billing",
 };
 
-/** One-line capability summary per role, shown in the role-card row. */
 const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
   owner: "Billing, deletion, and granting owner",
   admin: "Members and capabilities",
@@ -40,10 +39,8 @@ const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
   billing: "Invoices and plan only",
 };
 
-/** Roles assignable from the UI, in descending privilege order. */
 const ASSIGNABLE_ROLES: OrgRole[] = ["owner", "admin", "member", "viewer", "billing"];
 
-/** Tiny inline lock. Mirrors the design's RBAC note. */
 function LockGlyph() {
   return <Lock size={13} strokeWidth={1.7} aria-hidden="true" className="shrink-0" />;
 }
@@ -71,7 +68,6 @@ function invitedAgo(iso: string): string {
 export function Members() {
   const { orgSlug } = useTenant();
   const { user } = useAuth();
-  // The organization by name wherever the page refers to it; the slug is the URL segment only.
   const orgName = user?.orgs?.find((o) => o.slug === orgSlug)?.name ?? orgSlug;
   const qc = useQueryClient();
   const toast = useToast();
@@ -126,8 +122,7 @@ export function Members() {
   });
 
   const me = members.data?.find((m) => m.user_id === user?.id);
-  // Mirrors the server MEMBERS_MANAGE permission (owner + admin). Affordance only —
-  // the backend re-checks on every mutating call, so this is purely to hide controls.
+  // Affordance only: the backend re-checks MEMBERS_MANAGE on every write.
   const canManage = me?.role === "owner" || me?.role === "admin";
   const isOwner = me?.role === "owner";
 
@@ -212,7 +207,6 @@ export function Members() {
         }
       />
 
-      {/* Role legend — the five RBAC roles and what each can do. */}
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
         {ASSIGNABLE_ROLES.map((rl) => (
           <div key={rl} className="rounded-card bg-surface px-2.5 py-2.5">
@@ -224,7 +218,6 @@ export function Members() {
         ))}
       </div>
 
-      {/* Roster */}
       {members.isLoading ? (
         <div className="flex items-center gap-2 py-10 text-small text-muted">
           <Spinner size="sm" /> Loading members…
@@ -233,8 +226,7 @@ export function Members() {
         <ErrorNote error={members.error} />
       ) : roster.length === 0 ? (
         <div className="py-12 text-center">
-          {/* Never "invite someone": whoever is reading this is a member, so an empty roster is a
-              failed read, and the permission to invite is itself read off the roster. */}
+          {/* Whoever reads this is a member, so an empty roster is a failed read. */}
           <p className="text-body text-fg">Members did not load</p>
           <p className="text-small text-muted mt-1">Reload the page to try again.</p>
         </div>
@@ -247,7 +239,6 @@ export function Members() {
           </div>
           {roster.map((m, i) => {
             const isYou = m.user_id === user?.id;
-            // Admins can manage non-owners; only an owner can edit/remove another owner.
             const targetIsOwner = m.role === "owner";
             const canEditRow = canManage && !isYou && (isOwner || !targetIsOwner);
             const canRemoveRow = canManage && !isYou && (isOwner || !targetIsOwner);
@@ -282,7 +273,6 @@ export function Members() {
                       }}
                       className="h-7 text-small focus:border-border-strong">
                       {ASSIGNABLE_ROLES.map((rl) => (
-                        // Only an owner can grant the owner role.
                         <option key={rl} value={rl} disabled={rl === "owner" && !isOwner}>
                           {roleLabel(rl)}
                         </option>
@@ -314,7 +304,6 @@ export function Members() {
         </div>
       )}
 
-      {/* RBAC lock note — only an owner can grant the owner role; the selectors disable it otherwise. */}
       <div className="flex items-center gap-2 rounded-card bg-raised px-3 py-2 text-muted">
         <LockGlyph />
         <span className="text-small text-muted">
@@ -323,7 +312,6 @@ export function Members() {
         </span>
       </div>
 
-      {/* Sign-up policy (owner + admin): who may create an account on this install. */}
       {canManage && (
         <div className="mt-6">
           <div className="flex items-baseline gap-2.5">
@@ -397,7 +385,6 @@ export function Members() {
         </div>
       )}
 
-      {/* Pending invitations (owner only) */}
       {canManage && pending.length > 0 && (
         <div className="mt-6">
           <div className="flex items-baseline gap-2.5">
@@ -435,7 +422,6 @@ export function Members() {
         </div>
       )}
 
-      {/* Invite modal (owner only) */}
       <Modal
         open={inviteOpen}
         onClose={closeInvite}
@@ -483,7 +469,6 @@ export function Members() {
             {(p) => (
               <Select {...p} value={role} onChange={(e) => setRole(e.target.value as OrgRole)}>
                 {ASSIGNABLE_ROLES.map((rl) => (
-                  // Only an owner can invite another owner.
                   <option key={rl} value={rl} disabled={rl === "owner" && !isOwner}>
                     {roleLabel(rl)}
                   </option>

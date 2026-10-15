@@ -1,20 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * One classifier's configure page: switch it on or off, see whether it is healthy, choose where it runs, tune it,
- * and read what it found.
- *
- * Enabling a classifier and tuning its bar are things you do when you set the product up and then rarely again, so
- * this page sits off the Classifiers charts rather than on them, reached from their Configure menu.
- *
- * A drift classifier's Findings section stays un-gated on purpose: Triage is the alert list, this is the lead list
- * for one classifier, and a gated list would be empty forever.
- *
- * NOTHING ESCALATES ON ITS OWN, unless an org has asked it to. A classifier firing writes a row and stops: grading a
- * flagged trace costs a grader call and ruling a finding costs an E2B microVM, so the sweep is not entitled to spend
- * either. That makes this page one of the places both escalations start, from a person who has looked.
- * (`triage_automatic_enabled` presses the second button unattended, off by default and toggled in Settings →
- * Features; nothing on this page changes when it is.)
- */
+// Nothing escalates on its own unless the org enabled `triage_automatic_enabled`: grading costs a
+// grader call and ruling a finding a microVM, so this page is where a person starts both.
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
@@ -52,34 +38,27 @@ import { CallSitesSection, UNSCOPED_DETECTORS } from "./CallSitesSection";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
 import { CONTAINER, Fact, PROVIDER_PAUSES, ResolveVerbs, VerbButton, ago, chainWords } from "./shared";
 
-/** `ClassifierView.readiness` while Malformed Output has no call site schema to validate against. */
 const WAITING_ON_SCHEMAS = "waiting_on_schemas";
 
 const SCHEMAS_EXPLAINED =
   "Waiting on schemas. No call site declares an output schema yet, so there is nothing to check outputs against. " +
   "Schemas arrive when your repository is connected and assessed.";
 
-/** The rate classifiers, by what each one flags. Tool Errors is a rate too, but per tool: see `howAFindingOpens`. */
 const RATE_SUBJECTS: Record<string, string> = {
   frustration: "conversations",
   groundedness: "answers",
   malformed_output: "outputs",
 };
 
-/** What a drift classifier learns, and where, as the explanation names it. */
 const DRIFT_SUBJECTS: Record<string, string> = {
   cost_drift: "how cost per turn usually spreads on each call site",
   duration_drift: "how durations usually spread on each call site and each tool it measures",
 };
 
-// A separate lazy chunk, not a static import: nobody opening this page pays for the debug section's code until
-// they actually expand its disclosure. See `views/classifiers/debug/`.
 const DebugSection = lazy(() => import("./debug/DebugSection"));
 
-/** Detections shown on the page. Enough to read a pattern, short of a second page. */
 const DETECTION_LIMIT = 25;
 
-/** How often the page rereads Groundedness's status: a model going down shows within a minute. */
 const GROUNDEDNESS_STATUS_POLL_MS = 30_000;
 
 export function ClassifierConfigurePage() {
@@ -104,7 +83,6 @@ export function ClassifierConfigurePage() {
           </Link>
         </>
       )}
-      {/* Keyed so a move to another classifier's page reseeds every form from that classifier. */}
       {classifier && <Configure key={classifier.id} classifier={classifier} basePath={basePath} />}
     </div>
   );
@@ -123,7 +101,6 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
   const healthQ = useQuery({ queryKey: ["classifier-health", api.base], queryFn: api.listClassifierHealth });
   const health = (healthQ.data ?? []).find((h) => h.classifier_id === classifier.id);
 
-  // Groundedness's model runs outside Tessary, so its page reads whether that model is answering.
   const groundednessQ = useQuery({
     queryKey: groundednessStatusKey(api.base, classifier.id),
     queryFn: () => api.getGroundednessStatus(classifier.id),
@@ -151,7 +128,6 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
     if (enabled && classifier.detector === FRUSTRATION_DETECTOR) return setModal("frustration-enable");
     if (isGroundedness) {
       if (!enabled) return setModal("groundedness-turn-off");
-      // A model that has never answered needs setting up first; one that has scored before just resumes.
       if (!groundedness || neverSetUp(groundedness)) return setModal("groundedness-enable");
     }
     toggleM.mutate(enabled);
@@ -169,7 +145,6 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
         subtitle={classifier.description ?? "No description."}
         actions={
           <>
-            {/* Grey words beside a warning icon; the error itself is spelled out in Status. */}
             {health?.status === "failed" && (
               <span className="flex items-center gap-1.5 text-small text-fg-secondary whitespace-nowrap">
                 <AlertTriangle size={13} strokeWidth={1.75} className="text-warning shrink-0" aria-hidden="true" />
@@ -212,7 +187,6 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
                 conversations.
               </p>
             )}
-            {/* Keyed so a switch to another classifier seeds the form from that classifier's list. */}
             <CallSitesSection key={classifier.id} classifier={classifier} />
           </Section>
         )}
@@ -282,14 +256,13 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
   );
 }
 
-/** Detections over the returned window, summed from the daily buckets; undefined while the volume is unknown. */
 function sevenDayCount(volume: ClassifierDailyVolume | undefined, id: string): number | undefined {
   if (!volume) return undefined;
   const row = (volume.classifiers ?? []).find((c) => c.classifier_id === id);
   return (row?.counts ?? []).reduce((a: number, b: number) => a + b, 0);
 }
 
-/** The one plain-words answer to "when does this open a finding", by kind. No numbers: the bar lives on the server. */
+/** No numbers: the bar lives on the server. */
 function howAFindingOpens(detector: string): string {
   if (detector === "tool_error") {
     return "This classifier learns the usual failure rate for each tool, across every call site that calls it. A finding opens when a tool's recent failure rate rises clearly above that baseline. It opens nothing while it is still learning.";
@@ -305,7 +278,6 @@ function howAFindingOpens(detector: string): string {
   return "A finding opens when enough detections land within one window. This classifier learns no baseline, so it judges from its first detection.";
 }
 
-/** What the status beside the switch says. Groundedness says what its model is doing when that is the news. */
 function StatusWords({
   classifier,
   count,
@@ -316,7 +288,6 @@ function StatusWords({
   classifier: Classifier;
   count: number | undefined;
   groundedness: GroundednessStatus | undefined;
-  /** A setup prompt was copied in this browser and the model hasn't answered yet. */
   settingUp: boolean;
   providersPath: string;
 }) {
@@ -337,7 +308,6 @@ function StatusWords({
     );
   }
 
-  // A classifier that has nothing to judge yet is not quiet: "quiet 7d" would read as clean.
   const waiting = classifier.readiness === WAITING_ON_SCHEMAS;
   // A silent tripwire is healthy: it reads faint, never as a broken dash.
   const quiet = count === 0;
@@ -353,7 +323,6 @@ function StatusWords({
   );
 }
 
-/** What Groundedness says in place of the detection count, or null to keep the count. */
 type GroundednessStatusWords = { text: string; kind: "plain" | "faint" | "setting-up" | "alert" };
 
 function groundednessWords(status: GroundednessStatus, settingUp: boolean): GroundednessStatusWords | null {
@@ -365,8 +334,6 @@ function groundednessWords(status: GroundednessStatus, settingUp: boolean): Grou
     case "off":
       return { text: "off", kind: "faint" };
     case "on":
-      // Dev scores continuously, so the detections say it all. Production runs on a schedule, and the last run is
-      // what tells you the schedule is holding.
       return status.mode === "production" && status.last_caught_up_at
         ? { text: `last run ${clockTime(status.last_caught_up_at)}`, kind: "plain" }
         : null;
@@ -393,7 +360,6 @@ function GroundednessWords({ status }: { status: GroundednessStatusWords }) {
   );
 }
 
-/** Where the classifier runs, as Status names it. */
 function callSitesFact(classifier: Classifier): string {
   if (UNSCOPED_DETECTORS.has(classifier.detector)) return "Every tool";
   const count = classifier.call_site_ids?.length;
@@ -416,15 +382,12 @@ function StatusBlock({
   onRestart: () => void;
 }) {
   const groundednessState = groundedness ? rowState(groundedness) : null;
-  // The model's facts once it has run; before that, or while off, the generic ones.
   const modelFacts = groundedness != null && (groundednessState === "on" || groundednessState === "not_scoring");
   const paused = classifier.readiness ? PROVIDER_PAUSES[classifier.readiness] : undefined;
   const callSites = callSitesFact(classifier);
 
   return (
     <>
-      {/* A failing sweep is the one thing here that changes what you do next, so it sits above the facts as a
-          callout rather than as one more line inside them. */}
       {health?.status === "failed" && (
         <div
           className="flex items-start gap-2 border border-border-strong rounded-card py-2.25 px-2.75 mb-3 text-small"
@@ -474,10 +437,6 @@ function StatusBlock({
   );
 }
 
-/**
- * A paused provider-backed classifier: why it stopped, where to fix it, and a Retry that re-enables it, which lifts
- * the pause (or says why it cannot) instead of waiting out the sweep's own re-check.
- */
 function ProviderPauseCallout({
   classifier,
   explained,
@@ -513,10 +472,6 @@ function ProviderPauseCallout({
   );
 }
 
-/**
- * Groundedness's model stopped answering: since when, and the way back, which is the setup guide's restart section
- * run by a coding agent where the model lives.
- */
 function NotScoringCallout({ label, onRestart }: { label: string; onRestart: () => void }) {
   return (
     <div className="border border-border-strong rounded-card py-2.25 px-2.75 mb-3 text-small">
@@ -536,13 +491,7 @@ function NotScoringCallout({ label, onRestart }: { label: string; onRestart: () 
   );
 }
 
-/**
- * This drift classifier's findings: everything it has opened, with its ruling.
- *
- * <p>Ungated. Every finding carries its own ruling, so the thing to show is what triage made of this classifier's
- * output, which is also the only calibration signal it has. A classifier producing nothing but `negative` rulings is
- * one measuring the wrong thing.
- */
+/** Ungated: the rulings are this classifier's only calibration signal. */
 function Findings({ classifier }: { classifier: Classifier }) {
   const { api } = useTenant();
   const qc = useQueryClient();
@@ -552,7 +501,6 @@ function Findings({ classifier }: { classifier: Classifier }) {
     queryKey: key,
     queryFn: () => api.listBehaviorFindings(classifier.detector),
   });
-  // Triage lists the same findings, so a ruling or a triage run here must refresh it too.
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: key });
     void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
@@ -597,13 +545,7 @@ function Findings({ classifier }: { classifier: Classifier }) {
   );
 }
 
-/**
- * One finding: what moved, where triage left it, and the three things you can do about it.
- *
- * <p>The machine action and the two human verdicts sit on opposite ends of the row because they are different kinds
- * of act: <em>Run triage</em> spends a microVM to audit the claim, the other two are the decision, and stacking all
- * three as peers invited pressing the expensive one by reflex.
- */
+/** Run triage spends a microVM, so it sits apart from the two human verdicts to avoid a reflex press. */
 function FindingRow({
   finding,
   busy,
@@ -629,15 +571,13 @@ function FindingRow({
       <div className="flex flex-wrap items-center gap-2 mt-1.75">
         <VerbButton
           kind="filled"
-          // Once per cause: a second press lands on the same job rather than buying a second ruling, so the button
-          // stops offering after it has been pressed.
+          // A second press lands on the same job.
           disabled={busy || triaged || inFlight}
           onClick={onAnalyze}
         >
           {triaged ? "Triaged" : inFlight ? "Triaging…" : "Run triage"}
         </VerbButton>
-        {/* A ruling freezes the finding by construction (decision 1): once triaged, every verb on it 409s, so the
-            verbs stop being offered rather than staying up as a dead override. */}
+        {/* A ruling freezes the finding: every verb on it 409s. */}
         {!triaged && <ResolveVerbs busy={busy} onResolve={onResolve} />}
         {summary && (
           <button
@@ -693,11 +633,7 @@ function Detections({ classifier }: { classifier: Classifier }) {
   );
 }
 
-/**
- * Detector evidence is heterogeneous JSON, e.g. `{matched, pattern, field}` from the regex detectors. Flatten the
- * top level rather than special-casing each detector: every detector's evidence is small and bounded by
- * construction (never the trace payload).
- */
+/** Evidence is small and bounded by construction (never the trace payload), so flatten the top level. */
 function evidenceSummary(json: string | null | undefined): string | null {
   if (!json) return null;
   let parsed: unknown;
@@ -722,17 +658,11 @@ function truncate(s: string, max: number): string {
 }
 
 /**
- * One detection = one trace this classifier tripped on. Rows open the session the trace belongs to, focused on the
- * flagged span, and the trace itself for anonymous traffic with no session; a context-grain detection (no trace_id)
- * has nothing to open and stays inert rather than pretending to be a link.
- *
- * <p>There is no per-detection "Run analysis". A detection is a Layer-1 flag, a filter, not evidence, and running
- * graders on one would confirm something nobody had decided was worth confirming. Analysis is offered on the
- * finding, where the cause has already been made.
+ * A context-grain detection has no trace_id and stays inert. No per-detection "Run analysis": a
+ * detection is a Layer-1 filter, not evidence.
  */
 export function DetectionRow({ event }: { event: ClassifierEvent }) {
   const summary = evidenceSummary(event.evidence_json);
-  // Severity reads as text, never a red pill.
   const severe = event.severity === "warn" || event.severity === "critical";
 
   const body = (

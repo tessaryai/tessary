@@ -23,21 +23,9 @@ import {
   useToast,
 } from "../../ui";
 
-/**
- * Settings → API keys.
- *
- * Managed keys each carry a scope (write / query / admin) and an optional
- * and can be rotated.
- * The screen still pivots on one fragile moment — the plaintext you can only see
- * once, at create or rotate — so that reveal owns the design weight: a focused
- * modal, a single copy action, an honest warning, a deliberate "I've saved it".
- * The rest is a quiet ledger plus an audit trail of who did what, when.
- */
-
 const SCOPES: { value: KeyScope; label: string; hint: string }[] = [
   { value: "write", label: "Write", hint: "Ingest traces (POST /v1/traces)." },
   { value: "query", label: "Query", hint: "Read API (POST /v1/query/*)." },
-  // "admin" is the backend's wire value (write/query/admin) — the superset scope.
   { value: "admin", label: "Admin", hint: "Tool access over MCP (Model Context Protocol), plus write and query." },
 ];
 
@@ -59,11 +47,9 @@ export function ApiKeys() {
   const keys = useQuery({ queryKey: ["api-keys", api.base], queryFn: api.listApiKeys });
   const audit = useQuery({ queryKey: ["api-keys-audit", api.base], queryFn: api.listApiKeyAudit });
 
-  // Modal lifecycle: closed → form (create/rotate inputs) → reveal (one-time secret).
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [scope, setScope] = useState<KeyScope>("write");
-  // When set, the modal is in rotate mode for this key (name/scope/env locked).
   const [rotating, setRotating] = useState<ApiKey | null>(null);
   const [issued, setIssued] = useState<{ plaintext: string; name: string } | null>(null);
 
@@ -74,7 +60,6 @@ export function ApiKeys() {
         scope,
       }),
     onSuccess: (r) => {
-      // IssuedKeyResponse: { key, plaintext, warning }. Reveal the plaintext once.
       setIssued({ plaintext: r.plaintext, name: r.key.name });
       qc.invalidateQueries({ queryKey: ["api-keys", api.base] });
       qc.invalidateQueries({ queryKey: ["api-keys-audit", api.base] });
@@ -218,7 +203,6 @@ export function ApiKeys() {
         )}
       </Section>
 
-      {/* Create / rotate → one-time reveal, in a single focused modal. */}
       <Modal
         open={modalOpen}
         onClose={closeModal}

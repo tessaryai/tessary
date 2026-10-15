@@ -4,16 +4,8 @@ import { cn } from "../../ui/cn";
 import { useDensity } from "../../ui/density";
 import type { Density } from "../../ui/density";
 
-/**
- * Account-level display preferences, rendered as a section under Settings →
- * Organization via {@link AppearanceControls}.
- *
- * Theme is NOT a preference — the app is dark only (2026-07 redesign); the
- * toggle was removed with the light theme. Density is wired to its live context
- * so changes apply app-wide immediately.
- */
+/** Rendered under Settings → Organization. Theme is not a preference: the app is dark only. */
 
-/** Compact two-option segmented control, token-driven to match the design. */
 function Segmented<T extends string>({
   value,
   options,

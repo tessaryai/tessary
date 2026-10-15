@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ClassifierDebugSweep } from "../../../../api/types";
 
-/**
- * The sweep-job row in full: cursor, lease, attempts. Renders for every classifier regardless of
- * family, since every built-in dispatches through the same job queue.
- */
 export function CommonStatus({ sweep }: { sweep: ClassifierDebugSweep }) {
   return (
     <section>

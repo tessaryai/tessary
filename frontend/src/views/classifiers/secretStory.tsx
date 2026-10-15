@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * A secret leak told as a story: which masked key leaked, into which outputs, over what stretch of
- * time — and whether a copy of it is still sitting in trace storage unredacted.
- *
- * <h2>Why this is not {@link ./rateStory}</h2>
- * A secret leak has no reference rate: it never "was normal at some level and moved". One leak is
- * already the whole claim, so there is nothing to plot as before-and-after. What a reader needs
- * instead is WHEN each leak happened and WHICH key it was — a timeline with one lane per key, not a
- * bar chart with nothing to compare against.
- *
- * <h2>A masked key, never the credential</h2>
- * Every string this file prints is already masked server-side (`SecretLeakKeyView.masked`,
- * `SecretLeakLeakView.masked` — provider prefix, then `…`, then the last four characters). Nothing
- * here ever sees the raw match, so there is no redaction logic to get wrong on this side of the wire.
- */
+// A leak has no reference rate, so it is a timeline with one lane per masked key, not a before/after.
+// Every string here is masked server-side; this side never sees the raw match.
 import { useMemo } from "react";
 import type { components } from "../../api/generated/schema";
 import type { BehaviorFinding } from "../../api/types";
@@ -24,8 +11,7 @@ import { Pin, PinList } from "./rateStory";
 type SecretLeakDetail = components["schemas"]["SecretLeakDetail"];
 type SecretLeakLeak = components["schemas"]["SecretLeakLeakView"];
 
-/** How a leak was left in trace storage. `null`/`"unknown"` are the same forward-only gap (decision
- *  #2): a leak recorded before this classifier started stamping a masked key carries no verdict. */
+/** `null` and "unknown" are the same gap: a leak recorded before masked keys carries no verdict. */
 function storedTone(stored: string): "raw" | "redacted" | "unknown" {
   return stored === "raw" ? "raw" : stored === "redacted" ? "redacted" : "unknown";
 }
@@ -49,15 +35,12 @@ function isSameDay(a: Date, b: Date): boolean {
   return a.toDateString() === b.toDateString();
 }
 
-/** "10:02 today" beside a recent leak, "14 Sep, 10:02" once it isn't the day being read. */
 function whenShort(iso: string, now: Date): string {
   const d = new Date(iso);
   const time = d.toLocaleTimeString(undefined, CLOCK);
   return isSameDay(d, now) ? `${time} today` : `${d.toLocaleDateString(undefined, DAY_MONTH)}, ${time}`;
 }
 
-/** "14 minutes ago" / "3 hours ago" / "2 days ago" — spelled out, because this is a headline, not a
- *  table cell abbreviation. */
 function relativeWords(iso: string, now: Date): string {
   const ms = now.getTime() - new Date(iso).getTime();
   if (!Number.isFinite(ms) || ms < 60_000) return "moments ago";
@@ -69,8 +52,6 @@ function relativeWords(iso: string, now: Date): string {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
-/** A leak inside this window still reads as "still leaking"; past it, the finding reads as history
- *  even though it has not formally closed. A day is the same grain the timeline itself ticks in. */
 const STILL_LEAKING_WITHIN_MS = 24 * 60 * 60 * 1000;
 
 function latestLeakOf(leaks: SecretLeakLeak[]): SecretLeakLeak | null {
@@ -78,20 +59,11 @@ function latestLeakOf(leaks: SecretLeakLeak[]): SecretLeakLeak | null {
   return leaks.reduce((a, b) => (new Date(b.at ?? 0).getTime() > new Date(a.at ?? 0).getTime() ? b : a));
 }
 
-/**
- * Where to send a reader who clicks a trace id. The finding page and the case page resolve relative
- * links differently (see `FindingPage.tsx`'s note on why `..` cannot be reused blind), so this is
- * handed in rather than hard-coded.
- */
+/** The finding and case pages resolve relative links differently, so this is handed in. */
 export type TraceLinker = (traceId: string, spanId?: string | null) => string;
 
 const LINK_CLASS = "font-mono text-link hover:text-link-hover transition-colors";
 
-/**
- * The leak timeline: one lane per masked key, one dot per leaking output, coloured by whether that
- * copy sits in trace storage unredacted. The bordered card also carries the legend, so a reader never
- * has to look elsewhere to read a dot's colour.
- */
 export function LeakTimeline({ secretLeak }: { secretLeak: SecretLeakDetail }) {
   const now = useMemo(() => new Date(), []);
   const { keys, leaks } = secretLeak;
@@ -228,11 +200,7 @@ function LegendDot({ colour, label }: { colour: string; label: string }) {
   );
 }
 
-/**
- * The three numbered observations a leak timeline is read by: is it still leaking, when it started,
- * and whether any of it sits in storage unredacted. Third pin only renders when it has something to
- * say — most leaks are fully redacted, and a pin that always fires to say "none" is noise.
- */
+/** The third pin renders only when something sits unredacted; a pin that always says "none" is noise. */
 export function LeakPins({ secretLeak, linkToTrace }: { secretLeak: SecretLeakDetail; linkToTrace: TraceLinker }) {
   const now = useMemo(() => new Date(), []);
   const latest = latestLeakOf(secretLeak.leaks);
@@ -296,13 +264,8 @@ export function LeakPins({ secretLeak, linkToTrace }: { secretLeak: SecretLeakDe
 }
 
 /**
- * The finding's own header. Same anatomy as {@link ./rateStory.RateChart}'s header
- * (`FindingPage.tsx`'s `RateHeader`): breadcrumb, detector + call site kicker, a title naming the
- * claim, a subtitle carrying the numbers, and the one action available before triage.
- *
- * <p>A high-confidence secret leak opens its case straight from detection (decision: no triage
- * gate) — "Run triage" here is Layer-2 analysis, the same escalation every other finding offers, not
- * the case-opening decision.
+ * A high-confidence leak opens its case at detection; "Run triage" here is Layer-2 analysis, not the
+ * case-opening decision.
  */
 export function SecretHeader({
   secretLeak,

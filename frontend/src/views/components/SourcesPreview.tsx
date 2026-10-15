@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cn } from "../../ui";
 
-/** Logo glyph for a source row: first letter of the provider, on a quiet raised tile. */
 export function SourceGlyph({ provider, className }: { provider: string; className?: string }) {
   return (
     <span

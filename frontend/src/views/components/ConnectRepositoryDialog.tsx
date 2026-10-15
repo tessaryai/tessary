@@ -1,21 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The one dialog that binds a repository to a project, wherever the ask starts:
- * Settings → Git integration, the case page beside Run RCA, or the notice on an
- * RCA report that had no repo to read. All three open this, in place — someone
- * reading a failure should not lose their place to go configure something.
- *
- * An access token is the default and the GitHub App is the secondary path, which
- * is the reverse of how this used to read. The token is the only route that works
- * on every deployment: a self-hoster with no App configured used to meet three
- * buttons that dead-end before finding the field that binds a repo.
- *
- * Making a token is explained HERE rather than in a docs page, because the five
- * lines it takes are the whole distance between someone and a working connection.
- * The one unavoidable trip is github.com itself, which is the only place a token
- * can be minted; that opens in a new tab and leaves this dialog sitting where it
- * was, so nothing typed is lost.
- */
+// Opened in place from Settings, a case and an RCA report. A token leads because it works on every
+// deployment; the App path needs one registered first. Token creation is explained here because those
+// few lines are the whole distance to a working connection.
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, CircleAlert, ExternalLink } from "lucide-react";
@@ -23,11 +9,7 @@ import { useProjectApi } from "../../tenant/TenantContext";
 import { ApiError } from "../../api/types";
 import { Button, Field, Input, Modal, useToast } from "../../ui";
 
-/**
- * Split `owner/name` out of whatever someone pasted: a browser URL, an SSH-ish
- * `github.com/owner/name`, a `.git` suffix, or the bare slug. Returns null until
- * both halves are present, which is also what gates the submit button.
- */
+/** Null until both halves are present, which also gates submit. */
 export function parseRepo(input: string): { owner: string; name: string } | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
@@ -44,14 +26,8 @@ export function parseRepo(input: string): { owner: string; name: string } | null
 }
 
 /**
- * GitHub's template URL for a fine-grained token, prefilled as far as GitHub allows.
- *
- * `target_name` scopes the resource-owner dropdown, and the permission and expiry
- * arrive set. There is no parameter for the repository picker, so the repository
- * rides in `description` instead: that is the one prefillable field that renders as
- * readable text on GitHub's own form, which is where the person is standing when
- * they have to pick it. `name` is capped at 40 characters by GitHub, past which the
- * parameter is dropped rather than truncated.
+ * GitHub has no parameter for the repository picker, so the repository rides in `description`. GitHub
+ * drops a `name` over 40 characters rather than truncating it.
  */
 export function tokenTemplateUrl(repo: { owner: string; name: string } | null): string {
   const slug = repo ? `${repo.owner}/${repo.name}` : null;
@@ -76,7 +52,6 @@ export function ConnectRepositoryDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  /** Omitted where the App path has no home, e.g. the dialog opened from a case. */
   onUseGithubApp?: () => void;
 }) {
   const api = useProjectApi();
@@ -107,9 +82,7 @@ export function ConnectRepositoryDialog({
     },
   });
 
-  // Grey text with an error-colored icon, never red body copy: red passes contrast
-  // only in the large-or-bold class (DESIGN_SYSTEM.md § States).
-  // `||`, not `??`: a failure whose server message is empty would otherwise render no alert at all.
+  // `||`, not `??`: an empty server message would otherwise render no alert.
   const error = connect.error ? (connect.error as ApiError).detail || "The request failed. Try again." : null;
 
   return (

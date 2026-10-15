@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ClassifierDebugMetricBaseline, ClassifierDebugSketch } from "../../../../api/types";
 
-/**
- * cost_drift / duration_drift's per-(bucket × measure) window state: `metric_baseline` rows that no
- * other endpoint exposes. This is the family that prompted the debug screen: "0 baselines armed" on
- * the Classifiers page is a fact about these rows, and this is where you see which bucket, which
- * measure, and why.
- */
+/** `metric_baseline` rows no other endpoint exposes: which bucket and measure is armed, and why not. */
 export function MetricDriftDebug({ baselines }: { baselines: ClassifierDebugMetricBaseline[] }) {
   if (baselines.length === 0) {
     return (

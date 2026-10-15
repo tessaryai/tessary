@@ -2,14 +2,7 @@
 import { CodeXml } from "lucide-react";
 import { CopyButton } from "../../ui";
 
-/**
- * The paste-into-your-agent prompt anatomy: eyebrow + code surface (the linked guide's URL bright) + Copy
- * button. Shared by the connect gate and the Groundedness setup and restart modals.
- *
- * The bright token used to be `tessary.call_site.id`, back when the connect prompt spelled the whole ask
- * out inline. Every prompt is now one sentence pointing at a guide, so the URL is the part a reader's eye
- * should land on: it is the only thing in the sentence they can go and check.
- */
+/** The guide's URL renders bright: it is the only part of the prompt a reader can go and check. */
 export function PromptBlock({
   label,
   prompt,
@@ -18,7 +11,6 @@ export function PromptBlock({
 }: {
   label: string;
   prompt: string;
-  /** The part of the prompt to render bright, normally the guide's URL. */
   highlight?: string;
   onCopy: () => void;
 }) {

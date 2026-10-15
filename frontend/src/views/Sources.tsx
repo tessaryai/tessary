@@ -18,12 +18,7 @@ import {
 } from "../ui";
 import { OtlpConnect } from "./components/SourceConnect";
 
-/**
- * Settings → Sources. Sources are the OTLP/SDK ingest endpoints that feed real
- * spans into the substrate; a project's telemetry is bound to call sites by the
- * `tessary.call_site.id` the SDK stamps, not by any server-side mapping. This
- * screen lists connected sources and hands the user the OTLP connect story.
- */
+/** Telemetry binds to call sites by the `tessary.call_site.id` the SDK stamps, not a server-side mapping. */
 export function Sources() {
   const api = useProjectApi();
   const nav = useNavigate();
@@ -39,8 +34,6 @@ export function Sources() {
         subtitle="Forward your OpenTelemetry traces to Tessary so the classifiers can watch them."
         actions={
           <div className="flex items-center gap-2">
-            {/* Ungated: this was behind `graders_enabled`, and importing a `.tessary/`
-                bundle is plain pipeline authoring now. */}
             <Button
               variant="secondary"
               onClick={() => nav(`/orgs/${orgSlug}/projects/${projectSlug}/settings/import`)}
@@ -102,7 +95,6 @@ export function Sources() {
   );
 }
 
-/** A quiet, full-width source row. */
 function SourceRow({ source }: { source: IngestionSource }) {
   return (
     <div className="flex w-full items-center gap-3.5 rounded-card bg-surface px-4 py-3.5 text-left">
@@ -122,7 +114,6 @@ function SourceRow({ source }: { source: IngestionSource }) {
   );
 }
 
-/** "Connect a source": the OTLP connect story, rendered through {@link OtlpConnect}. */
 function NewSourceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Modal

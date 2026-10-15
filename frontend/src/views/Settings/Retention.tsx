@@ -7,10 +7,8 @@ import type { RetentionClassView } from "../../api/types";
 import { Button, ErrorNote, Field, Input, PageBody, PageHeader, Section, Spinner, Toggle, useToast } from "../../ui";
 
 /**
- * Settings → Data retention. How long this project keeps traces and classifier detections.
- * The install default comes from the deployment's environment (`TESSARY_RETENTION_*_TTL_DAYS`); each
- * class here can override it, and clearing the override returns to the default. 0 keeps forever.
- * When another build fixes a project's retention (`fixed_ttl_days` above 0), the page is read-only.
+ * 0 keeps forever. Clearing an override returns to the install default; a `fixed_ttl_days` above 0
+ * makes the page read-only.
  */
 
 const LABELS: Record<RetentionClassView["data_class"], { title: string; hint: string }> = {
@@ -35,7 +33,6 @@ export function Retention() {
 
   const view = useQuery({ queryKey: ["retention", api.base], queryFn: api.getRetention });
 
-  // Per class: null = follow the install default; a string = the override being edited.
   const [drafts, setDrafts] = useState<Partial<Record<RetentionClassView["data_class"], string | null>>>({});
 
   const classes = view.data?.classes ?? [];
@@ -43,7 +40,6 @@ export function Retention() {
   const fixed = classes.some((c) => c.fixed_ttl_days > 0);
   const draftFor = (c: RetentionClassView): string | null =>
     c.data_class in drafts ? (drafts[c.data_class] ?? null) : c.from_policy ? String(c.ttl_days) : null;
-  // Dirty only when the effective value would change, so toggling an override on and off again is a no-op.
   const dirty = classes.some((c) => {
     const d = draftFor(c);
     if (d === null) return c.from_policy;

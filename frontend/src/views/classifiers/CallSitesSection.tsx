@@ -11,10 +11,7 @@ export const UNSCOPED_DETECTORS: ReadonlySet<string> = new Set(["tool_error"]);
 
 type Scope = "all" | "some";
 
-/**
- * Which call sites a classifier runs on: every one (the default), or a list. A list is never empty, because a
- * classifier that should run nowhere is turned off instead, so "Every call site" is sent as null.
- */
+/** A list is never empty (a classifier that should run nowhere is off), so "Every call site" is null. */
 export function CallSitesSection({ classifier }: { classifier: Classifier }) {
   const { api } = useTenant();
   const qc = useQueryClient();

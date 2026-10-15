@@ -23,28 +23,13 @@ import {
   useToast,
 } from "../../ui";
 
-/**
- * Settings, Providers: a calm credential roster for the judge models your
- * graders run on. The only thing you scan for is configured-vs-not: a status
- * dot carries the signal, model counts sit quietly underneath.
- *
- * The judgment moment is a rejected credential: when a save fails, the modal
- * surfaces the provider's own error and offers "Edit and retry".
- *
- * All data wiring is preserved: the catalog + credentials queries, and the
- * upsert/remove mutations, are unchanged.
- */
-
-/** Display names for `PlatformDescriptor.used_by` lane ids; an unknown id shows as sent. */
 const LANE_LABELS: Record<string, string> = { frustration: "Frustration" };
 
-/** "Used by Frustration" for a provider that serves one feature and no chat lane, else null. */
 export function usedByLine(p: PlatformDescriptor): string | null {
   if (p.used_by.length === 0) return null;
   return `Used by ${p.used_by.map((lane) => LANE_LABELS[lane] ?? lane).join(", ")}`;
 }
 
-/** What credential shape a not-yet-configured provider expects, read aloud. */
 function expectedFields(p: PlatformDescriptor): string {
   if (p.auth === "aws") return "Access key · secret · region";
   return p.supports_base_url ? "API key · base URL" : "API key";
@@ -110,8 +95,6 @@ export function Providers() {
             "Could not load the provider catalog. Try again."}
         </p>
       ) : (
-        // A provider the deployment supplies (auth "platform") needs no key and renders as
-        // included; every other provider needs an org key.
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {platforms.map((p) => (
             <ProviderRow
@@ -150,11 +133,6 @@ export function Providers() {
   );
 }
 
-/**
- * One provider in the roster. Configured-vs-not is the dominant signal: a
- * status dot + word, with the model count and a couple of names as quiet
- * support. No nested cards, a single bordered tile, structured by space.
- */
 function ProviderRow({
   platform,
   cred,
@@ -170,7 +148,6 @@ function ProviderRow({
   onRemove: () => void;
   removing: boolean;
 }) {
-  // A provider the deployment supplies takes no key of the org's own: always on, nothing to edit.
   const supplied = platform.auth === "platform";
   const configured = supplied || (!!cred && (cred.has_api_key || cred.has_aws_credentials));
   const names = models.map((m) => m.display_name);
@@ -264,8 +241,7 @@ function ProviderKeyModal({
 
   const auth = platform.auth;
   const isAws = auth === "aws";
-  // CUSTOM has no real per-model catalog — one representative entry stands for "any model
-  // this endpoint serves" — so this is the only place a project names the actual model id it wants.
+  // CUSTOM has no per-model catalog, so this is the only place a project names its model id.
   const isCustom = platform.id === "CUSTOM";
 
   const [baseUrl, setBaseUrl] = useState(existing?.base_url_override ?? "");
@@ -274,8 +250,7 @@ function ProviderKeyModal({
   const [awsAccess, setAwsAccess] = useState("");
   const [awsSecret, setAwsSecret] = useState("");
   const [customModelName, setCustomModelName] = useState(existing?.custom_model_name ?? "");
-  // Bedrock/mantle-only. Defaults to the stored value, else "api_key" — the same default the
-  // backend applies to a credential with no auth_mode column value (ProviderCredentialController).
+  // Defaults to "api_key", as the backend does for a credential with no auth_mode.
   const [authMode, setAuthMode] = useState<"api_key" | "iam_role">(
     existing?.auth_mode === "iam_role" ? "iam_role" : "api_key",
   );
@@ -283,14 +258,12 @@ function ProviderKeyModal({
 
   const save = useMutation({
     mutationFn: () => {
-      // Omit a secret field (undefined) to keep the stored value; send a string to set it.
+      // Undefined keeps the stored secret; a string sets it.
       const body: UpsertProviderCredentialRequest = {
         base_url_override: platform.supports_base_url ? baseUrl.trim() : undefined,
         api_key: !isAws ? (apiKey.trim() ? apiKey.trim() : undefined) : undefined,
         aws_region: isAws ? awsRegion.trim() : undefined,
-        // An IAM-role credential has no AWS keys of its own — the instance/task role IS the
-        // credential — so these are sent as undefined (leave-untouched) rather than blank
-        // (explicitly clear) whenever that mode is selected, same as any other omitted field.
+        // An IAM-role credential has no keys, so they are left untouched rather than cleared.
         aws_access_key: isAws && !usesIamRole ? (awsAccess.trim() ? awsAccess.trim() : undefined) : undefined,
         aws_secret_key: isAws && !usesIamRole ? (awsSecret.trim() ? awsSecret.trim() : undefined) : undefined,
         auth_mode: isAws ? authMode : undefined,
@@ -388,10 +361,6 @@ function ProviderKeyModal({
           </>
         )}
 
-        {/* auth === "none" (Ollama's base-URL-only form) lived here until Ollama was dropped —
-            "none" left PlatformAuth's union with it, so this branch is now unreachable and removed
-            rather than dead code kept around. */}
-
         {auth === "aws" && (
           <>
             <SectionLabel>AWS credentials</SectionLabel>
@@ -399,10 +368,8 @@ function ProviderKeyModal({
               {(p) => <Input {...p} value={awsRegion} onChange={(e) => setAwsRegion(e.target.value)} className="font-mono" />}
             </Field>
 
-            {/* API key (sealed access/secret keys) vs IAM role (the sandbox/host's own
-                instance or task role — no keys stored at all). An explicit opt-in, never inferred
-                from blank key fields, so a key left empty by mistake never falls back to the
-                host's own role. */}
+            {/* An explicit opt-in, never inferred from blank key fields, so an empty key never falls back to the
+               host's own role. */}
             <div className="col-span-2">
               <Field label="Auth mode">
                 {(p) => (

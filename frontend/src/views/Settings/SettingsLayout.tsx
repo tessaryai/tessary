@@ -1,17 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Settings — one page, a left sub-nav rail grouped into coherent sections.
- * The sections themselves stay their own routed views, rendered through <Outlet/>.
- *
- * The rail is DERIVED from `SETTINGS_GROUPS` in shell/nav.tsx, filtered by the org's capability
- * object (segment F2). It used to be a second hand-maintained copy of that list, and the two had
- * already drifted — "Import YAML" was offered by ⌘K and missing from this rail.
- *
- * Import bundle lives under Data & ingestion, and Appearance and Features under Organization.
- * Observer schedule left Settings (2026-07): check cadence is edited in place on the Observer status
- * line. Signal tuning left too: it lives in the
- * classifier configure pages now — one home per concept, and the old routes redirect there.
- */
+// The rail is derived from SETTINGS_GROUPS in shell/nav.tsx so it cannot drift from ⌘K.
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTenant } from "../../tenant/TenantContext";
 import { useNavigation } from "../../shell/useNavigation";

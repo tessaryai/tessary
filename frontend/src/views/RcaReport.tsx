@@ -20,14 +20,6 @@ import { ConnectRepositoryDialog } from "./components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "./components/useRepoPrompt";
 import type { RcaReport as RcaReportView, RcaRuledOutCheck } from "../api/types";
 
-/**
- * One RCA report — the immutable per-finding drill-in behind the case page's "Run RCA" action.
- * Reads top-to-bottom: the movement, the verdict and its one-sentence summary, the causes on the same card
- * the case page uses, what the analysis ruled out (the eliminated candidates are what make the causes
- * trustworthy), and the agent's full write-up with all of its evidence. An older report shows its checklist
- * of structural causes in place of the ruled-out list, and ends with the leads it could not prove.
- */
-
 const METRIC_LABEL: Record<string, string> = {
   frustration: "Frustrated sessions",
   groundedness: "Flagged answers",
@@ -50,7 +42,6 @@ const ASSESSMENT: Record<string, { glyph: string; label: string; className: stri
   unknown: { glyph: "?", label: "Unresolved", className: "bg-surface-2 text-muted" },
 };
 
-/** An older report's entries are measured checklist items, each with the analysis's reasoning in `detail`. */
 function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
   const checklist = checks.some((c) => c.detail);
   return (
@@ -99,8 +90,6 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
   );
 }
 
-/** Which movement a report's causes explain. The report carries no detector blob, so this reads its kind,
- *  measure and the sign of the move. */
 function reportCauseKind(r: RcaReportView): CauseKind {
   if (r.report_kind === "frustration_causes") return "frustration";
   if (r.report_kind === "groundedness_causes") return "groundedness";
@@ -166,8 +155,6 @@ export function RcaReport() {
 
   const base = `/orgs/${orgSlug}/projects/${projectSlug}`;
 
-  // A report is immutable, so re-running produces a NEW one and we navigate to it. On failure,
-  // surface the API's own message rather than a bare retry.
   const rerun = useMutation({
     mutationFn: () => api.rerunRca(reportId),
     onSuccess: (fresh) => navigate(`${base}/rca/${fresh.id}`),
@@ -268,11 +255,8 @@ export function RcaReport() {
         </div>
       )}
 
-      {/* A run that had no repository could show what changed in production and not what changed in
-          the code. That ceiling belongs above the verdict, because it qualifies the verdict — until
-          now it existed only as a sentence the agent wrote into the markdown body, where it reads as
-          part of the analysis rather than as a limit on it. `repo_available` is null on reports
-          written before it was recorded: unknown, which must not render as "no repository". */}
+      {/* The ceiling qualifies the verdict, so it sits above it. `repo_available` is null on older reports:
+         unknown, not "no repository". */}
       {!running && r.status === "done" && r.repo_available === false && (
         <div
           className="rounded-card border border-[color:var(--color-info)] px-3 py-2 mb-6 flex items-center justify-between gap-4"

@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * One classifier's chart for one call site or one tool: the last 7 days against the baseline, the series over the
- * range on a continuous UTC time axis, and the cases it opened. A rate or range point is a step held over the hours it
- * merged; a count point is a bar over its bucket.
- *
- * Every card has the same height whatever it holds, so a grid of them lines up: the rows are fixed, the chart is a
- * fixed height, and the cases strip always keeps room for three lanes. Everything is grey except the delta, which is
- * red when the measure got worse and green when it got better (rateStory.tsx).
- *
- * The chart's coordinates are CSS pixels: the SVG takes its width from the card, measured, so its tick text is the
- * small type size at every card width instead of scaling with it.
- */
+// Every card has the same height whatever it holds, so a grid lines up. The SVG is measured in CSS
+// pixels so tick text stays the small type size at every card width.
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ChartCard as Card, ChartPoint, ClassifierCharts } from "../../api/types";
@@ -34,7 +24,6 @@ import {
   yAxis,
 } from "./chartRules";
 
-/** The chart's width before the card is measured, and where it cannot be (a test's DOM has no layout). */
 const FALLBACK_W = 520;
 const ML = 48;
 const MR = 8;
@@ -51,7 +40,6 @@ const STRIP_TEXT = "absolute -translate-y-1/2 text-small leading-none whitespace
 
 const rateOf = (p: ChartPoint): number | null => (p.checked ? (p.flagged ?? 0) / p.checked : null);
 
-/** The width of the element `ref` lands on, in CSS pixels, kept current as it resizes. */
 function useWidth() {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(FALLBACK_W);
@@ -69,7 +57,6 @@ function useWidth() {
   return [ref, width] as const;
 }
 
-/** The index of the point whose span holds `px`, else the one nearest it. */
 function nearestPoint(spans: { a: number; b: number }[], px: number): number | null {
   let best: number | null = null;
   let gap = Infinity;
@@ -455,7 +442,6 @@ export function ChartCard({
   );
 }
 
-/** A step series: the closed points solid, the open one dashed. */
 function StepLine({ paths, stroke, width }: { paths: { solid: string; dashed: string }; stroke: string; width: number }) {
   return (
     <>
