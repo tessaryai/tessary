@@ -37,11 +37,8 @@ public class MeteringController {
     /**
      * The per-bucket usage timeseries for one unit over {@code [from, to)} (both ISO-8601, both required), at
      * the requested {@code granularity} grain ({@code hour} default, or {@code day}; a {@code
-     * 422} on any other grain). {@code unit} is one of {@code ingested_spans|l1_evals|l2_evals|
-     * llm_tokens|storage} (a {@code 422} otherwise; {@code storage} returns empty unless the deployment has
-     * opted into producing it via {@code tessary.metering.storage-enabled}). The two eval units were spelled
-     * {@code signal_evals} and {@code grader_runs} before the 2026-08 cleanup release; a client pinned to
-     * those names gets the {@code 422}, not an empty series.
+     * 422} on any other grain). {@code unit} is one of {@code ingested_spans|ingested_traces|l1_evals} (a
+     * {@code 422} otherwise).
      *
      */
     @GetMapping("/timeseries")

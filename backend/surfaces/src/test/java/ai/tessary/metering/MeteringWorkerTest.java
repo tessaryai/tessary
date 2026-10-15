@@ -90,10 +90,7 @@ class MeteringWorkerTest {
         verify(jobs).markDone("job-2");
     }
 
-    /**
-     * {@link UsageUnit#metered()} must match what the worker writes: an omitted unit is billed nowhere, and an
-     * unwritten one reads as a permanent zero.
-     */
+    /** Every unit must be written by the worker: an omitted unit is billed nowhere and reads as a permanent zero. */
     @Test
     void theWorkerWritesExactlyTheMeteredUnits() {
         worker().meterOne(job("job-1", "p1"));
@@ -101,8 +98,8 @@ class MeteringWorkerTest {
         ArgumentCaptor<MetricRollupRow> written = ArgumentCaptor.forClass(MetricRollupRow.class);
         verify(rollups, atLeastOnce()).upsert(written.capture());
         assertEquals(
-                Arrays.stream(UsageUnit.metered()).map(UsageUnit::wire).collect(Collectors.toSet()),
+                Arrays.stream(UsageUnit.values()).map(UsageUnit::wire).collect(Collectors.toSet()),
                 written.getAllValues().stream().map(MetricRollupRow::metric).collect(Collectors.toSet()));
-        assertEquals(UsageUnit.metered().length, written.getAllValues().size(), "one row per unit");
+        assertEquals(UsageUnit.values().length, written.getAllValues().size(), "one row per unit");
     }
 }
