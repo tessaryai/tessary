@@ -4,44 +4,11 @@ package ai.tessary.storage;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A v2 {@code span} row — one step: an LLM call, a tool call, a sub-agent (substrate-model.md §3).
- *
- * <p>Identity is {@code (projectId, traceId, id)}, all three the producer's, and that triple is the
- * primary key, the natural key and the upsert conflict target at once. There is no bare-id lookup
- * anywhere in v2: a span pointer that names a span without its trace cannot be resolved.
- *
- * <p><b>Correlation handles are denormalized onto every row</b> ({@code sessionId}, {@code userId},
- * {@code projectVersionId}, {@code traceName}) so no read has to join upward, and
- * <b>usage and cost are typed columns</b> so no read parses JSON per row. The producer's raw usage object
- * survives as a receipt in {@code span_payload.providedUsage} and is never read for arithmetic.
- *
- * <h2>The three fields that are not the producer's</h2>
- *
- * <ul>
- *   <li>{@code path} — materialized ancestry, resolved by the path fixpoint. Null means UNRESOLVED, never
- *       "root": root is {@code parentSpanId == null}, the producer's own statement. The upsert never
- *       overwrites it, because a newer version replaces what the producer said, not what we derived.
- *   <li>{@code correlationState} / {@code pathState} — the resolvers' retirement markers. They are what
- *       keep the two partial indexes near-empty: without them, anonymous traffic (session-less forever) and
- *       a child of a parent the producer never shipped would sit in those indexes permanently and
- *       eventually crowd genuine work out of every LIMITed micro-batch. Neither is final: a later batch
- *       that brings the session, or the parent, puts the span back to {@code pending}
- *       ({@code SpanRepository.adoptTraceSession}, {@code SpanRepository.upsertAll}).
- * </ul>
- *
- * <p>{@code depth}, {@code totalTokens} and {@code totalCost} are generated columns: read-only, and
- * <b>null whenever every contributing bucket is null</b>. That is the invariant the whole cost surface
- * rests on — a zero there would launder "the producer sent no usage" into "this call was free".
- *
- * @param costSource the only correct way to read a null cost: {@code provided} (the producer sent it),
- *     {@code inferred} (we priced it, under {@code priceBookVersion}), {@code unpriced} (we hold no rate).
- * @param errorType the CLASS of failure — the producer's own {@code error.type} attribute, or a capped
- *     signature of its status message when it ships none. A short label, because every facet, breakdown
- *     and group-by in the product treats this column as a type. It used to hold the status message
- *     itself, which is how a facet key once came to be 3,271 characters of agent markdown.
- * @param errorMessage the PROSE — the producer's status message, capped at write. Nothing renders it
- *     today; it is here so that switching {@code errorType} to a class does not throw the description of
- *     the failure away, and so a reader is not sent to {@code span_payload} for it.
+ * A v2 {@code span} row. Identity is {@code (projectId, traceId, id)}; a bare id cannot be resolved. {@code path} null
+ * means UNRESOLVED, never root, and the upsert never overwrites it. {@code correlationState}/{@code pathState} keep the
+ * resolver partial indexes near-empty. Generated totals are null whenever every input is null: zero would launder "no
+ * usage sent" into "free". @param costSource {@code provided}, {@code inferred} (under {@code priceBookVersion}) or
+ * {@code unpriced} @param errorType a short class label (facets group by it); the prose is {@code errorMessage}
  */
 public record SpanRow(
         String projectId,
@@ -84,13 +51,11 @@ public record SpanRow(
         String pathState,
         String eventTs,
         boolean isDeleted,
-        // Generated / defaulted columns: populated on read, ignored on write.
         @Nullable Integer depth,
         @Nullable Long totalTokens,
         @Nullable String totalCost,
         @Nullable String createdAt) {
 
-    /** {@code cost_source} values — the vocabulary {@code ck_span_cost_source} enforces. */
     public static final class CostSource {
         public static final String PROVIDED = "provided";
         public static final String INFERRED = "inferred";
@@ -99,15 +64,11 @@ public record SpanRow(
         private CostSource() {}
     }
 
-    /** {@code correlation_state} / {@code path_state} values (implementation plan §2.6). */
     public static final class ResolverState {
-        /** Still in the resolver's work queue. */
         public static final String PENDING = "pending";
-        /** Correlation copied down from the trace row. */
         public static final String DONE = "done";
-        /** The trace settled with a null session id — anonymous traffic, nothing to copy, ever. */
+        /** Anonymous traffic: nothing to copy, ever. */
         public static final String NONE = "none";
-        /** Ancestry materialized. */
         public static final String RESOLVED = "resolved";
 
         private ResolverState() {}

@@ -25,14 +25,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * The findings read surface: the open findings, the correction loop, and the baseline changelog.
- */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/findings")
 public class FindingController {
 
-    /** Page ceiling. Generous for a table, and still a bound: the sets behind it reach 27k rows. */
+    /** The sets behind it reach 27k rows. */
     private static final int MAX_EVIDENCE_PAGE = 200;
 
     private static final int DEFAULT_EVENT_LIMIT = 100;
@@ -59,12 +56,7 @@ public class FindingController {
         return ApiResponse.ok(service.findings(r.project().id(), status, callSiteId, detector, confirmedOnly));
     }
 
-    /**
-     * One finding with its evidence parsed: what the finding's own page reads.
-     *
-     * <p>A separate call rather than a fatter list row: the evidence blob is the largest thing a finding
-     * carries, and a list of fifty would ship fifty of them to render fifty headlines.
-     */
+    /** Separate from the list because the evidence blob is the largest thing a finding carries. */
     @GetMapping("/{id}")
     public ApiResponse<BehaviorFindingDetailView> finding(
             TenantContext ctx,
@@ -75,13 +67,7 @@ public class FindingController {
         return ApiResponse.ok(service.finding(r.project().id(), id));
     }
 
-    /**
-     * One page of a finding's evidence, joined to the spans it names: what the finding page's evidence
-     * table renders.
-     *
-     * <p>The default page is small on purpose: a reader looks at the first few and pages on only if
-     * the shape isn't already obvious.
-     */
+    /** The default page is small on purpose. */
     @GetMapping("/{id}/evidence")
     public ApiResponse<BehaviorDtos.FindingEvidenceSpanPage> findingEvidence(
             TenantContext ctx,
@@ -97,10 +83,7 @@ public class FindingController {
     }
 
     /**
-     * One field's failing outputs since onset — what a {@code malformed_rate} finding's "How outputs
-     * broke" renders on the right once a reader selects a row of the schema tree. {@code field} is a
-     * declared field's collapsed path ({@code items[].sku}), or {@code not_json} / {@code other} for
-     * the two buckets no declared field owns.
+     * {@code field} is a declared field's collapsed path ({@code items[].sku}), or {@code not_json} / {@code other}.
      */
     @GetMapping("/{id}/malformed-outputs")
     public ApiResponse<MalformedOutputEvidence.FailingOutputPage> malformedOutputs(
@@ -117,9 +100,8 @@ public class FindingController {
     }
 
     /**
-     * One page of the frustrated sessions a {@code frustration_rate} finding cites, newest flag first: what the
-     * finding and case pages' session list loads as it scrolls past the first page. {@code rcaReport} and
-     * {@code cause}, the cause's 0-based position in that report, narrow it to one RCA cause's sessions.
+     * Newest flag first. {@code rcaReport} and {@code cause} (0-based position in that report) narrow it to one RCA
+     * cause's sessions.
      */
     @GetMapping("/{id}/frustrated-sessions")
     public ApiResponse<FrustrationEvidence.FrustratedSessionPage> frustratedSessions(
@@ -136,11 +118,7 @@ public class FindingController {
                 r.project().id(), id, rcaReport, cause, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
     }
 
-    /**
-     * One page of the flagged answers a {@code groundedness_rate} finding cites, newest flag first: what the
-     * finding and case pages' answer list loads as it scrolls past the first page. {@code rcaReport} and {@code
-     * cause} take the same RCA cause filter as {@link #frustratedSessions}.
-     */
+    /** Newest flag first; {@code rcaReport} and {@code cause} filter as in {@link #frustratedSessions}. */
     @GetMapping("/{id}/flagged-answers")
     public ApiResponse<GroundednessEvidence.FlaggedAnswerPage> flaggedAnswers(
             TenantContext ctx,
@@ -157,9 +135,8 @@ public class FindingController {
     }
 
     /**
-     * Record the human judgement on a finding. Marking it Expected allowlists the gram permanently and
-     * skips the graduation wait; Not expected pins it in quarantine so it never graduates and keeps
-     * firing. Doing nothing is also a valid answer: persistence graduation then runs as normal.
+     * Expected allowlists the gram permanently; Not expected pins it in quarantine. Doing nothing lets persistence
+     * graduation run as normal.
      */
     @PostMapping("/{id}/resolution")
     public ApiResponse<BehaviorFindingView> resolve(
@@ -173,16 +150,8 @@ public class FindingController {
     }
 
     /**
-     * Hand this finding to Layer 2: a sandbox with the finding's claim materialized as a dossier and
-     * this platform's read surface for the evidence behind it, no repository on any project.
-     *
-     * <p>{@code lane=grader} runs the call site's own rubrics against the same cited traces instead
-     * of the triage agent, writing to the same {@code triage_*} columns. Omitted or unrecognized
-     * means the triage agent.
-     *
-     * <p>409 without an exemplar trace, in either lane; never 409 for a missing repo, since triage
-     * never opens one. A second call returns 200 with {@code alreadyEscalated} instead of triaging
-     * twice.
+     * {@code lane=grader} runs the call site's own rubrics instead of the triage agent, into the same {@code triage_*}
+     * columns. 409 without an exemplar trace; a second call returns 200 with {@code alreadyEscalated}.
      */
     @PostMapping("/{id}/analysis")
     public ApiResponse<BehaviorAnalysisView> analyze(

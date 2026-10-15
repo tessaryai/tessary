@@ -16,31 +16,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Enforces retention: the hourly pass that actually deletes what a {@code retention_policy} says should be
- * gone. Until this existed the table was rows nobody read — a policy a customer could be shown and that
- * the system did not keep.
- *
- * <p><b>Bounded, and it says what it did.</b> Each (project, data class) gets at most
- * {@code max-batches-per-sweep} statements of {@code batch-size} rows, so the first pass after a long
- * unenforced period drains gradually rather than locking a table for minutes. When a class hits its cap the
- * sweep logs {@code truncated=true} for it, because "deleted 100,000 rows" and "deleted 100,000 rows and
- * stopped early with more to go" are different operational facts and only one of them means the backlog is
- * shrinking.
- *
- * <p><b>Deletion is by EVENT time, not row-insert time.</b> A backfilled trace carries the timestamp of
- * when it happened, and a partner who replays three months of history expects it to age on that clock.
- * Using {@code created_at} alone would keep replayed history for the full TTL from the day it was uploaded,
- * which is the opposite of what a retention commitment says. In v2 that is not a choice the query makes
- * any more: {@code trace} carries only {@code started_at}.
- *
- * <p><b>Payloads age ahead of structure.</b> The traces class deletes {@code span_payload} rows before
- * {@code trace} rows (spec §10), so the bytes go first and a trace whose text has expired keeps working
- * on every list, rollup and detector surface. Per-tier durations are a configuration decision that has
- * not been taken yet, so both tiers currently run on the traces policy's TTL.
- *
- * <p><b>Media is collected, not aged.</b> {@link #collectMedia} runs for every project on every pass,
- * outside the policy classes entirely, because an image no payload references any more is unreachable
- * rather than merely old.
+ * Enforces {@code retention_policy}. Each (project, data class) gets at most {@code max-batches-per-sweep} batches,
+ * logging {@code truncated=true} when capped. Deletes by event time ({@code started_at}) so replayed history ages on
+ * its own clock; payloads go before structure, and unreferenced media is collected every pass regardless of policy.
  */
 @Component
 public class RetentionSweeper {
@@ -91,9 +69,7 @@ public class RetentionSweeper {
             sweptTraces |= retention.dataClass() == DataClass.TRACES;
         }
         deleted += collectMedia(projectId);
-        // Reported every pass, deletions or not — a pin that never releases looks exactly like a healthy
-        // policy from the deletion counts alone: they simply go to zero and the project's disk stops
-        // falling. This is the number that tells the two apart.
+        // Reported every pass: a pin that never releases looks like a healthy policy from deletion counts alone.
         if (sweptTraces) {
             StructuredLog.info(log, Markers.OPS, "retention.pinned")
                     .field("project", projectId)
@@ -104,15 +80,8 @@ public class RetentionSweeper {
     }
 
     /**
-     * Collect the project's unreferenced media — every pass, for every project, whatever its policies say.
-     *
-     * <p>This is garbage collection, not retention. An image whose payload has been deleted (or whose
-     * batch never committed) cannot be reached, named or rendered by anything: no TTL makes it useful and
-     * no policy is expressed by keeping it. Gating it on a bounded traces policy the way the classes above
-     * are gated would leave every keep-forever project accumulating unreachable bytes for ever — both
-     * a disk-space bug and a deletion-promise bug at once.
-     *
-     * <p>Bounded like everything else, and logged only when it actually removed something.
+     * Garbage collection, not retention: unreferenced media is unreachable, so gating it on a traces policy would leak
+     * it for keep-forever projects.
      */
     private long collectMedia(String projectId) {
         int batchSize = Math.max(1, props.getBatchSize());
@@ -168,16 +137,9 @@ public class RetentionSweeper {
 
     private int delete(String projectId, DataClass dataClass, String cutoff, int limit) {
         return switch (dataClass) {
-            // Payloads first, then the structure. Both tiers run under the traces policy's TTL for now —
-            // giving payloads their own shorter horizon is a config decision, not a schema one, and the
-            // ordering here is what makes it a one-line change when that number is chosen. Until then the
-            // payload delete is a no-op after the first pass, since it removes rows the trace delete in
-            // the same sweep would have cascaded anyway.
-            // The Frustration classifier's copies of turn text (frustration_assessment.request) age with
-            // the payloads they were built from, so they are nulled in the same tier.
-            // Evidence last, and only ever after the substrate deletes above: a row is collectable
-            // exactly when its claim is closed AND the thing it pointed at is already gone, so running
-            // it in the same pass releases the previous pass's remainder rather than its own work.
+            // Payloads first, then structure; both tiers use the traces TTL for now. Frustration's copies of turn text
+            // age with the payloads. Evidence last: a row is collectable only when its claim is closed and its target
+            // is already gone.
             case TRACES ->
                 repo.nullAssessmentRequests(projectId, cutoff, limit)
                         + repo.deleteSpanPayloads(projectId, cutoff, limit)

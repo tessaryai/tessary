@@ -4,88 +4,51 @@ package ai.tessary.classifier.finding;
 import org.jspecify.annotations.Nullable;
 
 /**
- * How each classifier's cause identity is scoped into {@code finding.cause_key}.
- *
- * <p>{@code ux_finding_live} is one partial unique index over {@code (project_id, classifier_key,
- * cause_key)}, replacing the four scoped indexes the two old finding tables carried. The scope a cause
- * used to be unique WITHIN therefore has to live inside the key — otherwise two epochs of one project,
- * or two environments' baselines, silently merge into one finding.
- *
- * <p>One place, because the writer and the backfill have to spell these identically: a composition that
- * disagreed with migration {@code 0086} would open a second finding for every cause that already had
- * one, on the first sweep after deploy.
+ * Scopes each classifier's cause into {@code finding.cause_key}. {@code ux_finding_live} is one unique index over
+ * {@code (project_id, classifier_key, cause_key)}, so the scope must live inside the key. The writer and the migration
+ * {@code 0086} backfill must spell these identically, or every live cause opens a second finding.
  */
 public final class CauseKey {
 
     private CauseKey() {}
 
-    /**
-     * {@code <baseline_id>:<cause_key>} — the baseline-scoped shape (0042). The baseline id carries
-     * environment scope, so dropping it merges a staging shift into the production finding.
-     */
+    /** The baseline id carries environment scope; dropping it merges a staging shift into the production finding. */
     public static String metricDrift(String baselineId, String causeKey) {
         return baselineId + ":" + causeKey;
     }
 
-    /**
-     * The tool-error key verbatim: {@code tool_error_rate:<bucket>:<direction>} is already
-     * project-scoped and hangs off no fitted state (0049), so there is nothing to prefix.
-     */
+    /** Already project-scoped and hangs off no fitted state, so there is nothing to prefix. */
     public static String toolError(String causeKey) {
         return causeKey;
     }
 
-    /**
-     * The signal row's id, verbatim — the per-span classifiers' shape. A classifier's arming has exactly
-     * one cause ("this classifier is firing more than its owner said it should"), so the scope IS the
-     * classifier, and the id is used rather than the key because a key is renameable and a live finding
-     * must not detach from its classifier when someone edits the name.
-     */
+    /** The id, not the key: a key is renameable and a live finding must not detach from its classifier. */
     public static String perSpanClassifier(String classifierId) {
         return classifierId;
     }
 
     /**
-     * {@code <classifier_id>:<call_site_id>:<facet>} — a per-span classifier that files one finding per
-     * place and per kind of thing it saw, rather than one for the whole classifier. A leaked AWS key from
-     * one call site and a leaked GitHub token from another are two causes with two fixes, and keyed on
-     * the classifier alone one ruling would silence both. A span with no call site keeps an empty middle
-     * segment, so it stays distinct from every named call site without colliding with them.
+     * One finding per call site and facet: a leaked AWS key at one site and a GitHub token at another are two fixes. A
+     * span with no call site keeps an empty middle segment.
      */
     public static String perSpanClassifierFacet(String classifierId, @Nullable String callSiteId, String facet) {
         return classifierId + ":" + (callSiteId == null ? "" : callSiteId) + ":" + facet;
     }
 
-    /**
-     * {@code <classifier_id>:<call_site_id>} — Malformed Output's shape, one cause per call site. The call site
-     * is the scope because the schema a failure is measured against belongs to it, and the classifier id
-     * rather than its key for the reason {@link #perSpanClassifier} gives.
-     */
+    /** The schema a failure is measured against belongs to the call site. */
     public static String malformedOutput(String classifierId, String callSiteId) {
         return classifierId + ":" + callSiteId;
     }
 
-    /**
-     * {@code <classifier_id>:<call_site_id>} — Frustration's shape, one cause per call site, for Malformed
-     * Output's reason: a conversation is a trial on one call site's stream, and that call site is what a
-     * reader fixes.
-     */
     public static String frustration(String classifierId, String callSiteId) {
         return classifierId + ":" + callSiteId;
     }
 
-    /**
-     * {@code <classifier_id>:<call_site_id>} — Groundedness's shape, one cause per call site, for Frustration's
-     * reason: a trace is a trial on one call site's stream, and that call site is what a reader fixes.
-     */
     public static String groundedness(String classifierId, String callSiteId) {
         return classifierId + ":" + callSiteId;
     }
 
-    /**
-     * The tool a {@code tool_error} cause key names — its subject. Stripping both fixed affixes rather
-     * than splitting on colons, because a bucket key may contain them.
-     */
+    /** Strips both fixed affixes rather than splitting on colons, because a bucket key may contain them. */
     public static String toolOf(String causeKey) {
         String stripped =
                 causeKey.startsWith("tool_error_rate:") ? causeKey.substring("tool_error_rate:".length()) : causeKey;

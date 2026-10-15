@@ -22,33 +22,15 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
- * Computes the two statistical filters — spend and turn latency — for a window, against the
- * equal-length window before it, grouped by a dimension.
- *
- * <p><b>This slice deliberately has no Layer 2.</b> It writes nothing and enqueues nothing: the
- * statistics are read on demand from substrate that already exists. Expressing them as aggregate reads
- * makes escalation structurally impossible rather than merely switched off.
- *
- * <p><b>Tool errors were the third filter and are no longer here at all.</b> They are a classifier
- * again ({@code devdocs/concepts/tool-error.md}) — but a windowed one, per tool, against that tool's
- * own past, which is a different thing from the per-observation detector migration {@code 0030} deleted.
- * That one wrote a detection per failing span and every detection enqueued a grader run; this one writes
- * one finding per closed window and enqueues nothing. The property this javadoc claims for the slice is
- * therefore still true of the classifier that took the statistic away.
+ * Spend and turn latency for a window against the equal-length window before it, grouped by a dimension. Writes nothing
+ * and enqueues nothing, so escalation is structurally impossible here.
  */
 @Service
 public class VitalsService {
 
-    /** Widest window we will scan; beyond this the read stops being interactive. */
+    /** Beyond this the read stops being interactive. */
     public static final int MAX_WINDOW_DAYS = 90;
 
-    /**
-     * <b>There is no settle window any more.</b> A trace's completeness used to be guessed at — "300
-     * seconds old is probably finished" — and every consumer picked its own number, so the vitals card
-     * and the drift classifier could disagree about the same trace. {@code trace.is_settled} replaces all
-     * of them: it means precisely "nothing has arrived since the last rollup" (spec §7.4), never "we gave
-     * up waiting", and the repository filters on it directly.
-     */
     private final VitalsRepository repo;
 
     private final PriceBookRepository priceBook;
@@ -58,7 +40,6 @@ public class VitalsService {
         this.priceBook = priceBook;
     }
 
-    /** The vitals read for one project. */
     public Vitals compute(String projectId, int windowDays, VitalsRepository.Dimension by) {
         int days = Math.max(1, Math.min(MAX_WINDOW_DAYS, windowDays));
         Instant now = Instant.now();
@@ -104,8 +85,6 @@ public class VitalsService {
         Map<String, Bucket> byDim = new HashMap<>();
         Bucket total = Bucket.empty();
 
-        // One row per dimension value, already summed by the database. This loop used to run once per
-        // generation in the window, parsing a usage blob and pricing it in Java on every pass.
         for (VitalsRepository.UsageRow r : repo.usageIn(projectId, from, to, by)) {
             byDim.computeIfAbsent(r.dimension(), k -> Bucket.empty()).add(r);
             total.add(r);
@@ -114,10 +93,8 @@ public class VitalsService {
             byDim.computeIfAbsent(r.dimension(), k -> Bucket.empty()).addDuration(r.millis());
             total.addDuration(r.millis());
         }
-        // Per dimension AND on the total. Setting only the total would leave every call-site row
-        // reporting a hardcoded zero, which is the exact metric inversion this count exists to prevent:
-        // a call site whose turns increasingly hang would show a shrinking sample and a flattering p95,
-        // with nothing on the row to say why.
+        // Per dimension AND on the total: a call site whose turns increasingly hang would otherwise show a shrinking
+        // sample and a flattering p95.
         for (VitalsRepository.UnterminatedRow r : repo.unterminatedTurnsIn(projectId, from, to, by)) {
             if (r.total()) {
                 // The GROUPING SET's grand total, which counts each trace once however many dimension
@@ -137,11 +114,8 @@ public class VitalsService {
     }
 
     private static Cost cost(Bucket cur, Bucket base) {
-        // The denominator comes from the SPENDING population, not the root-span one. They are not the
-        // same set: a turn that reaches a second call site puts that llm span's cost in the second
-        // call-site bucket and its turn in the first, so the second bucket would read "spend, zero
-        // turns" and could never flag. For `by=model` the mismatch is total — root spans carry no
-        // model — which left cost flagging permanently dead on that view.
+        // The denominator comes from the spending population, not the root-span one: a turn reaching a second call site
+        // books cost there but its turn in the first, and root spans carry no model.
         long turns = cur.costTurns();
         long baseTurns = base.costTurns();
         double perTurn = turns > 0 ? cur.usd.doubleValue() / turns : 0;
@@ -181,12 +155,7 @@ public class VitalsService {
 
     private record Raw(Map<String, Bucket> byDimension, Bucket total) {}
 
-    /**
-     * Mutable accumulator for one dimension value in one window.
-     *
-     * <p>The {@code total} bucket folds several dimension rows together, so this still adds — but it adds
-     * pre-summed group totals, not one generation at a time, and it never prices anything.
-     */
+    /** The {@code total} bucket folds several dimension rows together, so this adds pre-summed group totals. */
     private static final class Bucket {
         private BigDecimal usd = BigDecimal.ZERO;
         private long tokens;
@@ -205,14 +174,12 @@ public class VitalsService {
             tokens += r.tokens();
             calls += r.calls();
             unpricedCalls += r.unpricedCalls();
-            // Summed rather than de-duplicated across dimension values. A trace whose spans carry two
-            // different call sites is genuinely two turns' worth of spend attribution, and the per-group
-            // denominators are what the flagging reads; the total's denominator is an upper bound, which
-            // makes cost-per-turn conservative rather than inflated.
+            // Summed, not de-duplicated: a trace spanning two call sites is two turns' worth of attribution, which
+            // makes the total's cost-per-turn conservative rather than inflated.
             spendingTraces += r.spendingTraces();
         }
 
-        /** Distinct turns that actually spent tokens in this bucket — the cost denominator. */
+        /** The cost denominator. */
         long costTurns() {
             return spendingTraces;
         }

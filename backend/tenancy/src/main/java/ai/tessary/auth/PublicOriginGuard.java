@@ -18,23 +18,10 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 /**
- * Makes {@code SITE_DOMAIN} the one variable a self-hoster sets to put this instance on a real
- * hostname. Before this, the domain lived in three variables that had to agree
- * ({@code SITE_DOMAIN}, {@code TESSARY_AUTH_FRONTEND_URL}, {@code WORKOS_REDIRECT_URI}) and nothing
- * checked that they did: set only the first and the stack booted clean, served TLS, and bounced
- * every sign-in to {@code http://localhost/}.
- *
- * <p>With a domain set this guard (1) requires it to be a bare hostname, because compose builds the
- * agentic lanes' callback origin by prefixing {@code https://} and a scheme-prefixed value would
- * silently become {@code https://https://...}; (2) derives the sign-in landing origin and the WorkOS
- * callback from it whenever they are still on a {@code localhost} default, and refuses to start when
- * either was set explicitly to a different host, naming both keys; (3) requires the Let's Encrypt
- * address in {@code acme} mode, so an operator's certificate account is never registered to an
- * address that is not theirs; and (4) rejects an unknown {@code TLS_MODE} here rather than in the
- * frontend container's own log.
- *
- * <p>Inert when {@code SITE_DOMAIN} is blank, for the same reason {@link PlaceholderSecretGuard}
- * is: every non-compose boot, tests included, has no domain and must pass through untouched.
+ * Makes {@code SITE_DOMAIN} the one variable for a real hostname: requires a bare hostname (compose prefixes
+ * {@code https://}), derives the frontend and WorkOS callback origins when still on localhost and refuses a conflicting
+ * explicit one, requires the ACME email in {@code acme} mode, and rejects an unknown {@code TLS_MODE}. Inert when
+ * {@code SITE_DOMAIN} is blank, as every non-compose boot is.
  */
 @Component
 public class PublicOriginGuard {
@@ -56,7 +43,7 @@ public class PublicOriginGuard {
         "TESSARY_RCA_AGENTIC_MCP_BASE_URL", "TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL"
     };
 
-    /** Resolves an IP-shaped host to its address; the seam a test uses to make a lookup fail. */
+    /** The seam a test uses to make a lookup fail. */
     @FunctionalInterface
     interface HostResolver {
         InetAddress resolve(String host) throws UnknownHostException;
@@ -88,8 +75,7 @@ public class PublicOriginGuard {
 
     @PostConstruct
     void verify() {
-        // BEFORE the no-domain early return: the value this catches is built precisely when
-        // SITE_DOMAIN is blank, so a check that runs only under a domain never sees it.
+        // Before the no-domain return: this value is built precisely when SITE_DOMAIN is blank.
         rejectHostlessMcpOrigin();
         String raw = tessary.getSiteDomain().trim();
         if (raw.isEmpty() || NO_DOMAIN_SENTINEL.equals(raw)) {
@@ -130,10 +116,8 @@ public class PublicOriginGuard {
         for (int i = 0; i < MCP_ORIGIN_KEYS.length; i++) {
             String value = env.getProperty(MCP_ORIGIN_KEYS[i], "");
             String host = hostOf(value);
-            // An internal service name is not a competing public origin, it is the compose default —
-            // and since agent containers share the backend's network unless an operator opts into
-            // SANDBOX_NETWORK_ISOLATION, it stays the right value on a domain'd install too. Only a
-            // value naming a DIFFERENT PUBLIC host is the mistake this check was written for.
+            // An internal service name is the compose default, still right on a domain'd install since agent containers
+            // share the backend's network. Only a different public host is the mistake.
             if (host != null && !host.equals(domain) && !isInternal(host)) {
                 throw new IllegalStateException("Refusing to start: SITE_DOMAIN is " + domain + " but "
                         + MCP_ORIGIN_ENV[i] + " is " + value
@@ -152,7 +136,6 @@ public class PublicOriginGuard {
                 redirect);
     }
 
-    /** The configured value when it already names the domain; the derived one when it is blank or local; otherwise a refusal naming both keys. */
     private String reconcile(String key, String configured, String domain, String derived) {
         String host = hostOf(configured);
         if (host == null || isLocal(host)) {
@@ -167,14 +150,8 @@ public class PublicOriginGuard {
     }
 
     /**
-     * A value with a scheme and no host at all — {@code https://} and nothing else.
-     *
-     * <p>This is what compose used to build for an install that never set SITE_DOMAIN, by
-     * concatenating {@code https://} with an empty domain. It is not blank, so every downstream
-     * blank-check passed it, and both agent lanes were handed a URL with nowhere to connect: the
-     * agent's only route to the evidence it reasons about, pointing at nothing. Blank stays legal —
-     * an install that runs no agentic lane sets neither variable, and the engines already refuse a
-     * blank one at run time with {@code NO_EVIDENCE_DOOR}. Only the half-built value is fatal.
+     * {@code https://} with no host, which compose built for a blank SITE_DOMAIN: not blank, so blank-checks passed it.
+     * Blank stays legal; the engines refuse it at run time with {@code NO_EVIDENCE_DOOR}.
      */
     private void rejectHostlessMcpOrigin() {
         for (int i = 0; i < MCP_ORIGIN_KEYS.length; i++) {
@@ -189,13 +166,8 @@ public class PublicOriginGuard {
     }
 
     /**
-     * A container-network service name ({@code backend}): a single dotless label the compose network
-     * resolves, reachable from a sibling container even though it is meaningless outside.
-     *
-     * <p>{@code localhost} is deliberately NOT one of these, despite also being dotless. It is the
-     * one host a sandbox container can never reach the backend on — inside a container it names the
-     * container itself — so a value pointing there is the misconfiguration this check exists to
-     * catch, not the compose default it exists to allow.
+     * A single dotless compose service name. {@code localhost} is excluded: inside a sandbox container it names the
+     * container itself.
      */
     private boolean isInternal(String host) {
         return !isLocal(host) && !host.contains(".") && !host.contains(":");

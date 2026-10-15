@@ -13,23 +13,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * One read for the whole of onboarding: where a project is on the ladder from <i>listening</i> to
- * <i>first case</i>, and the numbers behind whichever rung it is on.
- *
- * <p>Launch segment G replaced a four-step grader wizard with a single step — point an exporter at us —
- * and everything after that step is waiting rather than doing. This endpoint is what makes the waiting
- * legible: it says which rung, how far into it, and what will happen next, so the surface can show
- * progress instead of an empty page (G3), and can be honest that a new project genuinely sees nothing
- * for a while rather than looking broken (G4).
- *
- * <p><b>It supersedes {@code /substrate/status} for onboarding.</b> That endpoint answers one bit —
- * has anything landed — which was the whole question while "first value" meant a graded run. Under the
- * launch definition first value is a triaged case, and the interesting part of the journey is
- * entirely after the first trace. {@code /substrate/status} stays for the untagged-span nudge, which is a
- * different question.
- *
- * <p>Cookie-authed and project-scoped like {@code SubstrateController}: this is a browser read for the
- * person who just wired the exporter, not part of the programmatic surface.
+ * One read for onboarding: which rung from listening to first case, how far into it, and what happens next, so a new
+ * project's wait reads as progress rather than as broken. Supersedes {@code /substrate/status} for onboarding;
+ * cookie-authed and project-scoped.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/onboarding")
@@ -72,10 +58,7 @@ public class OnboardingController {
                 cases.firstAt()));
     }
 
-    /**
-     * The furthest rung reached — see {@link OnboardingStage} for why this is monotonic rather than a
-     * set of independent booleans.
-     */
+    /** Monotonic; see {@link OnboardingStage}. */
     private static OnboardingStage stage(
             boolean listening, boolean hasTraffic, long armedBuckets, long findings, long triagedCases) {
         if (triagedCases > 0) return OnboardingStage.CASE;
@@ -87,29 +70,11 @@ public class OnboardingController {
     }
 
     /**
-     * The whole onboarding read.
-     *
-     * @param stage the furthest rung reached — what the surface renders
-     * @param listening whether a key exists that an exporter could push with
-     * @param firstTraceAt event time of the earliest observation, null before any
-     * @param lastTraceAt event time of the latest observation — with {@code firstTraceAt}, how much
-     *     history the detectors have to work with
-     * @param baselineBuckets {@code (bucket, measure)} pairs the sweep has opened. Zero WITH traffic is a
-     *     real state and not an error: the sweep has not folded this project's traffic yet.
-     * @param baselineBucketsArmed how many can compare — the number that ends the warm-up
-     * @param baselineSamplesInFlight samples sitting in windows that have not closed. The evidence that
-     *     the wait is progress: it climbs every sweep even while nothing else changes.
-     * @param baselineBestWindowCount the fullest single window, so the surface can show the leading edge
-     *     rather than an average that hides it
-     * @param baselineMinSample samples a window needs before it can be compared — the DEFAULT
-     *     ({@link MetricDriftConfig#DEFAULT_MIN_SAMPLE}), which is what a project that has not tuned its
-     *     classifier runs on. A project that has edited {@code min_sample} will differ; the surface must
-     *     therefore describe this as the usual bar rather than promise it.
-     * @param findings findings written by any detector
-     * @param firstFindingAt event time of the earliest, null before any
-     * @param cases cases opened, by any arm including a human pressing <i>Real deviation</i>
-     * @param triagedCases cases whose finding Layer 2 ruled on — the milestone
-     * @param firstTriagedCaseAt when the first of those opened; the instant TTFV stops
+     * @param baselineBuckets zero with traffic means the sweep has not folded it yet, not an error @param
+     * baselineSamplesInFlight climbs every sweep, the evidence the wait is progress @param baselineMinSample the
+     * DEFAULT ({@link MetricDriftConfig#DEFAULT_MIN_SAMPLE}); a tuned project differs, so describe it as the usual bar
+     * @param cases includes a human pressing <i>Real deviation</i> @param triagedCases cases whose finding Layer 2
+     * ruled on, the milestone
      */
     public record OnboardingView(
             OnboardingStage stage,

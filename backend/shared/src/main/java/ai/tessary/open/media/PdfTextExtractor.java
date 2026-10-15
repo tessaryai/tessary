@@ -14,60 +14,36 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Bounded best-effort PDF text extraction — the document/PDF modality's judge-and-render input
- * (PDF only; audio/video are out of scope). Used at two call sites: ingest
- * ({@code MediaExternalizer}, once per document, the extracted text persisted into the
- * {@code document_ref} node) and the judge boundary ({@code ContentBlocks}, on-demand for a
- * {@code document_b64} block that never went through externalization).
- *
- * <p><b>Never throws.</b> Every PDFBox failure mode (encrypted, scanned/no text layer, corrupt/
- * truncated bytes, and every other checked/unchecked exception PDFBox can raise) collapses to
- * {@link Optional#empty()} — this is a best-effort text lift; the CALLER decides what an empty result
- * means (a failure marker on the persisted {@code document_ref}). A crashed batch over one bad PDF
- * would be strictly worse.
- *
- * <p><b>Bounded, deliberately, on three axes</b> — a PDF is untrusted input from an ingest path, not a
- * file the operator chose: a page cap (a pathological PDF with millions of empty pages), a character
- * cap (a PDF whose text layer is one enormous run), and a wall-clock cap (a pathological PDF that
- * hangs PDFBox's parser rather than erroring). Any cap tripping truncates the result rather than
- * failing it — a capped extraction is still useful signal for the judge.
+ * Bounded best-effort PDF text extraction. Never throws: every PDFBox failure collapses to {@link Optional#empty()}. A
+ * PDF is untrusted input, so pages, characters and wall-clock time are capped; tripping a cap truncates rather than
+ * fails.
  */
 public final class PdfTextExtractor {
 
     private static final Logger log = LoggerFactory.getLogger(PdfTextExtractor.class);
 
-    /** Labeled failure marker a caller may persist into a document's {@code text} field when
-     *  {@link #extract} returns {@link Optional#empty()} (encrypted, scanned with no text layer,
-     *  corrupt/truncated bytes) — never a silent empty string, so a downstream reader (the judge
-     *  boundary, a human) can tell "extraction failed" from "extracted to nothing". Public so every
-     *  module that writes or reads a {@code document_ref}'s {@code text} field (ingest's
-     *  {@code MediaExternalizer}, the judge boundary's {@code ContentBlocks}) shares one literal
-     *  instead of each defining — or worse, silently accepting — its own copy. */
+    /**
+     * Persisted instead of an empty string so a reader can tell "extraction failed" from "extracted to nothing"; one
+     * shared literal for every writer and reader.
+     */
     public static final String DOCUMENT_TEXT_UNAVAILABLE_MARKER = "[document text unavailable]";
 
-    /** Pages read before extraction stops (whatever text was already collected is kept). */
     private static final int MAX_PAGES = 200;
 
     /** Characters kept before extraction stops (a PDF-scale, not a judge-prompt-scale, cap — the
      *  judge boundary's own fencing/truncation happens downstream of this). */
     private static final int MAX_CHARS = 200_000;
 
-    /** Wall-clock ceiling for one extraction — a pathological PDF must not stall an ingest batch or a
-     *  synchronous grading call. */
+    /** A pathological PDF must not stall an ingest batch. */
     private static final Duration MAX_DURATION = Duration.ofSeconds(20);
 
     private PdfTextExtractor() {}
 
-    /**
-     * Extract text from {@code pdfBytes}, or {@link Optional#empty()} on any failure: encrypted,
-     * scanned with no text layer (extracts to blank/whitespace-only, treated as empty), corrupt or
-     * truncated bytes, or any cap tripping before a single character was read. Never throws.
-     */
+    /** Empty on any failure, including a blank text layer or a cap tripping before any character was read. */
     public static Optional<String> extract(byte @Nullable [] pdfBytes) {
         return extract(pdfBytes, Clock.systemUTC());
     }
 
-    /** {@link #extract(byte[])} measuring the wall-clock cap on {@code clock}. */
     static Optional<String> extract(byte @Nullable [] pdfBytes, Clock clock) {
         if (pdfBytes == null || pdfBytes.length == 0) return Optional.empty();
         Instant deadline = clock.instant().plus(MAX_DURATION);
@@ -86,29 +62,23 @@ public final class PdfTextExtractor {
             log.info("pdf text extraction: exceeded {} wall-clock cap — returning partial/none", MAX_DURATION);
             return Optional.empty();
         } catch (IOException e) {
-            // Corrupt/truncated bytes, an unsupported PDF variant, or any other PDFBox parse failure.
             log.info("pdf text extraction failed ({} bytes): {}", pdfBytes.length, e.toString());
             return Optional.empty();
         } catch (RuntimeException e) {
-            // PDFBox is documented to raise unchecked exceptions on some malformed inputs too
-            // (not only IOException) — catch broadly so a single hostile/corrupt PDF never escapes
-            // this best-effort extractor into the ingest batch or the judge call.
+            // PDFBox also raises unchecked exceptions on malformed input.
             log.info("pdf text extraction failed unexpectedly ({} bytes): {}", pdfBytes.length, e.toString());
             return Optional.empty();
         }
     }
 
-    /** Thrown internally by {@link BoundedTextStripper} to unwind past PDFBox once the wall-clock
-     *  cap trips; caught in {@link #extract} and never escapes this class. */
+    /** Unwinds past PDFBox once the wall-clock cap trips; never escapes this class. */
     private static final class DeadlineExceeded extends RuntimeException {
         DeadlineExceeded() {
             super(null, null, false, false); // no message/cause/stack — pure control flow
         }
     }
 
-    /** A {@link PDFTextStripper} that aborts once {@code deadline} passes, checked per line written —
-     *  the finest-grained hook PDFTextStripper exposes without subclassing its whole page-processing
-     *  pipeline. */
+    /** Checked per line written, the finest hook PDFTextStripper exposes. */
     private static final class BoundedTextStripper extends PDFTextStripper {
         private final Clock clock;
         private final Instant deadline;

@@ -18,54 +18,21 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Secret Leak built-in: the agent's OUTPUT carried a credential. An agent echoing a credential is the
- * leak; a user pasting one is an input-hygiene problem this classifier does not claim.
- *
- * <p><b>What it reads, in order.</b>
- *
- * <ol>
- *   <li><b>The redaction stamp.</b> Redaction runs the gitleaks corpus on the write path and replaces a
- *       credential before anything is stored, recording which rule matched in {@code span_payload.redactions}.
- *       That is the record of the leak, and it names it: an {@code aws-access-token} rather than a token
- *       that says only that something was removed.
- *   <li><b>The output itself.</b> A project that turned redaction off stores credentials as they came, so the
- *       same corpus runs over the stored output. On a project that redacts, it finds nothing, because the
- *       credentials are gone.
- *   <li><b>A redaction token with no stamp.</b> A span stored before stamping existed, one a regex rule
- *       redacted (the corpus does not name every shape the prefix rules catch), or one a producer redacted
- *       upstream. Something was removed, and nothing says what.
- * </ol>
- *
- * <p><b>The band says how sure the match is that it is a credential.</b> HIGH is a rule anchored on a literal
- * the provider stamps into the credential ({@code AKIA}, {@code ghp_}, {@code xoxb-}): the shape is the
- * proof. LOW is everything else: a vendor's name near a random-looking string, the five anchored rules in
- * {@link #LOW_BAND_RULES} whose shape still turns up on text that is not a leak, and a bare redaction token.
- * Only HIGH counts toward the classifier's arming bar; LOW stays listed for anyone looking.
- *
- * <p>Evidence names the rule and never carries the credential. It also names, and masks, which key leaked:
- * reading the stamp, the mask travels with it when the stamp carries one; reading raw output, this
- * computes {@link CredentialMasking#maskedKey}. Either way what reaches evidence is a provider prefix and
- * four trailing characters, never the credential itself.
- *
- * <p>This detector deliberately ignores {@code config_json}: the corpus is the product's opinion of what a
- * credential looks like, not per-project state. A documented carve-out from the convention {@link
- * RegexDetector} follows.
+ * The agent's OUTPUT carried a credential; a user pasting one is not claimed. Reads the redaction stamp, then the raw
+ * output (for projects with redaction off), then a bare redaction token. HIGH means a rule anchored on a
+ * provider-stamped literal; only HIGH counts toward arming. Evidence names the rule and a masked key, never the
+ * credential; {@code config_json} is ignored.
  */
 public final class SecretLeakDetector implements BuiltInDetector {
 
     /**
-     * Anchored rules that still fire LOW. Their shape is precise, but what it describes is not reliably a
-     * leak: a JWT in an output is as often a public id token or a documentation example as a live session;
-     * an {@code Authorization} header inside a {@code curl} line is what every API reference prints; and a
-     * Kubernetes {@code kind: Secret} manifest is how one is written down, usually with placeholder data.
+     * Precise shapes that are not reliably leaks: JWTs in docs, {@code Authorization} headers in {@code curl} examples,
+     * and Kubernetes {@code kind: Secret} manifests with placeholder data.
      */
     static final Set<String> LOW_BAND_RULES =
             Set.of("jwt", "jwt-base64", "curl-auth-header", "curl-auth-user", "kubernetes-secret-yaml");
 
-    /**
-     * The tokens redaction leaves in place of a credential. All LOW: a token says something was removed and
-     * cannot say what, which is exactly the ambiguity the stamp exists to resolve.
-     */
+    /** All LOW: a token says something was removed but not what. */
     private static final Map<String, Pattern> REDACTION_MARKERS = markers();
 
     private static Map<String, Pattern> markers() {
@@ -78,7 +45,6 @@ public final class SecretLeakDetector implements BuiltInDetector {
         return Map.copyOf(m);
     }
 
-    /** Where evidence says the rule was read from. */
     static final class Source {
         private Source() {}
 
@@ -109,9 +75,8 @@ public final class SecretLeakDetector implements BuiltInDetector {
         Detection stamped = fromStamps(obs.redactionsJson());
         if (stamped != null) return stamped;
 
-        // Deliberately the RAW output, not the flattened text view: a leaked credential is a leak wherever
-        // it appears in the output payload, tool-call arguments and structured parts a text flatten drops
-        // included. Credential shapes are alphanumeric, so JSON escaping does not hide them.
+        // The RAW output, not the flattened text: tool-call arguments and structured parts count too. Credential shapes
+        // are alphanumeric, so JSON escaping does not hide them.
         String haystack = obs.output();
         if (haystack == null || haystack.isBlank()) return Detection.none();
 
@@ -133,7 +98,6 @@ public final class SecretLeakDetector implements BuiltInDetector {
         return Detection.none();
     }
 
-    /** A detection from what redaction recorded removing from the output, or null when it recorded nothing. */
     private @Nullable Detection fromStamps(@Nullable String redactionsJson) {
         if (redactionsJson == null || redactionsJson.isBlank()) return null;
         JsonNode stamps;
@@ -173,12 +137,10 @@ public final class SecretLeakDetector implements BuiltInDetector {
         return anchored && !LOW_BAND_RULES.contains(rule) ? Detection.Confidence.HIGH : Detection.Confidence.LOW;
     }
 
-    /** What {@link #Source} says about whether the credential itself is still sitting in stored output. */
     private static String storedAs(String source) {
         return Source.OUTPUT.equals(source) ? Stored.RAW : Stored.REDACTED;
     }
 
-    /** Evidence's {@code stored} member: whether the credential itself is still sitting in stored output. */
     static final class Stored {
         private Stored() {}
 

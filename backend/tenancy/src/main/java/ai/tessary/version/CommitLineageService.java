@@ -6,50 +6,16 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /**
- * The commit-SHA lineage spine: resolve <em>any</em> platform node back to the
- * {@link ProjectVersionRow} (exact causing commit) it belongs to — given a node, find the commit.
- *
- * <p><b>Provenance shapes.</b> Lineage is stored in two shapes, both bridged here:
- * <ul>
- *   <li><b>Direct FK</b> — {@code project_version_id} on {@code trace} (and {@code span}, which a
- *       bare node id cannot address), denormalized at ingest. The canonical shape; resolved via
- *       {@link ProjectVersionRepository#findById}.</li>
- *   <li><b>Derived</b> — a {@code session} carries no stamp of its own and resolves to the newest
- *       deploy any of its traces ran under.</li>
- * </ul>
- *
- * <p>A third shape, RAW SHA, existed while there was an observer: {@code observer_alert.project_version_sha}
- * stored the SHA string rather than the FK and resolved through
- * {@link ProjectVersionRepository#findByCommit}. It went with the observer, and a new column must
- * NOT bring it back.
- *
- * <p><b>Forward contract for new node types.</b> A new lineage-bearing table MUST carry the
- * direct-FK shape from
- * day one — {@code project_version_id TEXT REFERENCES project_version(id) ON DELETE SET NULL} plus
- * an index — and register a {@link NodeKind} + resolution case here. That keeps "any detection
- * resolves to its causing commit" true without per-consumer retrofits.
- *
- * <p>Resolution is an on-demand read (single-row indexed lookups), never part of a hot loop —
- * write-side stamping resolves the version id once at write time.
+ * Resolves any platform node to the {@link ProjectVersionRow} (causing commit) it belongs to: via a direct
+ * {@code project_version_id} FK on {@code trace}, or derived for a session from its newest trace. A new lineage-bearing
+ * table must carry that FK (with {@code ON DELETE SET NULL} and an index) and register a {@link NodeKind}.
  */
 @Service
 public class CommitLineageService {
 
     /**
-     * The node types the lineage spine resolves today. {@code classifier} joins this enum when its
-     * table carries the FK (see the forward contract above).
-     *
-     * <p>These names are the PATH TOKEN of {@code /versions/lineage/{nodeKind}/{nodeId}}, so the enum is
-     * the public spelling of a node kind and not merely an internal label. {@link #SPAN} was
-     * {@code OBSERVATION} until the v1 vocabulary rename finished: {@link #TURN} is kept beside
-     * {@link #TRACE} because a turn IS a trace and callers minted links under both words, whereas nothing
-     * ever linked to {@code /lineage/observation/…} — the frontend has no caller and the plugin does not
-     * use this endpoint at all.
-     *
-     * <p>{@code VERDICT}, {@code OBSERVER_ALERT}, {@code DIFF_CLASSIFICATION} and {@code RISK_STAT}
-     * were removed with the tables behind them. The path variable is a string, so those
-     * spellings now fail {@link #parse} and the endpoint answers 400 rather than 500 — which is the
-     * correct answer for a node kind that no longer exists.
+     * These names are the path token of {@code /versions/lineage/{nodeKind}/{nodeId}}. Removed kinds fail
+     * {@link #parse}, so the endpoint answers 400 rather than 500.
      */
     public enum NodeKind {
         SESSION,
@@ -76,18 +42,13 @@ public class CommitLineageService {
         this.versions = versions;
     }
 
-    /**
-     * Resolve a node to the project version (commit SHA) that caused it. Empty when the node does
-     * not exist in this project or carries no lineage (e.g. a run created before the pipeline was
-     * bound to a commit).
-     */
+    /** Empty when the node does not exist in this project or carries no lineage. */
     public Optional<ProjectVersionRow> resolve(String projectId, NodeKind kind, String nodeId) {
         return switch (kind) {
             case SESSION -> byId(projectId, lineage.sessionVersionId(projectId, nodeId));
             case TURN -> byId(projectId, lineage.turnVersionId(projectId, nodeId));
             case TRACE -> byId(projectId, lineage.traceVersionId(projectId, nodeId));
-            // A span is identified by (project_id, trace_id, id), so a bare id cannot name one: empty,
-            // rather than resolving against whichever trace reused the span id.
+            // A span is identified by (project_id, trace_id, id), so a bare id cannot name one.
             case SPAN -> Optional.empty();
         };
     }
