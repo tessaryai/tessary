@@ -23,19 +23,11 @@ vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: session
 const member = (user_id: string, role: OrgRole, over: Partial<OrgMember> = {}): OrgMember => ({
   user_id,
   email: `${user_id}@acme.com`,
-  display_name: null,
-  avatar_url: null,
-  role,
-  created_at: "2026-01-15T00:00:00Z",
-  ...over,
+  display_name: null, avatar_url: null, role, created_at: "2026-01-15T00:00:00Z", ...over,
 });
 
 const POLICY: SignupPolicy = {
-  mode: "open",
-  domains: [],
-  governing: true,
-  governing_org_slug: "acme",
-  governing_org_name: "Acme",
+  mode: "open", domains: [], governing: true, governing_org_slug: "acme", governing_org_name: "Acme",
 };
 
 function roster(myRole: OrgRole) {
@@ -269,10 +261,7 @@ describe("the sign-up policy", () => {
 
   it("is read-only through an organization that does not govern it, and names the one that does", async () => {
     auth.getSignupPolicy.mockResolvedValue({
-      ...POLICY,
-      governing: false,
-      governing_org_slug: "first-org",
-      governing_org_name: "First Org",
+      ...POLICY, governing: false, governing_org_slug: "first-org", governing_org_name: "First Org",
     });
     renderRoute(<Members />);
 
@@ -283,10 +272,7 @@ describe("the sign-up policy", () => {
     cleanup();
 
     auth.getSignupPolicy.mockResolvedValue({
-      ...POLICY,
-      governing: false,
-      governing_org_slug: null,
-      governing_org_name: null,
+      ...POLICY, governing: false, governing_org_slug: null, governing_org_name: null,
     });
     renderRoute(<Members />);
     expect(await screen.findByText("unknown")).toBeTruthy();

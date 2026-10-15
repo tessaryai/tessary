@@ -9,11 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
-  Classifier,
-  SessionDetailView,
-  SessionListItemView,
-  TraceListItemView,
-  TracesPageView,
+  Classifier, SessionDetailView, SessionListItemView, TraceListItemView, TracesPageView,
 } from "../../api/types";
 import { currentParams, pending, renderRoute } from "../../test/render";
 import { TracesIndex } from "./TracesIndex";
@@ -24,30 +20,11 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 function session(over: Partial<SessionListItemView> = {}): SessionListItemView {
   return {
-    id: "sess-1",
-    started_at: "2026-09-25T10:00:00Z",
-    last_activity_at: "2026-09-25T10:05:00Z",
-    dominant_call_site_id: "checkout",
-    call_site_count: 3,
-    first_input_preview: "hi",
-    last_output_preview: "bye",
-    error_count: 1,
-    unsettled_traces: 1,
-    trace_count: 2,
-    span_count: 9,
-    total_cost: 0.5,
-    input_cost: 0.3,
-    output_cost: 0.2,
-    input_tokens: 10,
-    output_tokens: 20,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    reasoning_tokens: 0,
-    total_tokens: 30,
-    unpriced_spans: 0,
-    user_id: null,
-    detected_by: [],
-    ...over,
+    id: "sess-1", started_at: "2026-09-25T10:00:00Z", last_activity_at: "2026-09-25T10:05:00Z",
+    dominant_call_site_id: "checkout", call_site_count: 3, first_input_preview: "hi", last_output_preview: "bye",
+    error_count: 1, unsettled_traces: 1, trace_count: 2, span_count: 9, total_cost: 0.5, input_cost: 0.3,
+    output_cost: 0.2, input_tokens: 10, output_tokens: 20, cache_read_tokens: 0, cache_write_tokens: 0,
+    reasoning_tokens: 0, total_tokens: 30, unpriced_spans: 0, user_id: null, detected_by: [], ...over,
   };
 }
 
@@ -55,20 +32,9 @@ const page = (traces: TraceListItemView[], next_cursor: string | null = null): T
 
 const trace = (over: Partial<TraceListItemView> = {}) =>
   traceItem({
-    input_preview: "where is my order",
-    output_preview: "it ships today",
-    total_cost: 0.0123,
-    input_cost: 0.01,
-    output_cost: 0.0023,
-    span_count: 4,
-    input_tokens: 1_200,
-    output_tokens: 300,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    total_tokens: 1_500,
-    call_site_id: "checkout",
-    session: "sess-1",
-    ...over,
+    input_preview: "where is my order", output_preview: "it ships today", total_cost: 0.0123, input_cost: 0.01,
+    output_cost: 0.0023, span_count: 4, input_tokens: 1_200, output_tokens: 300, cache_read_tokens: 0,
+    cache_write_tokens: 0, total_tokens: 1_500, call_site_id: "checkout", session: "sess-1", ...over,
   });
 const classifier = (over: Partial<Classifier> = {}) => baseClassifier({ id: "cls-fr", ...over });
 const FRUSTRATED = [{ classifier_id: "cls-fr", name: "Frustration" }];
@@ -82,10 +48,7 @@ beforeEach(() => {
   api.listClassifiers.mockResolvedValue([
     classifier(),
     classifier({
-      id: "cls-leak",
-      classifier_key: "secret_leak",
-      name: "Secret leak",
-      detector: "secret_leak",
+      id: "cls-leak", classifier_key: "secret_leak", name: "Secret leak", detector: "secret_leak",
       shown_in_trace_views: false,
     }),
   ]);
@@ -317,18 +280,11 @@ describe("detected by", () => {
     api.listClassifiers.mockResolvedValue([
       classifier(),
       classifier({
-        id: "cls-leak",
-        classifier_key: "secret_leak",
-        name: "Secret leak",
-        detector: "secret_leak",
+        id: "cls-leak", classifier_key: "secret_leak", name: "Secret leak", detector: "secret_leak",
         shown_in_trace_views: false,
       }),
       classifier({
-        id: "cls-item",
-        classifier_key: "item_check",
-        name: "Item check",
-        detector: "item_check",
-        built_in: false,
+        id: "cls-item", classifier_key: "item_check", name: "Item check", detector: "item_check", built_in: false,
       }),
     ]);
     renderRoute(<TracesIndex />);

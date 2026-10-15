@@ -14,11 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
-  ModelProvider,
-  PlatformDescriptor,
-  ProviderCatalogResponse,
-  ProviderCredentialView,
-  UpsertProviderCredentialRequest,
+  ModelProvider, PlatformDescriptor, ProviderCatalogResponse, ProviderCredentialView, UpsertProviderCredentialRequest,
 } from "../../api/types";
 import { ApiError } from "../../api/types";
 import { Providers } from "./Providers";
@@ -40,32 +36,17 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 // instead, and `platform_funded` is gone from PlatformDescriptor entirely.
 
 const OPENAI: PlatformDescriptor = {
-  id: "OPENAI",
-  label: "OpenAI",
-  auth: "api_key",
-  default_base_url: "https://api.openai.com/v1",
-  supports_base_url: true,
-  used_by: [],
-  detail: null,
+  id: "OPENAI", label: "OpenAI", auth: "api_key", default_base_url: "https://api.openai.com/v1",
+  supports_base_url: true, used_by: [], detail: null,
 };
 
 const ANTHROPIC: PlatformDescriptor = {
-  id: "ANTHROPIC",
-  label: "Anthropic",
-  auth: "api_key",
-  default_base_url: "https://api.anthropic.com/v1",
-  supports_base_url: true,
-  used_by: [],
-  detail: null,
+  id: "ANTHROPIC", label: "Anthropic", auth: "api_key", default_base_url: "https://api.anthropic.com/v1",
+  supports_base_url: true, used_by: [], detail: null,
 };
 
 const BEDROCK: PlatformDescriptor = {
-  id: "BEDROCK",
-  label: "Amazon Bedrock",
-  auth: "aws",
-  default_base_url: "",
-  supports_base_url: false,
-  used_by: [],
+  id: "BEDROCK", label: "Amazon Bedrock", auth: "aws", default_base_url: "", supports_base_url: false, used_by: [],
   detail: null,
 };
 
@@ -73,17 +54,9 @@ const BEDROCK: PlatformDescriptor = {
 function storedCred(provider: ModelProvider, over: Partial<ProviderCredentialView> = {}): ProviderCredentialView {
   return {
     id: `cred_${provider}`,
-    provider,
-    base_url_override: "",
-    has_api_key: false,
-    aws_region: "",
-    has_aws_credentials: false,
-    bedrock_model_arn: "",
-    custom_model_name: "",
-    auth_mode: "api_key",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...over,
+    provider, base_url_override: "", has_api_key: false, aws_region: "", has_aws_credentials: false,
+    bedrock_model_arn: "", custom_model_name: "", auth_mode: "api_key", created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z", ...over,
   };
 }
 
@@ -99,10 +72,7 @@ async function saveEdit(label: string, edit: () => void = () => {}): Promise<Ups
 }
 
 const TYPESAFE: PlatformDescriptor = {
-  id: "TYPESAFE",
-  label: "TypeSafe",
-  auth: "api_key",
-  default_base_url: "https://api.typesafe.ai",
+  id: "TYPESAFE", label: "TypeSafe", auth: "api_key", default_base_url: "https://api.typesafe.ai",
   supports_base_url: true,
   used_by: ["frustration"],
   detail: null,
@@ -110,12 +80,7 @@ const TYPESAFE: PlatformDescriptor = {
 
 /** A provider the deployment supplies: no key of the org's own, a status line from the supplier. */
 const TESSARY_AI: PlatformDescriptor = {
-  id: "PLATFORM",
-  label: "Tessary AI",
-  auth: "platform",
-  default_base_url: "",
-  supports_base_url: false,
-  used_by: [],
+  id: "PLATFORM", label: "Tessary AI", auth: "platform", default_base_url: "", supports_base_url: false, used_by: [],
   detail: "$10.00 left",
 };
 
@@ -341,10 +306,7 @@ describe("Providers", () => {
 
     await waitFor(() => expect(orgApi.upsertProviderCredential).toHaveBeenCalled());
     expect(orgApi.upsertProviderCredential.mock.calls[0][1]).toMatchObject({
-      auth_mode: "api_key",
-      aws_region: "eu-west-1",
-      aws_access_key: "AKIA1",
-      aws_secret_key: "s3cret",
+      auth_mode: "api_key", aws_region: "eu-west-1", aws_access_key: "AKIA1", aws_secret_key: "s3cret",
       api_key: undefined,
     });
   });

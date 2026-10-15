@@ -24,18 +24,9 @@ const TRACE_B = traceItem({ id: "tr-b", name: null, started_at: "2026-09-25T10:0
 
 function session(over: Partial<SessionDetailView> = {}): SessionDetailView {
   return {
-    id: "sess-1",
-    started_at: "2026-09-25T10:00:00Z",
-    last_activity_at: "2026-09-25T10:01:05Z",
-    trace_count: 2,
-    span_count: 3,
-    total_tokens: 2_500,
-    total_cost: 1.504,
-    unpriced_spans: 2,
-    unsettled_traces: 1,
-    traces_truncated: false,
-    error_count: 0,
-    user_id: null,
+    id: "sess-1", started_at: "2026-09-25T10:00:00Z", last_activity_at: "2026-09-25T10:01:05Z", trace_count: 2,
+    span_count: 3, total_tokens: 2_500, total_cost: 1.504, unpriced_spans: 2, unsettled_traces: 1,
+    traces_truncated: false, error_count: 0, user_id: null,
     traces: [TRACE_A, TRACE_B],
     ...over,
   } as SessionDetailView;

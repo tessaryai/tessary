@@ -102,10 +102,7 @@ describe("connecting over OTLP", () => {
     expect(api.createApiKey).toHaveBeenCalledWith({ name: "OTLP ingest", scope: "write" });
     await waitFor(() =>
       expect(api.createSource).toHaveBeenCalledWith({
-        provider: "sdk",
-        name: "Tessary SDK",
-        baseUrl: "tessary://sdk",
-        credentials: {},
+        provider: "sdk", name: "Tessary SDK", baseUrl: "tessary://sdk", credentials: {},
       }),
     );
     expect(snippet()).toContain("Authorization=Bearer tsy_w_secret");

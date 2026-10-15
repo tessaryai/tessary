@@ -20,10 +20,7 @@ const SETTINGS = {
   groups: [],
   lanes: [
     {
-      id: "frustration",
-      label: "Frustration",
-      description: "",
-      group: "decision_calls",
+      id: "frustration", label: "Frustration", description: "", group: "decision_calls",
       provider_options: [
         {
           provider: "OPENROUTER",
@@ -42,11 +39,7 @@ const SETTINGS = {
       automatic: true,
     },
   ],
-  models: [],
-  catalog_models: [],
-  rates: [],
-  settings: [],
-  configured_providers: [],
+  models: [], catalog_models: [], rates: [], settings: [], configured_providers: [],
 } as ModelSettingsResponse;
 
 function frustration(enabled: boolean): Classifier {

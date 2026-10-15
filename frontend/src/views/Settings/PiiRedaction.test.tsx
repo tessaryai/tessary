@@ -20,13 +20,7 @@ const rule = (over: Partial<RedactionRuleView>): RedactionRuleView => ({
   id: "r-1",
   name: "Email",
   pattern: "[\\\\w.]+@[\\\\w.]+",
-  replacement: "[EMAIL]",
-  built_in: false,
-  enabled: true,
-  sort_order: 0,
-  created_at: "",
-  updated_at: "",
-  ...over,
+  replacement: "[EMAIL]", built_in: false, enabled: true, sort_order: 0, created_at: "", updated_at: "", ...over,
 });
 
 let confirmReply = true;

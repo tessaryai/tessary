@@ -19,11 +19,7 @@ const HOUR = 60 * MIN;
 
 const leak = (over: Partial<Leak>): Leak => ({
   at: ago(2 * HOUR),
-  masked: "sk-a…9f2c",
-  spanId: "span-1",
-  stored: "redacted",
-  traceId: "trace-0123456789",
-  ...over,
+  masked: "sk-a…9f2c", spanId: "span-1", stored: "redacted", traceId: "trace-0123456789", ...over,
 });
 const detail = (over: Partial<Detail> = {}): Detail => ({
   basis: "Any high-confidence match opens a case.",

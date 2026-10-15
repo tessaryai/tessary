@@ -16,15 +16,8 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const NOW = new Date("2026-09-25T12:00:00Z");
 const key = (over: Partial<ApiKey>): ApiKey => ({
-  id: "k-1",
-  name: "ingest-prod",
-  scope: "write",
-  token_prefix: "tsy_w_ab12",
-  created_at: "2026-09-25T11:55:00Z",
-  last_used_at: null,
-  revoked_at: null,
-  created_by_user_id: "u-1",
-  ...over,
+  id: "k-1", name: "ingest-prod", scope: "write", token_prefix: "tsy_w_ab12", created_at: "2026-09-25T11:55:00Z",
+  last_used_at: null, revoked_at: null, created_by_user_id: "u-1", ...over,
 });
 const issued = (k: ApiKey, plaintext: string) => ({ key: k, plaintext, warning: "shown once" });
 

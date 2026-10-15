@@ -38,39 +38,22 @@ function scopes(s: Partial<ChartScopes> = {}): ChartScopes {
 }
 
 const frustrationCard: ChartCard = {
-  classifier_id: "id-frustration",
-  classifier_key: "frustration",
-  name: "Frustration",
-  kind: "rate",
-  measure: null,
-  unit: "fraction",
-  learning: null,
+  classifier_id: "id-frustration", classifier_key: "frustration", name: "Frustration", kind: "rate", measure: null,
+  unit: "fraction", learning: null,
   headline: { value: 0.072, delta: 0.03 },
   baseline: { calls: 1000, failures: 42, rate: 0.042, pinned: false, p50: null, p95: null },
   arming: null,
   points: [
     {
-      start_at: "2026-10-08T00:00:00Z",
-      end_at: "2026-10-08T09:00:00Z",
-      open: true,
-      checked: 100,
-      flagged: 7,
-      n: null,
-      p50: null,
-      p95: null,
-      count: null,
-      total: null,
-      reached: null,
+      start_at: "2026-10-08T00:00:00Z", end_at: "2026-10-08T09:00:00Z", open: true, checked: 100, flagged: 7, n: null,
+      p50: null, p95: null, count: null, total: null, reached: null,
     },
   ],
   cases: { open_cases: 0, spans: [] },
 };
 
 const toolErrorCard: ChartCard = {
-  ...frustrationCard,
-  classifier_id: "id-tool-error",
-  classifier_key: "tool_error",
-  name: "Tool Errors",
+  ...frustrationCard, classifier_id: "id-tool-error", classifier_key: "tool_error", name: "Tool Errors",
   headline: { value: 0.018, delta: -0.013 },
 };
 
@@ -79,11 +62,7 @@ function charts(scope: { callSiteId: string } | { tool: string }): ClassifierCha
     return { scope: "tool", scope_id: scope.tool, days: 28, from_day: "2026-09-11", to_day: "2026-10-08", cards: [toolErrorCard], chips: [] };
   }
   return {
-    scope: "call_site",
-    scope_id: scope.callSiteId,
-    days: 28,
-    from_day: "2026-09-11",
-    to_day: "2026-10-08",
+    scope: "call_site", scope_id: scope.callSiteId, days: 28, from_day: "2026-09-11", to_day: "2026-10-08",
     cards: [frustrationCard],
     chips: [
       { classifier_id: "id-malformed", classifier_key: "malformed_output", name: "Malformed Output", state: "waiting", reason: "no_schema", since: null },

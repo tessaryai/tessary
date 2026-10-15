@@ -16,12 +16,7 @@ import { api } from "../../test/api";
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const cls = (data_class: string, over: Partial<RetentionClassView> = {}): RetentionClassView => ({
-  data_class,
-  ttl_days: 30,
-  from_policy: false,
-  platform_default_days: 30,
-  fixed_ttl_days: 0,
-  ...over,
+  data_class, ttl_days: 30, from_policy: false, platform_default_days: 30, fixed_ttl_days: 0, ...over,
 });
 /** Traces follow the install default; detections carry an override that keeps them forever. */
 const VIEW: RetentionView = {

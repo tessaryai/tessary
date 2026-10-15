@@ -22,15 +22,7 @@ function point(start: number, end: number, d: Partial<ChartPoint>): ChartPoint {
   return {
     start_at: iso(start),
     end_at: iso(end),
-    open: false,
-    checked: null,
-    flagged: null,
-    n: null,
-    p50: null,
-    p95: null,
-    count: null,
-    total: null,
-    reached: null,
+    open: false, checked: null, flagged: null, n: null, p50: null, p95: null, count: null, total: null, reached: null,
     ...d,
   };
 }
@@ -45,13 +37,8 @@ const ratePoints = (): ChartPoint[] =>
 
 function card(c: Partial<Card>): Card {
   return {
-    classifier_id: "c1",
-    classifier_key: "frustration",
-    name: "Frustration",
-    kind: "rate",
-    measure: null,
-    unit: "fraction",
-    learning: null,
+    classifier_id: "c1", classifier_key: "frustration", name: "Frustration", kind: "rate", measure: null,
+    unit: "fraction", learning: null,
     headline: { value: 0.072, delta: 0.03 },
     baseline: { calls: 1000, failures: 42, rate: 0.042, pinned: false, p50: null, p95: null },
     arming: null,
@@ -63,16 +50,9 @@ function card(c: Partial<Card>): Card {
 
 function span(s: Partial<ChartCaseSpan>): ChartCaseSpan {
   return {
-    finding_id: "f",
-    case_id: "case-1",
-    case_reference: "C-43",
-    case_title: "Users on support_agent.reply grew frustrated",
-    case_state: "open",
-    start_at: "2026-10-04T09:00:00Z",
-    end_at: null,
-    resolution: null,
-    disposition: null,
-    ...s,
+    finding_id: "f", case_id: "case-1", case_reference: "C-43",
+    case_title: "Users on support_agent.reply grew frustrated", case_state: "open", start_at: "2026-10-04T09:00:00Z",
+    end_at: null, resolution: null, disposition: null, ...s,
   };
 }
 
@@ -147,11 +127,7 @@ describe("ChartCard", () => {
     );
     const secret = (window_seconds: number) =>
       card({
-        classifier_key: "secret_leak",
-        name: "Secret Leak",
-        kind: "count",
-        unit: "count",
-        baseline: null,
+        classifier_key: "secret_leak", name: "Secret Leak", kind: "count", unit: "count", baseline: null,
         headline: { value: 7, delta: null },
         arming: { threshold: 2, window_seconds, basis: "event_count", confidence: "high" },
         points: hourly,
@@ -171,11 +147,7 @@ describe("ChartCard", () => {
   it("draws a bar over its whole bucket, bright when its arming window reached the bar", () => {
     const from = Date.parse("2026-10-02T00:00:00Z");
     const c = card({
-      classifier_key: "secret_leak",
-      name: "Secret Leak",
-      kind: "count",
-      unit: "count",
-      baseline: null,
+      classifier_key: "secret_leak", name: "Secret Leak", kind: "count", unit: "count", baseline: null,
       headline: { value: 3, delta: null },
       arming: { threshold: 2, window_seconds: 86_400, basis: "event_count", confidence: "high" },
       points: [

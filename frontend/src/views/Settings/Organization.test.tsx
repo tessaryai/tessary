@@ -22,34 +22,18 @@ vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: "u-me" 
 tenant.projectSlug = "support";
 
 const ORG: Org = {
-  id: "org_0123",
-  workos_org_id: null,
-  slug: "acme",
-  name: "Acme",
-  created_at: "2026-01-01T00:00:00Z",
-  archived_at: null,
-  settings: null,
+  id: "org_0123", workos_org_id: null, slug: "acme", name: "Acme", created_at: "2026-01-01T00:00:00Z",
+  archived_at: null, settings: null,
 };
 const project = (slug: string, over: Partial<Project> = {}): Project => ({
   id: `p-${slug}`,
-  org_id: "org_0123",
-  slug,
-  name: slug,
-  description: null,
-  created_at: "2026-01-01T00:00:00Z",
-  archived_at: null,
-  settings: null,
-  is_default: false,
-  deleting_at: null,
-  ...over,
+  org_id: "org_0123", slug, name: slug, description: null, created_at: "2026-01-01T00:00:00Z", archived_at: null,
+  settings: null, is_default: false, deleting_at: null, ...over,
 });
 const member = (user_id: string, role: OrgRole): OrgMember => ({
   user_id,
   email: `${user_id}@acme.com`,
-  display_name: null,
-  avatar_url: null,
-  role,
-  created_at: "2026-01-01T00:00:00Z",
+  display_name: null, avatar_url: null, role, created_at: "2026-01-01T00:00:00Z",
 });
 const PROJECTS = [
   project("default", { is_default: true }),

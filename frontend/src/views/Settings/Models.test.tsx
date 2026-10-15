@@ -15,40 +15,23 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 function entry(provider: CatalogEntry["provider"], modelName: string, flags: Partial<CatalogEntry>): CatalogEntry {
   return {
-    provider,
-    vendor: "Vendor",
-    model_name: modelName,
-    display_name: modelName,
-    strict_json_schema: false,
-    effort_levels: [],
-    default_base_url: "https://example.invalid",
-    agentic: false,
-    decision: false,
-    ...flags,
+    provider, vendor: "Vendor", model_name: modelName, display_name: modelName, strict_json_schema: false,
+    effort_levels: [], default_base_url: "https://example.invalid", agentic: false, decision: false, ...flags,
   };
 }
 
 const SETTINGS: ModelSettingsResponse = {
   groups: [
     {
-      id: "agent_vm",
-      label: "Agent in a VM",
-      description: "A model id handed to an agent.",
-      model_selectable: true,
+      id: "agent_vm", label: "Agent in a VM", description: "A model id handed to an agent.", model_selectable: true,
     },
     {
-      id: "decision_calls",
-      label: "Decision models",
-      description: "One question per turn.",
-      model_selectable: false,
+      id: "decision_calls", label: "Decision models", description: "One question per turn.", model_selectable: false,
     },
   ],
   lanes: [
     {
-      id: "rca",
-      label: "RCA",
-      description: "Investigates a mover.",
-      group: "agent_vm",
+      id: "rca", label: "RCA", description: "Investigates a mover.", group: "agent_vm",
       provider_options: [
         {
           provider: "OPENROUTER",
@@ -61,10 +44,7 @@ const SETTINGS: ModelSettingsResponse = {
       automatic: true,
     },
     {
-      id: "frustration",
-      label: "Frustration",
-      description: "Scores each eligible user turn.",
-      group: "decision_calls",
+      id: "frustration", label: "Frustration", description: "Scores each eligible user turn.", group: "decision_calls",
       provider_options: [
         {
           provider: "TYPESAFE",
@@ -120,10 +100,7 @@ const TRIAGE: ModelSettingsResponse = {
   ...SETTINGS,
   lanes: [
     {
-      id: "triage",
-      label: "Triage",
-      description: "Rules on each finding.",
-      group: "agent_vm",
+      id: "triage", label: "Triage", description: "Rules on each finding.", group: "agent_vm",
       provider_options: [
         {
           provider: "BEDROCK",

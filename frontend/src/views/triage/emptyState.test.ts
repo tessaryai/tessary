@@ -28,31 +28,16 @@ const HAS_PROVIDER = { configured: 1, canConfigure: true };
 
 function watching(over: Partial<TriageView["watching"]> = {}): TriageView["watching"] {
   return {
-    classifiers: 3,
-    call_sites: 4,
-    traces_last_day: 900,
-    traces_total: 12_481,
-    open_findings: 0,
-    ...over,
+    classifiers: 3, call_sites: 4, traces_last_day: 900, traces_total: 12_481, open_findings: 0, ...over,
   };
 }
 
 function onboarding(over: Partial<Onboarding> = {}): Onboarding {
   return {
     data: {
-      stage: "watching",
-      listening: true,
-      cases: 0,
-      findings: 0,
-      triaged_cases: 0,
-      first_trace_at: null,
-      last_trace_at: "2026-09-04T10:00:00Z",
-      first_finding_at: null,
-      first_triaged_case_at: null,
-      baseline_buckets: 4,
-      baseline_buckets_armed: 1,
-      baseline_min_sample: 100,
-      baseline_samples_in_flight: 40,
+      stage: "watching", listening: true, cases: 0, findings: 0, triaged_cases: 0, first_trace_at: null,
+      last_trace_at: "2026-09-04T10:00:00Z", first_finding_at: null, first_triaged_case_at: null, baseline_buckets: 4,
+      baseline_buckets_armed: 1, baseline_min_sample: 100, baseline_samples_in_flight: 40,
       baseline_best_window_count: 25,
     },
     stage: "watching",
@@ -99,10 +84,8 @@ describe("resolveState", () => {
       "counts the open findings, and sends the reader to traces rather than to the Classifiers page",
       { open_findings: 2 }, {}, HAS_PROVIDER,
       {
-        key: "no-cases",
-        title: "No open cases",
-        body: "2 findings are open. Triage hasn't determined that either one is a real issue.",
-        primary: TRACES,
+        key: "no-cases", title: "No open cases",
+        body: "2 findings are open. Triage hasn't determined that either one is a real issue.", primary: TRACES,
       },
     ],
     [
@@ -124,11 +107,8 @@ describe("resolveState", () => {
       "keeps the all-clear headline without a provider key, since nothing has failed, but offers the key",
       { open_findings: 0 }, {}, NONE,
       {
-        key: "no-findings",
-        title: "Nothing to review",
-        body: ALL_CLEAR,
-        note: "No provider key is configured. Triage cannot review a finding until one is added.",
-        primary: ADD_KEY,
+        key: "no-findings", title: "Nothing to review", body: ALL_CLEAR,
+        note: "No provider key is configured. Triage cannot review a finding until one is added.", primary: ADD_KEY,
         secondary: TRACES,
         nodes: [{}, {}, { label: "Cases open", value: "0", sub: "triage cannot run", tone: "warn" }],
       },

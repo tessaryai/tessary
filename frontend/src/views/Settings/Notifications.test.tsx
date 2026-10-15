@@ -21,23 +21,13 @@ vi.mock("../../capabilities/useCapabilities", () => ({
 
 const rule = (over: Partial<AlertRule> = {}) =>
   ({
-    id: "r-1",
-    name: "A case opens",
-    rule_type: "case_opened",
-    enabled: true,
-    created_at: "2026-09-01T00:00:00Z",
+    id: "r-1", name: "A case opens", rule_type: "case_opened", enabled: true, created_at: "2026-09-01T00:00:00Z",
     policy: { cadence_seconds: 3600, quiet_from: "22:00", quiet_to: "06:00", quiet_zone: "Europe/London" },
     ...over,
   }) as AlertRule;
 const channel = (over: Partial<AlertChannel> = {}): AlertChannel => ({
-  id: "ch-1",
-  name: "Webhook",
-  kind: "webhook",
-  enabled: true,
-  credentialsSet: true,
-  createdAt: "2026-09-01T00:00:00Z",
-  updatedAt: "2026-09-01T00:00:00Z",
-  ...over,
+  id: "ch-1", name: "Webhook", kind: "webhook", enabled: true, credentialsSet: true, createdAt: "2026-09-01T00:00:00Z",
+  updatedAt: "2026-09-01T00:00:00Z", ...over,
 });
 
 beforeEach(() => {

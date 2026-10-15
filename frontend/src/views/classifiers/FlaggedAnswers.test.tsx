@@ -25,13 +25,8 @@ function span(text: string): { start: number; end: number } {
 
 function answer(over: Partial<FlaggedAnswer> = {}): FlaggedAnswer {
   return {
-    traceId: "4f1c9a07e2b84d0f",
-    spanId: "span-1",
-    sessionId: "sess-1",
-    flaggedAt: "2026-09-23T14:41:00Z",
-    score: 0.99,
-    question: "Can I get a refund after 30 days?",
-    answer: ANSWER,
+    traceId: "4f1c9a07e2b84d0f", spanId: "span-1", sessionId: "sess-1", flaggedAt: "2026-09-23T14:41:00Z", score: 0.99,
+    question: "Can I get a refund after 30 days?", answer: ANSWER,
     flaggedSentences: [
       { ...span("Refunds are available for up to 60 days after purchase."), score: 0.99 },
       { ...span("After 60 days, you can still get half of your payment back."), score: 0.98 },
@@ -40,10 +35,7 @@ function answer(over: Partial<FlaggedAnswer> = {}): FlaggedAnswer {
       { title: "refund-policy.md", text: "Refunds are available within 30 days of purchase." },
       { title: null, text: "Refunds go back to the original payment method." },
     ],
-    premiseHadEvidence: true,
-    stored: true,
-    cleared: false,
-    ...over,
+    premiseHadEvidence: true, stored: true, cleared: false, ...over,
   };
 }
 

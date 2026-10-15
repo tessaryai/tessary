@@ -14,10 +14,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ProjectApi } from "../../api/client";
 import type {
-  FrustratedConversation,
-  FrustratedSessionPage,
-  FrustrationDetail,
-  TraceDetailView,
+  FrustratedConversation, FrustratedSessionPage, FrustrationDetail, TraceDetailView,
 } from "../../api/types";
 import { ConversationFilter, FlaggedList, type FlaggedLoader, type FlaggedRow } from "./FlaggedList";
 import { FRUSTRATION_LIST_COPY, frustrationLoader, frustrationRows } from "./frustrationStory";
@@ -27,13 +24,8 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 function conversation(over: Partial<FrustratedConversation> = {}): FrustratedConversation {
   return {
-    conversationId: "conv-1",
-    traceId: "t-3",
-    score: 0.98,
-    callSiteId: "policy.conversation",
-    flaggedAt: "2026-07-27T16:57:00Z",
-    cleared: false,
-    sessionId: "sess-1",
+    conversationId: "conv-1", traceId: "t-3", score: 0.98, callSiteId: "policy.conversation",
+    flaggedAt: "2026-07-27T16:57:00Z", cleared: false, sessionId: "sess-1",
     contextTraceIds: ["t-1", "t-2", "t-3"],
     message: "that cant be right, she is covered",
     ...over,
@@ -44,20 +36,10 @@ function conversation(over: Partial<FrustratedConversation> = {}): FrustratedCon
 function trace(id: string, user: string, reply: string, at: string): TraceDetailView {
   const span = {
     id: `s-${id}`,
-    trace_id: id,
-    parent_span_id: null,
-    kind: "agent",
-    name: "invoke_agent",
-    status: "ok",
-    started_at: at,
-    ended_at: at,
+    trace_id: id, parent_span_id: null, kind: "agent", name: "invoke_agent", status: "ok", started_at: at, ended_at: at,
     input: JSON.stringify([{ role: "user", content: user }]),
     output: JSON.stringify([{ role: "assistant", content: reply }]),
-    attributes: null,
-    tool_calls: [],
-    retrieval_documents: [],
-    payload_available: true,
-    is_logical_root: true,
+    attributes: null, tool_calls: [], retrieval_documents: [], payload_available: true, is_logical_root: true,
   } as unknown as TraceDetailView["spans"][number];
   return {
     trace: { id, started_at: at, name: "turn", latency_ms: 1000 } as unknown as TraceDetailView["trace"],
@@ -257,12 +239,7 @@ describe("FlaggedList", () => {
   /** A row as any caller builds it, with neutral copy. */
   function row(over: Partial<FlaggedRow> = {}): FlaggedRow {
     return {
-      id: "row-1",
-      traceId: "t-3",
-      score: 0.9,
-      flaggedAt: "2026-07-27T16:57:00Z",
-      cleared: false,
-      sessionId: "sess-1",
+      id: "row-1", traceId: "t-3", score: 0.9, flaggedAt: "2026-07-27T16:57:00Z", cleared: false, sessionId: "sess-1",
       contextTraceIds: ["t-1", "t-2", "t-3"],
       preview: "row preview",
       emphasis: [],

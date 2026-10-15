@@ -16,12 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
-  BehaviorFinding,
-  Classifier,
-  ClassifierDailyVolume,
-  ClassifierEvent,
-  ClassifierHealth,
-  GroundednessStatus,
+  BehaviorFinding, Classifier, ClassifierDailyVolume, ClassifierEvent, ClassifierHealth, GroundednessStatus,
 } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { chartReadsStale, seedChartReads } from "../../test/chartReads";
@@ -315,20 +310,9 @@ const RECENT = new Date().toISOString(); // "just now"
 
 function event(overrides: Partial<ClassifierEvent>): ClassifierEvent {
   return {
-    id: "d1",
-    classifier_id: "c1",
-    classifier_version: 1,
-    subject_kind: "span",
-    subject_id: "s1",
-    session_id: null,
-    trace_id: null,
-    project_version_id: null,
-    severity: "warn",
-    evidence_json: null,
-    confidence: "high",
-    detected_at: RECENT,
-    occurred_at: null,
-    ...overrides,
+    id: "d1", classifier_id: "c1", classifier_version: 1, subject_kind: "span", subject_id: "s1", session_id: null,
+    trace_id: null, project_version_id: null, severity: "warn", evidence_json: null, confidence: "high",
+    detected_at: RECENT, occurred_at: null, ...overrides,
   };
 }
 
@@ -365,11 +349,8 @@ describe("DetectionRow", () => {
 
 function groundednessRow(overrides: Partial<Classifier> = {}): Classifier {
   return classifier({
-    id: "clf-g",
-    classifier_key: "groundedness",
-    name: "Groundedness",
-    description: "Answers that state things the retrieved documents don't support.",
-    detector: "groundedness",
+    id: "clf-g", classifier_key: "groundedness", name: "Groundedness",
+    description: "Answers that state things the retrieved documents don't support.", detector: "groundedness",
     ...overrides,
   });
 }
@@ -539,11 +520,7 @@ describe("Frustration", () => {
 
 describe("a drift classifier's findings, detections and reset", () => {
   const COST = classifier({
-    id: "clf-c",
-    classifier_key: "cost_drift",
-    name: "Cost drift",
-    detector: "cost_drift",
-    enabled: true,
+    id: "clf-c", classifier_key: "cost_drift", name: "Cost drift", detector: "cost_drift", enabled: true,
   });
   const finding = (id: string, over: Partial<BehaviorFinding> = {}) =>
     ({
@@ -551,12 +528,7 @@ describe("a drift classifier's findings, detections and reset", () => {
       title: `Cost rose on ${id}`,
       detector: "cost_drift",
       causeKey: `cost_drift:${id}`,
-      traceCount: 12,
-      triageStatus: "pending",
-      triageSummary: null,
-      triageVerdict: null,
-      humanVerdictAt: null,
-      ...over,
+      traceCount: 12, triageStatus: "pending", triageSummary: null, triageVerdict: null, humanVerdictAt: null, ...over,
     }) as BehaviorFinding;
 
   it("lists only this classifier's findings, and says when it has none", async () => {

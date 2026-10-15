@@ -37,10 +37,7 @@ const SETTINGS = {
   groups: [],
   lanes: [
     {
-      id: "frustration",
-      label: "Frustration",
-      description: "Scores each eligible user turn.",
-      group: "decision_calls",
+      id: "frustration", label: "Frustration", description: "Scores each eligible user turn.", group: "decision_calls",
       provider_options: [
         {
           provider: "TYPESAFE",
@@ -59,25 +56,14 @@ const SETTINGS = {
       automatic: true,
     },
   ],
-  models: [],
-  catalog_models: [],
-  rates: [],
-  settings: [],
-  configured_providers: [],
+  models: [], catalog_models: [], rates: [], settings: [], configured_providers: [],
 } as ModelSettingsResponse;
 
 function credential(provider: "OPENROUTER" | "TYPESAFE"): ProviderCredentialListResponse["credentials"][number] {
   return {
     id: `cred-${provider}`,
-    provider,
-    base_url_override: "",
-    has_api_key: true,
-    aws_region: "",
-    has_aws_credentials: false,
-    bedrock_model_arn: "",
-    custom_model_name: "",
-    auth_mode: "api_key",
-    created_at: "2026-09-01T00:00:00Z",
+    provider, base_url_override: "", has_api_key: true, aws_region: "", has_aws_credentials: false,
+    bedrock_model_arn: "", custom_model_name: "", auth_mode: "api_key", created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
   };
 }

@@ -31,12 +31,7 @@ const FAKE_ME: Me = {
 };
 
 const NOT_CONNECTED_STATUS = {
-  has_live: false,
-  untagged_spans: 0,
-  has_tagged_span: false,
-  spans_received: 0,
-  tagged_spans: 0,
-  last_span_at: null,
+  has_live: false, untagged_spans: 0, has_tagged_span: false, spans_received: 0, tagged_spans: 0, last_span_at: null,
   service_name: null,
 };
 
@@ -277,11 +272,7 @@ describe("ConnectGate — an org with other projects", () => {
 describe("ConnectGate — spans without a call site", () => {
   it("counts what arrived untagged and offers the repair prompt instead of the connect steps", async () => {
     status = {
-      ...NOT_CONNECTED_STATUS,
-      has_live: true,
-      untagged_spans: 1200,
-      spans_received: 1200,
-      tagged_spans: 0,
+      ...NOT_CONNECTED_STATUS, has_live: true, untagged_spans: 1200, spans_received: 1200, tagged_spans: 0,
       last_span_at: new Date().toISOString(),
       service_name: "support-agent",
     };

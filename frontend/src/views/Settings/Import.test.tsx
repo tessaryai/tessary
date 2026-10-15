@@ -32,13 +32,7 @@ const BUNDLE = [
 
 const none: EntityDiff = { added: 0, updated: 0, removed: 0 };
 const result = (over: Partial<ImportResult> = {}): ImportResult => ({
-  mode: "upsert",
-  metaReplaced: false,
-  callSites: none,
-  chains: none,
-  failureModes: none,
-  repairs: [],
-  ...over,
+  mode: "upsert", metaReplaced: false, callSites: none, chains: none, failureModes: none, repairs: [], ...over,
 });
 
 const choose = (paths: string[]) => {

@@ -10,12 +10,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
-  CaseDetail,
-  ClassifierDetail,
-  FlaggedAnswer,
-  FrustratedConversation,
-  FrustrationDetail,
-  RcaReport,
+  CaseDetail, ClassifierDetail, FlaggedAnswer, FrustratedConversation, FrustrationDetail, RcaReport,
 } from "../../api/types";
 import { ApiError } from "../../api/types";
 import type { CapabilitiesView, Me } from "../../api/types-auth";
@@ -24,11 +19,7 @@ import { renderRoute } from "../../test/render";
 import { CasePage } from "./CasePage";
 import { stamp } from "../classifiers/shared";
 import {
-  CURRENT_GROUNDEDNESS_REPORT,
-  FLAGGED_ANSWER,
-  GROUNDEDNESS_CASE_DETAIL,
-  GROUNDEDNESS_DETAIL,
-  GROUNDEDNESS_REPORT,
+  CURRENT_GROUNDEDNESS_REPORT, FLAGGED_ANSWER, GROUNDEDNESS_CASE_DETAIL, GROUNDEDNESS_DETAIL, GROUNDEDNESS_REPORT,
 } from "../../test/groundednessFixtures";
 import { api, auth } from "../../test/api";
 
@@ -49,69 +40,41 @@ const BASE = GROUNDEDNESS_CASE_DETAIL;
 /** A case whose classifier draws no figure and ranks no causes: the answer-and-working layout. */
 function plainCase(over: Partial<CaseDetail> = {}, caseOver: Partial<CaseDetail["case"]> = {}): CaseDetail {
   return {
-    ...BASE,
-    groundedness: null,
-    rca: null,
-    rca_report_id: null,
-    ...over,
+    ...BASE, groundedness: null, rca: null, rca_report_id: null, ...over,
     case: { ...BASE.case, detector: "loop", rca_verdict: null, ...caseOver },
   };
 }
 
 const ANSWER_REPORT: RcaReport = {
-  ...GROUNDEDNESS_REPORT,
-  report_kind: "attribution",
-  verdict: "model_change",
+  ...GROUNDEDNESS_REPORT, report_kind: "attribution", verdict: "model_change",
   summary: "The call site got slower because the serving model changed and inputs grew.",
   causes: [
     {
-      title: "The serving model changed under the call site",
-      confidence: "high",
-      change: null,
-      type: null,
+      title: "The serving model changed under the call site", confidence: "high", change: null, type: null,
       what_changed: "A new model version started serving this call site.",
       how_it_caused_this: "The new model takes longer on the same inputs.",
-      next_step: "A real regression. Pin the previous model.",
-      attribution: null,
+      next_step: "A real regression. Pin the previous model.", attribution: null,
       evidence_trace_ids: ["trace-0123456789"],
       evidence_session_ids: [],
       affected_count: 12,
     },
     {
-      title: "Customers started pasting whole order histories",
-      confidence: "high",
-      change: null,
-      type: null,
-      what_changed: "Inputs grew to include order histories.",
-      how_it_caused_this: "Longer inputs take longer to read.",
-      next_step: "Expected traffic. Nothing to fix.",
-      attribution: null,
-      evidence_trace_ids: [],
-      evidence_session_ids: [],
-      affected_count: 4,
+      title: "Customers started pasting whole order histories", confidence: "high", change: null, type: null,
+      what_changed: "Inputs grew to include order histories.", how_it_caused_this: "Longer inputs take longer to read.",
+      next_step: "Expected traffic. Nothing to fix.", attribution: null, evidence_trace_ids: [],
+      evidence_session_ids: [], affected_count: 4,
     },
     {
-      title: "Traffic moved to longer inputs",
-      confidence: "low",
-      change: null,
-      type: null,
-      what_changed: "Inputs grew.",
-      how_it_caused_this: "Maybe slower.",
-      next_step: "Compare input lengths on both sides.",
-      attribution: null,
-      evidence_trace_ids: [],
-      evidence_session_ids: [],
-      affected_count: 0,
+      title: "Traffic moved to longer inputs", confidence: "low", change: null, type: null,
+      what_changed: "Inputs grew.", how_it_caused_this: "Maybe slower.",
+      next_step: "Compare input lengths on both sides.", attribution: null, evidence_trace_ids: [],
+      evidence_session_ids: [], affected_count: 0,
     },
   ],
   ruled_out: [
     {
-      check: "model_swap",
-      question: "Did the serving model change?",
-      assessment: "explains",
-      detail: "Model id changed.",
-      measurement: null,
-      passed: false,
+      check: "model_swap", question: "Did the serving model change?", assessment: "explains",
+      detail: "Model id changed.", measurement: null, passed: false,
     },
     { check: "input_length", question: null, assessment: "contributing", detail: "Longer inputs.", measurement: null, passed: false },
     { check: "grader_drift", question: null, assessment: "ruled_out", detail: "Grader unchanged.", measurement: null, passed: true },
@@ -126,11 +89,7 @@ const conversation = (id: string, message: string): FrustratedConversation =>
     traceId: id,
     sessionId: `sess-${id}`,
     conversationId: `conv-${id}`,
-    callSiteId: "support-agent",
-    contextTraceIds: [],
-    flaggedAt: "2026-09-23T14:00:00Z",
-    score: 0.9,
-    message,
+    callSiteId: "support-agent", contextTraceIds: [], flaggedAt: "2026-09-23T14:00:00Z", score: 0.9, message,
     cleared: false,
   }) as FrustratedConversation;
 
@@ -139,10 +98,7 @@ const FRUSTRATION: FrustrationDetail = {
   arlTarget: 50000,
   baselineFrustrated: 10,
   conversations: [conversation("f-all", "This is the third time I asked.")],
-  conversationsNextCursor: null,
-  jevThreshold: 0.5,
-  minDecisionInterval: 3600,
-  scorerVersion: "v1",
+  conversationsNextCursor: null, jevThreshold: 0.5, minDecisionInterval: 3600, scorerVersion: "v1",
 } as FrustrationDetail;
 
 const FRUSTRATION_REPORT: RcaReport = {
@@ -161,12 +117,7 @@ const FRUSTRATION_REPORT: RcaReport = {
 };
 
 const frustrationCase = (over: Partial<CaseDetail> = {}): CaseDetail => ({
-  ...BASE,
-  groundedness: null,
-  frustration: FRUSTRATION,
-  rca: FRUSTRATION_REPORT,
-  rca_report_id: "rca-f",
-  ...over,
+  ...BASE, groundedness: null, frustration: FRUSTRATION, rca: FRUSTRATION_REPORT, rca_report_id: "rca-f", ...over,
   case: { ...BASE.case, detector: "frustration", title: "Users on support-agent grew frustrated" },
 });
 
@@ -175,28 +126,14 @@ const WINDOW_CLOSED = "2026-10-09T15:52:33Z";
 const CASE_OPENED = "2026-10-09T16:07:10Z";
 
 const SHIFT = {
-  bucketKey: "support-agent",
-  bucketKind: "call_site",
-  nCur: 500,
-  nRef: 1200,
-  sinceVersionId: null,
-  windowClosedAt: WINDOW_CLOSED,
-  windowKind: null,
-  windowOpenedAt: WINDOW_OPENED,
-  w1Log: 0.4,
-  control: null,
-  direction: "up",
-  explains: [],
-  floor: 0,
-  measure: "duration",
+  bucketKey: "support-agent", bucketKind: "call_site", nCur: 500, nRef: 1200, sinceVersionId: null,
+  windowClosedAt: WINDOW_CLOSED, windowKind: null, windowOpenedAt: WINDOW_OPENED, w1Log: 0.4, control: null,
+  direction: "up", explains: [], floor: 0, measure: "duration",
   quantiles: [
     { key: "p50", then: 1000, now: 2500 },
     { key: "p95", then: 4000, now: 9000 },
   ],
-  ratio: 2.5,
-  reference: "previous",
-  tokens: [],
-  workload: [],
+  ratio: 2.5, reference: "previous", tokens: [], workload: [],
 } as unknown as NonNullable<CaseDetail["metric"]>;
 
 /** A drift case as the server writes it: onset is the sample that closed the window, last seen is the wall clock. */
@@ -305,11 +242,8 @@ describe("closing a case", () => {
       ...BASE,
       case: {
         ...BASE.case,
-        state: "resolved",
-        resolved_at: "2026-09-23T15:00:00Z",
-        resolved_by: "dana@example.com",
-        resolution_reason: "prompt fixed",
-        disposition: "fixed",
+        state: "resolved", resolved_at: "2026-09-23T15:00:00Z", resolved_by: "dana@example.com",
+        resolution_reason: "prompt fixed", disposition: "fixed",
       },
     });
     renderPage();
@@ -679,18 +613,11 @@ describe("a case with a classifier detail", () => {
   const ONSET = "2026-09-22T07:30:00Z";
   const DETAIL: ClassifierDetail = {
     rate: { ...GROUNDEDNESS_DETAIL.rate, onsetAt: ONSET },
-    baselineFlagged: 21,
-    flagLabel: "Yes",
-    flagThreshold: 0.8,
-    arlTarget: 50000,
-    minDecisionInterval: null,
+    baselineFlagged: 21, flagLabel: "Yes", flagThreshold: 0.8, arlTarget: 50000, minDecisionInterval: null,
     learningUntil: null,
     words: {
-      unitOne: "item",
-      unitMany: "items",
-      figureNote: "Share of items the check flagged",
-      referenceLabel: "is the reference",
-      referenceDetail: "Set from the first 1,000 items.",
+      unitOne: "item", unitMany: "items", figureNote: "Share of items the check flagged",
+      referenceLabel: "is the reference", referenceDetail: "Set from the first 1,000 items.",
       thresholdLine: "An item counts when its score is 0.80 or higher.",
     },
   };
@@ -704,12 +631,7 @@ describe("a case with a classifier detail", () => {
     ],
   };
   const classifierCase = (over: Partial<CaseDetail> = {}): CaseDetail => ({
-    ...BASE,
-    groundedness: null,
-    classifier_detail: DETAIL,
-    rca: null,
-    rca_report_id: null,
-    ...over,
+    ...BASE, groundedness: null, classifier_detail: DETAIL, rca: null, rca_report_id: null, ...over,
     case: { ...BASE.case, detector: "item_check", title: "Flagged items on support-agent rose", rca_verdict: null },
   });
 

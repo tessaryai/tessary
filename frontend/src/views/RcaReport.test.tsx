@@ -86,12 +86,8 @@ describe("RcaReport", () => {
       ...GROUNDEDNESS_REPORT,
       ruled_out: [
         {
-          check: "model_swap",
-          question: "Did the serving model change?",
-          assessment: "explains",
-          detail: "Model id changed.",
-          measurement: null,
-          passed: false,
+          check: "model_swap", question: "Did the serving model change?", assessment: "explains",
+          detail: "Model id changed.", measurement: null, passed: false,
         },
         { check: "grader_drift", question: null, assessment: "ruled_out", detail: "Grader unchanged.", measurement: null, passed: true },
       ],
@@ -133,21 +129,14 @@ describe("RcaReport", () => {
 
   it("counts a frustration report's causes in sessions and links the sessions and their turns", async () => {
     report = {
-      ...GROUNDEDNESS_REPORT,
-      report_kind: "frustration_causes",
-      metric: "frustration",
-      current_value: 0.052,
+      ...GROUNDEDNESS_REPORT, report_kind: "frustration_causes", metric: "frustration", current_value: 0.052,
       prior_value: 0.018,
       causes: [
         {
-          title: "The agent repeats the same clarifying question",
-          confidence: "high",
-          change: null,
-          type: null,
+          title: "The agent repeats the same clarifying question", confidence: "high", change: null, type: null,
           what_changed: "Asked for the order number after the user gave it.",
           how_it_caused_this: "Users had to repeat themselves.",
-          next_step: "Read the order number from the conversation before asking.",
-          attribution: null,
+          next_step: "Read the order number from the conversation before asking.", attribution: null,
           evidence_session_ids: ["session-0000aa01", "session-0000aa02"],
           evidence_trace_ids: ["trace-0000bb01"],
           affected_count: 4,

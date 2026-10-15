@@ -15,14 +15,8 @@ import { api } from "../../test/api";
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const token = (over: Partial<McpTokenView> = {}): McpTokenView => ({
-  id: "t-1",
-  name: "my-laptop",
-  token_prefix: "tsy_m_ab12",
-  created_at: "2026-09-25T11:00:00Z",
-  last_used_at: null,
-  revoked_at: null,
-  created_by_user_id: "u-1",
-  ...over,
+  id: "t-1", name: "my-laptop", token_prefix: "tsy_m_ab12", created_at: "2026-09-25T11:00:00Z", last_used_at: null,
+  revoked_at: null, created_by_user_id: "u-1", ...over,
 });
 
 const nativeConfirm = vi.fn(() => true);

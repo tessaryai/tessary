@@ -33,28 +33,14 @@ function plain(over: Partial<Finding> = {}, detail: Partial<BehaviorFindingDetai
 
 const RATE = { ...GROUNDEDNESS_DETAIL.rate, bucketKey: "search_tool", failingTraces: ["0123456789abcdef"] };
 const SHIFT = {
-  bucketKey: "cost|checkout",
-  bucketKind: "call_site",
-  nCur: 400,
-  nRef: 1200,
-  sinceVersionId: null,
-  windowClosedAt: "2026-09-23T00:00:00Z",
-  windowKind: null,
-  windowOpenedAt: "2026-09-16T00:00:00Z",
-  w1Log: 0.4,
-  control: null,
-  direction: "up",
-  explains: [],
-  floor: 0,
-  measure: "cost",
+  bucketKey: "cost|checkout", bucketKind: "call_site", nCur: 400, nRef: 1200, sinceVersionId: null,
+  windowClosedAt: "2026-09-23T00:00:00Z", windowKind: null, windowOpenedAt: "2026-09-16T00:00:00Z", w1Log: 0.4,
+  control: null, direction: "up", explains: [], floor: 0, measure: "cost",
   quantiles: [
     { key: "p50", then: 1, now: 2.5 },
     { key: "p95", then: 10, now: 40 },
   ],
-  ratio: 2.5,
-  reference: "previous",
-  tokens: [],
-  workload: [],
+  ratio: 2.5, reference: "previous", tokens: [], workload: [],
 } as unknown as NonNullable<BehaviorFindingDetail["metric"]>;
 
 beforeEach(() => {
@@ -134,11 +120,8 @@ describe("a finding with no figure", () => {
   it("shows triage's ruling with what it read and the scripts it ran, and offers no verbs", async () => {
     api.getBehaviorFinding.mockResolvedValue(
       plain({
-        triageStatus: "done",
-        triageAction: "closed",
-        triageVerdict: "positive",
-        triageSummary: "Refund retries doubled after the prompt change.",
-        triagedAt: "2026-09-23T15:00:00Z",
+        triageStatus: "done", triageAction: "closed", triageVerdict: "positive",
+        triageSummary: "Refund retries doubled after the prompt change.", triagedAt: "2026-09-23T15:00:00Z",
         caseId: "case-7",
         triageCitations: [
           { path: "window.n_cur", reason: "the current window's size", stdout: null },
@@ -271,19 +254,11 @@ describe("the triage verbs in each story's header", () => {
       "secret leak",
       {
         secretLeak: {
-          basis: "Any high-confidence match opens a case.",
-          confidence: "high",
-          firstAt: T0,
-          lastAt: T0,
+          basis: "Any high-confidence match opens a case.", confidence: "high", firstAt: T0, lastAt: T0,
           keys: [{ lastAt: T0, leaks: 1, masked: "sk-a…9f2c", storedRaw: true, traces: 1 }],
           leakCount: 1,
           leaks: [{ at: T0, masked: "sk-a…9f2c", spanId: "span-1", stored: "raw", traceId: "trace-1" }],
-          rule: "openai_api_key",
-          threshold: 1,
-          traceCount: 1,
-          windowEnd: T0,
-          windowSeconds: 86400,
-          windowStart: T0,
+          rule: "openai_api_key", threshold: 1, traceCount: 1, windowEnd: T0, windowSeconds: 86400, windowStart: T0,
         },
       },
     ],
@@ -316,11 +291,7 @@ describe("a frustration finding", () => {
         { detector: "frustration" },
         {
           frustration: {
-            rate: RATE,
-            arlTarget: 50000,
-            baselineFrustrated: 10,
-            jevThreshold: 0.5,
-            minDecisionInterval: 3600,
+            rate: RATE, arlTarget: 50000, baselineFrustrated: 10, jevThreshold: 0.5, minDecisionInterval: 3600,
             scorerVersion: "v1",
             conversations: [cleared],
             conversationsNextCursor: null,
@@ -340,14 +311,8 @@ describe("a frustration finding", () => {
         { detector: "frustration" },
         {
           frustration: {
-            rate: RATE,
-            arlTarget: 50000,
-            baselineFrustrated: 10,
-            jevThreshold: 0.5,
-            minDecisionInterval: 3600,
-            scorerVersion: "v1",
-            conversations: [],
-            conversationsNextCursor: null,
+            rate: RATE, arlTarget: 50000, baselineFrustrated: 10, jevThreshold: 0.5, minDecisionInterval: 3600,
+            scorerVersion: "v1", conversations: [], conversationsNextCursor: null,
           } as unknown as FrustrationDetail,
         },
       ),
@@ -364,14 +329,8 @@ describe("a frustration finding", () => {
         { detector: "frustration" },
         {
           frustration: {
-            rate: RATE,
-            arlTarget: 50000,
-            baselineFrustrated: 10,
-            jevThreshold: 0.5,
-            minDecisionInterval: 3600,
-            scorerVersion: "v1",
-            conversations: [],
-            conversationsNextCursor: null,
+            rate: RATE, arlTarget: 50000, baselineFrustrated: 10, jevThreshold: 0.5, minDecisionInterval: 3600,
+            scorerVersion: "v1", conversations: [], conversationsNextCursor: null,
           } as unknown as FrustrationDetail,
         },
       ),
@@ -399,23 +358,14 @@ const sinceWords = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 
 const WORDS: ClassifierDetail["words"] = {
-  unitOne: "item",
-  unitMany: "items",
-  figureNote: "Share of items the check flagged",
-  referenceLabel: "is the reference",
-  referenceDetail: "Set from the first 1,000 items.",
+  unitOne: "item", unitMany: "items", figureNote: "Share of items the check flagged",
+  referenceLabel: "is the reference", referenceDetail: "Set from the first 1,000 items.",
   thresholdLine: "An item counts when its score is 0.80 or higher.",
 };
 
 const CLASSIFIER_DETAIL: ClassifierDetail = {
-  rate: RATE,
-  baselineFlagged: 21,
-  flagLabel: "Yes",
-  flagThreshold: 0.8,
-  arlTarget: 50000,
-  minDecisionInterval: null,
-  learningUntil: null,
-  words: WORDS,
+  rate: RATE, baselineFlagged: 21, flagLabel: "Yes", flagThreshold: 0.8, arlTarget: 50000, minDecisionInterval: null,
+  learningUntil: null, words: WORDS,
 };
 
 /** A finding its owning adapter details: a title it stored, on a call site. */
@@ -457,12 +407,8 @@ describe("a finding with a classifier detail", () => {
   it("shows the ruling and its case once triaged", async () => {
     api.getBehaviorFinding.mockResolvedValue(
       owned({
-        caseId: "case-9",
-        triageStatus: "done",
-        triageVerdict: "positive",
-        triageAction: "opened_case",
-        triageSummary: "The flagged share rose on one prompt change.",
-        triagedAt: "2026-09-23T13:52:00Z",
+        caseId: "case-9", triageStatus: "done", triageVerdict: "positive", triageAction: "opened_case",
+        triageSummary: "The flagged share rose on one prompt change.", triagedAt: "2026-09-23T13:52:00Z",
       }),
     );
     renderPage();
@@ -494,12 +440,8 @@ describe("a finding with a classifier detail", () => {
         ...CLASSIFIER_DETAIL,
         rate: fell,
         words: {
-          unitOne: "widget",
-          unitMany: "widgets",
-          figureNote: "Share of widgets the check marked",
-          referenceLabel: "is the agreed limit",
-          referenceDetail: null,
-          thresholdLine: null,
+          unitOne: "widget", unitMany: "widgets", figureNote: "Share of widgets the check marked",
+          referenceLabel: "is the agreed limit", referenceDetail: null, thresholdLine: null,
         },
       }),
     );
@@ -569,12 +511,8 @@ describe("FindingPage, groundedness", () => {
       ...GROUNDEDNESS_FINDING_DETAIL,
       finding: {
         ...GROUNDEDNESS_FINDING_DETAIL.finding,
-        caseId: "case-1",
-        status: "closed",
-        triageStatus: "done",
-        triageVerdict: "positive",
-        triageAction: "opened_case",
-        triagedAt: "2026-09-23T13:52:00Z",
+        caseId: "case-1", status: "closed", triageStatus: "done", triageVerdict: "positive",
+        triageAction: "opened_case", triagedAt: "2026-09-23T13:52:00Z",
       },
     });
     renderPage();

@@ -250,12 +250,7 @@ const finding = (id: string, over: Partial<BehaviorFinding> = {}) =>
     detector: "cost_drift",
     callSiteId: "support-agent",
     firstSeenAt: new Date(Date.now() - 3 * 60_000).toISOString(),
-    triageStatus: "pending",
-    triageAction: null,
-    triageVerdict: null,
-    humanVerdictAt: null,
-    caseId: null,
-    ...over,
+    triageStatus: "pending", triageAction: null, triageVerdict: null, humanVerdictAt: null, caseId: null, ...over,
   }) as BehaviorFinding;
 
 describe("the findings", () => {

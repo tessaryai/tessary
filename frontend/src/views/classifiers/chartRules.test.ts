@@ -7,54 +7,24 @@
 import { describe, expect, it } from "vitest";
 import type { ChartCard, ChartCaseSpan, ChartChip, ChartPoint, ChartToolOption, ClassifierMenuItem } from "../../api/types";
 import {
-  armingLine,
-  axisTitle,
-  chipText,
-  countBar,
-  defaultCallSite,
-  defaultTool,
-  headlineOf,
-  lanesOf,
-  laneTooltip,
-  menuStatus,
-  pointTooltip,
-  spanLabel,
+  armingLine, axisTitle, chipText, countBar, defaultCallSite, defaultTool, headlineOf, lanesOf, laneTooltip, menuStatus,
+  pointTooltip, spanLabel,
   type Step,
-  stepPaths,
-  timeAxis,
-  toolGroups,
-  utcDay,
-  xTicks,
-  yAxis,
+  stepPaths, timeAxis, toolGroups, utcDay, xTicks, yAxis,
 } from "./chartRules";
 
 const HOUR = 3_600_000;
 
 /** A point from `start_at` to `end_at`, with only the fields its kind uses set. */
 const point = (start_at: string, end_at: string, d: Partial<ChartPoint>): ChartPoint => ({
-  start_at,
-  end_at,
-  open: false,
-  checked: null,
-  flagged: null,
-  n: null,
-  p50: null,
-  p95: null,
-  count: null,
-  total: null,
-  reached: null,
-  ...d,
+  start_at, end_at, open: false, checked: null, flagged: null, n: null, p50: null, p95: null, count: null, total: null,
+  reached: null, ...d,
 });
 
 function card(c: Partial<ChartCard>): ChartCard {
   return {
-    classifier_id: "c1",
-    classifier_key: "frustration",
-    name: "Frustration",
-    kind: "rate",
-    measure: null,
-    unit: "fraction",
-    learning: null,
+    classifier_id: "c1", classifier_key: "frustration", name: "Frustration", kind: "rate", measure: null,
+    unit: "fraction", learning: null,
     headline: { value: null, delta: null },
     baseline: null,
     arming: null,
@@ -69,16 +39,8 @@ const rangeBaseline = (p50: number, p95: number) => ({ calls: null, failures: nu
 
 function span(s: Partial<ChartCaseSpan>): ChartCaseSpan {
   return {
-    finding_id: "f",
-    case_id: "case",
-    case_reference: "C-1",
-    case_title: "A case",
-    case_state: "open",
-    start_at: "2026-10-01T09:00:00Z",
-    end_at: null,
-    resolution: null,
-    disposition: null,
-    ...s,
+    finding_id: "f", case_id: "case", case_reference: "C-1", case_title: "A case", case_state: "open",
+    start_at: "2026-10-01T09:00:00Z", end_at: null, resolution: null, disposition: null, ...s,
   };
 }
 
@@ -278,13 +240,8 @@ describe("laneTooltip", () => {
     expect(
       laneTooltip(
         span({
-          case_reference: "C-31",
-          case_title: "Users grew frustrated",
-          case_state: "resolved",
-          start_at: "2026-08-28T09:00:00Z",
-          end_at: "2026-09-05T12:00:00Z",
-          resolution: "human",
-          disposition: "fixed",
+          case_reference: "C-31", case_title: "Users grew frustrated", case_state: "resolved",
+          start_at: "2026-08-28T09:00:00Z", end_at: "2026-09-05T12:00:00Z", resolution: "human", disposition: "fixed",
         }),
       ),
     ).toEqual(["Opens C-31", "Users grew frustrated", "Aug 28 to Sep 5, fixed"]);
@@ -326,10 +283,7 @@ describe("pointTooltip", () => {
   // Bug: p50 and p95 swapped, the baseline band read as one number, or no word of how many samples the point holds.
   it("gives a range point's slow and typical values, its samples and the baseline band", () => {
     const c = card({
-      classifier_key: "duration_drift",
-      kind: "range",
-      measure: "turn_duration",
-      unit: "ms",
+      classifier_key: "duration_drift", kind: "range", measure: "turn_duration", unit: "ms",
       baseline: rangeBaseline(4_100, 11_500),
       points: [point("2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z", { n: 240, p50: 6_100, p95: 16_000 })],
     });
@@ -346,10 +300,7 @@ describe("pointTooltip", () => {
   it("says whether a count bucket's arming window reached the bar that opens a finding", () => {
     const arming = { threshold: 2, window_seconds: 86_400, basis: "event_count", confidence: "high" as const };
     const c = card({
-      classifier_key: "secret_leak",
-      kind: "count",
-      unit: "count",
-      arming,
+      classifier_key: "secret_leak", kind: "count", unit: "count", arming,
       points: [
         point("2026-10-06T06:00:00Z", "2026-10-06T12:00:00Z", { count: 2, total: 2, reached: true }),
         point("2026-10-07T06:00:00Z", "2026-10-07T12:00:00Z", { count: 1, total: 3, reached: false }),
@@ -462,15 +413,8 @@ describe("tools", () => {
 
 describe("menuStatus", () => {
   const item = (m: Partial<ClassifierMenuItem>): ClassifierMenuItem => ({
-    id: "c",
-    classifier_key: "frustration",
-    name: "Frustration",
-    status: "on",
-    waiting_reason: null,
-    covers: "call_sites",
-    all_call_sites: false,
-    call_site_count: 2,
-    ...m,
+    id: "c", classifier_key: "frustration", name: "Frustration", status: "on", waiting_reason: null,
+    covers: "call_sites", all_call_sites: false, call_site_count: 2, ...m,
   });
 
   // Bug: every classifier reads "On" whether it runs on one call site, all of them, or waits on a schema.
@@ -488,13 +432,7 @@ describe("menuStatus", () => {
 
 describe("chipText", () => {
   const chip = (c: Partial<ChartChip>): ChartChip => ({
-    classifier_id: "c",
-    classifier_key: "k",
-    name: "Groundedness",
-    state: "off",
-    reason: null,
-    since: null,
-    ...c,
+    classifier_id: "c", classifier_key: "k", name: "Groundedness", state: "off", reason: null, since: null, ...c,
   });
 
   // Bug: a classifier with no card disappears without a word, and the reader thinks it is not set up.
