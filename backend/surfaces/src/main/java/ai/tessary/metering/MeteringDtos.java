@@ -48,8 +48,8 @@ public final class MeteringDtos {
      *
      * <p>{@code costUsd} covers only the calls the pricing catalog held a rate for; {@code
      * unpricedCalls} is how many it did not, so a reader can see the size of the gap instead of
-     * mistaking it for free usage. {@code platformCostUsd} and {@code byoCostUsd} split the same total
-     * by whose credential paid and must not be re-added into one figure.
+     * mistaking it for free usage. {@code byoCostUsd} is the part of {@code costUsd} the customer's own
+     * provider keys paid for.
      */
     public record LlmUsageSliceView(
             String key,
@@ -61,7 +61,6 @@ public final class MeteringDtos {
             @JsonProperty("cache_write_tokens") long cacheWriteTokens,
             @JsonProperty("total_tokens") long totalTokens,
             @JsonProperty("cost_usd") BigDecimal costUsd,
-            @JsonProperty("platform_cost_usd") BigDecimal platformCostUsd,
             @JsonProperty("byo_cost_usd") BigDecimal byoCostUsd,
             @JsonProperty("unpriced_calls") long unpricedCalls) {
 
@@ -77,15 +76,13 @@ public final class MeteringDtos {
                     s.cacheWriteTokens(),
                     s.totalTokens(),
                     s.costUsd(),
-                    s.platformCostUsd(),
                     s.byoCostUsd(),
                     s.unpricedCalls());
         }
     }
 
     /**
-     * The org's platform LLM consumption over {@code [from, to)}: one total plus the same total cut
-     * three ways (by product lane, by project, by model). Unlike {@link UsageTimeseriesView} this is
+     * The org's platform LLM consumption over {@code [from, to)} as one total. Unlike {@link UsageTimeseriesView} this is
      * read live off the per-call ledger rather than off closed rollup buckets, so {@code asOf} is
      * genuinely now: it includes the call that finished a second ago.
      *
@@ -95,10 +92,7 @@ public final class MeteringDtos {
             @Nullable String from,
             @Nullable String to,
             @JsonProperty("as_of") String asOf,
-            LlmUsageSliceView total,
-            @JsonProperty("by_lane") List<LlmUsageSliceView> byLane,
-            @JsonProperty("by_project") List<LlmUsageSliceView> byProject,
-            @JsonProperty("by_model") List<LlmUsageSliceView> byModel) {}
+            LlmUsageSliceView total) {}
 
     /**
      * One {@code (bucket, series)} cell of the LLM usage timeseries: the value of one bar segment.
