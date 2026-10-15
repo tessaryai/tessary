@@ -89,8 +89,12 @@ Config keys: [`devdocs/reference/config-keys.md`](./devdocs/reference/config-key
   doesn't count.
 - **Every test names the bug it catches.** If you can't name one, don't write it. Don't add tests
   to code you didn't change unless asked.
-- **Never weaken a test to get green**: no deleting, skipping, loosening, or re-baselining. If a
-  test looks wrong, or breaks on a pure refactor, stop and ask.
+- **Never weaken a test to get green**: no skipping, loosening, or re-baselining. If a test looks
+  wrong, or breaks on a pure refactor, stop and ask.
+- **Delete a test only when it is proven redundant.** For unit-testable code, PIT's full mutation
+  matrix shows kept tests kill every mutant it kills, and it is not the only test pinning what PIT
+  can't mutate (literals, tables, tuning constants); for an integration test PIT can't run,
+  per-test coverage shows no branch lost and a read confirms a kept test asserts the same behaviour.
 - **Report each new test** in your summary: the bug it catches and its red output.
 - How to write them: [`backend/AGENTS.md`](./backend/AGENTS.md#testing),
   [`frontend/AGENTS.md`](./frontend/AGENTS.md#tests).
