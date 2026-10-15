@@ -184,16 +184,19 @@ describe("closing a case", () => {
     expect(api.getCase).toHaveBeenCalledTimes(2);
   });
 
-  it("cancels a close without sending it", async () => {
+  it.each([
+    ["Close", api.closeCase],
+    ["Absorb", api.absorbCase],
+  ])("dismisses the %s dialog on Cancel without sending it", async (verb, send) => {
     renderPage();
     await heading(BASE.case.title);
 
-    fireEvent.click(button("Close"));
+    fireEvent.click(button(verb));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await settle();
-    expect(api.closeCase).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("absorbs the case after the confirmation, and says why an absorb was refused", async () => {
@@ -211,18 +214,6 @@ describe("closing a case", () => {
     await waitFor(() => expect(api.absorbCase).toHaveBeenCalledTimes(2));
     expect(api.absorbCase).toHaveBeenLastCalledWith("case-1");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
-
-  it("dismisses the absorb dialog on Cancel without absorbing", async () => {
-    renderPage();
-    await heading(BASE.case.title);
-
-    fireEvent.click(button("Absorb"));
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    await settle();
-    expect(api.absorbCase).not.toHaveBeenCalled();
   });
 
   it("offers Close alone where a case cannot be absorbed", async () => {
@@ -274,29 +265,17 @@ describe("the meta line", () => {
 describe("a metric-drift case's window", () => {
   // Bug: the header read the case's onset (the sample that closed the window) and its wall-clock last
   // seen, so a five-hour window showed as fifteen minutes on two different clocks.
-  it("spans the window the drift was measured over", async () => {
-    api.getCase.mockResolvedValue(driftCase());
+  // A half-known window must not pair the window's open with the case's wall-clock last seen.
+  it.each([
+    ["spans the window the drift was measured over", {}, [WINDOW_OPENED, WINDOW_CLOSED]],
+    ["falls back to the case's own times when the finding carries no window", { windowOpenedAt: null, windowClosedAt: null }, [WINDOW_CLOSED, CASE_OPENED]],
+    ["takes both ends from the case when only one end of the window is known", { windowClosedAt: null }, [WINDOW_CLOSED, CASE_OPENED]],
+  ])("%s", async (_case, metric, [from, to]) => {
+    api.getCase.mockResolvedValue(driftCase(metric));
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.getByText(`${stamp(WINDOW_OPENED)} → ${stamp(WINDOW_CLOSED)}`)).toBeTruthy();
-  });
-
-  it("falls back to the case's own times when the finding carries no window", async () => {
-    api.getCase.mockResolvedValue(driftCase({ windowOpenedAt: null, windowClosedAt: null }));
-    renderPage();
-    await heading(BASE.case.title);
-
-    expect(screen.getByText(`${stamp(WINDOW_CLOSED)} → ${stamp(CASE_OPENED)}`)).toBeTruthy();
-  });
-
-  // Bug: a half-known window paired the window's open with the case's wall-clock last seen.
-  it("takes both ends from the case when only one end of the window is known", async () => {
-    api.getCase.mockResolvedValue(driftCase({ windowClosedAt: null }));
-    renderPage();
-    await heading(BASE.case.title);
-
-    expect(screen.getByText(`${stamp(WINDOW_CLOSED)} → ${stamp(CASE_OPENED)}`)).toBeTruthy();
+    expect(screen.getByText(`${stamp(from)} → ${stamp(to)}`)).toBeTruthy();
   });
 });
 

@@ -110,24 +110,16 @@ describe("the configure page", () => {
     expect(maybeSection("Tuning")).toBeNull();
   });
 
-  // Bug: Status says nothing about where Frustration runs, as if it still kept a list of its own.
-  it("says where Frustration runs in Status, like every other classifier", async () => {
-    api.listClassifiers.mockResolvedValue([classifier({})]);
+  // Bugs: Status says nothing about where Frustration runs, as if it still kept a list of its own; or says
+  // "0 call sites" where the Configure menu says "On, no call sites" for the same classifier.
+  it.each([
+    [null, "Every call site"],
+    [["a", "b"], "2 call sites"],
+    [[], "No call sites"],
+  ])("says where Frustration runs in Status for call_site_ids %j: %s", async (call_site_ids, text) => {
+    api.listClassifiers.mockResolvedValue([classifier({ call_site_ids })]);
     renderPage();
-    expect(await within(await waitFor(() => section("Status"))).findByText("Every call site")).toBeTruthy();
-  });
-
-  it("counts Frustration's call sites in Status when it is limited", async () => {
-    api.listClassifiers.mockResolvedValue([classifier({ call_site_ids: ["a", "b"] })]);
-    renderPage();
-    expect(await within(await waitFor(() => section("Status"))).findByText("2 call sites")).toBeTruthy();
-  });
-
-  // Bug: Status said "0 call sites" where the Configure menu says "On, no call sites" for the same classifier.
-  it("says no call sites in Status when the list is empty, as the Configure menu does", async () => {
-    api.listClassifiers.mockResolvedValue([classifier({ call_site_ids: [] })]);
-    renderPage();
-    expect(await within(await waitFor(() => section("Status"))).findByText("No call sites")).toBeTruthy();
+    expect(await within(await waitFor(() => section("Status"))).findByText(text)).toBeTruthy();
   });
 
   it("gives a drift classifier the call-site list and the tuning form", async () => {
@@ -325,22 +317,16 @@ describe("DetectionRow", () => {
     expect(screen.queryByText(ago(OLD))).not.toBeNull();
   });
 
-  it("opens the session on the flagged span, not the trace, when the detection belongs to a session", () => {
-    renderRoute(
-      <DetectionRow event={event({ trace_id: "t1", session_id: "sess-1", subject_kind: "span", subject_id: "sp1" })} />,
-      { route: "/classifiers", path: "classifiers" },
-    );
+  it.each([
+    ["the session on the flagged span, not the trace, when the detection belongs to a session", "sess-1", "/sessions/sess-1?span=sp1"],
+    ["the trace when the detection has no session (anonymous traffic)", null, "/traces/t1"],
+  ])("opens %s", (_case, session_id, to) => {
+    renderRoute(<DetectionRow event={event({ trace_id: "t1", session_id, subject_kind: "span", subject_id: "sp1" })} />, {
+      route: "/classifiers",
+      path: "classifiers",
+    });
     fireEvent.click(screen.getByRole("link"));
-    expect(currentLocation()).toBe("/sessions/sess-1?span=sp1");
-  });
-
-  it("opens the trace when the detection has no session (anonymous traffic)", () => {
-    renderRoute(
-      <DetectionRow event={event({ trace_id: "t1", session_id: null, subject_kind: "span", subject_id: "sp1" })} />,
-      { route: "/classifiers", path: "classifiers" },
-    );
-    fireEvent.click(screen.getByRole("link"));
-    expect(currentLocation()).toBe("/traces/t1");
+    expect(currentLocation()).toBe(to);
   });
 });
 
