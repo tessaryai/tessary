@@ -43,7 +43,7 @@ public class DbFeatureFlags implements FeatureFlags {
     public Optional<Boolean> override(String key, FlagContext context) {
         String orgId = context.orgId();
         if (orgId == null || orgId.isBlank()) {
-            // FlagContext.global(). There is no global row and deliberately no global table: an override is
+            // A global evaluation. There is no global row and deliberately no global table: an override is
             // something an organization states about itself, so a global evaluation has no opinion and
             // lands the caller on the default.
             return Optional.empty();

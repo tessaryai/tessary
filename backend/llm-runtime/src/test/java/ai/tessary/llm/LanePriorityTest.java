@@ -13,7 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 /**
- * The lane table has to agree with the two model tables it names: {@link BedrockModelProfile}'s offer
+ * The lane table has to agree with the two model tables it names: {@link BedrockModelProfile}'s profiles
  * list and {@link ModelCatalog}'s entries. Each disagreement is a settings page that lies: a lane with no
  * order has no automatic answer, a default outside its own list is a model the picker cannot show, a
  * model a lane names but its group does not permit renders and then 400s on save, and one the group
@@ -37,7 +37,10 @@ class LanePriorityTest {
     @ParameterizedTest
     @EnumSource(ModelLane.class)
     void everyLaneNamesExactlyTheModelsItsGroupPermits(ModelLane lane) {
-        Set<String> permitted = new LinkedHashSet<>(BedrockModelProfile.offeredFor(lane.group()));
+        Set<String> permitted = new LinkedHashSet<>();
+        for (BedrockModelProfile.ModelDescriptor d : BedrockModelProfile.platformModels()) {
+            if (lane.group() == LaneGroup.AGENT_VM && d.agentic()) permitted.add(d.modelKey());
+        }
         for (ModelCatalog.CatalogEntry e : ModelCatalog.entries()) {
             boolean fits = lane.group() == LaneGroup.AGENT_VM ? e.agentic() : e.decision();
             if (fits) permitted.add(ModelCatalog.key(e));

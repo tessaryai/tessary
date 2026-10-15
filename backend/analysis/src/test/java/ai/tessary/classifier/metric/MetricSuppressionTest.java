@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
  */
 class MetricSuppressionTest {
 
-    private static final MetricDriftConfig CONFIG = MetricDriftConfig.defaults();
+    private static final MetricDriftConfig CONFIG = MetricDriftConfig.DEFAULTS;
 
     private static final String CALL_SITE = "discover-sales-prospects";
     private static final String OTHER_CALL_SITE = "summarize-thread";

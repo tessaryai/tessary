@@ -140,7 +140,7 @@ class ClassifierServiceTest {
 
         ClassifierDtos.TuningView view = service.getTuning(PID, "clf-cost");
 
-        MetricDriftConfig defaults = MetricDriftConfig.defaults();
+        MetricDriftConfig defaults = MetricDriftConfig.DEFAULTS;
         assertTrue(0 < tight.stdDevLog()
                 && tight.stdDevLog() < middle.stdDevLog()
                 && middle.stdDevLog() < wide.stdDevLog());

@@ -21,7 +21,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class RegexDetectorTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final NlPhraseCompiler compiler = new DeterministicNlPhraseCompiler();
+    private final DeterministicNlPhraseCompiler compiler = new DeterministicNlPhraseCompiler();
 
     private RegexDetector detector(ClassifierField field, boolean wordBoundary) {
         return new RegexDetector(

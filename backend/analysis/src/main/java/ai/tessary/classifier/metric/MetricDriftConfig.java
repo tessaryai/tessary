@@ -164,7 +164,8 @@ public record MetricDriftConfig(
     private static final int SETTLE_SECONDS_MAX = 3_600;
     private static final int HIST_BINS_MIN = 64;
     private static final int HIST_BINS_MAX = 1_024;
-    private static final MetricDriftConfig DEFAULTS = new MetricDriftConfig(
+    /** The baked defaults, used when a project's signal carries no config. */
+    public static final MetricDriftConfig DEFAULTS = new MetricDriftConfig(
             // Both duration measures, because they are two halves of one question and therefore one
             // switch (metric-drift.md §3.1). Shipping tool_duration WITHOUT turn_duration would be the
             // supportable half-configuration; shipping turn without tool is the one that reports a
@@ -193,12 +194,7 @@ public record MetricDriftConfig(
         histBins = (int) clamp(histBins, HIST_BINS_MIN, HIST_BINS_MAX);
     }
 
-    /** The baked defaults, used when a project's signal carries no config. */
-    public static MetricDriftConfig defaults() {
-        return DEFAULTS;
-    }
-
-    /** Parse the classifier's {@code config_json}, falling back per-field to {@link #defaults()}. */
+    /** Parse the classifier's {@code config_json}, falling back per-field to {@link #DEFAULTS}. */
     public static MetricDriftConfig of(ObjectMapper mapper, @Nullable String configJson) {
         if (configJson == null || configJson.isBlank()) return DEFAULTS;
         JsonNode node;
