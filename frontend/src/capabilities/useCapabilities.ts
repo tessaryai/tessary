@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useQuery } from "@tanstack/react-query";
-import { auth } from "../api/client";
+import { capabilitiesQuery } from "../shell/shellQueries";
 import type { CapabilityWire } from "../api/types-auth";
 import { useTenant } from "../tenant/TenantContext";
 
@@ -18,11 +18,7 @@ import { useTenant } from "../tenant/TenantContext";
  */
 export function useCapabilities() {
   const { orgSlug } = useTenant();
-  const query = useQuery({
-    queryKey: ["capabilities", orgSlug],
-    queryFn: () => auth.getCapabilities(orgSlug),
-    enabled: !!orgSlug,
-  });
+  const query = useQuery({ ...capabilitiesQuery(orgSlug), enabled: !!orgSlug });
 
   const capabilities = query.data?.capabilities;
   return {

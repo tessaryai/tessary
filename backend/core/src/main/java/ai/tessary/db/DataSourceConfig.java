@@ -61,6 +61,9 @@ public class DataSourceConfig {
         ds.setMaximumPoolSize(10);
         ds.setMinimumIdle(1);
         ds.setLeakDetectionThreshold(30_000);
+        // JIT compiling the chart, vitals and search reads took 0.5-1.5 s each on 400k spans, longer than
+        // running them; nothing here runs long enough to pay that back.
+        ds.setConnectionInitSql("SET jit = off");
         // evals-hikari, not tessary-hikari: it is a Micrometer pool= tag, so renaming it splits the series.
         // telemetry-naming.md records it as deliberately frozen through the namespace rename.
         ds.setPoolName("evals-hikari");

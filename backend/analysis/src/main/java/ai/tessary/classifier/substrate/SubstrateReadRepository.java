@@ -123,7 +123,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * <p>Bucketed on event time, not ingest time, since a backfilled corpus would otherwise pile a
      * month of traffic into the hour it was uploaded. {@code trace} has no {@code created_at}
      * column: the row is identity plus rollups, and when it was written isn't a fact about the turn.
-     * Index-served by {@code ix_trace_project_started}.
+     * Index-served by {@code ix_trace_project_started_id}.
      */
     public List<DailyTraceCount> dailyTraceCounts(String projectId, java.time.Instant from) {
         return jdbc.sql("""
@@ -149,7 +149,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * them with {@code tessary.call_site.id}. Powers the onboarding/pipeline "instrument your call
      * sites" nudge; capped at {@value #UNTAGGED_CAP} via a LIMIT subquery since the UI renders
      * "{cap}+" beyond it and an exact count over an unbounded substrate is never worth paying for a
-     * banner.
+     * banner. Served by {@code ix_span_untagged}, which holds only untagged spans, so a project that tags
+     * everything answers zero without reading its spans.
      */
     public long untaggedSpans(String projectId) {
         return jdbc.sql("""

@@ -612,8 +612,7 @@ public class ClassifierChartService {
 
     private Built toolErrorCard(Reads p, ClassifierRow row, String key) {
         Instant started = Instant.now();
-        List<String> names = toolErrors.namesByToolKey(p.id, p.range.fromAt()).getOrDefault(key, List.of());
-        List<RateRow> rows = charts.toolErrorHours(p.id, names, p.range.fromAt());
+        List<RateRow> rows = charts.toolErrorHours(p.id, toolCallNames(p, key, p.range.fromAt()), p.range.fromAt());
         ChartBaseline baseline = ChartSeries.rateBaseline(
                 p.states(row.detector()).get(key), p.references().get(key), ChartSeries.minBaseline(row, mapper));
         LearningView learning = baseline != null
@@ -624,7 +623,8 @@ public class ClassifierChartService {
                         key,
                         () -> toolErrors
                                 .newestEventAt(p.id)
-                                .map(n -> toolErrors.hourlyTallies(p.id, n.minus(LEARNING_WINDOW)))
+                                .map(n -> n.minus(LEARNING_WINDOW))
+                                .map(from -> toolErrors.hourlyTallies(p.id, from, toolCallNames(p, key, from)))
                                 .orElse(List.of()));
         ChartCard card = rateCard(row, rows, baseline, learning, new ToolErrorTool(key), p);
         logRead(p, row, "tool", rows.size(), started);
@@ -633,6 +633,13 @@ public class ClassifierChartService {
                     toolErrors.namesByToolKey(p.id, before.minus(NAME_LOOKBACK)).getOrDefault(key, List.of());
             return charts.toolCallLastDay(p.id, older, before);
         });
+    }
+
+    /** The raw tool call names since {@code from} that fold to {@code key}. */
+    private List<String> toolCallNames(Reads p, String key, Instant from) {
+        return charts.toolCallNames(p.id, from).stream()
+                .filter(name -> key.equals(ToolErrorBuckets.toolKey(name)))
+                .toList();
     }
 
     private interface Tallies {

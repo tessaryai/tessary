@@ -13,7 +13,6 @@ import { ProtectedRoute } from "./ProtectedRoute";
 
 const auth = vi.hoisted(() => ({ me: vi.fn(), loginUrl: vi.fn((r?: string) => `/auth/login?returnTo=${r}`) }));
 vi.mock("../api/client", () => ({ auth }));
-vi.mock("../lib/routePreload", () => ({ preloadRouteChunk: vi.fn() }));
 
 const ME = { id: "u-1", email: "dana@example.com", orgs: [], platform_staff: false };
 

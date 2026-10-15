@@ -2,10 +2,8 @@
 /*
  * Route chunk warm-up.
  *
- * Lives in its own module rather than in App.tsx on purpose: AuthContext needs to START a preload
- * and App.tsx needs to REGISTER the loaders, and having them import each other would be a cycle
- * whose correctness depended on module evaluation order. A third module both can depend on has no
- * such ordering question.
+ * Lives in its own module rather than in App.tsx on purpose: main.tsx STARTS a preload at boot and
+ * App.tsx REGISTERS the loaders, and a module both can depend on has no evaluation-order question.
  *
  * WHY THIS EXISTS. `ProtectedRoute` renders nothing until `/auth/me` answers, so the route subtree —
  * and therefore React.lazy's dynamic import — could not begin until that round trip finished. That
@@ -14,9 +12,8 @@
  * then TenantPathResolver). Measured on production, the Graders chunk alone was 993 ms sitting in
  * that queue.
  *
- * WHAT IT DELIBERATELY DOES NOT DO. It moves no data request. A signed-out visitor fetches nothing
- * here they could not already fetch unauthenticated, so there is no burst of 401s to design around
- * and no change to what any identity can see. It only warms the module cache.
+ * It only warms the module cache. The shell's data reads are started beside it by
+ * `shell/shellQueries.ts#prefetchProjectShell`.
  */
 
 /** Route segment → the dynamic import that fetches its chunk. */
@@ -46,4 +43,17 @@ export function preloadRouteChunk(pathname: string): void {
   void load().catch(() => {
     /* warm-up only; React.lazy owns the real error path */
   });
+}
+
+/** A chunk's loader, plus the module once any call to it has landed. */
+export function trackedChunk<M>(loader: () => Promise<M>): { load: () => Promise<M>; loaded: () => M | undefined } {
+  let module: M | undefined;
+  return {
+    load: () =>
+      loader().then((m) => {
+        module = m;
+        return m;
+      }),
+    loaded: () => module,
+  };
 }

@@ -9,10 +9,11 @@ import { TenantProvider, useProjectApi, useTenant } from "./tenant/TenantContext
 import { auth as authApi } from "./api/client";
 import { isSampleProject } from "./api/types-auth";
 import { ShellChrome } from "./shell";
+import { projectsQuery, substrateStatusQuery } from "./shell/shellQueries";
 import { CapabilityGate } from "./capabilities/CapabilityGate";
 import { ConnectGate } from "./views/onboarding/ConnectGate";
 import { Button, Spinner, ToastProvider } from "./ui";
-import { registerRouteChunk } from "./lib/routePreload";
+import { registerRouteChunk, trackedChunk } from "./lib/routePreload";
 
 /*
  * Route-level code-splitting. Every view is lazy-loaded so the initial
@@ -31,10 +32,21 @@ function named<M, K extends keyof M>(
    */
   preloadAt?: string,
 ): M[K] extends ComponentType<infer P> ? ComponentType<P> : never {
-  if (preloadAt) registerRouteChunk(preloadAt, loader);
+  const chunk = trackedChunk(loader);
+  if (preloadAt) registerRouteChunk(preloadAt, chunk.load);
   // React.lazy expects a module with a `default` export; our views use named
   // exports, so adapt here while preserving each component's prop types.
-  return lazy(async () => ({ default: (await loader())[key] as ComponentType<unknown> })) as never;
+  return lazy(() => {
+    const module = chunk.loaded();
+    if (module) return resolvedNow({ default: module[key] as ComponentType<unknown> });
+    return chunk.load().then((m) => ({ default: m[key] as ComponentType<unknown> }));
+  }) as never;
+}
+
+// Resolves inside `then`, so React.lazy renders an already-fetched chunk on the first pass. Suspending
+// instead commits the fallback, and React then holds the view until 300 ms after it appeared.
+function resolvedNow<T>(value: T): Promise<T> {
+  return { then: (resolve: (v: T) => unknown) => resolve(value) } as unknown as Promise<T>;
 }
 
 const Login = named(() => import("./views/auth/Login"), "Login");
@@ -190,16 +202,12 @@ function ProjectShell() {
   const { orgSlug, projectSlug } = useTenant();
   const api = useProjectApi();
 
-  const projects = useQuery({
-    queryKey: ["projects", orgSlug],
-    queryFn: () => authApi.listProjects(orgSlug),
-  });
+  const projects = useQuery(projectsQuery(orgSlug));
   const project = projects.data?.find((p) => p.slug === projectSlug);
   const isSample = project ? isSampleProject(project) : false;
 
   const substrate = useQuery({
-    queryKey: ["substrate-status", api.base],
-    queryFn: api.substrateStatus,
+    ...substrateStatusQuery(api),
     // Only worth polling here while the gate might still be open -- once a project is known-sample
     // or the shell has already been chosen this render, ConnectGate (if mounted) owns its own poll.
     enabled: !isSample,

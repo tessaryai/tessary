@@ -89,16 +89,21 @@ public class VitalsRepository {
      *
      * <p>Only settled traces contribute. A trace still receiving spans has a partial cost, and averaging
      * partials into a window makes spend look like it fell.
+     *
+     * <p>Served by {@code ix_span_llm_usage}, which holds every column read here, so the window is read from the
+     * index rather than from span rows. The grouping and distinct keys are compared under {@code "C"}: the database
+     * collation is deterministic, so two strings are equal under it exactly when their bytes are, and the groups
+     * are the same; sorting them byte-wise instead of by locale is what makes the aggregation cheap.
      */
     public List<UsageRow> usageIn(String projectId, Instant from, Instant to, Dimension by) {
-        String dim = "COALESCE(s." + by.column() + ", '" + UNATTRIBUTED + "')";
+        String dim = "COALESCE(s." + by.column() + ", '" + UNATTRIBUTED + "') COLLATE \"C\"";
         return jdbc.sql("SELECT " + dim + " AS dim,"
                         + " sum(s.total_tokens) AS tokens,"
                         + " sum(s.total_cost) AS usd,"
                         + " count(*) FILTER (WHERE s.total_tokens IS NOT NULL) AS calls,"
                         + " count(*) FILTER (WHERE s.cost_source = '" + UNPRICED + "'"
                         + "                    AND s.total_tokens IS NOT NULL) AS unpriced_calls,"
-                        + " count(DISTINCT s.trace_id) FILTER (WHERE s.total_tokens IS NOT NULL)"
+                        + " count(DISTINCT s.trace_id COLLATE \"C\") FILTER (WHERE s.total_tokens IS NOT NULL)"
                         + "     AS spending_traces"
                         + " FROM span s JOIN trace t"
                         + "   ON t.project_id = s.project_id AND t.id = s.trace_id"

@@ -36,7 +36,7 @@ export function ShellChrome({
           <Sidebar />
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             {isSample && <SampleBanner />}
-            <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-y-auto outline-none">
+            <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-y-auto outline-none bg-bg">
               {/* Above the content well, not inside a surface: a platform-wide grading stop applies to
                   every surface, so it must not scroll away with one view's content. */}
               {children}
