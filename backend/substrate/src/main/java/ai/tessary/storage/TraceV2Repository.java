@@ -539,10 +539,6 @@ public class TraceV2Repository {
                 .list();
     }
 
-    /**
-     * The ids of a session's traces that pass {@code filter}, oldest first: the traces of an expanded session row
-     * the traces list would show. Served by {@code ix_trace_session}.
-     */
     @Transactional(readOnly = true)
     public List<String> idsInSessionMatching(String projectId, String sessionId, TraceQuery filter, int limit) {
         var params = new HashMap<String, Object>();
@@ -562,11 +558,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * One trace of a session, with the facts the session timeline reads from the trace row.
-     *
-     * @param settled no span of the trace is on its way ({@code is_settled})
-     * @param settledEnd the latest span end of a settled trace; null while the trace is not settled, since a span may
-     *     still arrive, or when none of its spans has ended
+     * {@code settledEnd} is null while the trace is unsettled, since a span may still arrive, or when none of its spans
+     * ended.
      */
     public record SessionTrace(
             String id,
@@ -594,9 +587,8 @@ public class TraceV2Repository {
             + " ORDER BY t.ended_at DESC, t.started_at DESC, t.id DESC LIMIT :limit";
 
     /**
-     * The traces of a session with no settled end, latest start first: those not settled, since a span may still
-     * arrive, and the settled ones none of whose spans ended. Detached sub-agent traces too. Served by {@code
-     * ix_trace_session_unended}, which holds only such traces, so a long session's ended traces are not read.
+     * Served by {@code ix_trace_session_unended}, which holds only such traces, so a long session's ended traces are
+     * not read.
      */
     public List<SessionTrace> listUnendedSessionTraces(String projectId, String sessionId) {
         return jdbc.sql(UNENDED_SESSION_TRACES)
@@ -607,10 +599,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * Up to {@code limit} settled traces of a session that have an end, latest end first, then start and id
-     * descending, after {@code after} in that order, or from the latest when it is null. Detached sub-agent traces
-     * too. Served by {@code ix_trace_session_ended} in this order, so a page reads only its own rows. With {@link
-     * #listUnendedSessionTraces} before it, it lists every trace of the session latest end first.
+     * Served by {@code ix_trace_session_ended} in this order, so a page reads only its own rows. Together with
+     * {@link #listUnendedSessionTraces} it lists every trace latest end first.
      */
     public List<SessionTrace> listEndedSessionTraces(
             String projectId, String sessionId, @Nullable SessionTrace after, int limit) {
@@ -643,10 +633,7 @@ public class TraceV2Repository {
                 Timestamps.iso(rs, "settled_end"));
     }
 
-    /**
-     * A conversation's turns, oldest first. A conversation is a session and a turn is a top-level trace: the key
-     * and grain the frustration classifier scores at. Served by {@code ix_trace_session}.
-     */
+    /** A conversation is a session and a turn is a top-level trace: the grain the frustration classifier scores at. */
     public List<Summary> listByConversation(String projectId, String conversationId, int limit) {
         return jdbc.sql("SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
                         + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens,"
@@ -665,14 +652,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * A session's totals: the SUM of its traces' already-materialized rollup columns, plus the count of
-     * those that have not settled (§7.5).
-     *
-     * <p>This is the one place the spec permits a read to add numbers up, and it is permitted precisely
-     * because the addends are stored columns of up to ~1,000 indexed rows rather than a scan over spans.
-     * {@code unsettledTraces} is the honesty device that goes with it: a total summed from traces still
-     * receiving spans is a lower bound, and the wire says so rather than letting the reader assume
-     * otherwise.
+     * The one read the spec permits to add numbers up, because the addends are stored columns of indexed rows.
+     * {@code unsettledTraces} says when the total is only a lower bound.
      */
     public record SessionTotals(
             int traceCount,
@@ -683,7 +664,6 @@ public class TraceV2Repository {
             @Nullable Long errorCount,
             @Nullable Long unpricedSpans) {}
 
-    /** One indexed read over {@code ix_trace_session}. */
     public SessionTotals sessionTotals(String projectId, String sessionId) {
         return jdbc.sql("""
                         SELECT count(*)                                     AS trace_count,
@@ -709,7 +689,6 @@ public class TraceV2Repository {
                 .single();
     }
 
-    /** One session's batched totals row: the multi-session sibling of {@link SessionTotals}. */
     public record SessionTotalsRow(
             String sessionId,
             int traceCount,
@@ -727,16 +706,7 @@ public class TraceV2Repository {
             @Nullable BigDecimal inputCost,
             @Nullable BigDecimal outputCost) {}
 
-    /**
-     * {@link #sessionTotals}, for a whole page of sessions in one query instead of one per row. Still the
-     * same permitted shape, a GROUP BY over up to {@code sessionIds.size()} indexed session partitions of
-     * {@code ix_trace_session}, not a scan over spans, because the sessions being summed are already the
-     * page a recency-ordered list chose, never a sort key themselves (§7.5).
-     *
-     * <p>Sessions with no traces yet (a session row can exist via {@code getOrCreateAll} before its first trace
-     * lands) are simply absent from the GROUP BY result; the caller fills in a zeroed row rather than this
-     * method returning one, so the SQL stays a plain GROUP BY with no LEFT JOIN against the id list.
-     */
+    /** Sessions with no traces yet are absent; the caller fills a zeroed row so the SQL stays a plain GROUP BY. */
     public Map<String, SessionTotalsRow> sessionTotalsForIds(String projectId, Collection<String> sessionIds) {
         Map<String, SessionTotalsRow> out = new HashMap<>();
         jdbc.sql("""
@@ -783,13 +753,11 @@ public class TraceV2Repository {
         return out;
     }
 
-    /** One (session, call_site) pair's trace count and most-recent sighting: the input to "dominant call site". */
     public record CallSiteCount(String sessionId, String callSiteId, long n, String lastSeenAt) {}
 
     /**
-     * How often each call site appears in each of {@code sessionIds}' traces, and when it was last seen.
-     * Untagged traces ({@code call_site_id IS NULL}) don't count toward any call site. The caller picks the
-     * highest {@code n} per session (ties broken by {@code lastSeenAt}) to name the session's dominant agent.
+     * Untagged traces count toward no call site; the caller picks the highest {@code n} per session as its dominant
+     * agent.
      */
     public List<CallSiteCount> callSiteFrequencyForIds(String projectId, Collection<String> sessionIds) {
         return jdbc.sql("""
@@ -810,13 +778,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * The opening line of each of {@code sessionIds}' sessions, its first trace's own input preview,
-     * by {@code started_at}. Paired with {@link #lastOutputPreviewForIds}, this is the "first input,
-     * last output" bracket a session's Input/Output columns show: neither is a real aggregate (a
-     * session has many inputs and many outputs), but the first ask and the most recent answer are the
-     * two single values that actually mean something read alone. {@code DISTINCT ON} rides the same
-     * {@code ix_trace_session (project_id, session_id, started_at)} index the totals queries use, an
-     * index-ordered skip, not a sort of every row.
+     * Each session's first trace input preview, paired with {@link #lastOutputPreviewForIds} as the "first ask, latest
+     * answer" bracket. {@code DISTINCT ON} rides {@code ix_trace_session}, an index-ordered skip.
      */
     public Map<String, String> firstInputPreviewForIds(String projectId, Collection<String> sessionIds) {
         Map<String, String> out = new HashMap<>();
@@ -833,7 +796,6 @@ public class TraceV2Repository {
         return out;
     }
 
-    /** The most recent trace's output preview per session, see {@link #firstInputPreviewForIds}. */
     public Map<String, String> lastOutputPreviewForIds(String projectId, Collection<String> sessionIds) {
         Map<String, String> out = new HashMap<>();
         jdbc.sql("""
