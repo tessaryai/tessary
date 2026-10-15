@@ -223,14 +223,12 @@ describe("the project switcher", () => {
   });
 });
 
-describe("the account menu", () => {
-  it("still leaves when the server's sign-out fails", async () => {
-    auth.logout.mockRejectedValue(new Error("offline"));
-    open();
+it("the account menu: still leaves when the server's sign-out fails", async () => {
+  auth.logout.mockRejectedValue(new Error("offline"));
+  open();
 
-    fireEvent.click(screen.getByRole("button", { name: /dana@example.com/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+  fireEvent.click(screen.getByRole("button", { name: /dana@example.com/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
-    await waitFor(() => expect(auth.logout).toHaveBeenCalled());
-  });
+  await waitFor(() => expect(auth.logout).toHaveBeenCalled());
 });

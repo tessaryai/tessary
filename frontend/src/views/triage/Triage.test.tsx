@@ -53,19 +53,17 @@ const renderPage = () => renderRoute(<Triage />, { route: "/orgs/acme/projects/d
 const lens = (name: RegExp) => screen.getByRole("button", { name }) as HTMLButtonElement;
 const section = (title: string) => screen.getByRole("heading", { level: 2, name: title }).closest("section")!;
 
-describe("the page", () => {
-  // Bug: the page still titled "Cases", or the lens buttons left in the page header where they read as
-  // filters for the findings too.
-  it("is titled Triage, with the case lenses in the Cases section and Findings below it", async () => {
-    renderPage();
+// Bug: the page still titled "Cases", or the lens buttons left in the page header where they read as
+// filters for the findings too.
+it("the page: is titled Triage, with the case lenses in the Cases section and Findings below it", async () => {
+  renderPage();
 
-    await screen.findByText("Case a");
-    expect(screen.getByRole("heading", { level: 1, name: "Triage" })).toBeTruthy();
-    const cases = section("Cases");
-    expect(within(cases).getByRole("button", { name: /Closed 7d · 1/ })).toBeTruthy();
-    expect(within(section("Findings")).queryByRole("button", { name: /Closed/ })).toBeNull();
-    expect(cases.compareDocumentPosition(section("Findings")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
+  await screen.findByText("Case a");
+  expect(screen.getByRole("heading", { level: 1, name: "Triage" })).toBeTruthy();
+  const cases = section("Cases");
+  expect(within(cases).getByRole("button", { name: /Closed 7d · 1/ })).toBeTruthy();
+  expect(within(section("Findings")).queryByRole("button", { name: /Closed/ })).toBeNull();
+  expect(cases.compareDocumentPosition(section("Findings")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 describe("the open cases", () => {

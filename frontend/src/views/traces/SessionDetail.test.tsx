@@ -143,17 +143,15 @@ describe("SessionDetail", () => {
   });
 });
 
-describe("SessionDetail JSON", () => {
-  it("shows the session and its spans as the API sent them, every string in full once expanded", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    renderSession("?view=json");
+it("SessionDetail JSON: shows the session and its spans as the API sent them, every string in full once expanded", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  renderSession("?view=json");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Expand all" }));
-    expect(screen.getByText(j([{ role: "user", content: "second question" }]))).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ session: session(), spans: spans() }, null, 2));
-  });
+  fireEvent.click(await screen.findByRole("button", { name: "Expand all" }));
+  expect(screen.getByText(j([{ role: "user", content: "second question" }]))).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+  expect(writeText).toHaveBeenCalledWith(JSON.stringify({ session: session(), spans: spans() }, null, 2));
 });
 
 describe("TraceRail", () => {
@@ -252,16 +250,14 @@ describe("SessionRail", () => {
   });
 });
 
-describe("detections", () => {
-  it("marks the turn a classifier flagged, in its own trace only", async () => {
-    api.getSession.mockResolvedValue(
-      session({ detections: [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-b", span_id: "b-llm" }] }),
-    );
-    renderSession();
+it("detections: marks the turn a classifier flagged, in its own trace only", async () => {
+  api.getSession.mockResolvedValue(
+    session({ detections: [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-b", span_id: "b-llm" }] }),
+  );
+  renderSession();
 
-    const second = await screen.findByText("second question");
-    const marker = screen.getByText("Frustration");
-    expect(screen.getAllByText("Frustration")).toHaveLength(1);
-    expect(second.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
+  const second = await screen.findByText("second question");
+  const marker = screen.getByText("Frustration");
+  expect(screen.getAllByText("Frustration")).toHaveLength(1);
+  expect(second.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

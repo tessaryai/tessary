@@ -314,21 +314,19 @@ describe("FlaggedList", () => {
   });
 });
 
-describe("ConversationFilter", () => {
-  it("presses the chip in effect, and reports the one chosen", () => {
-    const onChange = vi.fn();
-    render(
-      <ConversationFilter
-        options={[{ key: "all", label: "All · 40" }, { key: "0", label: "Cause 1 · 3" }]}
-        value="all"
-        onChange={onChange}
-      />,
-    );
-    const group = screen.getByRole("group", { name: "Filter sessions" });
+it("ConversationFilter: presses the chip in effect, and reports the one chosen", () => {
+  const onChange = vi.fn();
+  render(
+    <ConversationFilter
+      options={[{ key: "all", label: "All · 40" }, { key: "0", label: "Cause 1 · 3" }]}
+      value="all"
+      onChange={onChange}
+    />,
+  );
+  const group = screen.getByRole("group", { name: "Filter sessions" });
 
-    expect(within(group).getByRole("button", { name: "All · 40" }).getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(within(group).getByRole("button", { name: "Cause 1 · 3" }));
+  expect(within(group).getByRole("button", { name: "All · 40" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(within(group).getByRole("button", { name: "Cause 1 · 3" }));
 
-    expect(onChange).toHaveBeenCalledWith("0");
-  });
+  expect(onChange).toHaveBeenCalledWith("0");
 });

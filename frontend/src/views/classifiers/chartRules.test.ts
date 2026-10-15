@@ -137,23 +137,19 @@ describe("stepPaths", () => {
   });
 });
 
-describe("spanLabel", () => {
-  // Bug: the span printed in the browser's zone, or a point across midnight shown with one date.
-  it("prints a point's UTC hours, with both dates when it crosses midnight", () => {
-    expect(spanLabel("2026-10-07T14:00:00Z", "2026-10-07T16:00:00Z")).toBe("Oct 7, 14:00-16:00 UTC");
-    expect(spanLabel("2026-10-07T18:00:00Z", "2026-10-08T00:00:00Z")).toBe("Oct 7, 18:00-24:00 UTC");
-    expect(spanLabel("2026-10-07T22:00:00Z", "2026-10-08T02:00:00Z")).toBe("Oct 7, 22:00 to Oct 8, 02:00 UTC");
-  });
+// Bug: the span printed in the browser's zone, or a point across midnight shown with one date.
+it("spanLabel: prints a point's UTC hours, with both dates when it crosses midnight", () => {
+  expect(spanLabel("2026-10-07T14:00:00Z", "2026-10-07T16:00:00Z")).toBe("Oct 7, 14:00-16:00 UTC");
+  expect(spanLabel("2026-10-07T18:00:00Z", "2026-10-08T00:00:00Z")).toBe("Oct 7, 18:00-24:00 UTC");
+  expect(spanLabel("2026-10-07T22:00:00Z", "2026-10-08T02:00:00Z")).toBe("Oct 7, 22:00 to Oct 8, 02:00 UTC");
 });
 
-describe("utcDay", () => {
-  // Bug: dates printed in the browser's zone. East of UTC a case that opened at 23:30 UTC reads as the next day, and
-  // west of UTC a bare date reads as the day before, so the labels disagree with the UTC buckets they sit under.
-  it("prints the UTC day, whatever the browser's zone", () => {
-    expect(utcDay("2026-10-08")).toBe("Oct 8");
-    expect(utcDay("2026-10-06T23:30:00Z")).toBe("Oct 6");
-    expect(utcDay("2026-10-07T00:30:00Z")).toBe("Oct 7");
-  });
+// Bug: dates printed in the browser's zone. East of UTC a case that opened at 23:30 UTC reads as the next day, and
+// west of UTC a bare date reads as the day before, so the labels disagree with the UTC buckets they sit under.
+it("utcDay: prints the UTC day, whatever the browser's zone", () => {
+  expect(utcDay("2026-10-08")).toBe("Oct 8");
+  expect(utcDay("2026-10-06T23:30:00Z")).toBe("Oct 6");
+  expect(utcDay("2026-10-07T00:30:00Z")).toBe("Oct 7");
 });
 
 describe("headlineOf", () => {
@@ -229,26 +225,24 @@ describe("lanesOf", () => {
   });
 });
 
-describe("laneTooltip", () => {
-  // Bug: the case's internal id shown instead of its reference, or a fixed case read as still open.
-  it("names the case, its title, and when it ran", () => {
-    expect(laneTooltip(span({ case_reference: "C-43", case_title: "Turns got slower", start_at: "2026-10-06T09:00:00Z" }))).toEqual([
-      "Opens C-43",
-      "Turns got slower",
-      "Open since Oct 6",
-    ]);
-    expect(
-      laneTooltip(
-        span({
-          case_reference: "C-31", case_title: "Users grew frustrated", case_state: "resolved",
-          start_at: "2026-08-28T09:00:00Z", end_at: "2026-09-05T12:00:00Z", resolution: "human", disposition: "fixed",
-        }),
-      ),
-    ).toEqual(["Opens C-31", "Users grew frustrated", "Aug 28 to Sep 5, fixed"]);
-    expect(
-      laneTooltip(span({ case_state: "resolved", start_at: "2026-08-28T09:00:00Z", end_at: "2026-09-05T12:00:00Z", resolution: "human" })).at(-1),
-    ).toBe("Aug 28 to Sep 5, closed by hand");
-  });
+// Bug: the case's internal id shown instead of its reference, or a fixed case read as still open.
+it("laneTooltip: names the case, its title, and when it ran", () => {
+  expect(laneTooltip(span({ case_reference: "C-43", case_title: "Turns got slower", start_at: "2026-10-06T09:00:00Z" }))).toEqual([
+    "Opens C-43",
+    "Turns got slower",
+    "Open since Oct 6",
+  ]);
+  expect(
+    laneTooltip(
+      span({
+        case_reference: "C-31", case_title: "Users grew frustrated", case_state: "resolved",
+        start_at: "2026-08-28T09:00:00Z", end_at: "2026-09-05T12:00:00Z", resolution: "human", disposition: "fixed",
+      }),
+    ),
+  ).toEqual(["Opens C-31", "Users grew frustrated", "Aug 28 to Sep 5, fixed"]);
+  expect(
+    laneTooltip(span({ case_state: "resolved", start_at: "2026-08-28T09:00:00Z", end_at: "2026-09-05T12:00:00Z", resolution: "human" })).at(-1),
+  ).toBe("Aug 28 to Sep 5, closed by hand");
 });
 
 describe("pointTooltip", () => {
@@ -322,22 +316,20 @@ describe("pointTooltip", () => {
   });
 });
 
-describe("countBar", () => {
-  // Bug: bars drawn from what the arming bar counts, which is project-wide for a user classifier, so a call site's
-  // bar stands taller than the detections its tooltip and headline report.
-  it("is as tall as the call site's detections, and bright only when the arming window reached the bar", () => {
-    expect(countBar(point("2026-10-07T00:00:00Z", "2026-10-07T01:00:00Z", { count: 1, total: 3, reached: false }))).toEqual({
-      height: 3,
-      reached: false,
-    });
-    expect(countBar(point("2026-10-08T00:00:00Z", "2026-10-08T01:00:00Z", { count: 5, total: 1, reached: true }))).toEqual({
-      height: 1,
-      reached: true,
-    });
-    expect(countBar(point("2026-10-08T00:00:00Z", "2026-10-08T01:00:00Z", { count: 4, total: 4 }))).toEqual({
-      height: 4,
-      reached: false,
-    });
+// Bug: bars drawn from what the arming bar counts, which is project-wide for a user classifier, so a call site's
+// bar stands taller than the detections its tooltip and headline report.
+it("countBar: is as tall as the call site's detections, and bright only when the arming window reached the bar", () => {
+  expect(countBar(point("2026-10-07T00:00:00Z", "2026-10-07T01:00:00Z", { count: 1, total: 3, reached: false }))).toEqual({
+    height: 3,
+    reached: false,
+  });
+  expect(countBar(point("2026-10-08T00:00:00Z", "2026-10-08T01:00:00Z", { count: 5, total: 1, reached: true }))).toEqual({
+    height: 1,
+    reached: true,
+  });
+  expect(countBar(point("2026-10-08T00:00:00Z", "2026-10-08T01:00:00Z", { count: 4, total: 4 }))).toEqual({
+    height: 4,
+    reached: false,
   });
 });
 

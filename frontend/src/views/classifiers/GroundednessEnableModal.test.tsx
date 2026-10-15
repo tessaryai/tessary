@@ -167,23 +167,21 @@ describe("GroundednessEnableModal", () => {
   });
 });
 
-describe("GroundednessRestartModal", () => {
-  it("closes itself once a poll reads the model scoring again", async () => {
-    vi.useFakeTimers();
-    api.getGroundednessStatus.mockResolvedValueOnce(status({ state: "not_scoring", mode: "production", configured: true }));
-    const onClose = vi.fn();
-    renderRoute(<GroundednessRestartModal classifierId="clf-g" mode="production" setupRef="v1.3.0" onClose={onClose} />);
-    await tick(50);
-    expect(api.getGroundednessStatus).toHaveBeenCalledOnce();
-    expect(onClose).not.toHaveBeenCalled();
+it("GroundednessRestartModal: closes itself once a poll reads the model scoring again", async () => {
+  vi.useFakeTimers();
+  api.getGroundednessStatus.mockResolvedValueOnce(status({ state: "not_scoring", mode: "production", configured: true }));
+  const onClose = vi.fn();
+  renderRoute(<GroundednessRestartModal classifierId="clf-g" mode="production" setupRef="v1.3.0" onClose={onClose} />);
+  await tick(50);
+  expect(api.getGroundednessStatus).toHaveBeenCalledOnce();
+  expect(onClose).not.toHaveBeenCalled();
 
-    api.getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true }));
-    // The result reaches the component on a zero-delay timer of its own, a few ms past the poll.
-    await tick(SETUP_POLL_MS + 50);
+  api.getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true }));
+  // The result reaches the component on a zero-delay timer of its own, a few ms past the poll.
+  await tick(SETUP_POLL_MS + 50);
 
-    expect(api.getGroundednessStatus).toHaveBeenCalledTimes(2);
-    expect(onClose).toHaveBeenCalledOnce();
-  });
+  expect(api.getGroundednessStatus).toHaveBeenCalledTimes(2);
+  expect(onClose).toHaveBeenCalledOnce();
 });
 
 describe("GroundednessTurnOffModal", () => {

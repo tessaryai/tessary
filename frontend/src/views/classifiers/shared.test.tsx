@@ -38,12 +38,10 @@ describe("ago", () => {
   });
 });
 
-describe("triageState", () => {
-  it("closes a ruling that carries no verdict without claiming one", () => {
-    expect(triageState({ triageStatus: "done", triageVerdict: null, humanVerdictAt: null } as BehaviorFinding)).toEqual({
-      label: "Closed",
-      tone: "closed",
-    });
+it("triageState: closes a ruling that carries no verdict without claiming one", () => {
+  expect(triageState({ triageStatus: "done", triageVerdict: null, humanVerdictAt: null } as BehaviorFinding)).toEqual({
+    label: "Closed",
+    tone: "closed",
   });
 });
 

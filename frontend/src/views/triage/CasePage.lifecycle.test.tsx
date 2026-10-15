@@ -251,15 +251,13 @@ describe("closing a case", () => {
   });
 });
 
-describe("the meta line", () => {
-  it("names the classifier as the classifiers page does, and no call site for the unattributed sentinel", async () => {
-    api.getCase.mockResolvedValue(plainCase({}, { detector: "tool_error", call_site_id: "__unattributed__" }));
-    renderPage();
-    await heading(BASE.case.title);
+it("the meta line: names the classifier as the classifiers page does, and no call site for the unattributed sentinel", async () => {
+  api.getCase.mockResolvedValue(plainCase({}, { detector: "tool_error", call_site_id: "__unattributed__" }));
+  renderPage();
+  await heading(BASE.case.title);
 
-    expect(screen.getByText("Tool error")).toBeTruthy();
-    expect(screen.queryByText("__unattributed__")).toBeNull();
-  });
+  expect(screen.getByText("Tool error")).toBeTruthy();
+  expect(screen.queryByText("__unattributed__")).toBeNull();
 });
 
 describe("a metric-drift case's window", () => {
@@ -502,26 +500,24 @@ function escape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-describe("the activity", () => {
-  it("stays collapsed until asked, then lists each event and who did it", async () => {
-    api.getCase.mockResolvedValue({
-      ...BASE,
-      events: [
-        { id: "e1", kind: "opened", summary: "Case opened", actor: null, created_at: "2026-09-23T13:52:00Z" },
-        { id: "e2", kind: "muted", summary: "Muted", actor: "dana@example.com", created_at: "2026-09-23T14:00:00Z" },
-      ],
-    });
-    renderPage();
-    const toggle = await screen.findByRole("button", { name: "Activity (2) +" });
-    expect(screen.queryByText("Case opened")).toBeNull();
-
-    fireEvent.click(toggle);
-
-    expect(screen.getByText("Case opened").parentElement!.textContent).toContain("Tessary");
-    expect(screen.getByText("dana@example.com")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Activity (2) −" }));
-    expect(screen.queryByText("Case opened")).toBeNull();
+it("the activity: stays collapsed until asked, then lists each event and who did it", async () => {
+  api.getCase.mockResolvedValue({
+    ...BASE,
+    events: [
+      { id: "e1", kind: "opened", summary: "Case opened", actor: null, created_at: "2026-09-23T13:52:00Z" },
+      { id: "e2", kind: "muted", summary: "Muted", actor: "dana@example.com", created_at: "2026-09-23T14:00:00Z" },
+    ],
   });
+  renderPage();
+  const toggle = await screen.findByRole("button", { name: "Activity (2) +" });
+  expect(screen.queryByText("Case opened")).toBeNull();
+
+  fireEvent.click(toggle);
+
+  expect(screen.getByText("Case opened").parentElement!.textContent).toContain("Tessary");
+  expect(screen.getByText("dana@example.com")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Activity (2) −" }));
+  expect(screen.queryByText("Case opened")).toBeNull();
 });
 
 describe("a frustration case", () => {
@@ -655,14 +651,12 @@ describe("a case with a classifier detail", () => {
   });
 });
 
-describe("a case that cannot be read", () => {
-  it("says the case was not found, with the error", async () => {
-    api.getCase.mockRejectedValue(new ApiError(404, { code: "CASE.NOT_FOUND", message: "no such case" }));
-    renderPage();
+it("a case that cannot be read: says the case was not found, with the error", async () => {
+  api.getCase.mockRejectedValue(new ApiError(404, { code: "CASE.NOT_FOUND", message: "no such case" }));
+  renderPage();
 
-    expect(await heading("Case not found")).toBeTruthy();
-    expect(screen.getByText("CASE.NOT_FOUND")).toBeTruthy();
-  });
+  expect(await heading("Case not found")).toBeTruthy();
+  expect(screen.getByText("CASE.NOT_FOUND")).toBeTruthy();
 });
 
 describe("CasePage, groundedness", () => {

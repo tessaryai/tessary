@@ -4,13 +4,11 @@
  * org and project and calling the API with them, rather than failing loudly.
  */
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { useTenant } from "./TenantContext";
 
-describe("useTenant", () => {
-  it("refuses to run outside its provider", () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+it("useTenant: refuses to run outside its provider", () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(() => renderHook(() => useTenant())).toThrow("useTenant must be used inside <TenantProvider>");
-  });
+  expect(() => renderHook(() => useTenant())).toThrow("useTenant must be used inside <TenantProvider>");
 });

@@ -57,13 +57,11 @@ describe("groundedness", () => {
   });
 });
 
-describe("readSetupFlag", () => {
-  it("reads no setup under way when storage refuses", () => {
-    const spy = vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
-
-    expect(readSetupFlag("acme", "default")).toBe(false);
-    spy.mockRestore();
+it("readSetupFlag: reads no setup under way when storage refuses", () => {
+  const spy = vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+    throw new Error("denied");
   });
+
+  expect(readSetupFlag("acme", "default")).toBe(false);
+  spy.mockRestore();
 });

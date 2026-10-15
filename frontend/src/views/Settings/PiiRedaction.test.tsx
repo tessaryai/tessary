@@ -136,32 +136,30 @@ describe("writing a rule", () => {
   });
 });
 
-describe("the playground", () => {
-  it("previews the typed pattern, or the whole active rule set when it is blank", async () => {
-    api.previewRedaction
-      .mockResolvedValueOnce({ original: "", redacted: "SSN [X]", matches: 1 })
-      .mockResolvedValueOnce({ original: "", redacted: "[EMAIL] and [SSN]", matches: 2 })
-      .mockRejectedValueOnce(new Error("regex too slow"));
-    renderRoute(<PiiRedaction />);
-    await screen.findByText("Email");
+it("the playground: previews the typed pattern, or the whole active rule set when it is blank", async () => {
+  api.previewRedaction
+    .mockResolvedValueOnce({ original: "", redacted: "SSN [X]", matches: 1 })
+    .mockResolvedValueOnce({ original: "", redacted: "[EMAIL] and [SSN]", matches: 2 })
+    .mockRejectedValueOnce(new Error("regex too slow"));
+  renderRoute(<PiiRedaction />);
+  await screen.findByText("Email");
 
-    const preview = screen.getByRole("button", { name: "Preview redaction" }) as HTMLButtonElement;
-    expect(preview.disabled).toBe(true);
-    fireEvent.change(screen.getByRole("textbox", { name: "Sample text" }), { target: { value: "SSN 123-45-6789" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Pattern (optional)" }), { target: { value: "\\\\d{3}-\\\\d{2}-\\\\d{4}" } });
-    fireEvent.change(screen.getAllByRole("textbox", { name: "Replacement" })[0], { target: { value: "[X]" } });
-    fireEvent.click(preview);
+  const preview = screen.getByRole("button", { name: "Preview redaction" }) as HTMLButtonElement;
+  expect(preview.disabled).toBe(true);
+  fireEvent.change(screen.getByRole("textbox", { name: "Sample text" }), { target: { value: "SSN 123-45-6789" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Pattern (optional)" }), { target: { value: "\\\\d{3}-\\\\d{2}-\\\\d{4}" } });
+  fireEvent.change(screen.getAllByRole("textbox", { name: "Replacement" })[0], { target: { value: "[X]" } });
+  fireEvent.click(preview);
 
-    await waitFor(() => expect(api.previewRedaction).toHaveBeenCalledWith({ pattern: "\\\\d{3}-\\\\d{2}-\\\\d{4}", replacement: "[X]", sample_text: "SSN 123-45-6789" }));
-    expect(await screen.findByText("1 match redacted")).toBeTruthy();
-    expect(screen.getByText("SSN [X]")).toBeTruthy();
+  await waitFor(() => expect(api.previewRedaction).toHaveBeenCalledWith({ pattern: "\\\\d{3}-\\\\d{2}-\\\\d{4}", replacement: "[X]", sample_text: "SSN 123-45-6789" }));
+  expect(await screen.findByText("1 match redacted")).toBeTruthy();
+  expect(screen.getByText("SSN [X]")).toBeTruthy();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Pattern (optional)" }), { target: { value: "  " } });
-    fireEvent.click(preview);
-    await waitFor(() => expect(api.previewRedaction).toHaveBeenLastCalledWith({ sample_text: "SSN 123-45-6789" }));
-    expect(await screen.findByText("2 matches redacted")).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox", { name: "Pattern (optional)" }), { target: { value: "  " } });
+  fireEvent.click(preview);
+  await waitFor(() => expect(api.previewRedaction).toHaveBeenLastCalledWith({ sample_text: "SSN 123-45-6789" }));
+  expect(await screen.findByText("2 matches redacted")).toBeTruthy();
 
-    fireEvent.click(preview);
-    expect(await screen.findByText("Preview failed")).toBeTruthy();
-  });
+  fireEvent.click(preview);
+  expect(await screen.findByText("Preview failed")).toBeTruthy();
 });

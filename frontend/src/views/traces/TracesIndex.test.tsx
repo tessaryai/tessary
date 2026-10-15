@@ -549,44 +549,42 @@ describe("time range", () => {
   });
 });
 
-describe("refresh", () => {
-  it("auto-refreshes every 30s only while the reader is at the top, and remembers the choice", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const main = document.createElement("main");
-    document.body.appendChild(main);
-    try {
-      renderRoute(<TracesIndex />);
-      await screen.findByText("checkout-agent");
+it("refresh: auto-refreshes every 30s only while the reader is at the top, and remembers the choice", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const main = document.createElement("main");
+  document.body.appendChild(main);
+  try {
+    renderRoute(<TracesIndex />);
+    await screen.findByText("checkout-agent");
 
-      fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
-      fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
-      expect(window.localStorage.getItem("tessary:traces:auto-refresh")).toBe("on");
-      expect(screen.getByTitle("Refresh now · auto-refreshing every 30s")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
+    fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
+    expect(window.localStorage.getItem("tessary:traces:auto-refresh")).toBe("on");
+    expect(screen.getByTitle("Refresh now · auto-refreshing every 30s")).toBeTruthy();
 
-      const before = api.listTraces.mock.calls.length;
-      await act(async () => {
-        vi.advanceTimersByTime(30_000);
-      });
-      await waitFor(() => expect(api.listTraces.mock.calls.length).toBe(before + 1));
+    const before = api.listTraces.mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    await waitFor(() => expect(api.listTraces.mock.calls.length).toBe(before + 1));
 
-      main.scrollTop = 500;
-      fireEvent.scroll(main);
-      expect(screen.getByTitle("Refresh now · auto-refresh held while you are scrolled down")).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
-      expect(screen.getByText("Held while you are scrolled down.")).toBeTruthy();
-      const held = api.listTraces.mock.calls.length;
-      await act(async () => {
-        vi.advanceTimersByTime(30_000);
-      });
-      expect(api.listTraces.mock.calls.length).toBe(held);
+    main.scrollTop = 500;
+    fireEvent.scroll(main);
+    expect(screen.getByTitle("Refresh now · auto-refresh held while you are scrolled down")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
+    expect(screen.getByText("Held while you are scrolled down.")).toBeTruthy();
+    const held = api.listTraces.mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(api.listTraces.mock.calls.length).toBe(held);
 
-      fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
-      expect(window.localStorage.getItem("tessary:traces:auto-refresh")).toBe("off");
-      expect(screen.getByTitle("Refresh now · auto-refresh is off")).toBeTruthy();
-    } finally {
-      main.remove();
-    }
-  });
+    fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
+    expect(window.localStorage.getItem("tessary:traces:auto-refresh")).toBe("off");
+    expect(screen.getByTitle("Refresh now · auto-refresh is off")).toBeTruthy();
+  } finally {
+    main.remove();
+  }
 });
 
 describe("the rails and keyboard paths", () => {
@@ -617,29 +615,27 @@ describe("the rails and keyboard paths", () => {
   });
 });
 
-describe("infinite scroll", () => {
-  it("loads the next page when the sentinel comes into view", async () => {
-    const original = window.IntersectionObserver;
-    class Intersecting {
-      constructor(private cb: IntersectionObserverCallback) {}
-      observe() {
-        this.cb([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
-      }
-      disconnect() {}
+it("infinite scroll: loads the next page when the sentinel comes into view", async () => {
+  const original = window.IntersectionObserver;
+  class Intersecting {
+    constructor(private cb: IntersectionObserverCallback) {}
+    observe() {
+      this.cb([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
     }
-    window.IntersectionObserver = Intersecting as unknown as typeof IntersectionObserver;
-    try {
-      api.listTraces
-        .mockResolvedValueOnce(page([trace({ id: "tr-1", name: "first" })], "c-2"))
-        .mockResolvedValueOnce(page([trace({ id: "tr-2", name: "second" })], null));
-      renderRoute(<TracesIndex />);
+    disconnect() {}
+  }
+  window.IntersectionObserver = Intersecting as unknown as typeof IntersectionObserver;
+  try {
+    api.listTraces
+      .mockResolvedValueOnce(page([trace({ id: "tr-1", name: "first" })], "c-2"))
+      .mockResolvedValueOnce(page([trace({ id: "tr-2", name: "second" })], null));
+    renderRoute(<TracesIndex />);
 
-      expect(await screen.findByText("second")).toBeTruthy();
-      expect(lastListCall().cursor).toBe("c-2");
-    } finally {
-      window.IntersectionObserver = original;
-    }
-  });
+    expect(await screen.findByText("second")).toBeTruthy();
+    expect(lastListCall().cursor).toBe("c-2");
+  } finally {
+    window.IntersectionObserver = original;
+  }
 });
 
 describe("dropdowns and stored choices", () => {

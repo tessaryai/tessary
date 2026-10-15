@@ -166,27 +166,25 @@ describe("rotating and revoking", () => {
   });
 });
 
-describe("the audit trail", () => {
-  it("names each action's key, and says when there is none or it could not load", async () => {
-    const entry = (over: Partial<ApiKeyAudit>): ApiKeyAudit => ({ id: "a", project_id: "p", api_key_id: null, actor_user_id: null, action: "created", details: null, created_at: "2026-09-25T11:00:00Z", ...over });
-    api.listApiKeyAudit.mockResolvedValue([
-      entry({ id: "1", action: "created", details: "created ingest-prod" }),
-      entry({ id: "2", action: "rotated", api_key_id: "0123456789abcdef" }),
-      entry({ id: "3", action: "revoked" }),
-    ]);
-    renderRoute(<ApiKeys />);
-    expect(await screen.findByText("created ingest-prod")).toBeTruthy();
-    expect(screen.getByText("Key 01234567…")).toBeTruthy();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-    cleanup();
+it("the audit trail: names each action's key, and says when there is none or it could not load", async () => {
+  const entry = (over: Partial<ApiKeyAudit>): ApiKeyAudit => ({ id: "a", project_id: "p", api_key_id: null, actor_user_id: null, action: "created", details: null, created_at: "2026-09-25T11:00:00Z", ...over });
+  api.listApiKeyAudit.mockResolvedValue([
+    entry({ id: "1", action: "created", details: "created ingest-prod" }),
+    entry({ id: "2", action: "rotated", api_key_id: "0123456789abcdef" }),
+    entry({ id: "3", action: "revoked" }),
+  ]);
+  renderRoute(<ApiKeys />);
+  expect(await screen.findByText("created ingest-prod")).toBeTruthy();
+  expect(screen.getByText("Key 01234567…")).toBeTruthy();
+  expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  cleanup();
 
-    api.listApiKeyAudit.mockResolvedValue([]);
-    renderRoute(<ApiKeys />);
-    expect(await screen.findByText("No activity yet.")).toBeTruthy();
-    cleanup();
+  api.listApiKeyAudit.mockResolvedValue([]);
+  renderRoute(<ApiKeys />);
+  expect(await screen.findByText("No activity yet.")).toBeTruthy();
+  cleanup();
 
-    api.listApiKeyAudit.mockRejectedValue(new Error("audit unavailable"));
-    renderRoute(<ApiKeys />);
-    expect(await screen.findByText("audit unavailable")).toBeTruthy();
-  });
+  api.listApiKeyAudit.mockRejectedValue(new Error("audit unavailable"));
+  renderRoute(<ApiKeys />);
+  expect(await screen.findByText("audit unavailable")).toBeTruthy();
 });

@@ -127,16 +127,14 @@ describe("ShiftChart", () => {
   });
 });
 
-describe("ShiftPins", () => {
-  it("numbers each pin in chart order, and renders nothing with none", () => {
-    render(<ShiftPins shift={shift({})} />);
-    expect(screen.getByText("A typical turn is 2.5× more")).toBeTruthy();
-    expect(screen.getByText("The tail moved with the middle")).toBeTruthy();
-    expect(screen.getByText("2")).toBeTruthy();
-    cleanup();
-    const { container } = render(<ShiftPins shift={shift({ quantiles: [] })} />);
-    expect(container.innerHTML).toBe("");
-  });
+it("ShiftPins: numbers each pin in chart order, and renders nothing with none", () => {
+  render(<ShiftPins shift={shift({})} />);
+  expect(screen.getByText("A typical turn is 2.5× more")).toBeTruthy();
+  expect(screen.getByText("The tail moved with the middle")).toBeTruthy();
+  expect(screen.getByText("2")).toBeTruthy();
+  cleanup();
+  const { container } = render(<ShiftPins shift={shift({ quantiles: [] })} />);
+  expect(container.innerHTML).toBe("");
 });
 
 describe("ShiftBehind", () => {

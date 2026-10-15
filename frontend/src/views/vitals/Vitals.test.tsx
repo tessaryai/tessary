@@ -203,25 +203,23 @@ describe("the call-site table", () => {
   });
 });
 
-describe("the model table", () => {
-  it("reads by model, shows LLM spans and tokens instead of latency, and opens nothing", async () => {
-    renderRoute(<Vitals />, { route: "/vitals" });
-    await screen.findByText("answer");
+it("the model table: reads by model, shows LLM spans and tokens instead of latency, and opens nothing", async () => {
+  renderRoute(<Vitals />, { route: "/vitals" });
+  await screen.findByText("answer");
 
-    fireEvent.click(screen.getByRole("button", { name: "By model" }));
-    await screen.findByText("claude-sonnet");
-    expect(api.getVitals).toHaveBeenLastCalledWith(7, "model");
+  fireEvent.click(screen.getByRole("button", { name: "By model" }));
+  await screen.findByText("claude-sonnet");
+  expect(api.getVitals).toHaveBeenLastCalledWith(7, "model");
 
-    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
-      "Model",
-      "Spend↓",
-      "LLM spans",
-      "Tokens",
-    ]);
-    expect(cells()).toEqual([["claude-sonnet", "$400", "1,200", "800K"], ["claude-haiku", "$100", "9,000", "2.5M"]]);
+  expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+    "Model",
+    "Spend↓",
+    "LLM spans",
+    "Tokens",
+  ]);
+  expect(cells()).toEqual([["claude-sonnet", "$400", "1,200", "800K"], ["claude-haiku", "$100", "9,000", "2.5M"]]);
 
-    fireEvent.click(bodyRows()[0]);
-    expect(currentLocation()).toBe("/vitals");
-    expect(screen.queryByRole("row", { name: /Open traces/ })).toBeNull();
-  });
+  fireEvent.click(bodyRows()[0]);
+  expect(currentLocation()).toBe("/vitals");
+  expect(screen.queryByRole("row", { name: /Open traces/ })).toBeNull();
 });

@@ -33,16 +33,14 @@ beforeEach(() => {
 
 const toggle = () => screen.getByRole("switch", { name: "Automatic triage" }) as HTMLButtonElement;
 
-describe("reading", () => {
-  it("shows only automatic triage, with the build's default", async () => {
-    auth.listCapabilityOverrides.mockResolvedValue([triage({ enabled: true, default_enabled: true })]);
-    renderRoute(<Features />);
+it("reading: shows only automatic triage, with the build's default", async () => {
+  auth.listCapabilityOverrides.mockResolvedValue([triage({ enabled: true, default_enabled: true })]);
+  renderRoute(<Features />);
 
-    await screen.findByText("Automatic triage");
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
-    expect(toggle().getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByText("Default:").textContent).toBe("Default: on");
-  });
+  await screen.findByText("Automatic triage");
+  expect(screen.getAllByRole("switch")).toHaveLength(1);
+  expect(toggle().getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByText("Default:").textContent).toBe("Default: on");
 });
 
 describe("changing", () => {

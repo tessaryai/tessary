@@ -5,7 +5,7 @@
  * whatever was on their clipboard before).
  */
 import { fireEvent, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
 import type { EmptyState } from "./emptyState";
 import { PipelineEmpty } from "./PipelineEmpty";
@@ -21,17 +21,15 @@ const STATE: EmptyState = {
 };
 const ENDPOINT = `${window.location.origin}/v1/traces`;
 
-describe("PipelineEmpty", () => {
-  it("says when the endpoint could not be copied, and shows it to copy by hand", async () => {
-    Object.defineProperty(navigator, "clipboard", {
-      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
-      configurable: true,
-    });
-    renderRoute(<PipelineEmpty state={STATE} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Copy endpoint" }));
-
-    expect(await screen.findByText("Could not copy")).toBeTruthy();
-    expect(screen.getByText(ENDPOINT)).toBeTruthy();
+it("PipelineEmpty: says when the endpoint could not be copied, and shows it to copy by hand", async () => {
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    configurable: true,
   });
+  renderRoute(<PipelineEmpty state={STATE} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy endpoint" }));
+
+  expect(await screen.findByText("Could not copy")).toBeTruthy();
+  expect(screen.getByText(ENDPOINT)).toBeTruthy();
 });

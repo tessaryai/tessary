@@ -63,10 +63,8 @@ describe("the route guard", () => {
   });
 });
 
-describe("useAuth", () => {
-  it("refuses to run outside its provider", () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+it("useAuth: refuses to run outside its provider", () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(() => renderHook(() => useAuth())).toThrow("useAuth must be used inside <AuthProvider>");
-  });
+  expect(() => renderHook(() => useAuth())).toThrow("useAuth must be used inside <AuthProvider>");
 });

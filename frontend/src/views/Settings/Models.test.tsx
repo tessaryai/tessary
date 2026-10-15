@@ -76,19 +76,17 @@ const SETTINGS: ModelSettingsResponse = {
 
 const renderModels = () => renderRoute(<Models />);
 
-describe("Models", () => {
-  it("renders the decision group with a provider select and no model control", async () => {
-    api.getModelSettings.mockResolvedValue(SETTINGS);
-    renderModels();
+it("Models: renders the decision group with a provider select and no model control", async () => {
+  api.getModelSettings.mockResolvedValue(SETTINGS);
+  renderModels();
 
-    expect(await screen.findByRole("heading", { name: "Decision models" })).toBeTruthy();
-    const provider = screen.getByLabelText("Frustration provider") as HTMLSelectElement;
-    const options = Array.from(provider.options).map((o) => o.textContent);
-    expect(options).toEqual(["Automatic (TypeSafe)", "TypeSafe", "OpenRouter"]);
+  expect(await screen.findByRole("heading", { name: "Decision models" })).toBeTruthy();
+  const provider = screen.getByLabelText("Frustration provider") as HTMLSelectElement;
+  const options = Array.from(provider.options).map((o) => o.textContent);
+  expect(options).toEqual(["Automatic (TypeSafe)", "TypeSafe", "OpenRouter"]);
 
-    expect(screen.queryByLabelText("Frustration model")).toBeNull();
-    expect(screen.getByLabelText("RCA model")).toBeTruthy();
-  });
+  expect(screen.queryByLabelText("Frustration model")).toBeNull();
+  expect(screen.getByLabelText("RCA model")).toBeTruthy();
 });
 
 /*

@@ -488,17 +488,15 @@ describe("Groundedness", () => {
   });
 });
 
-describe("Frustration", () => {
-  it("closes the enable modal without enabling", async () => {
-    api.listClassifiers.mockResolvedValue([classifier({})]);
-    renderPage();
+it("Frustration: closes the enable modal without enabling", async () => {
+  api.listClassifiers.mockResolvedValue([classifier({})]);
+  renderPage();
 
-    fireEvent.click(await screen.findByRole("switch", { name: "Enable Frustration" }));
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
+  fireEvent.click(await screen.findByRole("switch", { name: "Enable Frustration" }));
+  fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
 
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(api.setClassifierEnabled).not.toHaveBeenCalled();
-  });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(api.setClassifierEnabled).not.toHaveBeenCalled();
 });
 
 describe("a drift classifier's findings, detections and reset", () => {
