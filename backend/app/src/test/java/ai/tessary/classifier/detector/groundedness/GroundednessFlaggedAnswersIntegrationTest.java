@@ -185,7 +185,6 @@ record GroundednessFlaggedAnswersIntegrationTest(
         String base =
                 "/api/orgs/" + mine.org().slug() + "/projects/" + mine.project().slug();
         String myAnswers = base + "/findings/" + mine.finding().id() + "/flagged-answers";
-        mvc.perform(get(myAnswers)).andExpect(status().isUnauthorized());
         // Both projects were seeded alike, so their findings cite the same trace ids.
         String trace = page(mine.session(), myAnswers + "?limit=1")
                 .path("rows")

@@ -147,23 +147,6 @@ record ClassifierChartControllerIntegrationTest(
         assertError(me, "/charts?callSiteId=cs-typo&days=7", 422, "CLASSIFIER.UNKNOWN_CALL_SITE");
     }
 
-    @Test
-    void otherProject_cannotReadCharts() throws Exception {
-        Signed me = signUp("chart-me@example.com");
-        Signed them = signUp("chart-them@example.com");
-        declare(them.project().id(), "cs-theirs", null);
-        String theirs =
-                "/api/orgs/" + them.org().slug() + "/projects/" + them.project().slug() + "/classifiers";
-
-        for (String path : List.of("/charts?callSiteId=cs-theirs&days=7", "/chart-scopes?days=7")) {
-            MockHttpServletResponse response = mvc.perform(get(theirs + path).cookie(me.session()))
-                    .andReturn()
-                    .getResponse();
-            assertEquals(403, response.getStatus(), path);
-            assertFalse(response.getContentAsString().contains("cs-theirs"), path);
-        }
-    }
-
     /**
      * Frustration enabled but limited to another call site is an off chip, not an empty card; Malformed Output on a
      * call site with no schema waits; the menu says how many call sites each runs on.

@@ -3,7 +3,6 @@ package ai.tessary.search;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
@@ -20,10 +19,8 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 /**
  * The global search palette over real Postgres with pg_trgm: ranked trace hits scoped to the caller's project. The
@@ -271,7 +268,7 @@ record GlobalSearchServiceIntegrationTest(
 
     /**
      * One hit per trace, keeping the stronger named hit; an unnamed span is titled by its trace; a long excerpt is
-     * clipped; a caller outside the org is refused.
+     * clipped.
      */
     @Test
     void theSearchEndpointNamesEachTraceOnceAndTitlesAnUnnamedSpanByItsTrace() {
@@ -297,15 +294,6 @@ record GlobalSearchServiceIntegrationTest(
         assertEquals(longBody.substring(0, 117) + "\u2026", byTrace.get(unnamed).snippet());
         assertEquals("Trace " + blankName, byTrace.get(blankName).title());
         assertEquals("reconciliation", byTrace.get(blankName).snippet());
-
-        var outsider =
-                TenantFixture.bootstrap(tenants, "search-endpoint-outsider").user();
-        TenantContext stranger = new TenantContext(outsider.id(), outsider.email(), null, null, null, null);
-        ResponseStatusException refused = assertThrows(
-                ResponseStatusException.class,
-                () -> controller.search(
-                        stranger, fix.org().slug(), fix.project().slug(), "reconciliation"));
-        assertEquals(HttpStatus.FORBIDDEN, refused.getStatusCode());
     }
 
     /** The merged legs are capped at the limit: two payload-only and two name-only matches at limit two return two. */

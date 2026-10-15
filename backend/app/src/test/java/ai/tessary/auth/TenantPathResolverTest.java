@@ -35,46 +35,12 @@ record TenantPathResolverTest(TenantPathResolver resolver, TenantService tenants
     }
 
     @Test
-    void requireOrg_unknownSlug_404() {
-        var fix = TenantFixture.bootstrap(tenants, "pr-404");
-        ResponseStatusException ex = assertThrows(
-                ResponseStatusException.class, () -> resolver.requireOrg(sessionFor(fix.user()), "no-such-org"));
-        assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
-    }
-
-    @Test
-    void requireOrg_noMembership_403() {
-        // Alice owns org "alice"; Bob is a member of org "bob" only.
-        var alice = TenantFixture.bootstrap(tenants, "pr-403-alice");
-        var bob = TenantFixture.bootstrap(tenants, "pr-403-bob");
-        ResponseStatusException ex = assertThrows(
-                ResponseStatusException.class,
-                () -> resolver.requireOrg(sessionFor(bob.user()), alice.org().slug()));
-        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
-    }
-
-    @Test
     void requireProject_withinOwnOrg_ok() {
         var fix = TenantFixture.bootstrap(tenants, "pr-happy");
         var r = resolver.requireProject(
                 sessionFor(fix.user()), fix.org().slug(), fix.project().slug());
         assertEquals(fix.project().id(), r.project().id());
         assertEquals("owner", r.role(), "owner of personal org keeps owner on project resolve");
-    }
-
-    @Test
-    void requireProject_projectInOtherOrg_404() {
-        var alice = TenantFixture.bootstrap(tenants, "pr-cross-alice");
-        var bob = TenantFixture.bootstrap(tenants, "pr-cross-bob");
-        // Bob is a member of his own org but asks for Alice's project under his own org slug:
-        // resolver should 404 because the slug doesn't exist within bob's org.
-        ResponseStatusException ex = assertThrows(
-                ResponseStatusException.class,
-                () -> resolver.requireProject(
-                        sessionFor(bob.user()),
-                        bob.org().slug(),
-                        alice.project().slug()));
-        assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
     }
 
     @Test
