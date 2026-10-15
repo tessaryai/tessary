@@ -10,12 +10,10 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/** Wire DTOs for the classifier feature. Snake_case on the wire, camelCase in Java. */
 public final class ClassifierDtos {
 
     private ClassifierDtos() {}
 
-    /** A classifier definition as exposed to the UI / API. */
     public record ClassifierView(
             String id,
             @JsonProperty("classifier_key") String classifierKey,
@@ -32,12 +30,9 @@ public final class ClassifierDtos {
             @JsonProperty("created_at") String createdAt,
             @JsonProperty("updated_at") String updatedAt,
             /**
-             * Why an enabled classifier cannot judge anything yet, or null when it can. {@link
-             * #WAITING_ON_SCHEMAS} on Malformed Output while no call site declares a schema: without one there is
-             * nothing to validate against, and a classifier reporting no detections would otherwise read as clean.
-             * A {@link ClassifierPause} reason on an enabled Frustration that has paused: its provider refused
-             * the org's key, no key is left, the org has no platform credit left, or the platform provider
-             * refused the deployment's key.
+             * {@link #WAITING_ON_SCHEMAS} on Malformed Output while no call site declares a schema, since a classifier
+             * reporting no detections would otherwise read as clean; a {@link ClassifierPause} reason on a paused
+             * Frustration.
              */
             @Nullable String readiness,
             /** Whether the trace and session views mark this classifier's flags and offer it in their filter. */
@@ -67,16 +62,7 @@ public final class ClassifierDtos {
     }
 
     /**
-     * A classifier <em>detection</em> as exposed to the UI / API, projected from a
-     * {@code verdict} ({@code source='automatic'}) JOIN {@code classifier} row — see
-     * {@link ClassifierService#events}/{@link ClassifierService#eventsForClassifier}.
-     * {@code id} is the verdict id (the detection's stable id); {@code classifierId}
-     * / {@code classifierVersion} come from the JOINed definition; {@code subjectId} is the finest-grain subject
-     * id named by {@code subjectKind}; {@code sessionId} is the session the subject belongs to, null for
-     * anonymous traffic (the Classifiers rail's deep-link anchor); {@code traceId} is the owning trace when the subject is a trace or an
-     * observation (the Explore deep-link anchor), null for context-grain detections; {@code detectedAt} is
-     * {@code verdict.created_at}. {@code severity} is
-     * kept for wire-shape compatibility but is always {@code null}: no per-detection severity is persisted.
+     * {@code severity} is kept for wire-shape compatibility but is always null: no per-detection severity is persisted.
      */
     public record ClassifierEventView(
             String id,
@@ -93,7 +79,6 @@ public final class ClassifierDtos {
             @JsonProperty("detected_at") String detectedAt,
             @JsonProperty("occurred_at") @Nullable String occurredAt) {}
 
-    /** Toggle the enable/disable lifecycle of a classifier definition. */
     public record SetEnabledRequest(@NotNull Boolean enabled) {}
 
     /** Limit a classifier to some call sites, or {@code null} to run it on every call site again. Never empty. */
@@ -101,13 +86,7 @@ public final class ClassifierDtos {
             @JsonProperty("call_site_ids") @Nullable @Size(min = 1)
             List<@NotBlank String> callSiteIds) {}
 
-    /**
-     * Sweep-job health for one classifier: makes a failing sweep observable in the product instead
-     * of only in Loki. A classifier with no job yet (never enqueued) reports {@link ClassifierJobRow#PENDING} with
-     * no failure history. {@code nextAttemptAt} is only populated once the sweep queue tracks a backoff
-     * stamp; until then it is always {@code null} — the UI treats a null next-attempt as "next
-     * heartbeat", not an error.
-     */
+    /** {@code nextAttemptAt} is null until the queue tracks a backoff stamp; the UI reads null as "next heartbeat". */
     public record ClassifierHealthView(
             @JsonProperty("classifier_id") String classifierId,
             String status,
@@ -128,12 +107,8 @@ public final class ClassifierDtos {
     }
 
     /**
-     * Per-classifier daily detected-trace volume over the trailing window. UTC calendar days, oldest
-     * first, the last bucket being today-so-far; every array is zero-filled and aligned with
-     * {@code days}. {@code counts[i]} is the DISTINCT traces the classifier detected on {@code days[i]}
-     * (bucketed by <em>detection</em> time — a backfill sweep over history can push a day's count past
-     * {@code trace_totals[i]}); {@code trace_totals[i]} is the non-deleted traces <em>created</em> that
-     * day, the "% of all traces" denominator (0 ⇒ no rate for that day).
+     * Zero-filled and aligned with {@code days}, oldest first, UTC. {@code counts} buckets by detection time, so a
+     * backfill can push a day past {@code trace_totals}.
      */
     public record ClassifierDailyVolumeView(
             List<String> days,
@@ -154,28 +129,16 @@ public final class ClassifierDtos {
         }
     }
 
-    /** One classifier's per-day distinct-trace detection counts, aligned with the parent's {@code days}. */
     public record ClassifierDailyCountsView(
             @JsonProperty("classifier_id") String classifierId, List<Long> counts) {}
 
-    /**
-     * The window/threshold operating point for a metric-drift classifier (cost_drift or
-     * duration_drift) — the {@link MetricDriftConfig} fields a tenant can tune, read back after
-     * {@link MetricDriftConfig}'s own clamps have applied. Only these four are editable; {@code
-     * measures}/{@code explained_by_fraction}/{@code settle_seconds}/{@code hist_bins} stay at
-     * whatever the catalog or a prior edit set them to.
-     */
+    /** Read back after {@link MetricDriftConfig}'s clamps. Only these four are editable. */
     public record TuningView(
             @JsonProperty("window_target_count") int windowTargetCount,
             @JsonProperty("window_max_hours") int windowMaxHours,
             @JsonProperty("min_sample") int minSample,
             @JsonProperty("w1_floor") double w1Floor,
-            /**
-             * What {@code w1_floor} costs in false alarms on THIS project's traffic, or null when no
-             * bucket has enough traffic to say. Read-only: it is the consequence of the dial above, shown
-             * where the dial is set so that choosing a move is not a decision whose effect only surfaces
-             * as noise a week later.
-             */
+            /** Read-only: the consequence of the dial, shown where the dial is set. */
             @JsonProperty("implied_false_alarm_rate") @Nullable
             Double impliedFalseAlarmRate) {
 
@@ -185,23 +148,7 @@ public final class ClassifierDtos {
         }
     }
 
-    /**
-     * Whether the groundedness model is scoring, and what the classifier row and its setup prompts need to
-     * say so. Everything the row shows is read here, so the rules live on the server once.
-     *
-     * @param state {@code off} when the row is disabled; else {@code on}, {@code not_scoring} (it was set up
-     *     and has stopped scoring) or {@code not_set_up} (the model has never answered a sweep)
-     * @param mode {@code dev} or {@code production}, from {@code TESSARY_GROUNDEDNESS_CLASSIFIER_MODE}
-     * @param configured whether the instance has a model URL at all
-     * @param available whether the model answered its last health check with the groundedness head
-     * @param reason the health check's answer, for example {@code unreachable: ConnectException}
-     * @param checkedAt when the health check last ran; null before the first
-     * @param everSwept whether a sweep has ever moved this classifier's cursor, which only a model that
-     *     answered can do
-     * @param lastScoredAt the newest scored answer in this project; null until one is
-     * @param lastCaughtUpAt when a sweep last reached the newest observation; null until one has
-     * @param setupRef the git ref the setup prompts link to: the running release's tag, or {@code main}
-     */
+    /** Everything the row shows is read here, so the rules live on the server once. */
     public record GroundednessStatusView(
             String state,
             String mode,
@@ -215,12 +162,8 @@ public final class ClassifierDtos {
             @JsonProperty("setup_ref") String setupRef) {}
 
     /**
-     * Request body for {@code PUT .../classifiers/{id}/tuning}. Every field is clamped server-side.
-     *
-     * <p>{@code w1_floor} is the dial: the smallest move worth reporting, at a full window. A thin window
-     * is held to more ({@code MetricDriftDetector.effectiveFloor}) because it cannot measure that move
-     * reliably. The false-alarm rate it implies is reported back on {@link TuningView} rather than being
-     * settable — the move is the promise, and the rate is its consequence.
+     * Every field is clamped server-side. The implied false-alarm rate is reported, not settable: the move is the
+     * promise, the rate its consequence.
      */
     public record SetTuningRequest(
             @JsonProperty("window_target_count") @NotNull Integer windowTargetCount,

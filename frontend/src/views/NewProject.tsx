@@ -19,10 +19,8 @@ export function NewProject() {
         name: name.trim(),
         description: description.trim() || null,
       }),
-    // A fresh project has no tagged span, so ProjectShell puts it behind ConnectGate — the same
-    // connect screen first-run gets, which is where a new project actually needs to land. Invalidate
-    // the org's project list first: the route pattern doesn't change, so ProjectShell and Sidebar
-    // don't remount and would otherwise resolve the new slug against a pre-creation list.
+    // The route pattern does not change, so ProjectShell and Sidebar would resolve the new slug against a
+    // stale project list without this invalidation.
     onSuccess: async (project) => {
       await qc.invalidateQueries({ queryKey: ["projects", orgSlug] });
       nav(`/orgs/${orgSlug}/projects/${project.slug}/triage`, { replace: true });
@@ -35,11 +33,6 @@ export function NewProject() {
     <div className="min-h-screen bg-bg text-fg flex items-center justify-center px-6">
       <div className="w-full max-w-md">
         <header className="mb-8">
-          {/* This used to double as the org-creation wizard's "Step 2 of 2" — that numbering
-              now lives on Signup/ConnectGate. This view is reached two ways today: never as part of
-              first-run (a fresh account's default project already exists by the time anyone can see
-              this route), and always live from the Sidebar's "+ New project" action on an
-              already-onboarded org, which has nothing to do with step numbering. Plain heading. */}
           <h1 className="text-h1 text-fg">New project</h1>
           <p className="text-body text-muted mt-2">
             A project owns its sources, classifiers, cases, and tokens. You can add more later.

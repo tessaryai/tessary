@@ -8,11 +8,7 @@ import java.time.Instant;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
-/**
- * Postgres-backed {@link MediaStore}: media bytes as {@code media_object.bytes}
- * ({@code bytea}), content-addressed by sha256 for per-project dedup. The default (and only) MediaStore
- * bean; an object-store implementation can replace it behind the SPI with no caller or schema change.
- */
+/** {@link MediaStore} on {@code media_object.bytes}, content-addressed by sha256 per project. */
 @Component
 public class PostgresMediaStore implements MediaStore {
 
@@ -25,7 +21,6 @@ public class PostgresMediaStore implements MediaStore {
     @Override
     public MediaRef put(String projectId, byte[] bytes, String mediaType) {
         String digest = PriceSnapshot.sha256Hex(bytes);
-        // Dedup: identical bytes in this project reuse the existing row (stable ref, no duplicate write).
         Optional<String> existing = repo.findIdByDigest(projectId, digest);
         if (existing.isPresent()) {
             return new MediaRef(existing.get());
@@ -39,8 +34,7 @@ public class PostgresMediaStore implements MediaStore {
                 bytes,
                 bytes.length,
                 Instant.now().toString());
-        // A concurrent insert may have won the (project_id, digest) unique key — resolve to the row that
-        // stuck so the returned ref is always the canonical one.
+        // A concurrent insert may have won the unique key; return the row that stuck.
         return new MediaRef(repo.findIdByDigest(projectId, digest).orElse(id));
     }
 

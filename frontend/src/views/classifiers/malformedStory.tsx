@@ -1,19 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * A malformed-output finding told two ways: as a rate (reusing `rateStory`, worded for outputs
- * rather than calls) and as a schema, field by field, beside one failing output at a time.
- *
- * <h2>Why the schema tree is the failure signature</h2>
- * A tool-error finding's failure signature is a normalized error message — there is no other
- * structure to a tool call's failure. A schema violation has real structure: it always names a field
- * of a document the customer already declared, so the tree IS the breakdown, annotated with each
- * field's own failure count, rather than a flat list of message strings standing in for one.
- *
- * <h2>Forward-only detail (decision: no backfill)</h2>
- * `SchemaFieldView.failing` and the `notJson`/`other` buckets only count detections written after
- * this classifier started recording structured violations. `other` exists for exactly the detections
- * that predate it: real failures whose field cannot be recovered, kept visible rather than dropped.
- */
+// A schema violation always names a declared field, so the annotated schema tree is the failure
+// signature. Per-field counts only cover detections recorded after structured violations; `other`
+// keeps older failures visible.
 import { useEffect, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -26,15 +14,10 @@ import { RateChart, RatePins } from "./rateStory";
 
 type RateDetail = components["schemas"]["RateDetail"];
 
-/** The two buckets no declared field owns, as pseudo-fields the tree renders the same way a real
- *  field is rendered. Their ids are exactly the `field` query values the endpoint recognises. */
+/** Their ids are the `field` query values the endpoint recognises. */
 const NOT_JSON = "not_json";
 const OTHER = "other";
 
-/**
- * The finding's own header. Same anatomy as `RateHeader` in `FindingPage.tsx` — a rate finding with
- * one more word in the title, since "the rate" here is specifically a schema failure rate.
- */
 export function MalformedHeader({
   rate,
   finding,
@@ -91,8 +74,6 @@ function formatPct(r: number): string {
   return `${(r * 100).toFixed(2)}%`;
 }
 
-/** "What moved" for a malformed-output finding: the same rate chart tool error uses, worded for the
- *  population this classifier actually measures. */
 export function MalformedRate({ rate }: { rate: RateDetail }) {
   return (
     <>
@@ -104,8 +85,6 @@ export function MalformedRate({ rate }: { rate: RateDetail }) {
 
 type FieldId = string;
 
-/** One row of the declared schema, indented to its depth, with its own failure count. Selectable and
- *  keyboard-reachable — it is a `<button>`, not a `<div onClick>`. */
 function FieldRow({
   field,
   selected,
@@ -141,11 +120,6 @@ function FieldRow({
   );
 }
 
-/**
- * The declared schema as a tree, each field annotated with its own failure count since the onset,
- * plus the two buckets no declared field owns. Selecting a row is the only interaction; the
- * "not JSON" and "other" rows behave exactly like a field row so a reader has one motion to learn.
- */
 export function SchemaFieldTree({
   detail,
   selected,
@@ -215,7 +189,6 @@ function BucketRow({
   );
 }
 
-/** Where to send a reader who clicks a trace id — see `secretStory.TraceLinker`'s own note. */
 export type TraceLinker = (traceId: string, spanId?: string | null) => string;
 
 const PAGE = 20;
@@ -227,11 +200,7 @@ function fieldLabel(detail: MalformedOutputDetail, field: FieldId): string {
   return f ? f.name : field;
 }
 
-/**
- * One failing output for the selected field: the validated document with its offending lines
- * highlighted, the violation message, and a step through every other output that failed the same
- * way. Paged rather than read whole — a widely-used field can fail on thousands of outputs.
- */
+/** Paged: a widely used field can fail on thousands of outputs. */
 export function FailingOutput({
   findingId,
   field,
@@ -253,8 +222,6 @@ export function FailingOutput({
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 
-  // A field switch is a fresh population; the position a reader was at in the last one means
-  // nothing here.
   useEffect(() => {
     setIndex(0);
   }, [field]);
@@ -361,12 +328,7 @@ function DocumentView({ document, highlightLines }: { document: string | null; h
   );
 }
 
-/**
- * "How outputs broke": the schema tree beside one failing output for whichever field is selected.
- * Exported as one block so `CasePage.tsx` can drop it in unchanged — the finding page and the case
- * page must never disagree about which field is broken or what a failing output for it looks like,
- * and reading them off the same `MalformedOutputDetail` is what guarantees that.
- */
+/** One block shared with CasePage.tsx so the two pages never disagree about which field broke. */
 export function HowOutputsBroke({
   findingId,
   detail,

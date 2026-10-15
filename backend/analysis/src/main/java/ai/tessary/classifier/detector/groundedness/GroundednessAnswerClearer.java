@@ -17,19 +17,13 @@ import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
- * What a {@code false_alarm} resolve does to the answers a groundedness case cites: their flags are cleared.
- *
- * <p>Every span-grain witness row on every finding the case holds names an answer the replay counted as
- * flagged, and the witnesses are all of them, not a sample. The trace-grain witness rows beside them name the
- * same traces, and the {@code member} rows are every trace scored, most of them clean, so neither is read here.
- * Clearing an answer's detection row ({@code cleared_at}) makes the next replay count its trace clean, unless
- * another flag in it still stands. {@code groundedness_assessment} is never touched: a cleared trace is still a
- * trial, it just stops being a failure.
+ * A {@code false_alarm} resolve clears the flags of every answer a groundedness case cites. Span-grain witness rows are
+ * every flagged answer, not a sample; trace witnesses and members are not read. The next replay counts a trace clean
+ * unless another flag in it stands. {@code groundedness_assessment} is never touched.
  */
 @Component
 public class GroundednessAnswerClearer {
 
-    /** Answers cleared per statement. */
     static final int CLEAR_CHUNK = 1_000;
 
     private final FindingRepository findings;
@@ -45,11 +39,7 @@ public class GroundednessAnswerClearer {
         this.detections = detections;
     }
 
-    /**
-     * Clear the flag on every flagged answer cited by a groundedness finding of case {@code caseId}.
-     *
-     * @return how many distinct answers the case cites, cleared now or already
-     */
+    /** @return how many distinct answers the case cites, cleared now or already */
     public int clear(String projectId, String caseId, String now) {
         Map<String, String> classifierByFinding = new LinkedHashMap<>();
         for (FindingRow f : findings.listByCase(projectId, caseId)) {
@@ -60,13 +50,13 @@ public class GroundednessAnswerClearer {
         }
         if (classifierByFinding.isEmpty()) return 0;
 
-        // Walk findings in the case's order, not the returned map's, so the cleared list is deterministic.
+        // In the case's order, so the cleared list is deterministic.
         Map<String, List<FindingEvidenceRow>> rowsByFinding =
                 evidence.listByFindings(projectId, new ArrayList<>(classifierByFinding.keySet()));
         Map<String, Set<SpanKey>> answersByClassifier = new LinkedHashMap<>();
         for (Map.Entry<String, String> f : classifierByFinding.entrySet()) {
             for (FindingEvidenceRow row : rowsByFinding.getOrDefault(f.getKey(), List.of())) {
-                // Only a witness at span grain is a flagged answer; members and trace witnesses are not.
+                // Only a span-grain witness is a flagged answer.
                 if (row.traceId() != null
                         && row.spanId() != null
                         && FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
@@ -80,7 +70,7 @@ public class GroundednessAnswerClearer {
         int answers = 0;
         for (Map.Entry<String, Set<SpanKey>> e : answersByClassifier.entrySet()) {
             List<SpanKey> cited = List.copyOf(e.getValue());
-            // In chunks: an uncapped witness set can outgrow what one statement's bind list holds.
+            // Chunked: an uncapped witness set can outgrow one statement's bind list.
             for (int from = 0; from < cited.size(); from += CLEAR_CHUNK) {
                 detections.clearSpans(
                         BuiltInDetector.Kind.GROUNDEDNESS,

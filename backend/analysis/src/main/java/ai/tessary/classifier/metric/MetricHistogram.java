@@ -12,65 +12,28 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A {@link MetricSketch} over fixed geometric bins: bin {@code i} covers
- * {@code [lo · r^i, lo · r^(i+1))}, which in log space is a uniform grid of {@code ln(r)}-wide slots.
- * Constant memory (one {@code long} per bin plus two edge counters), exact merges, and exactly
- * reproducible — no seeds, no compression, no ordering effects. That reproducibility is the reason
- * this and not a t-digest first: the metric-drift eval replays the same corpus through the same
- * sketch and has to get the same number twice.
- *
- * <h2>Geometry</h2>
- *
- * <p>{@code r = 1.05} — each bin is 5% wider than the last, so a quantile read off the grid is
- * accurate to about ±2.5%, well under the ~20% shift the detector is meant to notice. 320 bins spans
- * {@code 1.05^320 ≈ 6.0e6}, six and a bit orders of magnitude, which is what makes one range cover
- * both a 2 ms cache hit and a 40-minute research run. Fewer bins would not span the traffic; more
- * would buy resolution the statistic cannot use.
- *
- * <p>Each measure gets its own {@code lo} and they are never shared — see {@link #forDuration()} and
- * {@link #forCost()}. Putting duration and cost on one range would waste most of it on values neither
- * measure ever produces.
- *
- * <h2>Underflow and overflow are counted, never clipped silently</h2>
- *
- * <p>A sample outside the range increments a dedicated edge counter and still counts toward
- * {@link #count()}. Both matter. Dropping it would make a bucket that moved <i>out</i> of range look
- * unchanged, which is the one move a drift detector must not miss. Folding it into the first or last
- * bin would hide the fact that the range is wrong: traffic pinned in overflow is a configuration bug,
- * and a non-empty overflow bin is the signal that the range needs moving. Distance treats the edge counters as two extra slots one bin wide, which understates
- * a shift that lands out of range and never overstates one.
- *
- * <p>Not thread-safe. Each sweep pass owns its sketches under the signal job's existing lease.
+ * Fixed geometric bins: exact merges and exactly reproducible, which is why this rather than a t-digest. Out-of-range
+ * samples go to edge counters and still count: dropping them would hide a bucket moving out of range, and clipping
+ * would hide that the range is wrong. Not thread-safe; each sweep pass owns its sketches under the job lease.
  */
 public final class MetricHistogram implements MetricSketch {
 
-    /** The {@code kind} discriminator written into {@code *_sketch_json}. Persisted; never renamed. */
+    /** Persisted; never renamed. */
     static final String KIND = "hist";
 
-    /** One mapper for this package's sketch serialization. {@link ObjectMapper} is thread-safe once configured. */
     static final ObjectMapper JSON = new ObjectMapper();
 
-    /** Bin growth ratio. 5% per bin ⇒ quantiles good to ±2.5%. */
+    /** 5% per bin gives quantiles to about ±2.5%, well under the ~20% shift the detector looks for. */
     public static final double DEFAULT_RATIO = 1.05;
 
-    /** Bins per grid. {@code 1.05^320 ≈ 6.0e6} — six orders of magnitude, the span real traffic covers. */
+    /** {@code 1.05^320 ≈ 6.0e6}: one range covers a 2 ms cache hit and a 40-minute run. */
     public static final int DEFAULT_BINS = 320;
 
-    /**
-     * The immutable layout two sketches must share to be comparable. A value type rather than three
-     * loose doubles so {@link #id()} — the thing {@link MetricDistance} asserts on — cannot drift out
-     * of step with the numbers it describes.
-     *
-     * @param lo lower edge of bin 0, in the measure's own units
-     * @param ratio width multiplier between consecutive bins
-     * @param bins bin count, excluding the two edge counters
-     */
+    /** A value type so {@link #id()}, which {@link MetricDistance} asserts on, cannot drift from the numbers. */
     public record Grid(double lo, double ratio, int bins) {
 
         public Grid {
-            // Finiteness is tested FIRST so the comparisons below can be written the plain way round.
-            // NaN fails every comparison, so `lo <= 0` alone would let a NaN grid through; ruling it out
-            // up front is what makes the ordering load-bearing rather than stylistic.
+            // Finiteness first: NaN fails every comparison, so `lo <= 0` alone would let a NaN grid through.
             if (!Double.isFinite(lo) || lo <= 0) {
                 throw new IllegalArgumentException("grid lo must be finite and positive, was " + lo);
             }
@@ -82,49 +45,33 @@ public final class MetricHistogram implements MetricSketch {
             }
         }
 
-        /** {@code ln(lo)} — the lower edge in log space, where every sample is compared. */
         public double logLo() {
             return Math.log(lo);
         }
 
-        /** {@code ln(ratio)} — one slot's width in log space, constant across the grid. */
         public double slotWidthLog() {
             return Math.log(ratio);
         }
 
-        /** {@code ln(lo · ratio^bins)} — the upper edge, above which samples land in overflow. */
         public double logHi() {
             return logLo() + bins * slotWidthLog();
         }
 
-        /**
-         * Compact identity, and the exact string {@link MetricDistance} compares. Formatted rather than
-         * relying on record equality so that a sketch rehydrated from JSON — where {@code lo} has been
-         * through a decimal round-trip — still matches one built in memory.
-         */
+        /** Formatted rather than record equality, so a sketch rehydrated through a decimal round trip still matches. */
         public String id() {
-            // Locale.ROOT, not the default: this string is COMPARED, and a JVM running under a locale
-            // whose decimal separator is a comma would format "lo=1,00000" while its peer formats
-            // "lo=1.00000" — two nodes sweeping the same project would then reject each other's
-            // sketches as grid mismatches. forbiddenapis bans the default-locale overloads for exactly
-            // this class of bug, so the explicit locale is required rather than merely tidy.
+            // Locale.ROOT: this string is compared, and a comma-decimal locale on one node would reject its peer's
+            // sketches.
             return String.format(Locale.ROOT, "%s/lo=%.6g/r=%.6g/bins=%d", KIND, lo, ratio, bins);
         }
 
-        /**
-         * Duration in <b>milliseconds</b>, {@code lo = 1 ms}, spanning up to ≈ 1.7 hours. Nothing an
-         * agent does resolves below a millisecond, and the top end comfortably clears the longest real
-         * agent runs.
-         */
+        /** Milliseconds, {@code lo = 1 ms}, up to about 1.7 hours. */
         public static Grid duration() {
             return new Grid(1.0, DEFAULT_RATIO, DEFAULT_BINS);
         }
 
         /**
-         * Cost in <b>USD</b>, {@code lo = $0.00001}, spanning up to ≈ $60. The range is deliberately
-         * spent on the expensive tail: a turn below a thousandth of a cent is ~40 tokens on the cheapest
-         * model and carries no signal, whereas the regressions this measure exists to catch — a silent
-         * reroute to a pricier model, a retry loop — all live at the top.
+         * USD, {@code lo = $0.00001}, up to about $60: the range is spent on the expensive tail, where reroutes and
+         * retry loops live.
          */
         public static Grid cost() {
             return new Grid(1e-5, DEFAULT_RATIO, DEFAULT_BINS);
@@ -137,21 +84,17 @@ public final class MetricHistogram implements MetricSketch {
     private long overflow;
     private long count;
 
-    /** Sum of samples clamped to {@code [logLo, logHi]}; divided by {@link #count} for the mean. */
     private double clampedSumLog;
 
-    /** An empty sketch on {@code grid}. Grids come from {@link Grid#duration()} / {@link Grid#cost()}. */
     public MetricHistogram(Grid grid) {
         this.grid = grid;
         this.bins = new long[grid.bins()];
     }
 
-    /** Samples that fell below {@code grid.lo()}. Non-zero means the range starts too high. */
     public long underflow() {
         return underflow;
     }
 
-    /** Samples that fell at or above the top edge. Non-zero means the range ends too low. */
     public long overflow() {
         return overflow;
     }
@@ -190,14 +133,7 @@ public final class MetricHistogram implements MetricSketch {
         clampedSumLog += h.clampedSumLog;
     }
 
-    /**
-     * Add this histogram's bin mass into {@code target}, each bin scaled by {@code weight}.
-     *
-     * <p>The one operation {@link MetricControl.Weighted} needs from the inside of this class, and the
-     * only reason the bins are reachable at all outside it. The loop lives here rather than the array
-     * being handed out: a control that could reach {@code bins} could also write to it, and a reference
-     * sketch that a reader can mutate is exactly the bug the {@link #copy()} contract exists to rule out.
-     */
+    /** The loop lives here rather than handing out {@code bins}, which a caller could then mutate. */
     void foldScaledInto(double[] target, double weight) {
         for (int i = 0; i < bins.length; i++) {
             target[i] += weight * bins[i];
@@ -226,27 +162,14 @@ public final class MetricHistogram implements MetricSketch {
     }
 
     /**
-     * {@inheritDoc}
-     *
-     * <p>Recovered from the bins rather than from a running sum of squares, because a sketch rehydrated
-     * from JSON has bins and nothing else — persisting a second accumulator would have to survive every
-     * merge and every round trip to stay in step, and the bins already carry the answer.
-     *
-     * <p>Each sample is taken at its bin's MIDPOINT, so the result is the true standard deviation plus
-     * the binning's own variance. One bin is {@code ln(1.05)} wide, giving a uniform-within-bin variance
-     * of {@code ln(1.05)²/12 ≈ 2e-4}; against the 0.09 variance of even a tight call site that is a tenth
-     * of a percent, and it errs upward — a slightly wider reading raises the floor, which is the safe
-     * direction for a false-alarm rate. The edge counters sit at their own edges for the same reason
-     * {@link #meanLog()} clamps there.
+     * From the bins at midpoints, since a rehydrated sketch has nothing else. The binning adds about 2e-4 variance,
+     * erring upward, the safe direction for a false-alarm rate.
      */
     @Override
     public double stdDevLog() {
         if (count < 2) return 0.0;
-        // BOTH moments come off the bin midpoints, deliberately not off meanLog(). That mean is the exact
-        // clamped sum, and mixing the two views makes a bucket whose every sample is identical report a
-        // width of up to half a bin — the offset between its one midpoint and its true value — so the
-        // most stable traffic imaginable would look like it had spread. Taking both from the same view
-        // makes a single-bin sketch report exactly zero, which is the truth about it.
+        // Both moments come off the midpoints, not meanLog(): mixing views makes identical samples report up to half a
+        // bin of spread.
         double lo = grid.logLo();
         double hi = grid.logHi();
         double width = grid.slotWidthLog();
@@ -300,16 +223,13 @@ public final class MetricHistogram implements MetricSketch {
     public @Nullable Double quantile(double q) {
         if (count == 0) return null;
         double clamped = Math.clamp(q, 0.0, 1.0);
-        // Rank of the sample we want, on the same 0..count scale the cumulative counts are on.
         double targetRank = clamped * count;
         long below = underflow;
-        // Pinned at the floor: the true value is below the range, so the edge is the honest answer.
         if (below > 0 && targetRank <= below) return grid.logLo();
         for (int i = 0; i < bins.length; i++) {
             if (bins[i] == 0) continue;
             if (targetRank <= below + bins[i]) {
-                // Interpolate inside the bin, assuming mass is spread evenly across it. Half a bin of
-                // error either way is 2.5% on the value — an order below anything the detector reads.
+                // Half a bin of error is 2.5% on the value, an order below anything the detector reads.
                 double within = (targetRank - below) / bins[i];
                 return grid.logLo() + (i + within) * grid.slotWidthLog();
             }
@@ -318,7 +238,6 @@ public final class MetricHistogram implements MetricSketch {
         return grid.logHi(); // pinned at the ceiling: the true value is higher
     }
 
-    /** Slot index for a log value; negative means underflow, {@code >= bins.length} means overflow. */
     private int binOf(double logValue) {
         if (logValue == Double.NEGATIVE_INFINITY) return -1; // a measure of exactly zero
         if (logValue == Double.POSITIVE_INFINITY) return bins.length;
@@ -328,14 +247,9 @@ public final class MetricHistogram implements MetricSketch {
         return (int) Math.floor(offset);
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Serialization
-    // ---------------------------------------------------------------------------------------------
-
     /**
-     * Wire shape of {@code metric_baseline.*_sketch_json}. Bins are stored <b>sparsely</b>, keyed by
-     * index: a thin bucket occupies a handful of the 320, and this blob is written three times per
-     * (bucket × measure) on every window close.
+     * Bins are stored sparsely: a thin bucket fills a handful of the 320, and this blob is written three times per
+     * bucket and measure on every window close.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Payload(
@@ -360,7 +274,6 @@ public final class MetricHistogram implements MetricSketch {
         return JSON.valueToTree(payload).toString();
     }
 
-    /** Rehydrate a payload written by {@link #toJson()}. Prefer {@link MetricSketch#fromJson(String)}. */
     public static MetricHistogram fromJson(String json) {
         Payload payload;
         try {

@@ -5,11 +5,7 @@ import { Download } from "lucide-react";
 import { Button, Card, CopyButton } from "../../ui";
 import { jsonTheme } from "../components/jsonTheme";
 
-/**
- * The response exactly as the API sent it, no string cut short. `foldDepth` is the deepest level open
- * on arrival, the root being 1, so a long span list starts as one row per span. The tree reads its fold
- * depth only on mount, so Expand all and Collapse all remount it.
- */
+/** The tree reads its fold depth only on mount, so Expand all and Collapse all remount it. */
 export function RawJsonView({ value, fileName, foldDepth }: { value: object; fileName: string; foldDepth: number }) {
   const [fold, setFold] = useState<{ depth: number | false; mount: number }>({ depth: foldDepth, mount: 0 });
   const text = useMemo(() => JSON.stringify(value, null, 2), [value]);

@@ -24,12 +24,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Settings → Data retention: how long this project keeps traces and detections. The
- * install-wide default comes from {@code tessary.retention.*}; a project override is a
- * {@code retention_policy} row, and clearing the override returns the project to the default.
- * {@code 0} means keep forever. When {@link FixedRetention} fixes a project's retention, the page is read-only
- * and every update is refused. The sweeper reads the same {@link RetentionResolver}, so what this page shows
- * is what the hourly pass enforces.
+ * Settings → Data retention. A project override is a {@code retention_policy} row; clearing it returns to the install
+ * default, and {@code 0} keeps forever. Read-only when {@link FixedRetention} applies. The sweeper reads the same
+ * {@link RetentionResolver}, so this page shows what is enforced.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/retention")
@@ -57,11 +54,7 @@ public class RetentionController {
             List<RetentionClassView> classes,
             @JsonProperty("can_manage") boolean canManage) {}
 
-    /**
-     * Replaces both overrides at once: a number sets that class's override ({@code 0} keeps
-     * forever), and {@code null} or an absent key clears it so the install default applies.
-     * Refused when either class's retention is fixed.
-     */
+    /** A number sets the override, {@code null} or absent clears it. Refused when either class is fixed. */
     public record RetentionUpdateRequest(
             @Nullable @Min(0) Integer traces,
             @Nullable @Min(0) Integer detections) {}

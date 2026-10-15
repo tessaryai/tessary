@@ -12,16 +12,9 @@ import java.time.Duration;
 import java.util.Map;
 
 /**
- * Outbound POST helper for alert channels. A thin wrapper over the shared {@code ingest/UrlGuard}
- * SSRF guard and {@code ingest/BoundedBody} size-capped reader.
- *
- * <p>{@link #post} re-runs {@link UrlGuard#requirePublicHttp} on EVERY call. Channel URLs are
- * validated when the channel is created, but DNS can rebind between then and a send — without this
- * re-check a host that flips to 169.254.169.254 (EC2 IMDS) or 127.0.0.1 would receive a credentialed
- * POST. Connector endpoints (Sentry/Linear/PagerDuty) are public hosts and pass the guard; the guard's
- * real job is the user-supplied webhook/Slack URLs. The response body is read through
- * {@link BoundedBody} so a hostile upstream can never OOM the box, and is never surfaced to the caller
- * (it could echo SSRF-probed internal content).
+ * Outbound POST for alert channels. {@link #post} re-runs {@link UrlGuard#requirePublicHttp} on every call because DNS
+ * can rebind after a channel is created, sending a credentialed POST to IMDS or loopback. The response is read through
+ * {@link BoundedBody} and never surfaced, since it could echo SSRF-probed internal content.
  */
 public final class ChannelHttp {
 
@@ -29,15 +22,14 @@ public final class ChannelHttp {
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     /**
-     * Test seam: when set, sends route through this client instead of {@link #DEFAULT_CLIENT}. Lets a
-     * test drive every connector against a real local stub server while the SSRF guard still runs for
-     * real on the (public TEST-NET) channel URL. Never set in production.
+     * Test seam so connectors can hit a local stub while the SSRF guard still runs on the channel URL. Never set in
+     * production.
      */
     private static volatile @org.jspecify.annotations.Nullable HttpClient clientOverride;
 
     private ChannelHttp() {}
 
-    /** Install a test HttpClient (e.g. one that redirects to a loopback stub). Pass null to reset. */
+    /** Pass null to reset. */
     public static void setClientForTest(@org.jspecify.annotations.Nullable HttpClient client) {
         clientOverride = client;
     }
@@ -47,7 +39,7 @@ public final class ChannelHttp {
         return override != null ? override : DEFAULT_CLIENT;
     }
 
-    /** POST {@code body} (already serialized JSON) to {@code url} with the given headers. */
+    /** {@code body} is already serialized JSON. */
     public static HttpResponse<String> post(String url, Map<String, String> headers, String body)
             throws IOException, InterruptedException {
         URI uri = UrlGuard.requirePublicHttp(url);

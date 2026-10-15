@@ -21,24 +21,8 @@ import {
 } from "../../ui";
 
 /**
- * Settings → Notifications — how a case reaches a human when nobody is looking at the app.
- *
- * Two halves, in the order they matter. WHEN we tell you: the case-opened rule, which every project has
- * from the day it is created, plus the cadence and quiet hours that are the partner's to set. WHERE we
- * tell you: the delivery channels, without which the rule notifies nobody.
- *
- * A signed webhook is the route every org has. Slack is a capability of its own (`slack_enabled`, off —
- * it is not part of the launch), so its field appears only for an org that has it, and this page never
- * mentions it otherwise. That ordering is deliberate rather than incidental: alerting has to work for a
- * partner who will never see the Slack option, so the ungated route is the one the page leads with.
- *
- * Deliberately NOT a rule builder. The three launch detectors all reach a human the same way — a case
- * opens — so there is one rule and two dials on it, rather than a per-detector matrix that would ask a
- * partner to understand the detector taxonomy before they can be paged.
- *
- * Quiet hours DEFER, they do not drop. A regression that opens at 3am is delivered when the window
- * reopens, and the message says when the case actually opened. The copy says so, because a partner who
- * believes quiet hours mean "discard" will not use them.
+ * One case-opened rule with cadence and quiet hours, not a rule builder. The signed webhook leads
+ * because every org has it; Slack shows only with `slack_enabled`. Quiet hours defer, never drop.
  */
 
 /** Only the cadences worth offering. A free-text seconds field invites 7-second and 3-week policies. */
@@ -70,7 +54,6 @@ export function Notifications() {
   const [webhook, setWebhook] = useState("");
   const [slackUrl, setSlackUrl] = useState("");
 
-  // The rule is the source of truth; local state mirrors it once the read settles and after each save.
   useEffect(() => {
     if (!rule?.policy) return;
     setCadence(rule.policy.cadence_seconds);
@@ -89,8 +72,7 @@ export function Notifications() {
         name: rule?.name ?? "A case opens",
         policy: {
           cadence_seconds: cadence,
-          // Both ends or neither: half a window would be read as no window, and a partner who set only
-          // a start would think they were covered.
+          // Both ends or neither: half a window would read as no window.
           quiet_from: quietFrom && quietTo ? quietFrom : null,
           quiet_to: quietFrom && quietTo ? quietTo : null,
           quiet_zone: zone,
@@ -291,8 +273,7 @@ export function Notifications() {
               </Button>
             </div>
 
-            {/* Slack is its own capability and off by default. An org without it never sees the field —
-                and never sees a disabled one either, which would be a mention of something it cannot have. */}
+            {/* An org without Slack never sees the field, not even disabled. */}
             {slackEnabled && (
               <div className="mt-4 flex items-end gap-3">
                 <Field label="Slack incoming webhook" hint="hooks.slack.com/services/…" className="flex-1">
@@ -330,7 +311,6 @@ function Loading() {
   );
 }
 
-/** The browser's own zone as the starting guess — right far more often than UTC is. */
 function browserZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }

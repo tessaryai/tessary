@@ -17,35 +17,22 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a triaged metric-drift finding into a case: a bucket's duration or cost distribution sitting
- * measurably away from its own earlier baseline.
- *
- * <p>{@link CaseOpener} only calls {@link #shape} once a finding's ruling has already qualified it — a
- * triage run's positive, or a human's "Real deviation" — so this class has no gate of its own to apply.
- * {@link #gateSentence} still records which of the two authorities ruled, since that is part of the
- * case's own account of itself. Title, basis, and values are read back from the finding's own evidence
- * blob via {@link MetricFindingEvidence#read}, so a case can't disagree with the finding it came from;
- * when that blob is unreadable the case still opens, without inventing numbers.
+ * Shapes a triaged metric-drift finding into a case. {@link CaseOpener} has already qualified the finding, so there is
+ * no gate here. Values come from the finding's own evidence via {@link MetricFindingEvidence#read}; an unreadable blob
+ * still opens the case, without invented numbers.
  */
 @Component
 public class MetricDriftSource implements CaseSource {
 
     private static final Logger log = LoggerFactory.getLogger(MetricDriftSource.class);
 
-    /** The classifiers whose findings this source shapes. */
     private static final Set<String> METRIC_CLASSIFIERS =
             Set.of(BuiltInDetector.Kind.DURATION_DRIFT, BuiltInDetector.Kind.COST_DRIFT);
 
-    /**
-     * Severity saturates at {@code ln(3)}, a 3x move: past a tripling, "more" stops changing triage
-     * order. Ordering only; the real magnitude lives in {@link CaseDetection#basis}.
-     */
+    /** Saturates at a 3x move; ordering only. */
     private static final double SEVERITY_SATURATION = Math.log(3);
 
-    /**
-     * Severity for a finding whose evidence can't be read. Mid-list deliberately: sorting an
-     * unreadable blob to the bottom would hide a confirmed regression as effectively as dropping it.
-     */
+    /** Mid-list deliberately: sorting an unreadable blob to the bottom would hide a confirmed regression. */
     private static final double UNKNOWN_SEVERITY = 0.5;
 
     @Override
@@ -85,9 +72,8 @@ public class MetricDriftSource implements CaseSource {
     }
 
     /**
-     * The measure that moved, read off the cause key's first segment
-     * ({@code <measure>:<bucket>:<direction>:<reference>}) rather than the evidence blob, so a bad
-     * jsonb column can't split one regression into two cases.
+     * Read off the cause key rather than the evidence blob, so a bad jsonb column can't split one regression into two
+     * cases.
      */
     private static String measureOf(FindingRow finding) {
         String causeKey = finding.nativeCauseKey();
@@ -96,9 +82,8 @@ public class MetricDriftSource implements CaseSource {
     }
 
     /**
-     * Why this crossed its own bar, in this detector's own terms. Other detectors on the same
-     * ranked list use different thresholds, so normalizing onto a shared scale would misrepresent
-     * the comparison. Also names the gate, since the gate is half of why this is a case at all.
+     * In this detector's own terms; other detectors use different thresholds, so a shared scale would misrepresent
+     * them.
      */
     private static String basis(FindingRow finding, @Nullable Read read) {
         String gate = gateSentence(finding);
@@ -117,11 +102,6 @@ public class MetricDriftSource implements CaseSource {
                 sampleWord(read.measure()));
     }
 
-    /**
-     * Who confirmed this and on what authority: a human pressed "Real deviation" directly, or a
-     * triage run audited the claim and found it sound. Spelled out on the case since a reader
-     * deciding whether to page someone needs to know which one they're looking at.
-     */
     private static String gateSentence(FindingRow finding) {
         if (finding.humanVerdictAt() != null) {
             return "A human ruled this a real deviation.";
@@ -130,9 +110,8 @@ public class MetricDriftSource implements CaseSource {
     }
 
     /**
-     * The reference in words. The wire value ({@code pinned}/{@code previous}) is a persisted
-     * string in every {@code cause_key} ever written, so it stays as-is even as what it names
-     * evolves; only the human-readable sentence changes.
+     * The wire value ({@code pinned}/{@code previous}) is persisted in every {@code cause_key}, so it stays as-is; only
+     * the sentence changes.
      */
     private static String referenceWords(String reference) {
         return Reference.PINNED.wire().equals(reference) ? "the window pinned at the last deploy" : "its recent normal";
@@ -148,12 +127,10 @@ public class MetricDriftSource implements CaseSource {
         return Math.min(1, Math.abs(read.w1Log()) / SEVERITY_SATURATION);
     }
 
-    /** An {@code OptionalDouble} as the nullable {@code Double} the detection record carries. */
     private static @Nullable Double boxed(OptionalDouble value) {
         return value.isPresent() ? value.getAsDouble() : null;
     }
 
-    /** How far the median moved, in the measure's own units, or null when either side is unknown. */
     private static @Nullable Double delta(@Nullable Read read) {
         if (read == null || read.refP50().isEmpty() || read.curP50().isEmpty()) return null;
         return read.curP50().getAsDouble() - read.refP50().getAsDouble();

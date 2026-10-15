@@ -8,29 +8,16 @@ import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 /**
- * Application task executors.
- *
- * <p>Project Loom posture: the I/O-bound pools (the classifier sweep, the two agentic lanes) run
- * on <b>virtual threads</b> via {@link SimpleAsyncTaskExecutor} with {@code setVirtualThreads(true)},
- * so a blocking judge/HTTP/E2B call parks cheaply instead of pinning a platform thread. Every pool
- * keeps its concurrency <b>bound</b> via {@link SimpleAsyncTaskExecutor#setConcurrencyLimit(int)} —
- * virtual threads are cheap, but the bounds are deliberate backpressure against Bedrock/Anthropic
- * account RPM/TPM, concurrent E2B microVMs, and the bounded HikariCP pool (production profile:
- * {@code maximum-pool-size: 10}).
+ * I/O-bound pools run on virtual threads, but every pool keeps a concurrency limit as backpressure against provider
+ * RPM/TPM, concurrent E2B microVMs, and the bounded HikariCP pool.
  */
 @Configuration
 @EnableAsync
 public class AsyncConfig {
 
     /**
-     * Pool for the alert-destination fan-out. The {@code AlertDeliveryListener} hands a fired
-     * alert off here (via {@code AlertDeliveryDispatcher.deliverAll}) so the N blocking outbound HTTP
-     * POSTs — each up to the 30s {@code ChannelHttp} timeout — never run inline on the single
-     * {@code @Scheduled} AlertWorker thread that publishes the event (a slow/hanging upstream would
-     * otherwise stall the whole alert heartbeat and every other firing in the batch). Each delivery is
-     * a blocking HTTP call, so it runs on a virtual thread; the concurrency limit (2) is deliberate
-     * backpressure against the rate-limited upstreams (Slack/Sentry/Linear/PagerDuty) and the bounded
-     * HikariCP pool, while the per-(event,destination) claim makes concurrent dispatch safe.
+     * Keeps blocking outbound alert POSTs (up to the 30s {@code ChannelHttp} timeout) off the single AlertWorker
+     * thread. The per-(event, destination) claim makes concurrent dispatch safe.
      */
     @Bean(name = "alertDeliveryExecutor")
     public SimpleAsyncTaskExecutor alertDeliveryExecutor() {
@@ -42,33 +29,19 @@ public class AsyncConfig {
     }
 
     /**
-     * Pool for the async signal-detection sweep. Separate from every other pool so a
-     * substrate sweep never steals an agentic lane's slot. Built-in detectors are mostly
-     * structural/heuristic (no LLM call, DB-IO-bound); the encoder-tier detectors, however,
-     * issue a scoring HTTP call per observation on the sweep against the groundedness model
-     * server's {@code /classify}, so a sweep is network-IO-bound against that server too.
-     * The concurrency limit (2) bounds concurrent sweeps against the bounded HikariCP pool and the
-     * encoder call while the {@code FOR UPDATE SKIP LOCKED} job queue spreads the rest
-     * across instances. Runs on virtual threads.
+     * Separate so a sweep never steals an agentic lane's slot. Encoder-tier detectors make an HTTP call per
+     * observation, so this is network-bound too; {@code FOR UPDATE SKIP LOCKED} spreads the rest across instances.
      */
     @Bean(name = "signalTaskExecutor")
     public SimpleAsyncTaskExecutor signalTaskExecutor() {
         SimpleAsyncTaskExecutor ex = new SimpleAsyncTaskExecutor("signal-");
         ex.setVirtualThreads(true);
-        // mixed IO: DB-IO-bound built-ins + network-IO-bound encoder tier; SKIP-LOCKED spreads the rest
         ex.setConcurrencyLimit(2);
         ex.setTaskDecorator(new MdcTaskDecorator("signal"));
         return ex;
     }
 
-    /**
-     * Pool for the RCA worker ({@code RcaWorker}): each task runs one root-cause analysis — several
-     * window reads, up to nine trace hydrations, and one synthesis LLM call — so it is IO/LLM-bound
-     * like {@link #signalTaskExecutor}. Separate pool so a burst of "Run RCA" clicks can't steal
-     * the escalation path's or the signal sweep's slot. The concurrency limit (2) bounds concurrent
-     * synthesis calls against account RPM/TPM and the bounded HikariCP pool; user-triggered RCAs are
-     * rare and have no latency SLA.
-     */
+    /** Separate so a burst of "Run RCA" clicks can't steal the signal sweep's slot. */
     @Bean(name = "rcaTaskExecutor")
     public SimpleAsyncTaskExecutor rcaTaskExecutor() {
         SimpleAsyncTaskExecutor ex = new SimpleAsyncTaskExecutor("rca-");
@@ -79,13 +52,8 @@ public class AsyncConfig {
     }
 
     /**
-     * Pool for the behaviour-drift triage worker ({@code BehaviorTriageWorker}): each task
-     * is one agent session in an E2B microVM over a repo clone, budgeted up to 20 minutes. It
-     * gets its own pool for the same reason {@link #rcaTaskExecutor} does — sharing
-     * {@code signalTaskExecutor} (limit 2, sized for encoder and JDBC work) would let two
-     * triages occupy it outright and stall the classifier sweep for the whole agent timeout.
-     * The limit (2) bounds concurrent microVMs; triage is per-CAUSE, not per-trace, and has no
-     * latency SLA — nothing downstream waits on the verdict.
+     * Separate because two 20-minute triages in {@code signalTaskExecutor} would stall the classifier sweep for the
+     * whole agent timeout.
      */
     @Bean(name = "behaviorTriageTaskExecutor")
     public SimpleAsyncTaskExecutor behaviorTriageTaskExecutor() {

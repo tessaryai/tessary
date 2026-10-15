@@ -40,11 +40,7 @@ public class ProjectRepository {
                 .list();
     }
 
-    /** Every live project, oldest first — the sweep set for the background workers that reconcile
-     *  per-project state rather than claiming queued jobs. Archived projects are excluded: nothing
-     *  should be detected, paged or reconciled for an organization that has been put away. Projects
-     *  being deleted are excluded for a stronger reason — reconciling one races the purge worker,
-     *  and every row it writes is work that has to be deleted again. */
+    /** Archived and deleting projects are excluded: reconciling a deleting project races the purge worker. */
     public List<Project> findActive() {
         return jdbc.sql("SELECT * FROM project WHERE archived_at IS NULL AND deleting_at IS NULL"
                         + " ORDER BY created_at ASC, id ASC")
@@ -52,7 +48,6 @@ public class ProjectRepository {
                 .list();
     }
 
-    /** The organization's guaranteed default project, if one is set. */
     public Optional<Project> findDefaultForOrg(String orgId) {
         return jdbc.sql("SELECT * FROM project WHERE org_id = :oid AND is_default = TRUE")
                 .param("oid", orgId)
@@ -67,8 +62,7 @@ public class ProjectRepository {
                 .single();
     }
 
-    /** Every project on this install, archived ones included: the telemetry heartbeat's {@code counts.projects}
-     *  (devdocs/reference/telemetry-contract.md §1). */
+    /** The telemetry heartbeat's {@code counts.projects}. */
     public long countAll() {
         return jdbc.sql("SELECT COUNT(*) FROM project").query(Long.class).single();
     }
@@ -90,11 +84,7 @@ public class ProjectRepository {
                 .update();
     }
 
-    /**
-     * Partial update: only overwrite a column when the caller actually supplies a value.
-     * A {@code null} name/description/settings leaves the existing value untouched
-     * (COALESCE-merge), so a name-only PATCH never wipes the description or settings blob.
-     */
+    /** COALESCE-merge: a null field leaves the stored value, so a name-only PATCH never wipes the rest. */
     public void update(String id, String name, String description, String settings) {
         jdbc.sql("""
             UPDATE project
@@ -110,7 +100,7 @@ public class ProjectRepository {
                 .update();
     }
 
-    /** Set or clear the soft-archive marker (null un-archives). */
+    /** Null un-archives. */
     public void setArchived(String id, String archivedAt) {
         jdbc.sql("UPDATE project SET archived_at = :archived WHERE id = :id")
                 .param("archived", archivedAt)
@@ -118,7 +108,7 @@ public class ProjectRepository {
                 .update();
     }
 
-    /** Clear the default flag on every project in an organization (call before promoting a new default). */
+    /** Call before promoting a new default. */
     public void clearDefaultForOrg(String orgId) {
         jdbc.sql("UPDATE project SET is_default = FALSE WHERE org_id = :oid AND is_default = TRUE")
                 .param("oid", orgId)
@@ -132,10 +122,7 @@ public class ProjectRepository {
                 .update();
     }
 
-    /**
-     * Stamp the one-way delete marker. Returns false if the project was already marked, which is what
-     * makes a retried DELETE idempotent rather than a second accepted request.
-     */
+    /** False if already marked, which makes a retried DELETE idempotent. */
     public boolean markDeleting(String id, String deletingAt) {
         return jdbc.sql("UPDATE project SET deleting_at = :at WHERE id = :id AND deleting_at IS NULL")
                         .param("at", deletingAt)
@@ -145,15 +132,8 @@ public class ProjectRepository {
     }
 
     /**
-     * Undo {@link #markDeleting} after the purge worker has given up on a project ({@code
-     * ProjectPurgeWorker#tick} dead-lettering past its retry budget). Restores the project to normal
-     * visibility — it reappears in {@link #findByOrg}/{@link #findActive} and every project-scoped route
-     * accepts it again — so a human notices instead of the UI polling a "deleting" project forever.
-     *
-     * <p>Deliberately does NOT touch {@code api_key}: revocation is the security-critical half of a
-     * delete and a purge that merely failed to finish is not proof the delete request was wrong, so keys
-     * stay revoked and the operator re-issues new ones once they've looked at {@code job.last_error} and
-     * decided the project is safe to keep.
+     * Restores visibility after the purge worker gives up, so a human notices instead of the UI polling forever. Keys
+     * stay revoked: a failed purge is not proof the delete was wrong.
      */
     public void clearDeleting(String id) {
         jdbc.sql("UPDATE project SET deleting_at = NULL WHERE id = :id")
@@ -162,12 +142,8 @@ public class ProjectRepository {
     }
 
     /**
-     * Drop the project row itself.
-     *
-     * <p>This is the purge worker's LAST statement, not a delete path of its own. By the time it runs,
-     * the worker has already emptied the tables that hold the volume, so the {@code ON DELETE CASCADE}
-     * fan-out left for this statement covers only small ones. Calling it on a populated project is what
-     * used to take forty minutes inside an HTTP request.
+     * The purge worker's last statement, once the large tables are emptied; on a populated project the cascade takes
+     * tens of minutes.
      */
     public boolean deleteById(String id) {
         return jdbc.sql("DELETE FROM project WHERE id = :id").param("id", id).update() > 0;

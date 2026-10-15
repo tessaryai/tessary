@@ -3,7 +3,6 @@ package ai.tessary.open.errors;
 
 import org.springframework.http.HttpStatus;
 
-/** Error codes for Settings → Data retention. */
 public enum RetentionError implements ErrorCode {
     FIXED(HttpStatus.CONFLICT, "Retention for this project is fixed at %s days and cannot be changed");
 

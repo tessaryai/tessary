@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Classifiers: what each classifier sees, charted per call site and per tool.
- *
- * The Call site section charts every classifier that is on for one call site; the Tool section charts Tool Errors
- * and tool-call Duration Drift for one tool across every call site, because the server keys those two on the tool,
- * not on the call site. One range drives both. A classifier with nothing to chart is named in a chip with the
- * reason, so a missing card never reads as a missing classifier. The open findings live on Triage, and each
- * classifier's switch and settings live on its configure page, which the Configure menu lists.
- */
+// Tool Errors and tool-call Duration Drift are keyed on the tool server-side, hence the Tool section.
+// A classifier with nothing to chart gets a chip with the reason, so a missing card is never ambiguous.
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ChartRange, ChartToolOption, ClassifierCharts } from "../../api/types";
@@ -156,9 +149,8 @@ export function ClassifiersPage() {
 }
 
 /**
- * The cards for one scope. While a new range or a new scope reads, the old cards stay where they are, so the page does
- * not empty and refill. A new range keeps them as they are, with a line saying the range is loading. A new scope fades
- * them and names the scope that is loading, so one call site's charts never read as another's.
+ * Old cards stay while a new range or scope reads; a new scope fades them so one call site's charts
+ * never read as another's.
  */
 function useCharts(scope: "call_site" | "tool", id: string | null, days: ChartRange) {
   const { api } = useTenant();

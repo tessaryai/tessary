@@ -24,9 +24,8 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
- * "When it leaked": a secret-leak finding's own timeline detail, the only DB-backed half of {@link
- * SecretLeakEvidence} — the per-key breakdown and the leak-level detail have no home in the finding's
- * own payload, the same reason {@code MalformedOutputDetailService} exists for its classifier.
+ * The DB-backed half of {@link SecretLeakEvidence}: the per-key breakdown and leak-level detail, which have no home in
+ * the finding's payload.
  */
 @Service
 public class SecretLeakDetailService {
@@ -45,12 +44,9 @@ public class SecretLeakDetailService {
     }
 
     /**
-     * A secret-leak case's detail, read across every finding the case holds, newest first. The rule, bar
-     * and window come from the newest finding, but the keys to rotate and when it leaked span them all: the
-     * summary and keys count from the earliest onset, and the witnesses are every finding's, so a case that
-     * joined findings from several windows still lists the key its first window leaked.
-     *
-     * @return null when the newest finding is not a live {@code secret_leak} facet
+     * Read across every finding the case holds, newest first. Rule, bar and window come from the newest; keys and onset
+     * span them all, so a case that joined several windows still lists the first window's key. @return null when the
+     * newest finding is not a live {@code secret_leak} facet
      */
     public @Nullable SecretLeakDetail detail(List<FindingRow> caseFindings) {
         FindingRow finding = caseFindings.get(0);
@@ -109,7 +105,6 @@ public class SecretLeakDetailService {
         return s.isEmpty() ? null : s;
     }
 
-    /** Every WITNESS ref's (trace, span) pair across the findings, once each: their bounded population. */
     private List<SpanKey> witnessSpans(List<FindingRow> facet) {
         Set<SpanKey> out = new LinkedHashSet<>();
         for (FindingRow finding : facet) {
@@ -124,10 +119,7 @@ public class SecretLeakDetailService {
         return List.copyOf(out);
     }
 
-    /**
-     * The earliest {@code onset_at} that parses, or the epoch when none does: a facet with no history
-     * rather than a 500.
-     */
+    /** The epoch when none parses, so a facet with no history is not a 500. */
     private static Instant earliestOnset(List<FindingRow> facet) {
         return facet.stream()
                 .map(SecretLeakDetailService::onsetOrNull)

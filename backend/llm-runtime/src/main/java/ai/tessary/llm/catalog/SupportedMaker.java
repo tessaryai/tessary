@@ -6,17 +6,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The maker allowlist — the ONLY makers a live-fetched model is offered under. Everything
- * else (Amazon/Nova, Meta/Llama, Mistral, Cohere, DeepSeek, and every other maker a hosting platform
- * might add) is filtered out, so a newly released model from a supported maker appears with no code
- * change while an unsupported one never does. {@link ai.tessary.llm.ModelProvider#CUSTOM} is
- * the one deliberate exemption — see {@link OpenAiCompatModelLister}'s javadoc.
- *
- * <p>The alias tables below translate each hosting platform's OWN spelling of a maker into this enum.
- * A direct provider (OPENAI, ANTHROPIC, GEMINI, GLM, GROK, MOONSHOT) never needs one — the credential
- * IS the maker, so every model it reports is offered unfiltered by {@link OpenAiCompatModelLister} /
- * {@link AnthropicModelLister}. Only the multi-maker hosts (OpenRouter, Bedrock) need to ask "whose
- * model is this" per entry.
+ * The only makers a live-fetched model is offered under, so a new model from a supported maker appears with no code
+ * change. {@link ai.tessary.llm.ModelProvider#CUSTOM} is exempt. Only multi-maker hosts (OpenRouter, Bedrock) need the
+ * alias tables below.
  */
 public enum SupportedMaker {
     OPENAI,
@@ -29,15 +21,8 @@ public enum SupportedMaker {
     TYPESAFE;
 
     /**
-     * OpenRouter's own id-namespace prefix (the segment before the first {@code /}) for each maker,
-     * confirmed against a live, unauthenticated {@code GET https://openrouter.ai/api/v1/models} read
-     * on 2026-09-04 — the id shapes seen there:
-     * {@code openai/gpt-5.5}, {@code anthropic/claude-...}, {@code google/gemini-...},
-     * {@code moonshotai/kimi-...}, {@code z-ai/glm-...}, {@code x-ai/grok-...}, and TypeSafe's
-     * decision models as {@code typesafe/jev-...}. OpenRouter also
-     * prefixes some "latest"-pointer ids with {@code ~} (e.g. {@code ~anthropic/claude-haiku-latest})
-     * — {@link #fromOpenRouterPrefix} strips it before matching, so those resolve the same as their
-     * un-prefixed sibling instead of being silently dropped as an unrecognised namespace.
+     * Confirmed against a live {@code GET https://openrouter.ai/api/v1/models} on 2026-09-04.
+     * {@link #fromOpenRouterPrefix} strips a leading {@code ~} ("latest" pointers) before matching.
      */
     private static final Map<String, SupportedMaker> OPENROUTER_PREFIX = Map.of(
             "openai", OPENAI,
@@ -49,18 +34,8 @@ public enum SupportedMaker {
             "typesafe", TYPESAFE);
 
     /**
-     * Bedrock's {@code FoundationModelSummary.providerName()} string for each maker.
-     *
-     * <p><b>Not independently probe-verified against a live {@code ListFoundationModels} call</b> —
-     * this environment has no AWS credential to make one. Anthropic's spelling ({@code "Anthropic"})
-     * is the one entry this repo can already corroborate, indirectly: it is the sole maker
-     * {@link ai.tessary.llm.BedrockModelProfile}'s PROFILES table has ever carried for
-     * {@link ai.tessary.llm.ModelProvider#BEDROCK} (the mantle profiles are OpenAI's, reported
-     * differently — see {@link #fromBedrockProviderName}'s own note). The other five are AWS's
-     * documented provider-name spellings as of this writing, not a live read; a follow-up with a real
-     * Bedrock credential should confirm them before this table is trusted for anything beyond "does
-     * not crash on an unmapped provider" (unmapped simply drops the entry, fail-closed, same as an
-     * unknown model everywhere else in this codebase).
+     * Not verified against a live {@code ListFoundationModels} call; only {@code "Anthropic"} is corroborated. An
+     * unmapped provider drops the entry, fail-closed.
      */
     private static final Map<String, SupportedMaker> BEDROCK_PROVIDER_NAME = Map.of(
             "anthropic", ANTHROPIC,
@@ -70,7 +45,6 @@ public enum SupportedMaker {
             "zhipu ai", ZHIPU,
             "xai", XAI);
 
-    /** {@link #OPENROUTER_PREFIX}, resolving a raw OpenRouter model id's namespace segment. */
     public static Optional<SupportedMaker> fromOpenRouterPrefix(String modelId) {
         if (modelId == null) return Optional.empty();
         int slash = modelId.indexOf('/');
@@ -80,12 +54,7 @@ public enum SupportedMaker {
         return Optional.ofNullable(OPENROUTER_PREFIX.get(prefix));
     }
 
-    /**
-     * {@link #BEDROCK_PROVIDER_NAME}, resolving Bedrock's {@code providerName()}. Mantle is a
-     * different case: it has no {@code ListFoundationModels}-equivalent discovery call at all — see
-     * {@code BedrockMantleModelLister}'s own javadoc for what was checked instead — so this method is
-     * {@link ai.tessary.llm.ModelProvider#BEDROCK} (Converse) only.
-     */
+    /** Converse ({@link ai.tessary.llm.ModelProvider#BEDROCK}) only: mantle has no discovery call. */
     public static Optional<SupportedMaker> fromBedrockProviderName(String providerName) {
         if (providerName == null) return Optional.empty();
         return Optional.ofNullable(BEDROCK_PROVIDER_NAME.get(providerName.trim().toLowerCase(Locale.ROOT)));

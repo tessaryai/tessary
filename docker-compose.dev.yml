@@ -1,43 +1,22 @@
-# Development stack. Four services + bind-mounted source + named volumes for
-# heavyweight build caches (maven local repo, node_modules, postgres data).
-#
-# - postgres  Postgres 16, named-volume data dir, exposed on localhost:5433 for psql
-# - backend   JVM mode (Spring Boot + devtools), source bind-mounted, talks to postgres
-# - frontend  Vite dev server with HMR, source bind-mounted
-# - caddy     reverse proxy on host port TESSARY_DEV_PORT, default 80 (the entry point you hit in the browser)
-#
-# Usage:
-#   echo "TESSARY_SECRET_KEY=$(openssl rand -base64 32)" >> .env   # for ingestion sources
-#   task docker:dev:tmux         # launches tmux + compose up
-# or (PNPM_VERSION defaults to the Taskfile's pin; a raw compose call needs nothing exported):
-#     docker compose -f docker-compose.dev.yml up -d --build
-#   open http://localhost
-#
-# Serving on a port other than 80 (TESSARY_DEV_PORT)? The backend also needs the matching origin in
-# TESSARY_DEV_ORIGIN, which scripts/lib/dev-choices.sh derives for `task dev`; a raw compose call sets both.
+# Development stack: postgres (localhost:5433), backend (Spring Boot + devtools), frontend (Vite HMR) and
+# caddy on TESSARY_DEV_PORT (default 80), with source bind-mounted and build caches in named volumes.
+# Usage: `task docker:dev:tmux`, or `docker compose -f docker-compose.dev.yml up -d --build`.
+# A non-80 TESSARY_DEV_PORT needs a matching TESSARY_DEV_ORIGIN; scripts/lib/dev-choices.sh derives it.
 
-# Pin the Compose project name so the stack is identical from any directory
-# (incl. git worktrees); otherwise Compose derives it from the cwd and spawns a
-# duplicate set of containers/volumes per worktree.
+# Pinned so the stack is identical from any directory, including git worktrees.
 name: tessary
 
 services:
   postgres:
-    # pgvector/pgvector:pg16 = Postgres 16 with the pgvector extension preinstalled, so
-    # `CREATE EXTENSION vector` (migration 042) works. Same image the test suite uses.
+    # Postgres 16 with pgvector preinstalled; the same image the test suite uses.
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: tessary
       POSTGRES_USER: tessary
       POSTGRES_PASSWORD: tessary
     ports:
-      # Exposed on host so devs can psql in: psql -h localhost -p 5433 -U tessary.
-      # NOT loopback-bound, unlike every other publish in this file, and that is a known gap
-      # rather than an oversight: some external tooling reaches this port from INSIDE a
-      # throwaway container through host.docker.internal. On Docker Desktop that resolves to
-      # the host and a loopback publish would still answer; on Linux Docker Engine host-gateway
-      # is 172.17.0.1 and a loopback publish refuses it. Closing this means first moving that
-      # tooling onto the stack network to talk to postgres:5432 directly, which is its own change.
+      # psql -h localhost -p 5433 -U tessary. Not loopback-bound, a known gap: some tooling reaches it from a
+      # container via host.docker.internal, which is 172.17.0.1 on Linux and would be refused.
       - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -54,15 +33,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     image: tessary-dev:latest
-    # Fork the Spring Boot app JVM with a JDWP agent so a Java IDE can attach a
-    # Remote JVM Debug config to localhost:5005. Passing -Dspring-boot.run.jvmArguments
-    # makes the plugin fork, so the agent binds in the app JVM only (not the Maven
-    # JVM) — no double-bind on 5005. suspend=n: boot normally so the healthcheck
-    # still passes; switch to suspend=y to debug startup itself. The agent survives
-    # devtools in-process restarts (task dev:reload-backend).
-    # Two steps (see Dockerfile.dev): install app's whole dependency chain into the cached local
-    # repo, then run ONLY the app module (spring-boot:run can't run reactor-wide — it dies on the
-    # non-executable parent pom — and app-only can't resolve its siblings unless installed).
+    # JDWP on 5005 in the forked app JVM only (suspend=n so the healthcheck passes). Two steps: install app's
+    # dependency chain, then run only app, since spring-boot:run cannot run reactor-wide.
     command:
       - sh
       - -c
@@ -73,137 +45,68 @@ services:
         -Dspring-boot.run.jvmArguments=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     expose:
       - "8080"
-      # OTLP/gRPC trace receiver — reachable on the internal `tessary` network. Inert unless
-      # tessary.ingest.otlp.enabled=true AND tessary.ingest.otlp.transport is grpc|both.
+      # Internal OTLP/gRPC; inert unless tessary.ingest.otlp.enabled=true with a grpc transport.
       - "4317"
     ports:
-      # Publish only the debug port to the host; HTTP still flows through Caddy (TESSARY_DEV_PORT). JDWP has no
-      # authentication of any kind -- reaching this port is arbitrary code execution in the backend
-      # JVM -- so the publish is pinned to host loopback. The agent itself stays address=*:5005:
-      # Docker forwards a published port to the container's bridge IP, so an in-container loopback
-      # bind would refuse the forwarded connection and the debugger would never attach.
+      # JDWP is unauthenticated code execution, so the publish is loopback-only. The agent stays on *:5005
+      # because Docker forwards to the container's bridge IP.
       - "127.0.0.1:5005:5005"
-      # Publish the OTLP/gRPC receiver to the host so a local exporter can push to localhost:4317 when
-      # the receiver is enabled. A compose `ports:` mapping works without a Dockerfile `EXPOSE`
-      # (EXPOSE is metadata only); the `EXPOSE 4317` line in backend/Dockerfile is a protected path
-      # that changes only with sign-off from a human, not automatically.
+      # For a local exporter on localhost:4317; `ports:` works without `EXPOSE`.
       - "127.0.0.1:4317:4317"
     env_file:
-      # Pass the entire repo-root .env into the container. Optional — if absent
-      # the stack still starts and falls back to the application.yaml defaults
-      # (which require an ambient AWS_REGION for the platform-Bedrock judge default
-      # at request time, but the boot itself works).
-      # TESSARY_SECRET_KEY (AES-256 base64) belongs here if you use ingestion sources.
+      # Optional; without it the stack falls back to application.yaml defaults.
       - path: ./.env
         required: false
     environment:
-      # Container-internal config — not in .env because these are wiring, not secrets.
       TESSARY_JDBC_URL: jdbc:postgresql://postgres:5432/tessary
       TESSARY_DB_USERNAME: tessary
       TESSARY_DB_PASSWORD: tessary
-      # Sign-in is enforced, as on a self-hosted install. This used to default to "true", which
-      # made the dev stack a different product from the one `docker compose -f oci://...`
-      # installs: AuthFilter.shouldNotFilter bypasses itself for EVERY path when this is set, so no
-      # TenantContext is ever resolved and GET /auth/me answers 401 unconditionally. The UI still
-      # offers account creation, the account is created, sign-in succeeds on the server, and the
-      # browser is sent straight back to the login page, forever.
-      #
-      # `task dev` asks this as a question (scripts/lib/dev-choices.sh) and exports the answer, so
-      # the default below only reaches someone running this file with compose directly. Opt out
-      # with TESSARY_AUTH_DISABLED=true, knowing the sign-in flow cannot complete in that mode.
+      # Sign-in is enforced, as on a self-hosted install. With TESSARY_AUTH_DISABLED=true no TenantContext
+      # resolves, so /auth/me is always 401 and sign-in loops back to the login page. `task dev` asks this.
       TESSARY_AUTH_DISABLED: ${TESSARY_AUTH_DISABLED:-false}
-      # Where sign-in, sign-out, device-link and GitHub callbacks send the browser. The backend's own
-      # default is :8000, the bare-metal `task caddy` port, so the dev origin is passed explicitly.
+      # The backend's own default is :8000, so the dev origin is passed explicitly.
       TESSARY_AUTH_FRONTEND_URL: ${TESSARY_AUTH_FRONTEND_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}/}
-      # Compose interpolation reads .env, so a dev's own values win on plain `task dev`.
-      # Unset everywhere, they land on the SAME two placeholders docker-compose.yml ships, rather
-      # than on blank. Blank was a broken stack that looked like a working one: the app came up, and
-      # the first account creation 500d with "TESSARY_AUTH_COOKIE_PASSWORD is not configured", which
-      # the UI renders as COMMON.INTERNAL. A dev stack nobody can sign into is not a dev stack.
-      #
-      # Safe here for the reason they are safe there: each is base64 of an exactly-32-byte string, so
-      # SessionCipher and SecretBox decode rather than failing at first sign-in, and
-      # PlaceholderSecretGuard still refuses to boot any install that has a SITE_DOMAIN while either
-      # is at its default. This stack has no SITE_DOMAIN, so it warns on every boot instead, which is
-      # the right trade for a localhost stack that must work out of the box.
+      # Unset, these land on docker-compose.yml's 32-byte placeholders, not blank: blank 500s the first account
+      # creation. With no SITE_DOMAIN, PlaceholderSecretGuard only warns.
       TESSARY_SECRET_KEY: ${TESSARY_SECRET_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtc2VhbCE=}
-      # TESSARY_PLATFORM_BEDROCK_ENABLED lived here until it was removed — see docker-compose.yml's
-      # identical removal note; the switch it fed had zero production callers.
       TESSARY_AUTH_COOKIE_PASSWORD: ${TESSARY_AUTH_COOKIE_PASSWORD:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtY29va2k=}
-      # Local dev: turn ai.tessary logging up to DEBUG (logback-spring.xml + logging.level.ai.tessary).
-      # INFO everywhere by default; prod never sets this. Framework logs stay at their defaults.
+      # DEBUG for ai.tessary only; prod never sets this.
       APP_LOG_LEVEL: DEBUG
       SPRING_DEVTOOLS_LIVERELOAD_ENABLED: "false"
-      # Pre-wired target for OTLP traces to the local Alloy agent (below), which forwards the
-      # gen_ai (judge) spans on to Langfuse — so prompt-cache token usage is inspectable on
-      # local runs, same as prod. Off by default though: the base application.yaml sets
-      # management.tracing.export.otlp.enabled: false, and nothing here overrides that, so with
-      # no opt-in this is dead config the exporter never reads. Bring up Alloy AND flip the
-      # enabled flag to actually ship: `COMPOSE_PROFILES=observability
-      # MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED=true MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED=true
-      # task dev` (task dev:profiling does all of this for you already —
-      # scripts/dev.sh's TESSARY_PROFILING branch sets both the Compose profile and these flags).
+      # Inert until MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED=true and the `observability` profile is up;
+      # `task dev:profiling` sets both.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
       OTEL_SERVICE_NAME: tessary-backend
       OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_NAME:-development},service.namespace=tessary
-      # The Spring Boot OTLP trace-export ENDPOINT wiring lives in application-production.yaml,
-      # which only loads under the `production` profile. Local dev runs profile-less, so without
-      # these the autoconfig defaults to localhost:4317 @ 10% sampling. Set the Spring properties
-      # directly (relaxed-binding env) so the endpoint is right in dev — without pulling in the
-      # production profile's prod-only bits (HTTPS-only cookie, forwarded headers). Spring Boot's
-      # OTel starter reads THESE, not the OTEL_* SDK env vars above. Whether export actually
-      # fires is a separate flag (MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED, see above) — these two
-      # lines are pre-filled values, inert until that flag is also set.
+      # Local dev runs profile-less, so the OTLP endpoint wiring in application-production.yaml is set here via
+      # relaxed binding. Spring Boot reads these, not the OTEL_* vars; still inert until export is enabled.
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://alloy:4317
       MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_TRANSPORT: grpc
-      # The actual enable/disable flags the comment above refers to. Compose only forwards a host
-      # env var into the container when the compose YAML itself references it —
-      # task dev:profiling exporting these into the shell does nothing on its own without
-      # this line. Defaults to the base application.yaml's own "false" so plain `task dev` is
-      # unaffected; task dev:profiling's TESSARY_PROFILING branch sets the shell var to "true" before
-      # `docker compose up`, which this then passes through.
+      # Compose forwards a host env var only when the YAML references it, so this line is what lets
+      # `task dev:profiling` turn export on.
       MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: ${MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED:-false}
       MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED: ${MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED:-false}
-      # Agent-launcher wiring for the dev stack's chooser (scripts/lib/dev-choices.sh, `task
-      # dev:configure` to change): agents=docker/e2b export these into the shell env before
-      # `docker compose up`, which compose interpolation reads here (outranking .env). Both
-      # settings are inert when empty, so agents=off keeps the backend on its .env/default config.
-      #
-      # The analyzer type is NOT, which is why it defaults to a value rather than to empty: Spring
-      # binds "" over the Java default ("anchor") and ObserverProcessor's fail-fast rejects it, so
-      # `:-` killed the backend at boot on any host whose .env did not set this.
+      # Exported by the dev-choices.sh chooser (`task dev:configure`) and inert when empty. The analyzer type
+      # needs a real default: Spring binds "" over the Java default and ObserverProcessor rejects it at boot.
       TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-}
-      # Same placeholder docker-compose.yml ships on both sides of the pair, so a launcher and a
-      # backend that nobody configured still agree instead of 401ing each other.
+      # docker-compose.yml's placeholder, so an unconfigured launcher and backend still agree.
       TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}
-      # RCA — defaults onto the observer's launcher/key so one chosen agent sandbox powers both
-      # lanes with one setup. Without a launcher URL every "Run RCA" press fails: the sandboxed
-      # agent is RCA's only analysis path.
+      # Defaults onto the observer's launcher. Without it every "Run RCA" fails.
       TESSARY_RCA_AGENTIC_LAUNCHER_URL: ${TESSARY_RCA_AGENTIC_LAUNCHER_URL:-${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-}}
       TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY:-${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}}
-      # The evidence door, for BOTH agent lanes, and neither has another one: their dossiers carry
-      # the detector's claim and every row behind it is fetched over MCP, so a blank value here is a
-      # broken deployment rather than a degraded mode (the engines refuse to run). Defaulted to the
-      # dev API origin — Caddy on TESSARY_DEV_ORIGIN. agents=docker overrides this to http://backend:8080 (see
-      # dev-choices.sh) since a sibling container reaches the backend by service name, not
-      # localhost. agents=e2b is the exception either way: the microVM cannot see your localhost or
-      # the service network, so point this at a public tunnel.
+      # Required; blank stops both agent lanes. agents=docker overrides it to http://backend:8080. Under
+      # agents=e2b the microVM cannot see localhost, so point this at a public tunnel.
       TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}}
       TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL: ${TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL:-${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}}}
-      # The groundedness model server, from .env. Read here rather than left to env_file because
-      # `environment:` overrides `env_file:`, so a hardcoded value would hide the lines the setup
-      # guide (classifiers/groundedness/setup/) writes. On a Mac that is serve.py running natively,
-      # reached as http://host.docker.internal:<port>. Blank means groundedness is not set up and
-      # its sweeps are skipped.
+      # Read here because `environment:` overrides `env_file:`. On a Mac, serve.py runs natively at
+      # http://host.docker.internal:<port>. Blank skips groundedness sweeps.
       TESSARY_OBSERVER_ENCODER_URL: ${TESSARY_OBSERVER_ENCODER_URL:-}
       TESSARY_OBSERVER_ENCODER_API_KEY: ${TESSARY_OBSERVER_ENCODER_API_KEY:-}
       TESSARY_GROUNDEDNESS_CLASSIFIER_MODE: ${TESSARY_GROUNDEDNESS_CLASSIFIER_MODE:-}
     volumes:
-      # The reactor is twelve modules under backend/. The dev boot installs app's whole dependency
-      # chain into the cached .m2 and then runs app alone, so EVERY module's src must be mounted —
-      # a pom without its src installs a class-less jar and app fails with "cannot find symbol".
-      # A module added to the aggregator must be added here too.
+      # Every module's src must be mounted: a pom without src installs a class-less jar. A module added to the
+      # aggregator must be added here too.
       - ./backend/shared/src:/app/shared/src
       - ./backend/contract/src:/app/contract/src
       - ./backend/test-support/src:/app/test-support/src
@@ -227,11 +130,8 @@ services:
       - ./backend/analysis/pom.xml:/app/analysis/pom.xml:ro
       - ./backend/surfaces/pom.xml:/app/surfaces/pom.xml:ro
       - ./backend/app/pom.xml:/app/app/pom.xml:ro
-      # config/ holds the shared PMD ruleset + SpotBugs exclusions the parent's pluginManagement
-      # points every module at; core/tools/ holds the build-time schema-column generator that the
-      # generate-sources phase runs over core's Liquibase changelog. .mvn/jvm.config carries the
-      # --add-exports/--add-opens Error Prone needs to compile on JDK 25. All are build inputs the
-      # prod Dockerfile COPYs — the dev stack mounts them so the in-container build matches.
+      # Build inputs the prod Dockerfile copies (PMD/SpotBugs config, the schema-column generator, JDK 25
+      # --add-exports for Error Prone), mounted so the in-container build matches.
       - ./backend/config:/app/config:ro
       - ./backend/core/tools:/app/core/tools:ro
       - ./backend/.mvn:/app/.mvn:ro
@@ -240,8 +140,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # /dev/tcp is a bash builtin — no curl/wget needed in the maven image.
-      # Spring Boot binds :8080 only after the app is fully started.
+      # bash's /dev/tcp needs no curl; Spring binds :8080 only once fully started.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080"]
       interval: 5s
       timeout: 3s
@@ -254,8 +153,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-      # The Taskfile exports PNPM_VERSION (mirrored by the PNPM_VERSION Actions variable in CI);
-      # the fallback is the same literal; keep the two equal by hand.
+      # Keep this fallback equal to the Taskfile's PNPM_VERSION by hand.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
     image: tessary-frontend-dev:latest
@@ -265,21 +163,15 @@ services:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public:ro
       - ./frontend/index.html:/app/index.html:ro
-      # src/index.css imports ../tokens.css, which lives at the frontend root beside index.html
-      # rather than under src/. Without this mount Vite fails to resolve it and the dev server
-      # serves an error overlay instead of the app: the image copies only the lockfiles, so every
-      # root-level file the dev server reads has to be mounted here by name.
+      # src/index.css imports ../tokens.css. The image copies only lockfiles, so root-level files are mounted by name.
       - ./frontend/tokens.css:/app/tokens.css:ro
       - ./frontend/package.json:/app/package.json:ro
       - ./frontend/pnpm-lock.yaml:/app/pnpm-lock.yaml:ro
-      # pnpm 11 keeps settings (this package's overrides) here rather than in package.json, and the
-      # container's startup `pnpm install --frozen-lockfile` reads it. Without this mount the
-      # container resolves a different tree than the host and CI do.
+      # pnpm 11 reads overrides from here during the startup `pnpm install --frozen-lockfile`.
       - ./frontend/pnpm-workspace.yaml:/app/pnpm-workspace.yaml:ro
       - ./frontend/tsconfig.json:/app/tsconfig.json:ro
       - ./frontend/vite.config.ts:/app/vite.config.ts:ro
-      # node_modules lives in a named volume; otherwise the host's empty (or
-      # mismatched-arch) node_modules would shadow what the image build installed.
+      # A named volume, so the host's node_modules cannot shadow the image's.
       - frontend-node-modules:/app/node_modules
     networks:
       - tessary
@@ -287,15 +179,8 @@ services:
   caddy:
     image: caddy:2-alpine
     ports:
-      # HOST_BIND, not a bare publish: sign-in is enforced by default now, but a dev stack runs on
-      # the shipped placeholder secrets and can be switched to TESSARY_AUTH_DISABLED=true, at which
-      # point this port is the entire application with authentication off. On 0.0.0.0 that is every
-      # trace, every credential and every admin surface offered to whoever shares the network. Set
-      # HOST_BIND=0.0.0.0 to test from a phone on the same wifi.
-      #
-      # Host port TESSARY_DEV_PORT, default 80, so the stack is plain http://localhost. Set it (e.g.
-      # 8100) when 80 is taken or not bindable; `task dev` derives TESSARY_DEV_ORIGIN from it for the
-      # backend. The container side stays 8000, the port the Caddyfile listens on.
+      # Loopback by default: with placeholder secrets or auth disabled, this port is the whole application.
+      # HOST_BIND=0.0.0.0 to test from another device. The container side stays 8000.
       - "${HOST_BIND:-127.0.0.1}:${TESSARY_DEV_PORT:-80}:8000"
     environment:
       BACKEND_URL: backend:8080
@@ -312,21 +197,8 @@ services:
     networks:
       - tessary
 
-  # Optional telemetry agent for local runs: receives the backend's OTLP traces and
-  # forwards just the gen_ai (judge) spans on to Langfuse, so you can inspect prompt-cache
-  # token usage (cache_read / cache_creation) per generation.
-  #
-  # Uses a DEV-ONLY config (config.dev.alloy) with only the Langfuse trace branch.
-  #
-  # Requires LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY in .env (the same keys the
-  # pull-ingest adapter already uses). Without them the gen_ai push 401s and backs off.
-  # Note: caching only produces non-zero cache tokens once the shared system prefix clears
-  # the provider's minimum cacheable length (OpenAI 1024, Anthropic Sonnet/Opus 1024, Haiku
-  # 2048, Bedrock ~1024); small traces cache nothing and show 0 — that's expected.
-  #
-  # Opt-in: gated behind the `observability` Compose profile, so this is absent from a
-  # default `task dev` / detached boot. Bring it up with `COMPOSE_PROFILES=observability
-  # task dev` (task dev:profiling already does this for you — see scripts/dev.sh).
+  # Optional local telemetry agent (`observability` profile, off by default): forwards gen_ai spans to
+  # Langfuse to inspect prompt-cache usage. Needs LANGFUSE_* keys in .env. `task dev:profiling` starts it.
   alloy:
     profiles: ["observability"]
     image: grafana/alloy:latest
@@ -337,48 +209,25 @@ services:
       - /etc/alloy/config.alloy
     environment:
       DEPLOYMENT_NAME: ${DEPLOYMENT_NAME:-development}
-      # Langfuse OTLP target for the gen_ai-only trace branch. Endpoint + keys are read
-      # from ./.env via Compose interpolation (the same values the ingest adapter uses).
-      # Off by default: blank endpoint means the exporter has nothing to resolve, so
-      # opting into `observability` without Langfuse keys doesn't also start dialing Langfuse
-      # Cloud. Set LANGFUSE_OTLP_ENDPOINT in .env to re-enable.
+      # Blank by default, so the profile without Langfuse keys does not dial Langfuse Cloud.
       LANGFUSE_OTLP_ENDPOINT: ${LANGFUSE_OTLP_ENDPOINT:-}
-      # Alloy's otelcol.auth.basic rejects EMPTY credentials at config load (exit 1 on the
-      # current image), so default to a clearly-fake placeholder when unset — the langfuse
-      # push then 401s and backs off (the intended no-op) instead of crash-looping dev for
-      # anyone without Langfuse keys. Real keys in .env override these.
+      # Alloy rejects empty basic-auth credentials at config load, so a fake placeholder makes the push 401 instead.
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-dev-unset}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-dev-unset}
     volumes:
-      # Dev-only trimmed config (Langfuse branch only) mounted at the path the command
-      # expects. Swapping the source file is all it takes — the command stays generic.
       - ./observability/alloy/config.dev.alloy:/etc/alloy/config.alloy:ro
       - alloy-data:/var/lib/alloy/data
     networks:
       - tessary
 
-  # Agentic launcher (drives the docker/E2B sandbox backends that run OpenCode) — powers the
-  # synth CODE_GROUNDED tiers (/ground) and the observer agentic lane (/analyze). Built
-  # locally so it bundles the current server.js (incl. the /ground route).
-  # Reachable on the internal network at http://sandbox-runner:8080 — point the
-  # backend's TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL there (in .env). Optional: omit or
-  # stop it and the backend's code-grounding degrades cleanly to trace/draft.
-  #
-  # E2B prereq only: publish the template first (cd sandbox-runner/agent-sandbox &&
-  # pnpm exec tsx build.ts) under the SAME E2B team as E2B_API_KEY. Agent auth inside the
-  # sandbox: set AWS_* in .env (every agentic model is served from our own Bedrock).
-  # ${...} values interpolate from the repo-root ./.env.
-  #
-  # OFF by default locally (unlike prod, where it always runs): the `launcher` profile is only
-  # turned on when the dev-choices.sh chooser resolves agents to docker or e2b (`task dev`, `task
-  # dev:configure` to change) — agents=off runs the whole product minus triage/RCA. A bare
-  # `COMPOSE_PROFILES=launcher task dev` also works for a one-off override.
+  # Agentic launcher, built from this checkout. Off by default locally: the `launcher` profile is enabled when
+  # the dev-choices.sh chooser picks agents=docker or e2b. For e2b, publish the template under the same team
+  # as E2B_API_KEY first (sandbox-runner/agent-sandbox: `pnpm exec tsx build.ts`).
   sandbox-runner:
     profiles:
       - launcher
     build:
       context: ./sandbox-runner/launcher
-      # PNPM_VERSION single source — see the frontend service.
       args:
         PNPM_VERSION: ${PNPM_VERSION:-11.15.1}
     image: tessary-sandbox-runner-dev:latest
@@ -386,62 +235,37 @@ services:
       - "8080"
     environment:
       PORT: "8080"
-      # dev-choices.sh exports this (agents=docker or agents=e2b) before `docker compose up`,
-      # outranking .env — so a plain `task dev` needs no manual step. Empty passthrough otherwise:
-      # server.js's own default, `docker`, wins when this is unset, matching the self-host stack.
-      # The docker path's own wiring (SANDBOX_WORK_VOLUME + the docker.sock and work-dir mounts +
-      # group_add below) mirrors docker-compose.yml's sandbox-runner service so the default
-      # actually RUNS here — server.js exits at boot on SANDBOX_BACKEND=docker without
-      # SANDBOX_WORK_VOLUME.
+      # Exported by dev-choices.sh; unset means server.js's default, `docker`. The docker wiring below mirrors
+      # docker-compose.yml; server.js exits at boot on docker without SANDBOX_WORK_VOLUME.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-}
-      # dev-choices.sh's agents=docker branch builds AGENT_IMAGE from this checkout's
-      # sandbox-runner/agent-sandbox/ and exports the resulting tag here (see
-      # dev_docker_agent_image_ensure) — the default below is only ever reached by a bare
-      # `COMPOSE_PROFILES=launcher docker compose` invocation that bypassed the chooser. Same
-      # tessaryai/tessary:agent-sandbox convention as docker-compose.yml's sandbox-runner service
-      # — the tag matches the E2B template alias tessary-agent-sandbox. Unset floats to `-latest`;
-      # the version lives in the git tag, never in a literal here.
+      # agents=docker builds this from the checkout and exports the tag; the default only reaches a bare
+      # `COMPOSE_PROFILES=launcher docker compose`.
       AGENT_IMAGE: ${AGENT_IMAGE:-tessaryai/tessary:agent-sandbox-${TESSARY_VERSION:-latest}}
       SANDBOX_DOCKER_CONCURRENCY: ${SANDBOX_DOCKER_CONCURRENCY:-1}
-      # Same volume as the `sandbox-work` mount below — see docker-compose.yml's sandbox-runner
-      # service for the full Docker-outside-of-Docker mechanism. A distinct default name from the
-      # prod stack's, so a dev launcher and a prod launcher on one host never share a work volume.
+      # A different default from the prod stack, so dev and prod launchers on one host never share a volume.
       SANDBOX_WORK_VOLUME: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work-dev}
       # Must equal the backend's TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY.
       SANDBOX_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}
       E2B_API_KEY: ${E2B_API_KEY:-}
-      # Namespaced and floating, exactly as docker-compose.yml's sandbox-runner service — see the
-      # comment there for why the bare name was unreachable outside the Tessary E2B project.
+      # Namespaced and floating, as in docker-compose.yml.
       E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary/tessary-agent-sandbox:${TESSARY_VERSION:-latest}}
-      # FULL REMOVAL of every deployment-env-var credential this service used to read —
-      # AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/MANTLE_REGION, the whole AGENT_PROVIDER
-      # dev-override block (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, OPENAI_API_KEY,
-      # GEMINI_API_KEY, GLM_API_KEY/GLM_BASE_URL, GROK_API_KEY, CUSTOM_OPENAI_BASE_URL/
-      # CUSTOM_OPENAI_API_KEY) — see docker-compose.yml's identical removal note and
-      # server.js's file-header doc. MANTLE_PROJECT_ID stays: an attribution scope, not a secret.
+      # No provider secret here; each run carries the org's own credential. MANTLE_PROJECT_ID is not a secret.
       MANTLE_PROJECT_ID: ${TESSARY_MANTLE_PROJECT_ID:-}
-    # docker.sock GID + the two mounts: the docker sandbox default's wiring, mirrored from
-    # docker-compose.yml's sandbox-runner service — same default of 0 (Docker Desktop mounts the
-    # socket root:root, which is most people's first `task dev`; 999 sent every Mac/Windows dev to
-    # EACCES /var/run/docker.sock at boot — see the comment on docker-compose.yml's own group_add
-    # for the full reasoning and the `getent group docker` hint for DOCKER_SOCK_GID on native
-    # Linux). Unconditional so switching backends stays one env var, not a compose edit.
+    # Mirrors docker-compose.yml's group_add, mounts and default GID of 0; see the comment there.
     group_add:
       - "${DOCKER_SOCK_GID:-0}"
     depends_on:
       sandbox-runner-work-init:
         condition: service_completed_successfully
     volumes:
-      # Pick up server.js edits on `--force-recreate` without an image rebuild.
+      # Picks up server.js edits on `--force-recreate` without a rebuild.
       - ./sandbox-runner/launcher/server.js:/app/server.js:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - sandbox-work:/launcher-work
     networks:
       - tessary
 
-  # Mirrors docker-compose.yml's sandbox-runner-work-init: pre-creates the launcher's work dir
-  # owned by the launcher image's `node` uid (1000), so the docker sandbox default can write
-  # into it. Same profile as the launcher — nothing else needs it.
+  # Mirrors docker-compose.yml's sandbox-runner-work-init.
   sandbox-runner-work-init:
     profiles:
       - launcher
@@ -462,8 +286,6 @@ volumes:
   caddy-config:
   postgres-data:
   alloy-data:
-  # The launcher's work volume, shared with every sibling agent container it spawns. Explicit
-  # `name:` for the same reason as docker-compose.yml's — the launcher hands this exact string to
-  # the Engine API, and a project prefix would break the match. See that file for the mechanism.
+  # Explicit `name:`, as in docker-compose.yml: the launcher hands this exact string to the Engine API.
   sandbox-work:
     name: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work-dev}

@@ -12,7 +12,6 @@ import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.MalformedOutputDetector;
 import ai.tessary.classifier.detector.RegexDetector;
 import ai.tessary.classifier.detector.SecretLeakDetector;
-import ai.tessary.classifier.detector.groundedness.GroundednessDetector;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.plan.Capability;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,70 +25,18 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
- * The starter pack of built-in classifiers, declared as {@link ClassifierModelModule} manifests, one
- * comprehensive declaration per classifier. The catalog derives its {@link BuiltIn} list and its
- * detector-dispatch map from {@link #MODULES}, so adding or changing a classifier is a single
- * declaration here, not edits scattered across the catalog, the detector list, and seeding.
- *
- * <p>Seven built-ins ship in four tiers. The <b>deterministic</b> tier costs nothing per observation
- * and calls no model: Secret Leak matches the vendored gitleaks credential corpus ({@link
- * SecretLeakDetector}); Malformed Output validates outputs against the call site's captured schema
- * ({@link MalformedOutputDetector}). The <b>encoder</b> tier is Groundedness, a TOKEN head that reads
- * the retrieved passages and the whole answer in one pass ({@link GroundednessDetector}), scored by
- * the groundedness model server's {@code /classify} with a deterministic filter in front of it. The
- * <b>decision</b> tier is Frustration: each eligible user turn is one question to a hosted decision
- * model on the org's own key, and a call site's rate of frustrated conversations is watched with Tool
- * Error's sequential test. Its detector is not named here by class: it is supplied through the {@link
- * DetectorSupplier} seam rather than built in this file's {@link #MODULES} list, see that module's
- * {@code detectorFactory} comment below. The <b>fitting</b> tier holds three modules that ship as
- * per-project procedures rather than models, and so carry no {@link BuiltInDetector} at all: the two
- * window-grain metric classifiers (Duration Drift and Cost Drift) and Tool Errors. All ship
- * project-local state rather than a model, because "slow for this call site", "expensive for this call
- * site" and "failing more than usual" are definitionally project-relative and none has a transferable
- * model to ship.
- *
- * <p>Duration and cost are <b>two switches rather than one or seven</b>. A classifier is one decision
- * a human makes: "do I want to hear about latency here" is a different decision from "do I want to
- * hear about spend", and the measures under each are how that decision is implemented, declared in
- * its {@code defaultConfigJson} rather than as modules of their own. That is what lets one switch span
- * two candidate grains, which a single catalog {@link Grain} cannot express.
- *
- * <p>What every tier has in common is the L1 cost model: <b>no built-in makes a per-observation LLM
- * call.</b> A detector that needs one belongs behind Layer-2 triage, on the findings that already
- * fired, not in front of the whole stream.
- *
- * <p>A classifier withdrawn from the catalog is disabled on every project that has it, never deleted:
- * {@link ClassifierService#resyncBuiltIns}'s retirement path handles that, so history stays listable.
- *
- * <p>Seeding is per-project and idempotent: a project missing a built-in gets it inserted with its
- * module's {@code defaultEnabled}; an existing built-in whose catalog {@code version} advanced has its
- * definition re-synced. User enable/disable state is never clobbered.
- *
- * <p><b>Catalog membership is not availability.</b> Every module here is defined for every org,
- * always; whether one reaches a given org is its {@link ClassifierModelModule#capability()}, resolved
- * per org by the flag layer. Keep the two apart: {@link #builtIns()} is membership and must never be
- * filtered by a flag, and seeding filters a copy of it. Deleting a flag-gated module from
- * {@link #MODULES} to "turn it off" would disable it in every project including the orgs whose flag
- * says on, and the rows would never come back.
- *
- * <p>The flag-off ending is <b>suppression, not a write</b>: a withheld built-in's row is hidden from
- * every read and skipped by the sweep enqueue while its {@code enabled} column keeps whatever the
- * project set ({@code ClassifierService#withheldBuiltInKeys}). A module removed from this list is
- * gone for everyone and irreversible; a module whose capability is off is fully restored the moment
- * the flag flips back, which is why "turn it off" always means the flag and never a deletion here.
+ * The built-in classifiers, declared once each as {@link ClassifierModelModule} manifests from which the
+ * {@link BuiltIn} list and detector dispatch are derived. No built-in makes a per-observation LLM call except
+ * Frustration, which runs on the org's own key. Catalog membership is not availability: a capability flag decides
+ * whether a module reaches an org, and turning one off must always be the flag, never a deletion here, which would
+ * disable it everywhere for good.
  */
 @Component
 public class BuiltInClassifierCatalog {
 
     /**
-     * A built-in signal definition: catalog metadata plus the detector kind the worker dispatches
-     * on. {@code capability} rides along because seeding reads it, to decide whether the classifier
-     * reaches the org at all.
-     *
-     * <p>Every built-in seeds enabled except two. Frustration seeds disabled because enabling it
-     * spends the org's own provider credit, and Groundedness because it needs a model server a person
-     * sets up first. Trust in an unmeasured classifier is expressed only by who
-     * its capability flag is on for, resolved per org without a deploy, rather than by this switch.
+     * Frustration seeds disabled because it spends the org's own provider credit, and Groundedness because it needs a
+     * model server set up first.
      */
     public record BuiltIn(
             String classifierKey,
@@ -100,26 +47,18 @@ public class BuiltInClassifierCatalog {
             int version,
             Capability capability,
             /**
-             * The operating point a FRESHLY-SEEDED row takes. Not applied to an already-seeded
-             * project: {@code ClassifierService} preserves the tenant's stored mode across a
-             * re-seed, so moving an existing estate is a migration, deliberately and once.
+             * Only for a freshly seeded row: {@code ClassifierService} preserves a tenant's stored mode across a
+             * re-seed.
              */
             String defaultMode,
-            /** Whether a freshly seeded row starts enabled; an existing row's switch is never touched. */
             boolean defaultEnabled) {}
 
-    /**
-     * The classifier manifests, the single source of truth for the built-in catalog. Each entry
-     * declares one classifier's metadata, operating point, and detector factory in one place.
-     * Detector factories are pure (they only close over the {@link Deps} passed at build time), so
-     * this list is static; the catalog binds it to the real dependencies in its constructor.
-     */
+    /** Detector factories close only over the {@link Deps} passed at build time, so this list is static. */
     static final List<ClassifierModelModule> MODULES = List.of(
             new ClassifierModelModule(
                     "frustration",
                     "Frustration",
-                    // User-facing, and re-synced onto every seeded project by the version bump below, so
-                    // it has to track the scorer: a stale description here gets written into production
+                    // Re-synced onto every seeded project on a version bump, so a stale description lands in production
                     // rows as fact.
                     "Frustration the agent caused, judged by TypeSafe's Jev decision model on your "
                             + "OpenRouter or TypeSafe key. Off by default. Scores every call site unless you "
@@ -132,39 +71,24 @@ public class BuiltInClassifierCatalog {
                             + "that normal. A call site that is bad from day one learns that as normal and "
                             + "is flagged only if it gets worse.",
                     Kind.FRUSTRATION,
-                    // ClassifierService re-syncs a built-in onto an already-seeded project only when the
-                    // catalog version exceeds the stored one, so every threshold or config change below
-                    // needs a bump or it reaches fresh installs only. 9 replaced the encoder config
-                    // wholesale; 10 re-syncs the description for picked call sites; 11 re-syncs it for
-                    // every call site by default. The list lives in classifier.call_site_ids, which a
-                    // re-sync never writes, so a bump does not drop it.
+                    // Every threshold or config change needs a version bump, or it reaches fresh installs only. A
+                    // re-sync never writes classifier.call_site_ids.
                     11,
                     Capability.FRUSTRATION,
-                    // TURN grain: the subject is what the USER said, and the user says it once. A turn
-                    // lands as several observations (a wrapper span, a router, the reply, a memory pass,
-                    // tool rounds), so scoring per observation would send one user message several times.
-                    // The sweep scores the first span of each call site in the turn that it runs on.
+                    // TURN grain: a user message lands as several observations, so the sweep scores the first span of
+                    // each call site in the turn.
                     Grain.TURN,
-                    // Every key here is one FrustrationConfig parses. threshold is the flag cutoff on
-                    // P(unhappy_with_assistant), set on a held-out labelled set; it is hashed into the
-                    // scorer version, so changing it starts a new set of assessment rows. The rest are the
-                    // rate test's dials. arl_target and min_decision_interval are Tool Error's false-alarm
-                    // budget converted from tool calls to conversations, reasoned rather than measured.
-                    // EXPERIMENT(frustration-tuning): threshold, arl_target and min_decision_interval
-                    // are starting values until a null replay on real traffic settles them. Judged from 100
-                    // conversations, the reference learning until 1,000, as Groundedness does in traces.
+                    // threshold is the cutoff on P(unhappy_with_assistant), hashed into the scorer version; the rest
+                    // are the rate test's dials. EXPERIMENT(frustration-tuning): threshold, arl_target and
+                    // min_decision_interval are starting values until a null replay on real traffic settles them.
                     "{\"threshold\":0.40,\"arl_target\":10000,\"min_decision_interval\":4,"
                             + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
                             + "\"min_baseline_conversations\":100,\"freeze_baseline_conversations\":1000}",
-                    // null: the detector is JevFrustrationDetector, a Spring bean supplied through the
-                    // DetectorSupplier seam (FrustrationDetectorSupplier), because it needs the decision
-                    // client, the provider resolver and its own repositories, none of which are Deps.
+                    // null: JevFrustrationDetector is a Spring bean supplied through DetectorSupplier, since it needs
+                    // dependencies that are not Deps.
                     null,
-                    // TRACKING: the one band Jev writes is HIGH, so both modes read the same rows; tracking
-                    // is kept so a project's stored mode does not change under it.
+                    // TRACKING: Jev writes only the HIGH band, so both modes read the same rows.
                     ClassifierRow.Mode.TRACKING,
-                    // Seeds disabled: enabling it spends the org's own provider credit, so a person turns
-                    // it on, through the enable flow that asks for the key.
                     false),
             new ClassifierModelModule(
                     "secret_leak",
@@ -178,13 +102,10 @@ public class BuiltInClassifierCatalog {
                     Kind.SECRET_LEAK,
                     3,
                     Capability.SECRET_LEAK,
-                    // Any span can leak a credential: an inner call's output reaches logs and downstream
-                    // prompts just like a user-facing one.
+                    // Any span can leak a credential, inner calls included.
                     Grain.OBSERVATION,
-                    // Armed at one: a single leaked credential is the whole incident, so there is no
-                    // count below which it is noise. ClassifierArming files it per call site and per
-                    // pattern. Only the HIGH band counts toward the bar; the classifier stays in
-                    // discovery so the LOW band is still listed on its page without opening anything.
+                    // Armed at one: a single leaked credential is the whole incident. Only the HIGH band counts toward
+                    // the bar.
                     "{\"arming\":{\"basis\":\"event_count\",\"threshold\":1,\"window_seconds\":86400,"
                             + "\"confidence\":\"high\"}}",
                     d -> new SecretLeakDetector(d.mapper())),
@@ -197,66 +118,37 @@ public class BuiltInClassifierCatalog {
                     Kind.MALFORMED_OUTPUT,
                     1,
                     Capability.MALFORMED_OUTPUT,
-                    // Per-call by definition: each call site's own output is validated against its own
-                    // declared schema, inner calls included.
                     Grain.OBSERVATION,
                     null,
                     d -> new MalformedOutputDetector(d.substrate(), d.mapper())),
             new ClassifierModelModule(
                     "groundedness",
                     "Groundedness",
-                    // User-facing, the classifier row's text. How the model reads an answer and how the rate
-                    // test judges a call site is the method card's job (ClassifierMethodCard), and the
-                    // catalog quotes no benchmark numbers.
                     "Answers that state things the retrieved documents don't support.",
                     Kind.GROUNDEDNESS,
-                    // v5 (2026-09-18): the pair head (bart-large-mnli, contradiction-only, per-sentence
-                    // windows) is replaced by the long-context token head. The contract changed with it,
-                    // from "contradicts" to "unsupported: contradicted OR baseless", because on
-                    // human-labelled data the contradiction-only question was unreachable by any model of
-                    // this size while the unsupported question is where the field's own benchmarks sit.
-                    // Evidence reaches the head as a LIST of documents (GroundingEvidenceReads.Evidence#
-                    // documents), never one joined string: the layout with numbered passages is the one
+                    // A version bump rewrites configJson wholesale, which is what dropped the arming block and second
+                    // band from projects seeded before v7. Evidence reaches the head as a LIST of documents, the layout
                     // the checkpoint was trained on.
-                    // v6 (2026-09-21): the classifier armed by default, three detections in a day.
-                    // v7: arming is replaced by a rate test per call site, and the two bands by one
-                    // threshold. A fixed count arms on the model's false alarms, whose rate depends on the
-                    // domain; a reference learned per call site absorbs it, so only a rise is a finding.
-                    // A version bump rewrites configJson wholesale, which is what drops the arming block
-                    // and the second band from projects seeded before it.
                     7,
-                    // tessaryai/groundedness-classifier-v1 (MIT; ModernBERT-large, Apache-2.0 base;
-                    // RAGTruth, MIT), measured on RAGTruth's human-labelled test split before shipping;
-                    // numbers in the classifiers README and the model card.
                     Capability.GROUNDEDNESS,
-                    // Per-call: the head scores one output against ITS OWN input, so an inner
-                    // retrieval-answer call is exactly as checkable as the outermost one.
+                    // Per-call: the head scores one output against its own input, so inner calls are as checkable as
+                    // the outermost.
                     Grain.OBSERVATION,
-                    // Every key here is one GroundednessConfig parses. threshold is the flag cutoff on
-                    // P(unsupported), the 2% false-alarm point on RAGTruth test; it is hashed into the
-                    // scorer version, so changing it starts a new set of assessment rows. The rest are the
-                    // rate test's dials, in traces: judged from 100, the reference learning until 1,000,
-                    // and one false finding per 50,000 traces on a healthy call site.
+                    // threshold is the cutoff on P(unsupported), the 2% false-alarm point on RAGTruth test, hashed into
+                    // the scorer version; the rest are the rate test's dials, in traces.
                     "{\"threshold\":0.975,\"arl_target\":50000,\"min_decision_interval\":4,"
                             + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
                             + "\"min_baseline_traces\":100,\"freeze_baseline_traces\":1000}",
-                    // null: the detector writes its own groundedness_assessment rows, one per scored
-                    // answer, so it arrives through the DetectorSupplier seam with its repository
-                    // (GroundednessDetectorSupplier), as Frustration's does.
+                    // null: the detector writes its own groundedness_assessment rows, so it arrives through
+                    // DetectorSupplier with its repository.
                     null,
-                    // TRACKING: the one band the detector writes is HIGH, so both modes read the same
-                    // rows, as Frustration's.
+                    // TRACKING: the detector writes only the HIGH band.
                     ClassifierRow.Mode.TRACKING,
-                    // Seeds disabled: it needs a model server a person sets up first, so a person turns
-                    // it on, through the setup flow that checks the model answers.
                     false),
             new ClassifierModelModule(
                     "duration_drift",
                     "Duration Drift",
-                    // User-facing, and re-synced onto every seeded project by the version bump below, so
-                    // it names both grains now that both are measured. "This call site got slower" and
-                    // "this tool inside it got slower" are the same question asked at two depths, and an
-                    // operator reading only the first sentence would not know the second was covered.
+                    // Re-synced by the version bump, so it names both grains.
                     "This call site's turns — and the individual tool calls inside them — are taking "
                             + "measurably longer, or shorter, than they recently did. Compares each "
                             + "population's own recent distribution against its own earlier one, so nobody "
@@ -266,57 +158,28 @@ public class BuiltInClassifierCatalog {
                             + "forty-second research run and a two-second lookup are both routinely "
                             + "correct.",
                     Kind.DURATION_DRIFT,
-                    // A version bump rewrites configJson wholesale on every already-seeded project, so an
-                    // operator's edited thresholds are replaced by the catalog's each time. That costs
-                    // little while the numbers below are unmeasured; once a null-case run lands a tuned
-                    // operating point, a bump starts costing something. A key with no reader left in
-                    // MetricDriftConfig is dropped in the same bump that orphans it, rather than sitting in
-                    // a project's config reading as a dial that does nothing.
+                    // A version bump replaces an operator's edited thresholds on every seeded project. Drop a key with
+                    // no reader in MetricDriftConfig in the same bump that orphans it.
                     4,
-                    // Seeds enabled, like every built-in; whether this one reaches anyone but us is
-                    // `duration_drift_enabled`, and while its numbers are unvalidated (see w1_floor below)
-                    // that flag is the only thing standing between the guess and a partner's Triage.
+                    // While its numbers are unvalidated (see w1_floor) the `duration_drift_enabled` flag is all that
+                    // keeps this out of a partner's Triage.
                     Capability.DURATION_DRIFT,
-                    // WINDOW grain: the scored unit is a stretch of one bucket's traffic summarized as a
-                    // distribution. See ClassifierModelModule.Grain#WINDOW for why that is the honest
-                    // answer rather than a workaround for grainFor() returning one grain per detector.
                     Grain.WINDOW,
-                    // The measures this switch governs, declared HERE rather than as separate modules:
-                    // "this turn was slow" and "one tool call inside it was slow" are two halves of one
-                    // question and therefore one on/off switch across two candidate grains, which a single
-                    // catalog Grain cannot express. MetricDriftConfig carries the per-measure grain and
-                    // MetricDriftSweep reads it from there.
-                    //
-                    // tool_duration ships with the suppression rule and never without it: a tool finding
-                    // that does not suppress the turn it explains reports one cause twice, in a stream that
-                    // has no alert budget to absorb the duplicate. explained_by_fraction is that rule's one
-                    // dial, how much of a turn's added time one tool's own added time has to account for.
-                    // A turn shift nothing explains still fires alone, which is invisible at tool grain and
-                    // the whole reason turn duration is measured too.
-                    //
-                    // w1_floor (0.139, roughly 1.15x) is set from a synthetic null run rather than real
-                    // traffic; a real null-case run is what settles it, and until that has happened this
-                    // classifier belongs to orgs whose flag we set deliberately.
+                    // Both measures sit behind one switch, since "this turn was slow" and "a tool inside it was slow"
+                    // are one question at two grains. tool_duration must ship with the suppression rule, or one cause
+                    // is reported twice. w1_floor (0.139, about 1.15x) comes from a synthetic null run; a real
+                    // null-case run settles it.
                     "{\"measures\":[\"turn_duration\",\"tool_duration\"],\"window_target_count\":500,"
                             + "\"window_max_hours\":24,\"min_sample\":100,\"w1_floor\":0.139,"
                             + "\"explained_by_fraction\":0.5,\"settle_seconds\":300,\"hist_bins\":320}",
-                    // No detector factory: this is a per-project fitting procedure dispatched through the
-                    // ClassifierSweep registered for this kind on ClassifierWorker's Grain.WINDOW branch,
-                    // not an observation-grain BuiltInDetector.
-                    //
-                    // callSiteFactsRead() is deliberately empty, worth saying since there's no object here
-                    // to say it on. It exists for detectors gated on a call_site column captured from the
-                    // repository, where a fact landing late must rewind the sweep cursor of the signals
-                    // that declare it. This classifier reads observation columns and the trace spine only,
-                    // both present from the very first trace, so nothing outside the trace can invalidate
-                    // a sweep of it and the declared set is genuinely empty.
+                    // No detector factory: dispatched through the ClassifierSweep registered for this kind.
+                    // callSiteFactsRead() is empty because it reads only observation columns and the trace spine,
+                    // present from the first trace.
                     null),
             new ClassifierModelModule(
                     "cost_drift",
                     "Cost Drift",
-                    // USER-FACING. It names the decomposition because that is what distinguishes this
-                    // classifier from a spend chart: an operator who reads only "cost moved" would go and
-                    // read spend by model, which is the work this is supposed to have already done.
+                    // Names the decomposition, which is what separates this from a spend chart.
                     "This call site's turns are costing measurably more, or less, than they recently "
                             + "did. Compares each call site's own recent cost distribution against its own "
                             + "earlier one, so nobody has to know what \"expensive\" means for a call site "
@@ -327,44 +190,22 @@ public class BuiltInClassifierCatalog {
                             + "not. Labels no individual trace, because a $0.40 research turn and a "
                             + "$0.004 lookup are both routinely correct.",
                     Kind.COST_DRIFT,
-                    // Kept in step with duration drift's blob so an operator reading one is not surprised
-                    // by the other.
                     3,
-                    // Seeds enabled and is held back only by its flag, exactly as duration drift is, and for
-                    // the same reason: w1_floor below is simulated and no real null case has run yet.
+                    // Held back only by its flag, like duration drift: w1_floor is simulated.
                     Capability.COST_DRIFT,
-                    // WINDOW grain, dispatched through this kind's registered ClassifierSweep. The scored
-                    // unit is a stretch of one call site's traffic summarized as a distribution of dollars
-                    // per turn.
                     Grain.WINDOW,
-                    // `cost` is the only measure listed on purpose: MetricDriftConfig's registry holds
-                    // specs only for measures that can open a finding, so the four token buckets can't be
-                    // turned into findings by editing this blob. They're still computed every window by
-                    // MetricSource and printed inside the cost finding's evidence as the decomposition
-                    // that explains it.
-                    //
-                    // settle_seconds is not a per-measure wait: the sweep reads only settled traces, and
-                    // settle_seconds only caps how long a page is held open for a trace whose root span
-                    // never lands.
-                    //
-                    // w1_floor is the same simulated 0.139 as duration drift, unvalidated for the same
-                    // reason.
+                    // `cost` is the only measure because MetricDriftConfig registers specs only for measures that may
+                    // open a finding; the token buckets are evidence. settle_seconds only caps how long a page waits
+                    // for a root span that never lands.
                     "{\"measures\":[\"cost\"],\"window_target_count\":500,"
                             + "\"window_max_hours\":24,\"min_sample\":100,\"w1_floor\":0.139,"
                             + "\"explained_by_fraction\":0.5,\"settle_seconds\":300,\"hist_bins\":320}",
-                    // No detector factory, and callSiteFactsRead() deliberately empty, both exactly as for
-                    // duration drift above: this reads observation columns (usage, model, call_site_id)
-                    // and the trace spine, nothing captured onto `call_site` from a repository. Its
-                    // late-arriving-fact hazard is the price book, and the rewind seam is the wrong tool
-                    // for it, since rewinding rebuilds a current window but never a pinned reference. The
-                    // mitigation is to resolve rates at sweep time instead, which MetricSource does.
+                    // callSiteFactsRead() is empty as for duration drift. Its late-fact hazard is the price book, which
+                    // the rewind seam cannot fix because it never rebuilds a pinned reference.
                     null),
             new ClassifierModelModule(
                     "tool_error",
                     "Tool Errors",
-                    // USER-FACING. It names the grouping, because that is what separates this from a chart
-                    // of failure counts: an operator told only "errors are up" goes and reads a list of
-                    // failing calls, which is the work this is supposed to have already done for them.
                     "This tool is failing more often — or less often — than it recently did. Watches each "
                             + "tool's failure rate against that tool's own past, so nobody has to know what "
                             + "\"normal\" is for a tool they have never called, and groups the failures by "
@@ -376,24 +217,14 @@ public class BuiltInClassifierCatalog {
                     Kind.TOOL_ERROR,
                     1,
                     Capability.TOOL_ERROR,
-                    // WINDOW: the scored unit is a stretch of one tool's traffic, tested against that
-                    // tool's own earlier stretch. Its own sweep drives it from the worker like every other
-                    // classifier, with the WINDOW branch looking this detector kind up in
-                    // ClassifierSweepRegistry rather than falling into metric drift.
+                    // WINDOW grain, looked up in ClassifierSweepRegistry rather than falling into metric drift.
                     Grain.WINDOW,
-                    // decision_interval is the CUSUM threshold and it is a guess: 6.0 buys a false alarm
-                    // about every 250,000 calls under independent Bernoulli trials, and real tool failures
-                    // are bursty in a way that arithmetic cannot price; a null run against a real corpus is
-                    // what replaces it, and it will very likely move up.
-                    //
-                    // ToolErrorConfig does not read min_effect_size or settle_seconds; it ignores keys it
-                    // does not know.
+                    // decision_interval 6.0 is a guess (one false alarm per ~250,000 independent calls); real failures
+                    // are bursty, and a null run on a real corpus will likely move it up.
                     "{\"decision_interval\":6.0,\"shift_multiple\":2.0,\"shift_floor\":0.005,"
                             + "\"min_effect_size\":0.05,\"min_baseline_calls\":500,"
                             + "\"down_arm_min_rate\":0.01,\"settle_seconds\":300,\"max_patterns\":8}",
-                    // No detector factory and no sweep. callSiteFactsRead() is moot for the same reason it
-                    // is empty on the metric modules: this reads tool_call, the observation attribute bag
-                    // and the trace spine, nothing captured onto call_site from a repository.
+                    // callSiteFactsRead() is moot: this reads nothing captured onto call_site from a repository.
                     null));
 
     private final List<BuiltIn> builtIns;
@@ -407,7 +238,6 @@ public class BuiltInClassifierCatalog {
             ObjectProvider<DetectorSupplier> discovered) {
         Deps deps = new Deps(mapper, encoderScorer, substrate);
 
-        // Catalog metadata + built-in detectors are both derived from the manifests.
         this.builtIns = MODULES.stream().map(ClassifierModelModule::toBuiltIn).toList();
 
         // Sweep grain per detector kind, also derived from the manifests. Only kinds declared by a
@@ -417,13 +247,8 @@ public class BuiltInClassifierCatalog {
                 .collect(Collectors.toUnmodifiableMap(
                         ClassifierModelModule::detectorKind, ClassifierModelModule::grain));
 
-        // One dispatch-only detector is NOT a catalog built-in but is registered so the worker
-        // dispatches its kind for USER-authored signals:
-        //  - RegexDetector backs USER-authored `regex` classifiers; each such row supplies its phrases
-        //    via config_json, ClassifierField.BOTH so a phrase can match either side of
-        //    the exchange, WARN because a user tracker feeds metrics, not incident escalation. Nothing
-        //    mints one of these any more, but the kind stays dispatched so rows already on disk keep
-        //    scoring.
+        // RegexDetector is dispatch-only, not a catalog built-in: nothing creates regex classifiers any more, but rows
+        // already on disk keep scoring.
         BuiltInDetector regex = new RegexDetector(
                 Kind.REGEX,
                 ClassifierField.BOTH,
@@ -432,19 +257,8 @@ public class BuiltInClassifierCatalog {
                 new DeterministicNlPhraseCompiler(),
                 mapper);
 
-        // toUnmodifiableMap fails loud on a duplicate detector kind (IllegalStateException), the
-        // fail-loud invariant kept via the collector framework rather than an explicit constructor
-        // throw, which SpotBugs forbids (CT_CONSTRUCTOR_THROW). A module with no factory is one of
-        // the five fitting-tier classifiers, dispatched by the ClassifierSweep registered for their
-        // kind, or frustration or groundedness, whose detectors are instead supplied through
-        // `discovered` below.
-        //
-        // `discovered` is the generic source: any DetectorSupplier bean on the classpath is folded in
-        // for the kind it claims, with no check against MODULES membership; see DetectorSupplier's
-        // class comment for the failure mode that trades for. ObjectProvider, not
-        // List<DetectorSupplier>, because Spring treats a required List with no candidate bean as an
-        // unsatisfied dependency, and nothing discovered must be an ordinary empty answer, not a boot
-        // failure.
+        // toUnmodifiableMap fails loud on a duplicate kind without a constructor throw, which SpotBugs forbids
+        // (CT_CONSTRUCTOR_THROW). ObjectProvider rather than List, because a required List with no bean fails boot.
         this.detectors = Stream.concat(
                         Stream.concat(
                                 MODULES.stream()
@@ -460,28 +274,19 @@ public class BuiltInClassifierCatalog {
         return builtIns;
     }
 
-    /** The detector for a {@code signal.detector} value, or {@code null} for inert/unknown kinds. */
     @Nullable
     public BuiltInDetector detectorFor(String detectorKind) {
         return detectors.get(detectorKind);
     }
 
-    /**
-     * Whether a module in the manifest declares this detector kind, so {@link #grainFor} answers
-     * from the manifest and not from its default. A kind with a detector and no module, such as
-     * {@code regex}, is not declared.
-     */
+    /** A kind with a detector and no module, such as {@code regex}, is not declared. */
     public boolean declares(String detectorKind) {
         return grains.containsKey(detectorKind);
     }
 
     /**
-     * The sweep {@link Grain} a {@code signal.detector} value scores at: what one scored unit is
-     * for that classifier. Defaults to {@link Grain#OBSERVATION} for anything not declared by a
-     * module (user-authored regex/classifiers, and inert or unknown kinds), since a classifier is
-     * per-span unless it says otherwise. For an undeclared kind that a {@code ClassifierSweep}
-     * claims, {@code SweepRouting} answers window grain instead; the worker and {@code
-     * ClassifierService} read a kind's grain from there.
+     * OBSERVATION unless a module declares otherwise; {@code SweepRouting} answers window grain for an undeclared kind
+     * a {@code ClassifierSweep} claims.
      */
     public Grain grainFor(String detectorKind) {
         return grains.getOrDefault(detectorKind, Grain.OBSERVATION);

@@ -9,13 +9,9 @@ import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One span as the timeline builder reads it: the span row's facts, its payload and its tool call, with the call site
- * already resolved (the span's, else the trace's).
- *
- * @param parentTraceId set when the trace is a detached sub-agent trace
- * @param kind the stored canonical kind
- * @param model the span's model id, else the model name the producer gave
- * @param tool the {@code tool_call} row of the span, or null when there is none
+ * One span as the timeline builder reads it, with the call site already resolved (the span's, else the trace's). @param
+ * parentTraceId set when the trace is a detached sub-agent trace @param model the span's model id, else the producer's
+ * model name @param tool null when the span has no {@code tool_call} row
  */
 public record TimelineSpan(
         String traceId,
@@ -36,7 +32,7 @@ public record TimelineSpan(
         @Nullable String attributes,
         @Nullable Tool tool) {
 
-    /** A stored span with its payload and tool call; either is null when the span has none. */
+    /** Either may be null. */
     public static TimelineSpan of(
             TraceV2Repository.SessionTrace trace,
             SpanRow span,
@@ -71,7 +67,7 @@ public record TimelineSpan(
                 toolCall == null ? null : new Tool(toolCall.name(), arguments(toolCall), toolCall.result()));
     }
 
-    /** The parsed arguments, else the text a producer sent, which ingest keeps only in {@code arguments_raw}. */
+    /** Else the text a producer sent, which ingest keeps only in {@code arguments_raw}. */
     private static @Nullable String arguments(ToolCallRow toolCall) {
         String parsed = toolCall.arguments();
         return parsed == null ? toolCall.argumentsRaw() : parsed;
@@ -88,10 +84,7 @@ public record TimelineSpan(
         public static final Usage NONE = new Usage(null, null, null, null, null, null);
     }
 
-    /**
-     * The tool call's name ({@code gen_ai.tool.name}), arguments and result, as stored; {@code result} is null when it
-     * is not a JSON object or array, and the span's output then holds it.
-     */
+    /** {@code result} is null when it is not a JSON object or array; the span's output then holds it. */
     public record Tool(
             @Nullable String name,
             @Nullable String arguments,

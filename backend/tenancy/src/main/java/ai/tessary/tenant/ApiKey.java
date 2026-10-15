@@ -5,13 +5,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A managed, project-scoped API key — the {@code api_key} table. A row belongs
- * to a {@link #scope} family (write / query / admin). The hash is never exposed over the wire; the
- * plaintext token is shown to the user exactly once at issue time.
- *
- * <p>{@code scopes} is a JSON permission-narrowing bag (distinct from the coarse {@code scope} family),
- * {@code expiresAt} an optional expiry, and {@code attributes} a free-form bag — all reserved for
- * finer-grained key policy.</p>
+ * A project-scoped {@code api_key} row in one {@link #scope} family. The hash never goes over the wire. {@code scopes},
+ * {@code expiresAt} and {@code attributes} are reserved for finer-grained policy.
  */
 public record ApiKey(
         String id,
@@ -32,13 +27,12 @@ public record ApiKey(
         return revokedAt != null && !revokedAt.isBlank();
     }
 
-    /** The key family this row belongs to (defaults to least-privilege {@link KeyScope#WRITE} for a
-     * stray blank — never the read-capable superset). */
+    /** A stray blank defaults to least-privilege {@link KeyScope#WRITE}, never the read-capable superset. */
     public KeyScope scopeEnum() {
         return KeyScope.fromWireOrDefault(scope);
     }
 
-    /** Build a key from the 10 core fields, defaulting the policy columns (no scopes/expiry). */
+    /** Policy columns default to no scopes and no expiry. */
     public static ApiKey of(
             String id,
             String projectId,

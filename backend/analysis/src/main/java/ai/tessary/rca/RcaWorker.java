@@ -25,12 +25,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Drains the {@code rca} job queue — the same heartbeat/claim/dispatch shape as {@link
- * ai.tessary.classifier.grader.GraderRunWorker}: fail exhausted jobs, claim due ones ({@code FOR UPDATE
- * SKIP LOCKED}), hand each to the bounded {@code rcaTaskExecutor}, where {@link RcaAnalysisService}
- * runs the pipeline and stamps the report. A failure stamps the report {@code failed} with the error
- * as its summary, so the polling UI always converges (see also {@link RcaReportRepository} on why
- * reads take status from the job row).
+ * Drains the {@code rca} queue into {@code rcaTaskExecutor}. A failure stamps the report {@code failed} so the polling
+ * UI always converges.
  */
 @Component
 public class RcaWorker {
@@ -45,8 +41,6 @@ public class RcaWorker {
     private final RcaProperties props;
     private final TaskExecutor executor;
     private final TraceMdcBridge traceBridge;
-    /** The finding a finished report was about, so a successful run can find the case that owns it —
-     *  see {@link #appendRcaCompleted}. */
     private final FindingRepository findings;
 
     private final CaseEventRepository caseEvents;
@@ -118,11 +112,8 @@ public class RcaWorker {
             jobs.markDone(job.id());
             appendRcaCompleted(job);
         } catch (RuntimeException e) {
-            // Log the error CODE, not just the message: it is the one field that separates "the
-            // launcher is down" from "the agent returned junk", and it is bounded enough to egress.
-            // The message can embed model output (Jackson parse failures echo it), so it and the
-            // throwable stay at DEBUG — backend/AGENTS.md § Logging. The infrastructure failures
-            // that warrant a stack trace already log one with their cause in E2bRcaSandbox.
+            // Log the error CODE, which separates "launcher down" from "agent returned junk"; the message can embed
+            // model output, so it stays at DEBUG.
             String code = e instanceof TessaryException ee
                     ? ee.error().code()
                     : e.getClass().getSimpleName();
@@ -143,13 +134,7 @@ public class RcaWorker {
         }
     }
 
-    /**
-     * Append {@code rca_completed} to the case that owns the report's finding (1c), so its trail says
-     * the analysis {@link CaseService#runRca its own press} requested has landed.
-     *
-     * <p>Never rethrown: a failure here costs one trail line, not the report a person is waiting on —
-     * the run genuinely finished and {@code markDone} has already committed by the time this runs.
-     */
+    /** Never rethrown: the run finished and {@code markDone} has committed, so a failure costs one trail line. */
     private void appendRcaCompleted(RcaJobRow job) {
         try {
             findings.findById(job.projectId(), job.findingId())
@@ -167,7 +152,7 @@ public class RcaWorker {
         }
     }
 
-    /** The host name {@code hostName} reports, or {@code host} when this machine's own name does not resolve. */
+    /** Falls back to {@code host} when this machine's name does not resolve. */
     static String shortHost(Callable<String> hostName) {
         try {
             return hostName.call();

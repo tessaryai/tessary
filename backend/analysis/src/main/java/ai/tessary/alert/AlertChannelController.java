@@ -25,11 +25,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/**
- * CRUD + delivery-log read for a project's alert channels. Owner-gated for mutations,
- * mirroring {@code git/GitIntegrationController}. Credentials are write-only: a channel's config is
- * accepted on create/update but never returned (see {@code ChannelView}).
- */
+/** Alert channel CRUD and delivery log. Credentials are write-only (see {@code ChannelView}). */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/alert-channels")
 public class AlertChannelController {
@@ -112,7 +108,6 @@ public class AlertChannelController {
                 .toList());
     }
 
-    /** Resolve the project and require the {@link Capability#ALERTS} entitlement. */
     private Resolved requireCapableProject(TenantContext ctx, String orgSlug, String projectSlug) {
         Resolved r = resolver.requireProject(ctx, orgSlug, projectSlug);
         capabilities.require(r.org().id(), Capability.ALERTS);

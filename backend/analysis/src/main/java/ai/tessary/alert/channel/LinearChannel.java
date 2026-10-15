@@ -13,15 +13,9 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
- * Linear connector: creates a Linear issue via the GraphQL API ({@code POST
- * https://api.linear.app/graphql}) using an {@code issueCreate} mutation, authenticated with a personal
- * API key in the {@code Authorization} header. The configured {@code team_id} scopes the new issue.
- *
- * <p>Linear has no server-side dedup key for issues, so duplicate-suppression relies solely on the
- * delivery-attempt log's at-most-once guard ({@code (alert_event_id, channel_id)}); a second issue
- * for the same fired alert can only happen if that record is lost. Acceptable at pre-prod scale.
- *
- * <p>Config JSON shape: {@code {"api_key": "lin_api_…", "team_id": "<uuid>"}}.
+ * Creates a Linear issue via an {@code issueCreate} GraphQL mutation. Linear has no dedup key, so duplicates are
+ * prevented only by the delivery log's {@code (alert_event_id, channel_id)} guard. Config:
+ * {@code {"api_key", "team_id"}}.
  */
 @Component
 public class LinearChannel implements AlertChannel {
@@ -69,7 +63,7 @@ public class LinearChannel implements AlertChannel {
             if (code / 100 != 2) {
                 return DeliveryResult.failure(code, "linear returned HTTP " + code);
             }
-            // GraphQL returns 200 even for mutation errors — inspect the body shape.
+            // GraphQL returns 200 even for mutation errors.
             if (!createdSuccessfully(res.body())) {
                 return DeliveryResult.failure(code, "linear issueCreate did not succeed");
             }

@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The Classifiers page's two dropdowns: the call site and tool pickers, and the Configure menu that leads to each
- * classifier's configure page.
- *
- * Both work from the keyboard as their roles promise: the arrows move focus through the options or items, Escape
- * and a pick give focus back to the button that opened them, and moving focus out of one closes it.
- */
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
@@ -20,16 +13,11 @@ export type PickerGroup = { label?: string; options: PickerOption[] };
 const PANEL =
   "absolute right-0 top-full mt-1 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-card bg-overlay border border-border-strong py-1";
 
-/** The elements of `panel` carrying `role`, in document order. */
 function itemsOf(panel: HTMLElement | null, role: string): HTMLElement[] {
   return panel ? Array.from(panel.querySelectorAll<HTMLElement>(`[role="${role}"]`)) : [];
 }
 
-/**
- * Closes the dropdown when focus moves to something outside it. Focus that goes nowhere (a click on a part of the page
- * that takes no focus) is left to the dropdown's outside-click handling, so a click on an option that does not take
- * focus still lands.
- */
+/** Focus that goes nowhere is left to outside-click handling, so a click on a non-focusable option lands. */
 function closeOnFocusOut(container: React.RefObject<HTMLElement | null>, close: () => void) {
   return (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null;
@@ -37,10 +25,6 @@ function closeOnFocusOut(container: React.RefObject<HTMLElement | null>, close: 
   };
 }
 
-/**
- * A button showing the current choice, opening a list of options, with a search box above the list when
- * `searchLabel` is set. The button's name is the label and the choice ("Call site: kb_answer.generate").
- */
 export function ScopePicker({
   label,
   listLabel,
@@ -68,7 +52,6 @@ export function ScopePicker({
     .map((g) => ({ ...g, options: g.options.filter((o) => !q || o.name.toLowerCase().includes(q)) }))
     .filter((g) => g.options.length > 0);
 
-  // With no search box to type in, focus starts on the current choice.
   useEffect(() => {
     if (!open || searchLabel) return;
     const options = itemsOf(panelRef.current, "option");
@@ -181,10 +164,7 @@ export function ScopePicker({
   );
 }
 
-/**
- * "Configure classifiers": every classifier with where it runs, each leading to its configure page. `classifiers` is
- * undefined until the read lands, so the menu says it is loading or why it failed, never that there are none.
- */
+/** `classifiers` is undefined until the read lands, so the menu never claims there are none. */
 export function ConfigureMenu({
   classifiers,
   error,
@@ -199,7 +179,6 @@ export function ConfigureMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
 
-  // Focus goes into the menu as it opens: onto the first classifier, or onto the menu while they load.
   useEffect(() => {
     if (!open) return;
     (itemsOf(menuRef.current, "menuitem")[0] ?? menuRef.current)?.focus();

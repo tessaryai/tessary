@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The empty-queue screen: traces → findings → cases, drawn every time, with the first unsatisfied
- * stage lit. {@link resolveState} decides what it says; this decides only how it looks.
- *
- * The pipeline is what makes the four states one component. A reader who arrives at any of them sees
- * the same three nodes in the same places and reads the difference off which one is lit — rather
- * than four bespoke screens that happen to share a headline slot.
- */
+// The empty-queue screen: traces → findings → cases with the first unsatisfied stage lit.
+// {@link resolveState} decides what it says; this decides only how it looks.
 import { Link } from "react-router-dom";
 import { CopyButton, useToast } from "../../ui";
 import type { Action, EmptyState, NodeTone, PipelineNode } from "./emptyState";
 
-/**
- * The four tones, as the token layer already spells them.
- *
- * `warn` is the only hue on this screen, and it is the blue the palette reserves for info/warning —
- * never red. Nothing here is an error: a stopped exporter is a thing to go and check, and painting
- * it red would put a failure state on a screen whose whole job is to say that nothing is failing.
- */
+/** `warn` is the only hue here, the palette's info blue, never red: nothing on this screen is an error. */
 const TONE: Record<NodeTone, { box: string; label: string; value: string; sub: string }> = {
   satisfied: {
     box: "bg-surface border border-border",
@@ -59,9 +47,7 @@ export function PipelineEmpty({ state }: { state: EmptyState }) {
         {state.body}
       </p>
 
-      {/* Wraps rather than overflows: three fixed-width nodes and two rules do not fit a narrow
-          main column, and a pipeline that runs off the edge tells the reader less than one that
-          folds. */}
+      {/* Wraps rather than overflows on a narrow main column. */}
       <div className="flex flex-wrap items-stretch justify-center mt-10">
         <Node node={first} />
         <Rule />
@@ -129,10 +115,8 @@ function Rule() {
 }
 
 /**
- * A link action renders as an anchor, not a button with a navigate handler: middle-click, copy-link
- * and "open in new tab" all matter on a screen whose entire purpose is sending someone elsewhere.
- * The styling mirrors `Button`'s md size and primary/ghost variants rather than importing it, since
- * `Button` renders a `<button>` and cannot host an href.
+ * Link actions are anchors, not navigate buttons, so middle-click and copy-link work. Styled to mirror
+ * `Button`'s md primary/ghost, since `Button` renders a `<button>`.
  */
 const LINK_BASE =
   "inline-flex items-center justify-center h-9 px-3.5 text-small rounded-control " +
@@ -157,8 +141,7 @@ function ActionControl({ action, primary }: { action: Action; primary?: boolean 
     );
   }
 
-  // Built here rather than in `resolveState` because it is a property of the browser, not of the
-  // project's state — the same reason ConnectGate builds it at render time.
+  // Built here, not in `resolveState`: the origin is a property of the browser, not the project.
   const endpoint = `${window.location.origin}/v1/traces`;
   return (
     <CopyButton

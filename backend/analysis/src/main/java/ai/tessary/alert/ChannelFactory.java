@@ -7,11 +7,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
-/**
- * Resolves the right {@link AlertChannel} SPI bean by {@link AlertChannelKind}. Spring
- * injects every registered impl, so adding a channel is just adding its {@code @Component} class —
- * nothing here changes. Mirrors {@code git/GitProviderFactory}'s EnumMap-of-beans registry.
- */
+/** Resolves an {@link AlertChannel} bean by {@link AlertChannelKind}; adding a channel is adding its component. */
 @Component
 public class ChannelFactory {
 

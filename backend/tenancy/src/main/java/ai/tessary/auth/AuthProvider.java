@@ -9,85 +9,48 @@ import java.util.Base64;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The identity-provider seam. Everything {@link AuthController}, {@link AuthFilter}, and
- * {@link ai.tessary.tenant.OrganizationController} need from an identity provider — mint an
- * authorization URL, exchange a code, refresh a session, and manage org invitations — lives here,
- * behind an interface, so none of those call sites (nor {@link SessionCipher},
- * {@link AuthPostureAnnouncer}, {@link AuthRequiredInProdGuard}, or
- * {@link ai.tessary.auth.link.DeviceLinkController}) hold a direct reference to
- * {@link WorkOsClient} or {@link WorkOsProperties} any more.
- *
- * <p>{@link WorkOsClient} (BYO WorkOS credentials) and {@link PasswordAuthProvider} (the
- * dependency-free open-edition default) are the two implementations, wired via
- * {@link AuthProviderConfig}. Session sealing ({@link SealedSession}, {@link SessionCipher}) stays
- * on the provider-agnostic side of this seam — a {@code SealedSession} is built from an
- * {@link AuthResult}, which this interface owns, not from anything WorkOS-shaped directly.
- *
- * <p>The nested types below are moved here verbatim from {@code WorkOsClient} — same field names,
- * same order, same nullability — so every existing call site's accessor chain (notably
- * {@link AuthFilter}'s refresh-path null-coalescing over {@code r.workosUserId()/organizationId()})
- * keeps compiling and behaving unchanged. The field names still say "workos" because that is the
- * wire shape WorkOS returns and the DB column {@link PasswordAuthProvider} also populates,
- * with a synthetic id, for its own principals; renaming them is out of scope here.
+ * Session sealing stays provider-agnostic: a {@code SealedSession} is built from an {@link AuthResult}. Field names
+ * still say "workos" because that is the wire shape and the DB column the password provider also fills.
  */
 public interface AuthProvider {
 
-    /** Build the URL the browser is redirected to in order to sign in, carrying the given CSRF state. */
     String authorizationUrl(String state);
 
-    /** Exchange an authorization code for tokens + user. */
     AuthResult authenticateWithCode(String code) throws AuthException;
 
-    /** Use a refresh token to mint a fresh session. */
     AuthResult refresh(String refreshToken, @Nullable String organizationId);
 
-    /** Send an invitation email for the given address. */
     Invitation createInvitation(String email);
 
-    /** Revoke a previously-sent invitation. Best-effort; surfaces failure to the caller. */
     void revokeInvitation(String invitationId);
 
     /**
-     * Whether this provider drives the OAuth redirect dance ({@code authorizationUrl}/
-     * {@code authenticateWithCode}, called from {@code GET /auth/login}/{@code /auth/callback}).
-     * True for every provider until {@code PasswordAuthProvider}, which overrides this to
-     * {@code false} so {@link AuthController} degrades those two GET routes to a frontend redirect
-     * instead of calling a method that provider has no way to implement.
+     * False only for {@code PasswordAuthProvider}, so {@link AuthController} degrades the two GET routes to a frontend
+     * redirect.
      */
     default boolean supportsRedirectFlow() {
         return true;
     }
 
     /**
-     * Where the browser goes to finish signing out. A provider that keeps its own sign-in session
-     * (WorkOS AuthKit) must end it here too, or the next sign-in is answered from that session
-     * without asking and the user lands straight back in the app.
+     * A provider with its own sign-in session (WorkOS AuthKit) must end it here, or the next sign-in skips the prompt.
      */
     default String signOutUrl(@Nullable String sessionId, String returnTo) {
         return returnTo;
     }
 
     /**
-     * Create an account from an email/password pair. Defaults to a clean 4xx via
-     * {@link AuthException} so a stray {@code POST /auth/signup} while a redirect-flow provider
-     * (WorkOS) is active fails predictably instead of needing every implementation to know about
-     * every other provider's routes. Overridden by {@code PasswordAuthProvider}, the one
-     * implementation that can actually do this.
+     * Defaults to {@link AuthException} so a stray credential POST under a redirect-flow provider fails as a clean 4xx.
      */
     default AuthResult signupWithCredentials(String email, String password) throws AuthException {
         throw new AuthException("credential auth not supported by this provider");
     }
 
-    /** Authenticate an email/password pair. Same default-throws shape as {@link #signupWithCredentials}. */
     default AuthResult authenticateWithCredentials(String email, String password) throws AuthException {
         throw new AuthException("credential auth not supported by this provider");
     }
 
-    /**
-     * Parsed response from an authenticate/refresh call. Field names mirror the WorkOS wire shape.
-     * Token expiry is computed at parse time (now + expires_in seconds) so callers don't have to do
-     * the math.
-     */
+    /** Expiry is computed at parse time. */
     record AuthResult(
             @Nullable String accessToken,
             @Nullable String refreshToken,
@@ -118,10 +81,8 @@ public interface AuthProvider {
         }
 
         /**
-         * The provider's session id, the {@code sid} claim of a WorkOS access token. The signature
-         * is not checked: the token came straight from the provider's authenticate response over
-         * TLS, and the id is only ever handed back to that provider. Null for a token that is not a
-         * JWT, such as {@link PasswordAuthProvider}'s placeholder.
+         * The signature is not checked: the token came straight from the provider over TLS and the id only goes back to
+         * it. Null for a non-JWT token.
          */
         public @Nullable String sessionId() {
             if (accessToken == null) return null;
@@ -146,10 +107,8 @@ public interface AuthProvider {
         }
     }
 
-    /** Result of sending an invitation. */
     record Invitation(@Nullable String id) {}
 
-    /** Signals a failure talking to the identity provider — caller decides how to surface it (usually 502). */
     final class AuthException extends RuntimeException {
         public AuthException(String message) {
             super(message);

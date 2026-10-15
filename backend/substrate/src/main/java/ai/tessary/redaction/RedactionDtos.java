@@ -7,12 +7,10 @@ import jakarta.validation.constraints.NotNull;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/** Wire DTOs for the PII redaction feature. Snake_case on the wire, camelCase in Java. */
 public final class RedactionDtos {
 
     private RedactionDtos() {}
 
-    /** A redaction rule as returned to the playground. */
     public record RuleView(
             String id,
             String name,
@@ -40,7 +38,6 @@ public final class RedactionDtos {
 
     public record RuleListView(List<RuleView> rules) {}
 
-    /** Create/update a custom rule. */
     public record UpsertRuleRequest(
             @NotBlank String name,
             @NotBlank String pattern,
@@ -57,19 +54,15 @@ public final class RedactionDtos {
         }
     }
 
-    /** Toggle a rule's enabled flag (the only mutation permitted on a built-in rule). */
+    /** The only mutation permitted on a built-in rule. */
     public record SetEnabledRequest(@NotNull Boolean enabled) {}
 
-    /**
-     * Playground preview request. When {@code pattern} is present, previews that single (possibly unsaved)
-     * rule; when it is blank, previews the whole active rule set for the project.
-     */
+    /** A present {@code pattern} previews that single, possibly unsaved rule; blank previews the whole active set. */
     public record PreviewRequest(
             @Nullable String pattern,
             @Nullable String replacement,
             @JsonProperty("sample_text") @NotNull String sampleText) {}
 
-    /** Playground preview result: the original + redacted text and how many matches were redacted. */
     public record PreviewView(String original, String redacted, int matches) {
         public static PreviewView of(RedactionService.PreviewResult r) {
             return new PreviewView(r.original(), r.redacted(), r.matches());

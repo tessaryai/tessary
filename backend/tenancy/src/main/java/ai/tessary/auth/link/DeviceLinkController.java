@@ -29,10 +29,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Device-link endpoints. The plugin-facing {@code /auth/link/start} and
- * {@code /auth/link/poll} are unauthenticated (see {@code AuthFilter.shouldNotFilter})
- * and per-IP rate limited here. The browser-facing {@code /api/link/**} run
- * under the cookie session + CSRF guard.
+ * The plugin-facing {@code /auth/link/start} and {@code /auth/link/poll} are unauthenticated and per-IP rate limited
+ * here; {@code /api/link/**} runs under the cookie session and CSRF guard.
  */
 @RestController
 public class DeviceLinkController {
@@ -48,7 +46,6 @@ public class DeviceLinkController {
     private static final int MAX_PER_WINDOW = 60; // poll is ~20/min/code; allow a few concurrent links
     private final ConcurrentMap<String, long[]> ipWindows = new ConcurrentHashMap<>();
 
-    /** What the per-IP window and {@code expires_in} are measured against: the system clock outside tests. */
     private final Clock clock;
 
     @Autowired
@@ -87,8 +84,6 @@ public class DeviceLinkController {
 
     public record ConfirmRequest(String org_slug, String project_slug) {}
 
-    // ----------------------------------------------------------- plugin-facing (unauth)
-
     @PostMapping("/auth/link/start")
     public ApiResponse<StartResponse> start(@RequestBody(required = false) StartRequest req, HttpServletRequest http) {
         rateLimit(http);
@@ -120,8 +115,6 @@ public class DeviceLinkController {
         return ResponseEntity.status(code).body(ApiResponse.ok(PollResponse.from(outcome)));
     }
 
-    // ----------------------------------------------------------- browser-facing (cookie + CSRF)
-
     @GetMapping("/api/link/{userCode}")
     public ApiResponse<View> view(@PathVariable String userCode) {
         View v = service.view(userCode)
@@ -135,12 +128,10 @@ public class DeviceLinkController {
         if (req.org_slug() == null || req.project_slug() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "org_slug and project_slug required");
         }
-        // Enforces the caller's membership in the org + that the project exists.
+        // Checks org membership and that the project exists.
         Resolved r = resolver.requireProject(ctx, req.org_slug(), req.project_slug());
-        // Confirming is a mint: DeviceLinkService.poll lazy-mints a KeyScope.ADMIN token against this
-        // project once the link is claimed, and every bearer key resolves back as role `member`. Same
-        // gate as POST /mcp-tokens for the same reason -- without it this route is the other door to
-        // the same self-service escalation.
+        // Confirming mints a KeyScope.ADMIN token, so it takes the same gate as POST /mcp-tokens; otherwise this is a
+        // second door to the same escalation.
         r.require(Permission.ORG_MANAGE, "confirm a device link");
         boolean ok = service.confirm(userCode, r.org().id(), r.project().id(), ctx.userId());
         if (!ok) {
@@ -156,22 +147,18 @@ public class DeviceLinkController {
         return ApiResponse.ok(Map.of("status", "denied"));
     }
 
-    // ----------------------------------------------------------- helpers
-
     private String linkUri(@Nullable String userCode) {
         String base = props.getFrontendUrl();
         if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
         return base + "/link" + (userCode != null ? "?code=" + userCode : "");
     }
 
-    // Coarse cap so the limiter map can't grow without bound (mirrors RateLimitFilter's
-    // accepted single-instance tradeoff); cleared wholesale when it gets large.
+    // Bounds the limiter map, cleared wholesale when large (RateLimitFilter's single-instance tradeoff).
     private static final int MAX_TRACKED_IPS = 50_000;
 
     private void rateLimit(HttpServletRequest http) {
-        // getRemoteAddr() is the real client IP: server.forward-headers-strategy=native
-        // makes Tomcat resolve X-Forwarded-For from the trusted proxy. Reading the raw
-        // header here instead would be client-spoofable, defeating the limiter.
+        // getRemoteAddr() is the real client IP via server.forward-headers-strategy=native; reading the header here
+        // would be spoofable.
         String ip = http.getRemoteAddr();
         long nowWindow = clock.instant().getEpochSecond() / WINDOW_SECONDS;
         if (ipWindows.size() > MAX_TRACKED_IPS) ipWindows.clear();

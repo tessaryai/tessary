@@ -3,18 +3,6 @@ import { ApiError } from "../api/types";
 import { Spinner, Skeleton } from "./Spinner";
 import { cn } from "./cn";
 
-/**
- * Shared loading / error / empty state primitives.
- *
- * Surfaces across the app hand-rolled the same three states inline; these wrap
- * the design-system primitives (`Spinner`, `Skeleton`, `EmptyState`) so every
- * surface renders them identically, accessibly, and with consistent spacing.
- * They are deliberately small and composable — a view can use {@link LoadingRow}
- * for an inline "Loading…" line, {@link ErrorNote} for a query failure, or
- * {@link TableSkeleton} for a data-dense table's loading frame.
- */
-
-/** Inline "Loading…" line — spinner + muted text, polite to screen readers. `label` says what is loading. */
 export function LoadingRow({ label = "Loading…", className }: { label?: string; className?: string }) {
   return (
     <div role="status" aria-live="polite" className={cn("flex items-center gap-2 text-small text-muted", className)}>
@@ -24,11 +12,9 @@ export function LoadingRow({ label = "Loading…", className }: { label?: string
   );
 }
 
-/** A query failure, rendered as an alert. `error` may be any caught value. */
 export function ErrorNote({ error, className }: { error: unknown; className?: string }) {
   const code = (error as { code?: string } | null)?.code;
-  // `ApiError.detail` rather than `.message`: the latter is already prefixed with the code, and the
-  // code is rendered separately below.
+  // `detail`, not `message`, which already carries the code rendered separately below.
   const message =
     (error instanceof ApiError
       ? error.detail
@@ -46,7 +32,6 @@ export function ErrorNote({ error, className }: { error: unknown; className?: st
   );
 }
 
-/** A skeleton placeholder shaped like a table, for the loading frame of data-dense views. */
 export function TableSkeleton({ rows = 6, cols = 4, className }: { rows?: number; cols?: number; className?: string }) {
   return (
     <div

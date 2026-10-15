@@ -7,19 +7,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Says the instance's authentication posture out loud at startup.
- *
- * <p>Sibling of {@link AuthRequiredInProdGuard}: a bean whose only job is to look at the resolved
- * configuration once and tell the operator what it means. The guard refuses the boot in the one
- * state that must never reach production; this one narrates the states that are allowed but worth
- * knowing about. It lives outside {@link AuthFilter} because a one-shot startup announcement and a
- * per-request filter are different lifecycles, and because the whole posture table reads better as
- * one small file than folded into the filter.
- *
- * <p>{@code tessary.auth.disabled} is checked first and is authoritative on its own, regardless of
- * which {@link AuthProvider} is active: a provider is always configured while
- * {@link AuthFilter#shouldNotFilter} may be bypassing everything, so announcing the provider first
- * would say "enforced" while auth is actually off.
+ * Logs the instance's authentication posture at startup; {@link AuthRequiredInProdGuard} refuses the one forbidden
+ * state. {@code tessary.auth.disabled} is checked first: a provider is always configured even while
+ * {@link AuthFilter#shouldNotFilter} bypasses everything, so announcing the provider first would say "enforced" while
+ * auth is off.
  */
 @Component
 public class AuthPostureAnnouncer {

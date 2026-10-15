@@ -12,28 +12,22 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * What a {@code frustration_rate} finding says about itself, written by {@link FrustrationRateService} and read
- * back by the finding page and the case source. Mirrors {@code MalformedOutputEvidence}: a flat payload in
- * conversations, turned into tool_error's {@link RateDetail} so the same rate figure renders it.
+ * A {@code frustration_rate} finding's payload, turned into tool_error's {@link RateDetail} so the same rate figure
+ * renders it.
  */
 public final class FrustrationEvidence {
 
-    /** The {@code eval_case} tuple's measure segment for a frustration case. */
     public static final String MEASURE = "frustration_rate";
 
-    /** The ruling every spell's finding is filed with. It never goes through triage. */
+    /** Never goes through triage. */
     public static final String SUMMARY = "Frustrated sessions at this call site rose above its own learned"
             + " rate. Opened without triage; the numbers are on the finding.";
 
     private FrustrationEvidence() {}
 
     /**
-     * The finding page's frustration block: the rate since onset against the learned rate, the tuning it was
-     * judged under, and the first page of the frustrated sessions it cites with the turn that fired in each.
-     *
-     * @param jevThreshold the per-turn score above which a turn was flagged
-     * @param conversations the newest frustrated sessions, one page of them
-     * @param conversationsNextCursor where the next page starts, or null when this is all of them
+     * @param jevThreshold the per-turn score above which a turn was flagged @param conversationsNextCursor null when
+     * this is all of them
      */
     public record FrustrationDetail(
             RateDetail rate,
@@ -45,7 +39,7 @@ public final class FrustrationEvidence {
             List<FrustratedConversationView> conversations,
             @Nullable String conversationsNextCursor) {
 
-        /** The same block with no session or trace ids, for the agent door. */
+        /** No session or trace ids, for the agent door. */
         public FrustrationDetail withoutIds() {
             return new FrustrationDetail(
                     rate,
@@ -59,7 +53,6 @@ public final class FrustrationEvidence {
         }
     }
 
-    /** One page of a finding's frustrated sessions, and how many it cites under the same filter. */
     public record FrustratedSessionPage(
             List<FrustratedConversationView> rows,
             long total,
@@ -71,16 +64,8 @@ public final class FrustrationEvidence {
     }
 
     /**
-     * One frustrated session the finding cites.
-     *
-     * @param callSiteId the flagged turn's call site, which is the finding's
-     * @param cleared true once a {@code false_alarm} resolve cleared the conversation's flag
-     * @param sessionId the flagged trace's session, which the page links to for the whole conversation;
-     *     null when the trace carries none
-     * @param contextTraceIds the turns the page draws, oldest first: up to {@link #CONTEXT_TURNS_BEFORE}
-     *     turns before the flagged one, then the flagged trace itself
-     * @param message the flagged user message as it was scored, clipped, for the list's preview line; null
-     *     once retention cleared it
+     * @param contextTraceIds up to {@link #CONTEXT_TURNS_BEFORE} turns before the flagged one, then the flagged trace,
+     * oldest first @param message clipped; null once retention cleared it
      */
     public record FrustratedConversationView(
             String conversationId,
@@ -98,10 +83,9 @@ public final class FrustrationEvidence {
         }
     }
 
-    /** How many turns before a flagged one its conversation view shows. */
     public static final int CONTEXT_TURNS_BEFORE = 2;
 
-    /** The payload a spell's finding carries. {@code cause_kind} is added by the finding writer. */
+    /** {@code cause_kind} is added by the finding writer. */
     public static String payload(
             ObjectMapper mapper, String callSite, Decision d, long baselineFrustrated, FrustrationConfig config) {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -126,7 +110,6 @@ public final class FrustrationEvidence {
         return mapper.valueToTree(body).toString();
     }
 
-    /** The rate, read off the finding's own flat payload, in the shape tool_error's figure renders. */
     public static RateDetail rateDetail(FindingRow finding) {
         JsonNode body = finding.payload();
         return new RateDetail(
@@ -150,7 +133,6 @@ public final class FrustrationEvidence {
                 body.path("criticality").asDouble(0));
     }
 
-    /** The page block for a finding, with the first page of sessions the caller read for it. */
     public static FrustrationDetail detail(
             FindingRow finding, List<FrustratedConversationView> conversations, @Nullable String nextCursor) {
         JsonNode body = finding.payload();

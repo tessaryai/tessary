@@ -31,9 +31,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Classifier lifecycle surface: list the project's classifier definitions (built-ins are seeded by the
- * first successful generation run — never by a read), toggle enable/disable, and read detections. Evaluation is async ({@link ClassifierWorker}); this
- * controller is the definition + read API.
+ * Built-ins are seeded by the first successful generation run, never by a read. Evaluation is async
+ * ({@link ClassifierWorker}).
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers")
@@ -58,7 +57,6 @@ public class ClassifierController {
         this.detectionTables = detectionTables;
     }
 
-    /** The row as the API shows it: its readiness, and whether the trace views show its flags. */
     private ClassifierView view(String projectId, ClassifierRow row) {
         return ClassifierView.of(
                 row, service.readiness(projectId, row), detectionTables.showsInTraceViews(row.detector()));
@@ -74,14 +72,7 @@ public class ClassifierController {
                 .toList());
     }
 
-    /**
-     * Per-signal sweep-job health for the project — status/attempts/last error/last-swept-at, so
-     * a signal whose sweep has been failing for days is observable from the product instead of only
-     * from Loki. A healthy signal reports {@link ClassifierJobRow#PENDING}/{@link ai.tessary.model.JobStatus#DONE}
-     * with no {@code lastError}; a signal fast-failing its sweep reports {@link
-     * ai.tessary.model.JobStatus#FAILED} with the
-     * error text and attempt count.
-     */
+    /** Makes a sweep failing for days visible in the product, not only in Loki. */
     @GetMapping("/health")
     public ApiResponse<List<ClassifierHealthView>> health(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
@@ -113,10 +104,7 @@ public class ClassifierController {
         return ApiResponse.ok(view(r.project().id(), row));
     }
 
-    /**
-     * Reset the classifier: delete what it detected and learned, close its unruled findings, and check
-     * every kept trace again from the start. See {@link ClassifierReset}. 409s while a sweep is running.
-     */
+    /** 409s while a sweep is running. */
     @PostMapping("/{id}/reset")
     public ApiResponse<ClassifierView> reset(
             TenantContext ctx,
@@ -129,7 +117,6 @@ public class ClassifierController {
         return ApiResponse.ok(view(r.project().id(), row));
     }
 
-    /** Limit the classifier to some call sites, or run it on every call site again. */
     @PutMapping("/{id}/call-sites")
     public ApiResponse<ClassifierView> setCallSites(
             TenantContext ctx,
@@ -143,7 +130,6 @@ public class ClassifierController {
         return ApiResponse.ok(view(r.project().id(), row));
     }
 
-    /** The call sites a classifier can be limited to: those the bundle declares and those traces arrived on. */
     @GetMapping("/call-sites")
     public ApiResponse<List<String>> callSites(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
@@ -151,11 +137,7 @@ public class ClassifierController {
         return ApiResponse.ok(service.knownCallSiteIds(r.project().id()));
     }
 
-    /**
-     * The window/threshold operating point for a metric-drift classifier (cost_drift or
-     * duration_drift) — the numbers a tenant can tune to see deviation measured over a different
-     * window. 422s for any other detector, which has nothing here to read.
-     */
+    /** 422s for any other detector. */
     @GetMapping("/{id}/tuning")
     public ApiResponse<TuningView> getTuning(
             TenantContext ctx,
@@ -166,11 +148,7 @@ public class ClassifierController {
         return ApiResponse.ok(service.getTuning(r.project().id(), id));
     }
 
-    /**
-     * Tune a metric-drift classifier's window/threshold operating point. Merges into the existing
-     * config rather than replacing it wholesale, and every field is clamped server-side — the response
-     * is the value actually in effect, which may differ from what was submitted.
-     */
+    /** Every field is clamped server-side, so the response may differ from what was submitted. */
     @PutMapping("/{id}/tuning")
     public ApiResponse<TuningView> setTuning(
             TenantContext ctx,
@@ -184,10 +162,7 @@ public class ClassifierController {
                 r.project().id(), id, req.windowTargetCount(), req.windowMaxHours(), req.minSample(), req.w1Floor()));
     }
 
-    /**
-     * Whether the groundedness model is scoring: the row's state, the instance's mode, the last health
-     * check, and the git ref its setup prompts link to. Read-only. 422s for any other classifier.
-     */
+    /** Read-only. 422s for any other classifier. */
     @GetMapping("/{id}/groundedness-status")
     public ApiResponse<GroundednessStatusView> getGroundednessStatus(
             TenantContext ctx,
@@ -200,10 +175,8 @@ public class ClassifierController {
     }
 
     /**
-     * Detections for a signal, optionally at a specific operating point via {@code ?mode=}:
-     * {@code tracking} surfaces only the precise HIGH-confidence subset; {@code discovery} (or an
-     * absent {@code mode}) surfaces the full high-recall set. So the SAME classifier's two modes are
-     * observable side by side from one corpus.
+     * {@code tracking} returns only the HIGH-confidence subset; {@code discovery} or no {@code mode} returns
+     * everything.
      */
     @GetMapping("/{id}/events")
     public ApiResponse<List<ClassifierEventView>> eventsForClassifier(
@@ -217,11 +190,7 @@ public class ClassifierController {
         return ApiResponse.ok(service.eventsForClassifier(r.project().id(), id, mode, limit));
     }
 
-    /**
-     * Per-classifier daily detected-trace counts over the trailing {@code days} UTC calendar days
-     * (default 7, clamped 1–30), plus per-day project trace totals — one batch read for the whole
-     * classifier list, so the UI can render volume bars and "% of all traces" without N+1 calls.
-     */
+    /** One batch read for the whole classifier list, avoiding N+1 calls. */
     @GetMapping("/metrics/daily")
     public ApiResponse<ClassifierDailyVolumeView> dailyMetrics(
             TenantContext ctx,

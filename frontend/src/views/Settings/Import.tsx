@@ -44,8 +44,7 @@ export function ImportYaml() {
   const toast = useToast();
   const [mode, setMode] = useState<ImportMode>("upsert");
   const [dirFiles, setDirFiles] = useState<File[]>([]);
-  // Replace is destructive, so it cannot be submitted until the operator types
-  // the project slug back to confirm intent. Upsert never gates on this.
+  // Replace is destructive, so it needs the project slug typed back; upsert never does.
   const [confirmText, setConfirmText] = useState("");
 
   const runImport = useMutation({
@@ -430,8 +429,6 @@ function summariseDirSelection(files: File[]): DirSummary {
     graderCount,
   };
 }
-
-// ---- glyphs ------------------------------------------------------------------
 
 function CheckGlyph() {
   return <CheckCircle2 size={15} strokeWidth={1.6} aria-hidden="true" className="text-success flex-none" />;

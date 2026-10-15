@@ -1,41 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * A loopback JSON-RPC proxy in front of one or more named MCP upstreams. agent-stream.js starts one
- * on the system-prompt path (the triage and run lanes) with the single upstream `tessary-evals`; session.js
- * starts one with every server its session names. RCA never sees it.
- *
- * WHY: triage's prompt tells the agent to read every evidence row rather than a sampled preview,
- * and a finding's evidence page can run to hundreds of rows — well past what belongs inline in a
- * model's context. opencode itself truncates any MCP tool result over 2000 lines or 50KB, so a
- * page that size would arrive at the agent silently cut off rather than as a page it could work
- * with. The relay sits between opencode and the upstreams, on the SAME loopback interface
- * agent-stream.js already binds the opencode server to, and rewrites only the reply to a
- * `tools/call`: every result is saved whole to `checks/mcp/NNN-<tool>.json` under the run's WORK
- * dir, with one counter across every server so the numbers stay unique. Small results still come
- * back inline in full, with the saved path added; large ones come back as a summary the agent can
- * read at a glance and then go compute over with its own bash/jq/scripts.
- *
- * Everything else — `initialize` (whose `instructions` field must reach the agent unchanged, see
- * agent-stream.js's caller), `tools/list`, notifications — is forwarded byte-for-byte. This file
- * has no opinion on the MCP protocol beyond "find the tools/call result and maybe shrink it".
- *
- * One listening socket serves every name at `/mcp/<name>`, and each name forwards to its own URL
- * with its own bearer token. A name the relay was not started with is a 404 and is never
- * forwarded: falling back to some upstream would hand that upstream's token to a path the agent
- * made up.
- *
- * The bearer tokens live HERE, not in opencode's own MCP config: opencode config is written to
- * OPENCODE_CONFIG_CONTENT and is at least in principle a value a curious agent could read back
- * (env, a debug endpoint). The relay is the one place that holds the live keys, exactly the way a
- * same-origin reverse proxy would.
+ * Loopback JSON-RPC proxy in front of named MCP upstreams. opencode truncates any MCP result over
+ * 2000 lines or 50KB, so each `tools/call` result is saved whole under checks/mcp/ and large ones come
+ * back as a summary. Everything else is forwarded byte-for-byte. An unknown name is a 404, never
+ * forwarded. The bearer tokens live here, not in opencode's config, which the agent could read back.
  */
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// opencode's own MCP truncation is 2000 lines / 50KB (see file header) — stay well under both.
-// Estimated the same way the design doc does: compact JSON length / 4 as a cheap token proxy.
+// Compact JSON length / 4 as a cheap token proxy.
 const INLINE_TOKEN_BUDGET = 2000;
 const PREVIEW_ROW_COUNT = 3;
 const SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
@@ -44,12 +19,6 @@ function tokenEstimate(compactJson) {
   return Math.ceil(compactJson.length / 4);
 }
 
-/**
- * The paged-rows shape `get_finding_evidence` (and anything else that pages) answers with: a
- * `rows` array plus a cursor under either spelling. A bare JSON array is treated the same way, so
- * a tool that answers with `[...]` at the top level still gets a row-shaped summary. Anything else
- * (a single object, e.g. `get_finding`) has no row concept and falls back to a plainer summary.
- */
 function rowsOf(parsed) {
   if (parsed && Array.isArray(parsed.rows)) return parsed.rows;
   if (Array.isArray(parsed)) return parsed;
@@ -66,23 +35,12 @@ function fieldNamesOf(rows) {
   return first ? Object.keys(first) : [];
 }
 
-/**
- * The full result plus where it was saved, for an inline (under-budget) reply: the agent gets
- * everything the tool returned, and can also point a script at `file` instead of re-fetching. Row
- * shapes keep their `rows`/cursor fields; a bare object gets `file` merged in; anything else (a
- * bare array, a primitive) is wrapped rather than dropped.
- */
 function withFile(parsed, workRelativeFile) {
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { ...parsed, file: workRelativeFile };
   if (Array.isArray(parsed)) return { file: workRelativeFile, rows: parsed };
   return { file: workRelativeFile, value: parsed };
 }
 
-/**
- * The reply the agent sees in place of a large tool result: enough to decide what to look at next
- * without paying for the whole page in context. `file` is WORK-relative, matching how the agent
- * already addresses its own `checks/` scripts.
- */
 function summarize(parsed, workRelativeFile) {
   const rows = rowsOf(parsed);
   const cursor = cursorOf(parsed);
@@ -104,7 +62,6 @@ function summarize(parsed, workRelativeFile) {
   };
 }
 
-/** The tool's own JSON payload out of a `tools/call` result: `structuredContent`, else the first text block. */
 function payloadOf(result) {
   if (result && result.structuredContent !== undefined) return result.structuredContent;
   const textBlock = Array.isArray(result && result.content)
@@ -118,14 +75,6 @@ function payloadOf(result) {
   }
 }
 
-/**
- * Start the relay. Each of `servers` is `{ name, url, token }`: an upstream MCP endpoint and its
- * bearer token, served at `/mcp/<name>`. Names match SERVER_NAME and are unique, or the call
- * rejects before anything listens. `workDir` is the run's WORK dir (results save under
- * `<workDir>/checks/mcp/`).
- *
- * @returns {Promise<{urls: Object<string, string>, close: () => void}>}
- */
 function startMcpRelay({ servers, workDir }) {
   const upstreams = new Map();
   for (const { name, url, token } of servers) {
@@ -148,7 +97,6 @@ function startMcpRelay({ servers, workDir }) {
     return path.relative(workDir, absFile);
   }
 
-  /** Rewrite a parsed `tools/call` JSON-RPC response in place, or return it untouched. */
   function rewriteToolCallResult(toolName, respObj) {
     if (!respObj || typeof respObj !== 'object' || respObj.error) return respObj;
     const result = respObj.result;
@@ -188,7 +136,6 @@ function startMcpRelay({ servers, workDir }) {
           res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'invalid json' }));
           return;
         }
-        // A JSON-RPC notification carries no `id` and gets no reply body; opencode expects 204.
         const isNotification =
           parsedReq && typeof parsedReq === 'object' && !Array.isArray(parsedReq) && parsedReq.id === undefined;
         try {
@@ -207,7 +154,6 @@ function startMcpRelay({ servers, workDir }) {
           try {
             respObj = JSON.parse(text);
           } catch {
-            // Not JSON-RPC we understand; forward verbatim rather than guess.
             res.writeHead(upstream.status, { 'content-type': 'application/json' }).end(text);
             return;
           }
@@ -228,9 +174,7 @@ function startMcpRelay({ servers, workDir }) {
     server.on('error', reject);
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address();
-      // A relay closed mid-run can be holding open keep-alive sockets from opencode; without
-      // dropping them first, server.close() waits for them to end on their own, which is exactly
-      // the hang decision 2 removes from the server side of this same run.
+      // Drop opencode's keep-alive sockets first, or server.close() waits for them and hangs the run.
       const urls = {};
       for (const name of upstreams.keys()) urls[name] = `http://127.0.0.1:${port}/mcp/${name}`;
       resolve({

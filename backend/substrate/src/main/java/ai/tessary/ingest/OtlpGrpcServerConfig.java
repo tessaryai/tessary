@@ -18,17 +18,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires + lifecycle-manages the OTLP/gRPC {@code TraceService/Export} server.
- *
- * <p>The server binds {@code tessary.ingest.otlp.grpc-port} (default 4317) <em>only</em> when the receiver's
- * {@link OtlpReceiverProperties#transport() transport} includes gRPC — otherwise the
- * {@link OtlpGrpcServer} {@link SmartLifecycle} is a no-op and no socket is opened. HTTP ingest is always
- * on; gRPC binds a separate inbound socket, so it stays opt-in via the transport knob (default HTTP).
- *
- * <p>Requests run on {@code Executors.newVirtualThreadPerTaskExecutor()} — the project's Loom idiom
- * (matching {@code SubstrateWriter} and the E2B sandboxes) — so a per-request handler can block freely on the
- * (non-blocking, O(1)) substrate enqueue without tying up a Netty event-loop thread. The server infra and its
- * lifecycle live here in {@code config/}; the request handler + auth live in the {@code ingest/otlp/} slice.
+ * The OTLP/gRPC server binds {@code tessary.ingest.otlp.grpc-port} only when the transport includes gRPC; HTTP is
+ * always on. Requests run on virtual threads so a handler never ties up a Netty event loop.
  */
 @Configuration(proxyBeanMethods = false)
 public class OtlpGrpcServerConfig {
@@ -39,11 +30,7 @@ public class OtlpGrpcServerConfig {
         return new OtlpGrpcServer(props, traceService, authInterceptor);
     }
 
-    /**
-     * A Spring {@link SmartLifecycle} owning the gRPC {@link Server} socket. Starting/stopping is bound to the
-     * application lifecycle, but the server only actually binds when the transport includes gRPC — so a
-     * default (HTTP-only) deployment never opens port 4317.
-     */
+    /** Never opens port 4317 on an HTTP-only deployment. */
     static final class OtlpGrpcServer implements SmartLifecycle {
 
         private static final Logger log = LoggerFactory.getLogger(OtlpGrpcServer.class);
@@ -52,12 +39,7 @@ public class OtlpGrpcServerConfig {
         private final OtlpGrpcTraceService traceService;
         private final OtlpGrpcAuthInterceptor authInterceptor;
 
-        /**
-         * Null until {@link #start()} and again after {@link #stop()} — a lifecycle-scoped handle, not
-         * an invariant. Declared {@code @Nullable} now that this class lives in a NullAway-checked
-         * package; the null handling in {@code stop()} was already written for it, only the annotation
-         * was missing while {@code config} went unchecked.
-         */
+        /** Null until {@link #start()} and again after {@link #stop()}. */
         @Nullable
         private volatile Server server;
 
@@ -82,9 +64,8 @@ public class OtlpGrpcServerConfig {
                     .executor(Executors.newVirtualThreadPerTaskExecutor())
                     .addService(traceService)
                     .intercept(authInterceptor);
-            // Share the one configured byte bound with the HTTP path (OtlpTraceController honours
-            // max-body-bytes); otherwise grpc-java's 4 MiB default would silently reject 4–32 MiB
-            // batches an operator sized for the HTTP receiver. <= 0 leaves grpc-java's default in place.
+            // Shares the HTTP path's byte bound; otherwise grpc-java's 4 MiB default would reject batches sized for
+            // HTTP. <= 0 keeps grpc-java's default.
             int maxBodyBytes = props.maxBodyBytes();
             if (maxBodyBytes > 0) {
                 builder.maxInboundMessageSize(maxBodyBytes);
@@ -127,10 +108,7 @@ public class OtlpGrpcServerConfig {
             return grpcEnabled();
         }
 
-        /**
-         * Start late / stop early relative to the rest of the context (a high phase): the inbound socket
-         * should not accept traffic until the substrate write path it feeds is up.
-         */
+        /** A high phase: the socket must not accept traffic until the write path it feeds is up. */
         @Override
         public int getPhase() {
             return Integer.MAX_VALUE - 100;

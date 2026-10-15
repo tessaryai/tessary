@@ -46,37 +46,7 @@ class SpanSideTablesTest {
 
         assertNull(extracted.toolCall(), "a retrieval span is not a tool call");
         assertEquals(
-                List.of(
-                        RetrievedDocRow.retrieved(
-                                SideTableIds.retrievedDoc("p", "t", "s", 0),
-                                "p",
-                                "t",
-                                "s",
-                                "result",
-                                0,
-                                "doc-0",
-                                "first",
-                                0.75,
-                                null,
-                                null,
-                                null,
-                                AT,
-                                AT),
-                        RetrievedDocRow.retrieved(
-                                SideTableIds.retrievedDoc("p", "t", "s", 1),
-                                "p",
-                                "t",
-                                "s",
-                                "result",
-                                1,
-                                null,
-                                "second",
-                                2.0,
-                                null,
-                                null,
-                                "{\"page\": 4}",
-                                AT,
-                                AT)),
+                List.of(doc(0, "doc-0", "first", 0.75, null), doc(1, null, "second", 2.0, "{\"page\": 4}")),
                 extracted.retrievedDocs());
     }
 
@@ -89,7 +59,8 @@ class SpanSideTablesTest {
     @CsvSource(
             delimiter = '|',
             value = {
-                "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"arguments\":{\"q\":\"x\"}}]}] | {\"q\":\"x\"}",
+                "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"arguments\":{\"q\":\"x\"}}]}] |"
+                        + " {\"q\":\"x\"}",
                 "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"arguments\":\"q=x\"}]}] | q=x",
                 "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\"}]}] | plain input",
                 "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"hi\"}]}] | plain input",
@@ -104,6 +75,26 @@ class SpanSideTablesTest {
         ToolCallRow row = extracted.toolCall();
         assertNotNull(row);
         assertEquals(arguments, row.argumentsRaw());
+    }
+
+    /** A retrieved passage of span s in trace t of project p. */
+    private static RetrievedDocRow doc(
+            int index, @Nullable String id, String content, double score, @Nullable String metadata) {
+        return RetrievedDocRow.retrieved(
+                SideTableIds.retrievedDoc("p", "t", "s", index),
+                "p",
+                "t",
+                "s",
+                "result",
+                index,
+                id,
+                content,
+                score,
+                null,
+                null,
+                metadata,
+                AT,
+                AT);
     }
 
     private static RawEntry raw(Map<String, Object> attrs, @Nullable String inputMessagesJson) {

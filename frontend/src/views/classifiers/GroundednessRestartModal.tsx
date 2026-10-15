@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The model stopped answering, and restarting it is the setup guide's restart section, run by a coding
- * agent on the machine that hosts it. This hands over that prompt for where the model runs, then waits:
- * it polls the status and closes itself once the model is scoring again.
- */
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { GroundednessMode } from "../../api/types";

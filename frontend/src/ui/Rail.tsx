@@ -1,24 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Rail — THE right rail. One system, everywhere (DESIGN-DIRECTION §6):
- *
- *   - one shape for every rail: defaults to 44% of the viewport (min 520px),
- *     but the left edge is drag-to-resize — width is remembered per browser
- *     (localStorage), not per-rail, so every rail opens at the size you left it;
- *   - opens from any row click; ESC closes; slide-in via the `tsyRail` keyframes;
- *   - a header: title (mono when it's an identifier) + optional dim meta +
- *     an external-link expand + a close (X) button — icons, not text glyphs;
- *   - the body carries its own inset (see BODY_PADDING) — consumers pass content,
- *     never padding;
- *   - a rail never opens a second rail — drilling deeper navigates the rail's
- *     own content (render a breadcrumb back inside `children`);
- *   - rail states should be URL-addressable — the OPENER owns that (drive `open`
- *     from the URL); the primitive only renders.
- *
- * Modals survive only as confirmations; everything else is this rail.
- * Built from a plain <aside> (not <dialog>) so the page behind stays visible and
- * scrollable; focus is trapped by useFocusTrap and restored on close.
- */
+// THE right rail. Width is drag-resizable and remembered per browser, not per rail. A rail never opens
+// a second rail; the opener drives `open` from the URL. A plain <aside>, not <dialog>, so the page
+// behind stays scrollable; focus is trapped by useFocusTrap.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -31,15 +14,7 @@ const WIDTH_STORAGE_KEY = "tsy-rail-width";
 const MIN_WIDTH = 520;
 const DEFAULT_WIDTH_RATIO = 0.44;
 
-/**
- * The body's inset. Horizontal matches the header's `px-[18px]` so a rail reads as one
- * column from title to last row; the deep bottom is scroll breathing room, so the final
- * section clears the viewport edge instead of ending flush against it.
- *
- * This lives on the primitive, not on each consumer: every rail wants the same inset, and
- * when it was the consumer's job all three of them forgot and rendered text against the
- * panel edge.
- */
+/** On the primitive, not each consumer: when it was the consumer's job all three forgot it. */
 const BODY_PADDING = "px-[18px] pt-[18px] pb-10";
 
 function clamp(n: number, min: number, max: number): number {
@@ -60,7 +35,6 @@ function readStoredWidth(): number | null {
   }
 }
 
-/** Drag-to-resize handle on the rail's left edge. Persists to `WIDTH_STORAGE_KEY` on release. */
 function useRailWidth(open: boolean) {
   const [width, setWidth] = useState<number>(
     () => readStoredWidth() ?? clamp(window.innerWidth * DEFAULT_WIDTH_RATIO, MIN_WIDTH, maxWidth()),
@@ -69,7 +43,6 @@ function useRailWidth(open: boolean) {
   widthRef.current = width;
   const [dragging, setDragging] = useState(false);
 
-  // Re-read on every open so a width persisted from another rail applies here too.
   useEffect(() => {
     if (!open) return;
     const stored = readStoredWidth();
@@ -83,7 +56,6 @@ function useRailWidth(open: boolean) {
     setDragging(true);
 
     function onMove(ev: PointerEvent) {
-      // Rail is anchored to the right edge, so dragging left (dx > 0) grows it.
       const dx = startX - ev.clientX;
       setWidth(clamp(startWidth + dx, MIN_WIDTH, maxWidth()));
     }
@@ -94,7 +66,6 @@ function useRailWidth(open: boolean) {
       try {
         window.localStorage.setItem(WIDTH_STORAGE_KEY, String(widthRef.current));
       } catch {
-        // Storage unavailable (private mode, quota) — width just won't persist.
       }
     }
     window.addEventListener("pointermove", onMove);
@@ -106,19 +77,13 @@ function useRailWidth(open: boolean) {
 
 export type RailProps = {
   open: boolean;
-  /** Called on ESC (key or button) and when the ⤢/consumer wants to dismiss. */
   onClose: () => void;
-  /** Header title. Set `monoTitle` when it is an identifier (`tr_8VQZ…`, `C-118`). */
   title: ReactNode;
   monoTitle?: boolean;
-  /** Dim meta beside the title (12px, subtle) — timestamps, counts, ⌘J hints. */
   meta?: ReactNode;
-  /** ⤢ expand — navigate to the full-screen version of the rail's subject. */
   onExpand?: () => void;
-  /** Accessible label for ⤢, e.g. "Open full trace". */
   expandLabel?: string;
   children: ReactNode;
-  /** Accessible name for the rail when `title` is not plain text. */
   "aria-label"?: string;
 };
 
@@ -136,10 +101,8 @@ export function Rail({
   const trapRef = useFocusTrap<HTMLElement>(open);
   const { width, dragging, onHandlePointerDown } = useRailWidth(open);
 
-  // ESC closes — global while open, so it works wherever focus sits. The
-  // shared overlay stack makes sure only the topmost overlay acts: a rail
-  // under the Ask drawer (or another rail) must not also close — in trace-rail
-  // mode onClose NAVIGATES.
+  // Only the topmost overlay acts: in trace-rail mode onClose navigates, so a rail under another must
+  // not also close.
   useEscToClose(open, onClose);
 
   if (!open) return null;
@@ -158,7 +121,6 @@ export function Rail({
         boxShadow: "var(--shadow-md)",
         animation: dragging ? undefined : "tsyRail .18s var(--ease-enter)" }}
     >
-      {/* Drag handle — centered on the left border, wide hit area for an easy grab. */}
       <div
         role="separator"
         aria-orientation="vertical"

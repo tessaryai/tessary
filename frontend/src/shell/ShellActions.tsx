@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * A tiny imperative registry for shell-level affordances that the command palette wants to
- * trigger but does not own — namely the project switcher, which lives in the Sidebar. The
- * Sidebar registers its opener on mount; the palette calls it. Both render inside ShellChrome's
- * provider.
- */
+// Lets the palette trigger shell affordances it does not own, such as the Sidebar's project switcher.
 import { createContext, useContext, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 
@@ -33,7 +28,6 @@ export function ShellActionsProvider({ children }: { children: ReactNode }) {
   return <ShellActionsCtx.Provider value={api}>{children}</ShellActionsCtx.Provider>;
 }
 
-/** Read shell actions. Only called under ShellChrome, which mounts the provider. */
 export function useShellActions(): ShellActionsApi {
   return useContext(ShellActionsCtx)!;
 }

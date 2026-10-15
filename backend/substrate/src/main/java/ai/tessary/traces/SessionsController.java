@@ -16,18 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Read API for sessions — one continuous interaction with one user (substrate-model.md §5.2, §7.5).
- *
- * <p>The shapes and the assembly live in {@link SessionReadService} / {@link SessionDtos}, because MCP's
- * {@code list_sessions} / {@code get_session} serve the same two answers and a session's honesty devices
- * ({@code unsettled_traces}, {@code traces_truncated}) are only honest if every surface carries them. What
- * remains here is the HTTP boundary: tenancy, permission, the page-size policy, and the 404.
- *
- * <p><b>The list has no sort parameter, and that is contractual.</b> Listing sessions by cost or tokens would
- * mean summing every session in the project before the page could be chosen — the read shape this substrate
- * exists to make impossible. Recency is what {@code session.last_activity_at} and
- * {@code ix_session_project_active} serve without any rollup behind them; anything else needs a session
- * materialization with its own staleness contract, as a separate piece of work.
+ * HTTP boundary for session reads; shapes live in {@link SessionReadService} so MCP shares them. No sort parameter,
+ * contractually: sorting by cost would sum every session before choosing a page.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/sessions")
@@ -45,18 +35,8 @@ public class SessionsController {
     }
 
     /**
-     * A page of the project's sessions, most recently active first.
-     *
-     * <p>Deliberately no {@code sort} parameter — see the class javadoc. Adding one for cost or tokens is
-     * not an omission to be filled in later without a design change behind it.
-     *
-     * <p>{@code include=totals} is a display opt-in, not a sort: it adds each returned session's totals and
-     * dominant call site to the page already chosen by recency, batched as two grouped queries for the whole
-     * page (see {@link SessionReadService#page}). Any other value, or the parameter's absence, is the plain
-     * identity-only read.
-     *
-     * <p>The filters are the traces list's, by the same names: a session is on the page when one of its traces
-     * passes every one of them, which is to say when the traces list would show one of its traces.
+     * {@code include=totals} adds totals to the page already chosen by recency. A session is listed when the traces
+     * list would show one of its traces.
      */
     @GetMapping
     public ApiResponse<SessionDtos.SessionsPage> list(
@@ -88,10 +68,7 @@ public class SessionsController {
                 filter));
     }
 
-    /**
-     * One session: identity, the summed rollups of its traces, and those traces oldest first. Given the traces
-     * list's filters, it also names the traces that pass them.
-     */
+    /** Given the traces list's filters, also names the traces that pass them. */
     @GetMapping("/{sessionId}")
     public ApiResponse<SessionDtos.SessionDetail> detail(
             TenantContext ctx,
@@ -115,11 +92,7 @@ public class SessionsController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found")));
     }
 
-    /**
-     * Every span across a session's traces — deliberately not a field on {@link #detail}, which every
-     * caller wanting only totals or a trace list would otherwise pay for. See
-     * {@link SessionReadService#spans} for why this and {@link #detail} always describe the same traces.
-     */
+    /** Its own endpoint so callers wanting only totals don't pay for spans. */
     @GetMapping("/{sessionId}/spans")
     public ApiResponse<SessionDtos.SessionSpans> spans(
             TenantContext ctx,

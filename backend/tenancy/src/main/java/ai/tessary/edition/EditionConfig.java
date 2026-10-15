@@ -4,7 +4,6 @@ package ai.tessary.edition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** Wires this build's {@link Edition} bean. */
 @Configuration(proxyBeanMethods = false)
 public class EditionConfig {
 

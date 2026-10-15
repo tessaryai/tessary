@@ -23,18 +23,6 @@ import {
   useToast,
 } from "../../ui";
 
-/**
- * Settings → MCP tokens.
- *
- * The whole screen exists for one fragile moment: the secret you can only see
- * once. So that reveal gets the design weight, a focused modal with a single
- * copy action, an honest warning, and a deliberate "I've saved it" before it's
- * gone for good. The rest is a quiet ledger of prefixes and last-used times.
- *
- * Data wiring is preserved verbatim: the `mcp-tokens` query plus the issue and
- * revoke mutations, all keyed on `api.base`.
- */
-
 
 function KeyGlyph({ size = 20 }: { size?: number }) {
   return <KeyRound size={size} strokeWidth={1.5} aria-hidden="true" />;
@@ -46,20 +34,16 @@ export function McpTokens() {
   const toast = useToast();
   const tokens = useQuery({ queryKey: ["mcp-tokens", api.base], queryFn: api.listMcpTokens });
 
-  // Modal lifecycle: closed → naming (issue form) → reveal (one-time secret).
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [issued, setIssued] = useState<{ plaintext: string; name: string } | null>(null);
-  // Asked in the page, not with window.confirm(): a native dialog blocks the tab, and an automated
-  // browser dismisses it unseen, so the revoke never runs (#84).
+  // Not window.confirm(): an automated browser dismisses it unseen, so the revoke never runs (#84).
   const [toRevoke, setToRevoke] = useState<McpTokenView | null>(null);
-  // The MCP config block is a text link, not a Button, so it drives the same confirmed/reset cycle itself.
   const copyConfig = useCopy();
 
   const issue = useMutation({
     mutationFn: () => api.issueMcpToken(name.trim()),
     onSuccess: (r) => {
-      // IssueTokenResponse: { token, plaintext, warning }. Reveal the plaintext once.
       setIssued({ plaintext: r.plaintext, name: r.token.name });
       qc.invalidateQueries({ queryKey: ["mcp-tokens", api.base] });
     },
@@ -218,7 +202,6 @@ export function McpTokens() {
         <p className="text-small text-muted">Any client using it loses access immediately. You cannot undo this.</p>
       </Modal>
 
-      {/* New token: name → one-time reveal, in a single focused modal. */}
       <Modal
         open={modalOpen}
         onClose={closeModal}

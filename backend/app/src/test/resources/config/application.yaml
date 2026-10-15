@@ -24,3 +24,7 @@ tessary:
       probe-interval-ms: 86400000
   metering:
     storage-enabled: true
+# The Kafka client logs every rebootstrap at INFO.
+logging:
+  level:
+    org.apache.kafka: WARN

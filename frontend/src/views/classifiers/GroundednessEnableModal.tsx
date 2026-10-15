@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Enabling Groundedness needs its model running somewhere first, and a coding agent does that setup,
- * so the switch opens this instead of flipping: pick where the model runs, copy the prompt that points
- * the agent at the matching setup guide, and watch the three steps tick over.
- *
- * The modal learns each step from the status endpoint, polled while it is open. The agent restarts
- * Tessary part way through, so a read that fails because nothing is answering is the "Restart Tessary"
- * step, not an error. Once the model answers, the modal enables the classifier itself, once.
- */
+// The coding agent restarts Tessary part way through setup, so a status read that fails because
+// nothing answers is the "Restart Tessary" step, not an error.
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Circle } from "lucide-react";
@@ -25,7 +18,6 @@ import {
   setupPrompt,
 } from "./groundedness";
 
-/** `ConnectGate`'s interval: fast enough that the steps tick over while the user watches. */
 export const SETUP_POLL_MS = 3500;
 
 const STEPS = ["Set up model", "Restart Tessary", "Start scoring"] as const;
@@ -49,7 +41,6 @@ export function GroundednessEnableModal({
     queryKey: statusKey,
     queryFn: () => api.getGroundednessStatus(classifierId),
     refetchInterval: SETUP_POLL_MS,
-    // A failed read is the restart step: the next poll is the retry.
     retry: false,
   });
   const status = statusQ.data;
@@ -64,8 +55,7 @@ export function GroundednessEnableModal({
     if (restarting) setSawRestart(true);
   }, [restarting]);
 
-  // Whether the model URL was set when the modal opened: set later means the setup wrote the .env and
-  // Tessary came back with it, so the restart is done or under way.
+  // Set later means the setup wrote the .env and Tessary came back with it.
   const [initialConfigured, setInitialConfigured] = useState<boolean | null>(null);
   useEffect(() => {
     if (status && initialConfigured === null) setInitialConfigured(status.configured);
@@ -158,10 +148,6 @@ export function GroundednessEnableModal({
   );
 }
 
-/**
- * The three setup steps: done before `active`, in progress at it, waiting after it. Local on purpose:
- * `ui/` has no stepper, and one use doesn't make one.
- */
 function SetupSteps({ active }: { active: number }) {
   return (
     <ol

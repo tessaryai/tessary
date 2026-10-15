@@ -1,54 +1,29 @@
 version: '3'
 
-# Top-level dev commands. Install Task: https://taskfile.dev/installation/.
-#
-# Three services run together in dev:
-#   - backend (Spring Boot)  on :8080
-#   - frontend (Vite)        on :5173
-#   - caddy (reverse proxy)  on :8000 bare metal (`task caddy`)
-# `task dev` serves the whole stack at http://localhost (TESSARY_DEV_PORT, default 80).
+# Top-level dev commands (https://taskfile.dev/installation/). `task dev` serves the whole stack at
+# http://localhost (TESSARY_DEV_PORT, default 80).
 
 vars:
   SESSION: tessary-dev
-  # The dev stack. scripts/lib/dev-compose.sh is the ONE derivation every dev compose string
-  # (this, DC_DEV_ALL, scripts/dev.sh, scripts/dev-up.sh) calls.
-  #
-  # Two independent `sh:` calls rather than DC_DEV_ALL: '{{.DC_DEV}} ...' — one Task var must not
-  # depend on another's resolution order for something this load-bearing.
+  # scripts/lib/dev-compose.sh is the one derivation of every dev compose string. Two separate `sh:` calls
+  # so neither var depends on the other's resolution order.
   DC_DEV:
     sh: 'bash scripts/lib/dev-compose.sh'
-  # TEARDOWN ONLY — never for `up` or a restart shortcut. Teardown has to know about every
-  # service startup could have created: `down` with only the base file cannot see the pyroscope
-  # container from the profiling overlay, so it survives the "stop" still holding :4040.
-  # It is deliberately NOT reused for `up`/`--force-recreate`, because the overlay also attaches
-  # -javaagent to the backend — a plain `task rb` would then start a profiler nobody asked for and
-  # fail outright when the agent jar was never fetched (dev.sh only fetches it under
-  # TESSARY_PROFILING=1; scripts/dev-up.sh keeps off the overlay for the same reason).
-  # Extra `-f` is harmless for `down`: absent services are simply nothing to remove.
+  # Teardown only. It adds the profiling overlay so `down` also removes pyroscope; never use it for `up`,
+  # which would attach a -javaagent nobody asked for.
   DC_DEV_ALL:
     sh: 'bash scripts/lib/dev-compose.sh -f docker-compose.profiling.yml'
-  # For anything that creates or recreates dev containers (`up`, `--force-recreate`). DC_DEV alone
-  # exports none of the choices `task dev` resolved (launcher URL, MCP base URL, AGENT_IMAGE,
-  # COMPOSE_PROFILES, sign-in), so compose would recreate the container from the file's empty
-  # defaults. This re-resolves the saved choices without prompting, then runs DC_DEV's command.
-  # Read-only calls (logs, exec, ps) stay on DC_DEV.
+  # For anything that creates or recreates dev containers: re-resolves the saved `task dev` choices
+  # without prompting. Read-only calls (logs, exec, ps) stay on DC_DEV.
   DC_DEV_UP: 'bash scripts/lib/dev-choices.sh compose'
-  # The prod stack. All four prod targets route through this, teardown included — that is the
-  # point of doing it in one place. See the DC_DEV_ALL note above for what happens when `down`
-  # cannot see a service that `up` created: the container survives the stop still holding its port.
+  # Every prod target, teardown included, goes through this one string.
   DC_PROD: 'docker compose -f docker-compose.yml'
 
-# The pnpm version baked into every image built locally. The compose files and the frontend and
-# launcher Dockerfiles carry the same literal as their default so a bare `docker compose build`
-# works with nothing exported; keep every copy equal to this one by hand. CI mirrors it with the
-# `PNPM_VERSION` GitHub Actions variable (see the deploy workflows). Keep this in step with the
-# `packageManager` field in each package.json. Exported at the top level so it reaches
-# `bash scripts/dev.sh` and every `docker compose` invocation below.
+# The pnpm version for local image builds. The compose files and Dockerfiles carry the same literal as a
+# default; keep every copy, the `packageManager` fields and the CI `PNPM_VERSION` variable equal by hand.
 env:
   PNPM_VERSION: "11.15.1"
-  # The version identity stamped on the backend and frontend images: the repo's short-SHA
-  # convention, the same expression release.yml tags with, plus the full SHA as the revision. Both
-  # flow into docker-compose.yml's build args.
+  # Short and full SHA, as release.yml tags; both flow into docker-compose.yml's build args.
   IMAGE_VERSION:
     sh: git rev-parse --short HEAD 2>/dev/null || echo dev
   IMAGE_REVISION:
@@ -134,29 +109,11 @@ tasks:
     desc: Run the Spring Boot backend (dev mode, JVM). Needs Postgres 16 + pgvector via TESSARY_JDBC_URL (e.g. `task dev:up`).
     dir: backend
     env:
-      # The bare-metal dev path, like the Docker one, runs unauthenticated -- and it has to SAY so.
-      # Absent WorkOS credentials used to be the off switch by themselves; they now fail
-      # closed, so without this every /api/** call here answers 401. Set here rather than left to
-      # the developer because this task loads no dotenv: there is nowhere else it could come from,
-      # and a dev path that 401s with no explanation is a failure this must not cause.
-      #
-      # Hardcoded rather than defaulted-from-the-environment: the safe default for a task that
-      # loads no dotenv should not require a developer to remember an override.
-      #
-      # TESSARY_AUTH_DISABLED=true here is authoritative on its own: exporting a WorkOS key changes
-      # NOTHING about this task's posture, it stays unauthenticated. To actually test enforced auth
-      # locally, edit this line to "false" (or unset it) rather than relying on WorkOS config to
-      # override it.
-      #
-      # "The real auth flow" no longer means WorkOS specifically: PasswordAuthProvider
-      # (dependency-free email/password) is the open edition's always-on default and wins this same
-      # AuthProviderConfig selection whenever WORKOS_API_KEY/WORKOS_CLIENT_ID aren't exported --
-      # TESSARY_AUTH_DISABLED here just decides whether that default is enforced or bypassed for dev.
+      # Hardcoded on purpose: this task loads no dotenv and, without WorkOS credentials, every /api/** call
+      # would 401. Exporting a WorkOS key does not change it; edit this line to test enforced auth locally.
       TESSARY_AUTH_DISABLED: "true"
     cmds:
-      # Install app's whole dependency chain first, then run ONLY the app module. spring-boot:run
-      # can't run reactor-wide (it dies on the non-executable parent pom), and app-only can't
-      # resolve its sibling jars unless they are installed into the local repo.
+      # spring-boot:run cannot run reactor-wide, and app alone cannot resolve uninstalled siblings.
       - mvn -q -pl app -am install -DskipTests
       - mvn -q -pl app spring-boot:run
 
@@ -199,11 +156,8 @@ tasks:
     cmds:
       - mvn -q clean package -DskipTests
 
-  # ---- node packages ----
-  # Every Node package here is installed with pnpm (see AGENTS.md). They are deliberately NOT a
-  # workspace: each keeps its own pnpm-lock.yaml so the Dockerfiles can build from their own
-  # directory. pnpm's shared content-addressable store means a second worktree hardlinks these
-  # rather than re-downloading ~640 MB.
+  # Every Node package uses pnpm and keeps its own lockfile (deliberately not a workspace) so each
+  # Dockerfile builds from its own directory.
   node:install:
     desc: Install deps for every Node package (pnpm). Run this once after creating a worktree.
     cmds:
@@ -219,13 +173,8 @@ tasks:
       - silent: true
         cmd: |
           cd "{{.DIR}}"
-          # Self-heal a checkout that predates the pnpm migration. npm's flat node_modules has no
-          # .pnpm/ marker (every pnpm layout has one, including lambda's hoisted tree, where it holds
-          # just lock.yaml). pnpm installs happily on top of npm's tree but never removes npm's
-          # directories, which leaves two problems: ~170 MB of dead files, and — the real one —
-          # undeclared transitive imports keep resolving from the leftover flat layout, silently
-          # defeating the strict resolution that would otherwise catch them. Re-installing from the
-          # shared store costs ~1s, so clearing is close to free.
+          # Clears an npm-era node_modules (no .pnpm/ marker): pnpm never removes npm's tree, and leftover flat
+          # layout would let undeclared transitive imports keep resolving.
           if [ -d node_modules ] && [ ! -d node_modules/.pnpm ]; then
             echo "{{.DIR}}: clearing pre-pnpm (npm) node_modules before installing"
             rm -rf node_modules
@@ -334,10 +283,7 @@ tasks:
     desc: Stop the dev stack and kill its tmux session.
     cmds:
       - tmux kill-session -t {{.SESSION}} 2>/dev/null || true
-      # DC_DEV_ALL, not DC_DEV — see the note on those vars: the base file alone cannot see the
-      # profiling overlay's pyroscope container, which would then outlive `dev:stop` on :4040.
-      # `--profile '*'` for the same reason: `down` skips any service whose profile is not active,
-      # so the `launcher` sandbox-runner that `task dev` starts would survive, holding the network.
+      # DC_DEV_ALL and `--profile '*'`, so the profiling and launcher containers do not outlive the stop.
       - "{{.DC_DEV_ALL}} --profile '*' down --remove-orphans"
 
   dev:logs:

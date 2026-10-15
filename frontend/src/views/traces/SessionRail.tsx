@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Rail preview of a session, opened from the Traces index (grouped mode) row click.
- * URL-addressable via ?session=<id> — same convention as TraceRail's ?trace=<id>, and deliberately the
- * exact same shell: Rail, ViewSegment, Conversation/Tree/Timeline/JSON chrome. The only content difference
- * is that each view is stitched across every trace in the session — see detail-views.tsx's
- * SessionConversationView/SessionTreeView/SessionTimelineView, which reuse the trace views unchanged.
- *
- * ⤢ opens the full session page in a NEW TAB, so the list keeps its filters and scroll position.
- */
+// ?session=<id>, the same shell as TraceRail. ⤢ opens a new tab so the list keeps filters and scroll.
 import { useState } from "react";
 import { ErrorNote, LoadingRow, Rail } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";

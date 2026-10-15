@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.llm;
 
-import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -10,137 +9,61 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Which provider each {@link ModelLane} reaches for, in order, and which model it runs there.
- *
- * <p><b>Provider first, model second.</b> A key is the thing an org either has or does not have, so
- * it is the first question: walk this lane's providers in order and take the first one the org holds
- * a credential for. The model is the second question, answered inside that provider by its
- * {@link ProviderOption#defaultModelKey()}. Doing it the other way — one flat list of models — let a
- * provider's second-best model outrank another provider's best, which is not a choice anyone would
- * make deliberately.
- *
- * <p>There is no per-lane default model, and that is the point. A default named one model, which
- * named one provider, which the org may have no key for — so the settings page's first option was a
- * model the project could not run, followed by an instruction to go and buy the key that would make
- * the option true. Configure Bedrock and RCA lands on Claude Sonnet 5.5; configure only xAI and it
- * lands on Grok 4.6; configure nothing and the lane has no model at all, which is the honest answer
- * rather than a model id that will fail on the first call, unless the deployment supplies
- * {@link ModelProvider#PLATFORM}, which sits last on both agent lanes.
- *
- * <p><b>Each provider carries every model we support for that lane</b>, with one of them the default.
- * The default is what automatic selection takes; the rest are what the dropdown offers once someone
- * opens it. So a project that wants Haiku on RCA does not have to leave Bedrock to get it.
- *
- * <p><b>TRIAGE is exactly RCA</b>: the same providers, in the same order, with the same defaults.
- * TRIAGE used to carry its own price-ceiling'd list and cheaper defaults; that ceiling is gone. A
- * project that never chose a triage model now runs whatever RCA would, because there is no honest
- * argument that an unattended ruling deserves a worse model than the same finding would get if a
- * person asked RCA about it — the ceiling existed to bound an unattended bill, not because triage's
- * job needs less. Picking a model priced above its own provider's default is still allowed on
- * either lane; the settings page warns before saving one on TRIAGE, reading live rates rather than a
- * fixed threshold, since a project running triage unattended, once per cause, is the one that pays
- * for that choice on every finding rather than once.
- *
- * <p><b>AGENT_RUN shares the same list.</b> It runs the same agent shape as RCA (a repository, the
- * traces over MCP, one long tool loop), started by a person, so there is no second ordering to
- * maintain for it either.
- *
- * <p><b>Every chat provider appears on every agent lane. All ten of them.</b> That is the coverage
- * rule, and it is literal rather than qualified: whichever single chat key an org happens to hold,
- * both lanes resolve to something rather than to nothing. Most providers also carry a smaller
- * current-generation model alongside their flagship — not because either lane defaults to it, but
- * because it stays selectable for a project that wants to point either lane, and especially
- * unattended TRIAGE, at something cheaper than the default on purpose.
- *
- * <p>{@link ModelProvider#ANTHROPIC}, {@link ModelProvider#OPENROUTER} and
- * {@link ModelProvider#MOONSHOT} were absent from both lanes until this change, for a reason that
- * was never a decision about the models: {@code sandbox-runner/launcher/server.js} had no provider
- * mode for them, so a lane pointed at one would have failed at launch. With the agent lanes the only
- * chat lanes, that left an org holding only one of those three keys unable to run anything at all. The launcher now has a mode for each — Anthropic
- * on its own wire, the other two as OpenAI-compat — so the coverage rule reaches every provider the
- * Providers page will sell you. Adding an eleventh still means adding it to the launcher first.
- * {@link ModelProvider#PLATFORM} needs no launcher mode of its own: the credential the supplying build
- * resolves for it names the provider whose wire it speaks.
- *
- * <p><b>FRUSTRATION is a {@link LaneGroup#DECISION_CALLS} lane</b> and stands outside the coverage rule:
- * only TypeSafe and OpenRouter serve TypeSafe's Jev, one model each. TypeSafe leads because it is the
- * model's own endpoint; OpenRouter is the same model one hop further away. {@link ModelProvider#PLATFORM}
- * follows both, for the same reason it is last on the agent lanes.
- *
- * <p>Model keys are the two spellings {@link ProjectModelSettings} decodes: a dotted
- * {@link BedrockModelProfile} key, or {@code "<PROVIDER>:<model_name>"} for a {@link ModelCatalog}
- * entry. What a lane here names and what its group offers must be the same set, so a model can
- * neither go missing from a lane nor be ordered into existence.
+ * Provider first, model second: walk a lane's providers in order and take the first the org holds a key for, then that
+ * provider's default. A flat model list let one provider's second-best outrank another's best. There is no per-lane
+ * default model, since it would name a provider the org may not have. TRIAGE and AGENT_RUN share RCA's list. Every chat
+ * provider appears on every agent lane, which requires a launcher mode for each. Model keys use the two spellings
+ * {@link ProjectModelSettings} decodes.
  */
 public final class LanePriority {
 
     /**
-     * One provider's standing on one lane: every model we support there, and which of them automatic
-     * selection takes. {@code defaultModelKey} is always a member of {@code modelKeys}, because a
-     * default outside its own list would be selectable automatically and unpickable by hand.
+     * {@code defaultModelKey} is always in {@code modelKeys}, or it would be auto-selectable but unpickable by hand.
      */
     public record ProviderOption(ModelProvider provider, List<String> modelKeys, String defaultModelKey) {}
 
-    // Bedrock Converse. Sonnet 5.5 replaced Sonnet 5 outright on 2026-10-07: a row that still pins
-    // Sonnet 5 reads as unset and the lane falls back to this order.
+    // A row still pinning Sonnet 5 reads as unset and falls back to this order.
     private static final String SONNET_5_5 = "anthropic.claude-sonnet-5-5";
     private static final String HAIKU_4_5 = "anthropic.claude-haiku-4-5";
-    // Bedrock's mantle endpoint — the only place the GPT-5.6 line is Bedrock-hosted.
+    // The only place the GPT-5.6 line is Bedrock-hosted.
     private static final String TERRA = "openai.gpt-5.6-terra";
     private static final String MANTLE_LUNA = "openai.gpt-5.6-luna";
-    // Anthropic direct — the same models Bedrock serves, on Anthropic's own wire and price book.
     private static final String ANTHROPIC_SONNET_5_5 = "ANTHROPIC:claude-sonnet-5-5";
     private static final String ANTHROPIC_HAIKU_4_5 = "ANTHROPIC:claude-haiku-4-5";
-    // The OpenAI-compatible providers, current generation, one model at each of the two sizes.
-    // GPT-6 Sol ($2/$10) and not the $4/$20 flagship is what RCA takes here.
     private static final String GPT_6_SOL = "OPENAI:gpt-6-sol";
     private static final String GPT_5_6 = "OPENAI:gpt-5.6";
     private static final String GPT_6_LUNA = "OPENAI:gpt-6-luna";
-    // The same GPT-6 pair over OpenRouter. Its model NAMES carry a slash of their own
-    // ("openai/gpt-6-sol" is one name, not provider + model) — the launcher's toProviderModel
-    // has an OpenRouter branch for exactly that.
+    // OpenRouter names carry their own slash ("openai/gpt-6-sol" is one name); the launcher's toProviderModel handles
+    // that.
     private static final String OR_SOL = "OPENROUTER:openai/gpt-6-sol";
     private static final String OR_LUNA = "OPENROUTER:openai/gpt-6-luna";
-    // Moonshot direct. One model at one size, so it is both this provider's RCA and TRIAGE answer.
     private static final String KIMI_K2_6 = "MOONSHOT:kimi-k2.6";
     private static final String GEMINI_3_1_PRO = "GEMINI:gemini-3.1-pro-preview";
     private static final String GEMINI_3_7_FLASH = "GEMINI:gemini-3.7-flash";
     private static final String GROK_4_6 = "GROK:grok-4.6";
     private static final String GLM_5_3 = "GLM:glm-5.3";
     private static final String GLM_5_3_FLASH = "GLM:glm-5.3-flash";
-    // TypeSafe's Jev decision model, direct and over OpenRouter.
     private static final String JEV = "TYPESAFE:jev-latest";
     private static final String OR_JEV = "OPENROUTER:~typesafe/jev-latest";
 
     /**
-     * Last on every lane, because the entry stands for "whatever model this endpoint serves" rather
-     * than for a model — see {@link ModelCatalog}'s CUSTOM comment. Auto-selecting an unknown model
-     * over a known one is never the better guess; an org that configures only a custom endpoint still
-     * gets it, since by then it is the only provider left. A customer's own endpoint also carries no
-     * rate we can read, so the settings page has no price to warn on for it.
+     * Last on every lane: "whatever this endpoint serves" is never a better guess than a known model, and it carries no
+     * rate to warn on.
      */
     private static final String CUSTOM_MODEL = "CUSTOM:custom-model";
 
-    /**
-     * After every provider an org brings its own key for, CUSTOM included: a deployment-supplied
-     * provider is what a lane runs on when the org has configured nothing, and an org that adds a key
-     * of its own moves every lane it never pinned onto that key.
-     */
+    /** After every org-supplied provider, so adding a key of its own moves every unpinned lane onto it. */
     private static final String PLATFORM_SONNET_5_5 = "PLATFORM:claude-sonnet-5-5";
 
     private static final Map<ModelLane, List<ProviderOption>> BY_LANE = byLane();
 
     private static Map<ModelLane, List<ProviderOption>> byLane() {
         Map<ModelLane, List<ProviderOption>> m = new EnumMap<>(ModelLane.class);
-        // Providers ordered by their flagship's fitness for a long tool loop over a repository.
-        // Bedrock leads because Sonnet is the model this lane has actually been run on. TRIAGE
-        // shares this list verbatim (see the class javadoc's "TRIAGE is exactly RCA"): both lanes run
-        // the same agent shape, so there is no second ordering to maintain.
+        // Ordered by fitness for a long tool loop over a repository; Bedrock leads because Sonnet is what this lane has
+        // run on.
         List<ProviderOption> agentVmOrder = List.of(
                 new ProviderOption(ModelProvider.BEDROCK, List.of(SONNET_5_5, HAIKU_4_5), SONNET_5_5),
-                // Directly after Bedrock, because it is the SAME model on a different
-                // transport — if Sonnet is what this lane has been run on, the route to it
-                // is not what should decide second place.
+                // The same model on a different transport, so it comes directly after Bedrock.
                 new ProviderOption(
                         ModelProvider.ANTHROPIC,
                         List.of(ANTHROPIC_SONNET_5_5, ANTHROPIC_HAIKU_4_5),
@@ -150,9 +73,7 @@ public final class LanePriority {
                 new ProviderOption(ModelProvider.GEMINI, List.of(GEMINI_3_1_PRO, GEMINI_3_7_FLASH), GEMINI_3_1_PRO),
                 new ProviderOption(ModelProvider.GROK, List.of(GROK_4_6), GROK_4_6),
                 new ProviderOption(ModelProvider.GLM, List.of(GLM_5_3, GLM_5_3_FLASH), GLM_5_3),
-                // Both after the direct routes to the models they resolve to: an aggregator
-                // adds a hop and a second price book to the same weights, and Kimi K2.6 is a
-                // smaller model than every flagship above it.
+                // Aggregators add a hop and a second price book, so they follow the direct routes.
                 new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_SOL, OR_LUNA), OR_SOL),
                 new ProviderOption(ModelProvider.MOONSHOT, List.of(KIMI_K2_6), KIMI_K2_6),
                 new ProviderOption(ModelProvider.CUSTOM, List.of(CUSTOM_MODEL), CUSTOM_MODEL),
@@ -170,17 +91,14 @@ public final class LanePriority {
 
     private LanePriority() {}
 
-    /** One lane's providers, best first. */
     public static List<ProviderOption> of(ModelLane lane) {
         return BY_LANE.get(lane);
     }
 
-    /** What {@code provider} runs on {@code lane}, or empty when this lane does not reach it. */
     public static Optional<ProviderOption> forProvider(ModelLane lane, ModelProvider provider) {
         return of(lane).stream().filter(o -> o.provider() == provider).findFirst();
     }
 
-    /** Every model {@code lane} offers, in provider order then each provider's own order. */
     public static List<String> modelKeys(ModelLane lane) {
         return of(lane).stream().flatMap(o -> o.modelKeys().stream()).toList();
     }

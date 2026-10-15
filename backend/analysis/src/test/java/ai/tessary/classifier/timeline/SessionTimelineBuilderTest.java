@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
@@ -23,178 +24,37 @@ class SessionTimelineBuilderTest {
     private static final Instant T0 = Instant.parse("2026-01-05T10:00:00Z");
 
     private static final String SYS = "{\"role\":\"system\",\"content\":\"You are support.\"}";
-    private static final String Q1 = "{\"role\":\"user\",\"content\":\"where is my order 42?\"}";
+    private static final String Q1 = user("where is my order 42?");
     private static final String C1 = "{\"id\":\"c1\",\"type\":\"function\","
             + "\"function\":{\"name\":\"lookup_order\",\"arguments\":\"{\\\"id\\\":42}\"}}";
     private static final String TC1 = "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[" + C1 + "]}";
-    private static final String R1 = "{\"role\":\"assistant\",\"content\":\"Order 42 ships tomorrow.\"}";
-    private static final String EXPEDITE = "{\"role\":\"user\",\"content\":\"can you expedite it?\"}";
-
-    private record Row(
-            String id,
-            String kind,
-            int position,
-            Instant at,
-            int depth,
-            @Nullable String parentId,
-            @Nullable String parentKind,
-            List<String> ancestorKinds,
-            @Nullable String agentId,
-            String turn,
-            @Nullable String callSiteId) {}
+    private static final String R1 = assistant("Order 42 ships tomorrow.");
+    private static final String EXPEDITE = user("can you expedite it?");
+    private static final String R1_TEXT = "Order 42 ships tomorrow.";
+    private static final String REFUNDS = "Refunds take 5 days.";
+    private static final String SYSTEM_BILLING = "{\"role\":\"system\",\"content\":\"You are billing.\"}";
 
     @Test
     void buildsTheAcceptanceSessionInTimelineOrder() {
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "sess-1", acceptanceSession());
 
         assertEquals(
-                List.of(
-                        new Row(
-                                "tr-a/a1#user:0",
-                                "user_message",
-                                0,
-                                at(0),
-                                1,
-                                "a1",
-                                "agent",
-                                List.of("agent"),
-                                "a1",
-                                "tr-a",
-                                "cs-agent"),
-                        new Row(
-                                "tr-a/a2",
-                                "llm",
-                                1,
-                                at(200),
-                                1,
-                                "a1",
-                                "agent",
-                                List.of("agent"),
-                                "a1",
-                                "tr-a",
-                                "cs-llm"),
-                        new Row(
-                                "tr-a/a3",
-                                "tool",
-                                2,
-                                at(300),
-                                1,
-                                "a1",
-                                "agent",
-                                List.of("agent"),
-                                "a1",
-                                "tr-a",
-                                "cs-turn-a"),
-                        new Row(
-                                "tr-a/a5",
-                                "llm",
-                                3,
-                                at(590),
-                                2,
-                                "a4",
-                                "agent",
-                                List.of("agent", "agent"),
-                                "a4",
-                                "tr-a",
-                                "cs-billing-llm"),
-                        new Row(
-                                "tr-a/a4",
-                                "agent",
-                                4,
-                                at(600),
-                                1,
-                                "a1",
-                                "agent",
-                                List.of("agent"),
-                                "a1",
-                                "tr-a",
-                                "cs-billing"),
-                        new Row(
-                                "tr-a/a6",
-                                "llm",
-                                5,
-                                at(900),
-                                1,
-                                "a1",
-                                "agent",
-                                List.of("agent"),
-                                "a1",
-                                "tr-a",
-                                "cs-llm"),
-                        new Row(
-                                "tr-a/a6#reply:0",
-                                "assistant_reply",
-                                6,
-                                at(900),
-                                2,
-                                "a6",
-                                "llm",
-                                List.of("agent", "llm"),
-                                "a1",
-                                "tr-a",
-                                "cs-llm"),
-                        new Row("tr-a/a1", "agent", 7, at(900), 0, null, null, List.of(), null, "tr-a", "cs-agent"),
-                        new Row(
-                                "tr-b/b1#user:0",
-                                "user_message",
-                                8,
-                                at(1000),
-                                1,
-                                "b1",
-                                "agent",
-                                List.of("agent"),
-                                "b1",
-                                "tr-b",
-                                "cs-agent"),
-                        new Row(
-                                "tr-b/b4",
-                                "step",
-                                9,
-                                at(1005),
-                                1,
-                                "b1",
-                                "agent",
-                                List.of("agent"),
-                                "b1",
-                                "tr-b",
-                                "cs-turn-b"),
-                        new Row(
-                                "tr-b/b2",
-                                "llm",
-                                10,
-                                at(1400),
-                                1,
-                                "b1",
-                                "agent",
-                                List.of("agent"),
-                                "b1",
-                                "tr-b",
-                                "cs-llm"),
-                        new Row(
-                                "tr-b/b3",
-                                "tool",
-                                11,
-                                at(1450),
-                                1,
-                                "b1",
-                                "agent",
-                                List.of("agent"),
-                                "b1",
-                                "tr-b",
-                                "cs-turn-b"),
-                        new Row("tr-b/b1", "agent", 12, at(1500), 0, null, null, List.of(), null, "tr-b", "cs-agent"),
-                        new Row(
-                                "tr-b/b1#reply:0",
-                                "assistant_reply",
-                                13,
-                                at(1500),
-                                1,
-                                "b1",
-                                "agent",
-                                List.of("agent"),
-                                "b1",
-                                "tr-b",
-                                "cs-agent")),
+                table("""
+                    tr-a/a1#user:0  user_message     0     0  1  a1  agent  agent        a1  tr-a  cs-agent
+                    tr-a/a2         llm              1   200  1  a1  agent  agent        a1  tr-a  cs-llm
+                    tr-a/a3         tool             2   300  1  a1  agent  agent        a1  tr-a  cs-turn-a
+                    tr-a/a5         llm              3   590  2  a4  agent  agent,agent  a4  tr-a  cs-billing-llm
+                    tr-a/a4         agent            4   600  1  a1  agent  agent        a1  tr-a  cs-billing
+                    tr-a/a6         llm              5   900  1  a1  agent  agent        a1  tr-a  cs-llm
+                    tr-a/a6#reply:0 assistant_reply  6   900  2  a6  llm    agent,llm    a1  tr-a  cs-llm
+                    tr-a/a1         agent            7   900  0  -   -      -            -   tr-a  cs-agent
+                    tr-b/b1#user:0  user_message     8  1000  1  b1  agent  agent        b1  tr-b  cs-agent
+                    tr-b/b4         step             9  1005  1  b1  agent  agent        b1  tr-b  cs-turn-b
+                    tr-b/b2         llm             10  1400  1  b1  agent  agent        b1  tr-b  cs-llm
+                    tr-b/b3         tool            11  1450  1  b1  agent  agent        b1  tr-b  cs-turn-b
+                    tr-b/b1         agent           12  1500  0  -   -      -            -   tr-b  cs-agent
+                    tr-b/b1#reply:0 assistant_reply 13  1500  1  b1  agent  agent        b1  tr-b  cs-agent
+                    """),
                 rows(timeline),
                 "wrong order on a tie, an orchestrator message as a user message, a sub-agent return as a reply");
 
@@ -210,16 +70,14 @@ class SessionTimelineBuilderTest {
                 data.get(1),
                 "history counted as new messages, or the system prompt kept among them");
         assertEquals(json("\"You are billing.\""), data.get(3).get("system_prompt"));
+        assertEquals(json(list(user("check refund status for 42"))), data.get(3).get("new_messages"));
         assertEquals(
-                json("[{\"role\":\"user\",\"content\":\"check refund status for 42\"}]"),
-                data.get(3).get("new_messages"));
-        assertEquals(
-                json("[{\"role\":\"tool\",\"tool_call_id\":\"c2\",\"content\":\"no refund pending\"}]"),
+                json(list(toolResult("c2", "no refund pending"))),
                 data.get(5).get("new_messages"),
                 "a tool-call-only assistant message is the boundary of what is new");
         assertEquals(
                 json("\"Order 42 ships tomorrow.\""), data.get(5).get("output").get("text"));
-        assertEquals(json("[" + EXPEDITE + "]"), data.get(10).get("new_messages"));
+        assertEquals(json(list(EXPEDITE)), data.get(10).get("new_messages"));
         assertEquals(
                 json("{\"name\":\"lookup_order\",\"mcp\":false,\"status\":\"ok\",\"error_type\":null,"
                         + "\"input\":{\"id\":42},\"output\":{\"eta\":\"tomorrow\"}}"),
@@ -241,60 +99,34 @@ class SessionTimelineBuilderTest {
 
     @Test
     void aRouterInsideTheAgentIsNotAReply() {
+        String where = list(user("where is my refund?"));
+        String reply = "Your refund is on its way.";
         List<TimelineSpan> spans = List.of(
-                span("tr-r", "r1", "agent")
-                        .at(0, 300)
-                        .out("Your refund is on its way.")
-                        .build(),
-                span("tr-r", "r2", "llm")
-                        .parent("r1")
-                        .at(10, 50)
-                        .in("[{\"role\":\"user\",\"content\":\"where is my refund?\"}]")
-                        .out("billing")
-                        .build(),
-                span("tr-r", "r3", "llm")
-                        .parent("r1")
-                        .at(60, 200)
-                        .in("[{\"role\":\"user\",\"content\":\"where is my refund?\"}]")
-                        .out("Your refund is on its way.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-r", "r1", "agent", null, 0, 300, null, reply),
+                span("tr-r", "r2", "llm", "r1", 10, 50, where, "billing"),
+                span("tr-r", "r3", "llm", "r1", 60, 200, where, reply));
 
         assertEquals(
-                List.of("tr-r/r3#reply:0"),
-                replyIds(timeline),
+                "tr-r/r3#reply:0",
+                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a router's text is never shown to the user, so only the text the agent returned is a reply");
     }
 
     @Test
     void theAgentLoopsOwnTextIsAReply() {
-        String letMeCheck = "{\"role\":\"assistant\",\"content\":\"Let me check.\",\"tool_calls\":[{\"id\":\"c9\","
-                + "\"type\":\"function\",\"function\":{\"name\":\"expedite\",\"arguments\":\"{}\"}}]}";
+        String letMeCheck = calling("Let me check.", "c9", "expedite");
+        String asked = user("expedite 42");
+        String done = "Done: order 42 is expedited.";
         List<TimelineSpan> spans = List.of(
-                span("tr-g", "g1", "agent")
-                        .at(0, 500)
-                        .out("Done: order 42 is expedited.")
-                        .build(),
-                span("tr-g", "g2", "llm")
-                        .parent("g1")
-                        .at(10, 100)
-                        .in("[{\"role\":\"user\",\"content\":\"expedite 42\"}]")
-                        .out("[" + letMeCheck + "]")
-                        .build(),
-                span("tr-g", "g3", "tool").parent("g1").at(110, 200).build(),
-                span("tr-g", "g4", "llm")
-                        .parent("g1")
-                        .at(210, 490)
-                        .in("[{\"role\":\"user\",\"content\":\"expedite 42\"}," + letMeCheck
-                                + ",{\"role\":\"tool\",\"tool_call_id\":\"c9\",\"content\":\"ok\"}]")
-                        .out("Done: order 42 is expedited.")
-                        .build());
+                span("tr-g", "g1", "agent", null, 0, 500, null, done),
+                span("tr-g", "g2", "llm", "g1", 10, 100, list(asked), list(letMeCheck)),
+                span("tr-g", "g3", "tool", "g1", 110, 200, null, null),
+                span("tr-g", "g4", "llm", "g1", 210, 490, list(asked, letMeCheck, toolResult("c9", "ok")), done));
 
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of("tr-g/g2#reply:0", "tr-g/g4#reply:0"),
+                "tr-g/g2#reply:0 tr-g/g4#reply:0",
                 replyIds(timeline),
                 "treating the agent output as the only reply loses the first reply of the turn");
         assertEquals(
@@ -307,97 +139,53 @@ class SessionTimelineBuilderTest {
 
     @Test
     void theAgentLoopsOwnTextIsAReplyWhenTheNextCallStartsTheSameMillisecond() {
-        String letMeCheck = "{\"role\":\"assistant\",\"content\":\"Let me check.\",\"tool_calls\":[{\"id\":\"c9\","
-                + "\"type\":\"function\",\"function\":{\"name\":\"expedite\",\"arguments\":\"{}\"}}]}";
+        String letMeCheck = calling("Let me check.", "c9", "expedite");
+        String asked = user("expedite 42");
+        String done = "Done: order 42 is expedited.";
         List<TimelineSpan> spans = List.of(
-                span("tr-g", "g1", "agent")
-                        .at(0, 500)
-                        .out("Done: order 42 is expedited.")
-                        .build(),
-                span("tr-g", "g2", "llm")
-                        .parent("g1")
-                        .at(10, 100)
-                        .in("[{\"role\":\"user\",\"content\":\"expedite 42\"}]")
-                        .out("[" + letMeCheck + "]")
-                        .build(),
-                span("tr-g", "g4", "llm")
-                        .parent("g1")
-                        .at(100, 490)
-                        .in("[{\"role\":\"user\",\"content\":\"expedite 42\"}," + letMeCheck
-                                + ",{\"role\":\"tool\",\"tool_call_id\":\"c9\",\"content\":\"ok\"}]")
-                        .out("Done: order 42 is expedited.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-g", "g1", "agent", null, 0, 500, null, done),
+                span("tr-g", "g2", "llm", "g1", 10, 100, list(asked), list(letMeCheck)),
+                span("tr-g", "g4", "llm", "g1", 100, 490, list(asked, letMeCheck, toolResult("c9", "ok")), done));
 
         assertEquals(
-                List.of("tr-g/g2#reply:0", "tr-g/g4#reply:0"),
-                replyIds(timeline),
+                "tr-g/g2#reply:0 tr-g/g4#reply:0",
+                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a clock boundary drops a reply when the next model call starts in the millisecond the last one ended");
     }
 
     @Test
     void aSummaryThatRepeatsAnEarlierReplyIsNotAReply() {
-        String history = "{\"role\":\"user\",\"content\":\"where is my order 42?\"}," + R1;
         List<TimelineSpan> spans = List.of(
-                span("tr-m", "m1", "agent").at(0, 500).out("Yes, expedited.").build(),
-                span("tr-m", "m2", "llm")
-                        .parent("m1")
-                        .at(10, 100)
-                        .in("[" + history + ",{\"role\":\"user\",\"content\":\"summarise the chat\"}]")
-                        .out("Order 42 ships tomorrow.")
-                        .build(),
-                span("tr-m", "m3", "llm")
-                        .parent("m1")
-                        .at(110, 490)
-                        .in("[" + history + "," + EXPEDITE + "]")
-                        .out("Yes, expedited.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-m", "m1", "agent", null, 0, 500, null, "Yes, expedited."),
+                span("tr-m", "m2", "llm", "m1", 10, 100, list(Q1, R1, user("summarise the chat")), R1_TEXT),
+                span("tr-m", "m3", "llm", "m1", 110, 490, list(Q1, R1, EXPEDITE), "Yes, expedited."));
 
         assertEquals(
-                List.of("tr-m/m3#reply:0"),
-                replyIds(timeline),
+                "tr-m/m3#reply:0",
+                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a text a later call carries only as old history is counted as shown again");
     }
 
     @Test
     void aModelCallInsideAToolOfTheAgentIsNotThePersonsDialogue() {
-        String question = "{\"role\":\"user\",\"content\":\"what does my contract say about refunds?\"}";
+        String question = user("what does my contract say about refunds?");
         String answer = "Refunds within 30 days.";
+        String clause = user("Summarize the refund clause of this contract: ...");
+        String args = "{\"kwargs\":{\"question\":\"what does my contract say about refunds?\"}}";
+        String said = list(assistant(answer));
         List<TimelineSpan> spans = List.of(
-                span("T", "ag", "agent")
-                        .at(0, 100)
-                        .in("{\"kwargs\":{\"question\":\"what does my contract say about refunds?\"}}")
-                        .out("[{\"role\":\"assistant\",\"content\":\"" + answer + "\"}]")
-                        .build(),
-                span("T", "l1", "llm")
-                        .parent("ag")
-                        .at(1, 20)
-                        .in("[" + SYS + "," + question + "]")
-                        .out("[" + TC1 + "]")
-                        .build(),
-                span("T", "tool", "tool").parent("ag").at(21, 60).build(),
-                span("T", "l2", "llm")
-                        .parent("tool")
-                        .at(22, 59)
-                        .in("[{\"role\":\"user\",\"content\":\"Summarize the refund clause of this contract: ...\"}]")
-                        .out("[{\"role\":\"assistant\",\"content\":\"" + answer + "\"}]")
-                        .build(),
-                span("T", "l3", "llm")
-                        .parent("ag")
-                        .at(61, 99)
-                        .in("[" + SYS + "," + question + "," + TC1
-                                + ",{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"" + answer + "\"}]")
-                        .out("[{\"role\":\"assistant\",\"content\":\"" + answer + "\"}]")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("T", "ag", "agent", null, 0, 100, args, said),
+                span("T", "l1", "llm", "ag", 1, 20, list(SYS, question), list(TC1)),
+                span("T", "tool", "tool", "ag", 21, 60, null, null),
+                span("T", "l2", "llm", "tool", 22, 59, list(clause), said),
+                span("T", "l3", "llm", "ag", 61, 99, list(SYS, question, TC1, toolResult("c1", answer)), said));
 
         assertEquals(
-                List.of("T/l1#user:0 what does my contract say about refunds?", "T/l3#reply:0 " + answer),
-                messages(timeline),
+                """
+                T/l1#user:0 what does my contract say about refunds?
+                T/l3#reply:0 Refunds within 30 days.
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a model call a tool makes reads as the person's dialogue: its prompt becomes the person's message"
                         + " and its text takes the place of the reply the agent loop wrote");
     }
@@ -405,169 +193,102 @@ class SessionTimelineBuilderTest {
     @Test
     void aModelCallUnderAStepOfTheAgentIsThePersonsDialogue() {
         List<TimelineSpan> spans = List.of(
-                span("T", "ag", "agent").at(0, 100).out("Hello!").build(),
-                span("T", "st", "step").parent("ag").at(1, 99).build(),
-                span("T", "l1", "llm")
-                        .parent("st")
-                        .at(2, 98)
-                        .in("[" + SYS + ",{\"role\":\"user\",\"content\":\"hi\"}]")
-                        .out("Hello!")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("T", "ag", "agent", null, 0, 100, null, "Hello!"),
+                span("T", "st", "step", "ag", 1, 99, null, null),
+                span("T", "l1", "llm", "st", 2, 98, list(SYS, user("hi")), "Hello!"));
 
         assertEquals(
-                List.of("T/l1#user:0 hi", "T/l1#reply:0 Hello!"),
-                messages(timeline),
-                "a span of unknown kind (stored as step) that wraps the agent's model call hides the person's dialogue");
+                """
+                T/l1#user:0 hi
+                T/l1#reply:0 Hello!
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
+                "a span of unknown kind (stored as step) that wraps the agent's model call hides the person's"
+                        + " dialogue");
     }
 
     @Test
     void anAgentCalledAsAToolIsNotTheAgentThePersonTalksTo() {
+        String find = user("find a free table for 2 at 8pm");
+        String book = user("book a table");
+        String free = "Table 7 is free.";
+        String booked = "Booked table 7 for you.";
         List<TimelineSpan> spans = List.of(
-                span("T", "w", "workflow").at(0, 100).build(),
-                span("T", "l1", "llm")
-                        .parent("w")
-                        .at(1, 10)
-                        .in("[{\"role\":\"user\",\"content\":\"book a table\"}]")
-                        .out("[" + TC1 + "]")
-                        .build(),
-                span("T", "tool", "tool").parent("w").at(11, 80).build(),
-                span("T", "sub", "agent")
-                        .parent("tool")
-                        .at(12, 79)
-                        .in("[{\"role\":\"user\",\"content\":\"find a free table for 2 at 8pm\"}]")
-                        .out("Table 7 is free.")
-                        .build(),
-                span("T", "l2", "llm")
-                        .parent("sub")
-                        .at(13, 78)
-                        .in("[{\"role\":\"user\",\"content\":\"find a free table for 2 at 8pm\"}]")
-                        .out("Table 7 is free.")
-                        .build(),
-                span("T", "l3", "llm")
-                        .parent("w")
-                        .at(81, 99)
-                        .in("[{\"role\":\"user\",\"content\":\"book a table\"}," + TC1
-                                + ",{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"Table 7 is free.\"}]")
-                        .out("Booked table 7 for you.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("T", "w", "workflow", null, 0, 100, null, null),
+                span("T", "l1", "llm", "w", 1, 10, list(book), list(TC1)),
+                span("T", "tool", "tool", "w", 11, 80, null, null),
+                span("T", "sub", "agent", "tool", 12, 79, list(find), free),
+                span("T", "l2", "llm", "sub", 13, 78, list(find), free),
+                span("T", "l3", "llm", "w", 81, 99, list(book, TC1, toolResult("c1", free)), booked));
 
         assertEquals(
-                List.of("T/l1#user:0 book a table", "T/l3#reply:0 Booked table 7 for you."),
-                messages(timeline),
+                """
+                T/l1#user:0 book a table
+                T/l3#reply:0 Booked table 7 for you.
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "an agent a tool runs reads as the agent the person talks to: the model's request becomes the"
                         + " person's message and the tool's answer a reply");
     }
 
     @Test
     void aPromptCodeWritesToAModelCallOfTheAgentIsNotAUserMessage() {
-        String history = Q1 + "," + R1;
         List<TimelineSpan> spans = List.of(
-                span("tr-m", "m1", "agent")
-                        .at(0, 500)
-                        .in("[" + history + "," + EXPEDITE + "]")
-                        .out("Yes, expedited.")
-                        .build(),
-                span("tr-m", "m2", "llm")
-                        .parent("m1")
-                        .at(10, 100)
-                        .in("[" + history + ",{\"role\":\"user\",\"content\":\"summarise the chat\"}]")
-                        .out("Order 42 ships tomorrow.")
-                        .build(),
-                span("tr-m", "m3", "llm")
-                        .parent("m1")
-                        .at(110, 490)
-                        .in("[" + history + "," + EXPEDITE + "]")
-                        .out("Yes, expedited.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-m", "m1", "agent", null, 0, 500, list(Q1, R1, EXPEDITE), "Yes, expedited."),
+                span("tr-m", "m2", "llm", "m1", 10, 100, list(Q1, R1, user("summarise the chat")), R1_TEXT),
+                span("tr-m", "m3", "llm", "m1", 110, 490, list(Q1, R1, EXPEDITE), "Yes, expedited."));
 
         assertEquals(
-                List.of("tr-m/m1#user:0 can you expedite it?", "tr-m/m3#reply:0 Yes, expedited."),
-                messages(timeline),
+                """
+                tr-m/m1#user:0 can you expedite it?
+                tr-m/m3#reply:0 Yes, expedited.
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a memory summary's instruction under the user role reads as the person's message, though the agent"
                         + " input says what the person sent");
     }
 
     @Test
     void aMessageThePersonAddsWhileTheAgentRunsIsAUserMessage() {
-        String book = "{\"role\":\"user\",\"content\":\"book a table\"}";
-        String find = "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\","
-                + "\"type\":\"function\",\"function\":{\"name\":\"find\",\"arguments\":\"{}\"}}]}";
-        String found = "{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"free at 8\"}";
-        String four = "{\"role\":\"user\",\"content\":\"actually make it for 4 people\"}";
-        String reserve = "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c2\","
-                + "\"type\":\"function\",\"function\":{\"name\":\"reserve\",\"arguments\":\"{}\"}}]}";
-        String reserved = "{\"role\":\"tool\",\"tool_call_id\":\"c2\",\"content\":\"ok\"}";
+        String book = user("book a table");
+        String find = calling(null, "c1", "find");
+        String found = toolResult("c1", "free at 8");
+        String four = user("actually make it for 4 people");
+        String reserve = calling(null, "c2", "reserve");
+        String reserved = toolResult("c2", "ok");
+        String booked = "Booked for 4.";
         List<TimelineSpan> spans = List.of(
-                span("t1", "a", "agent")
-                        .at(0, 500)
-                        .in("[" + book + "]")
-                        .out("Booked for 4.")
-                        .build(),
-                span("t1", "l1", "llm")
-                        .parent("a")
-                        .at(10, 100)
-                        .in("[" + book + "]")
-                        .out("[" + find + "]")
-                        .build(),
-                span("t1", "x", "tool").parent("a").at(110, 200).build(),
-                span("t1", "l2", "llm")
-                        .parent("a")
-                        .at(210, 300)
-                        .in("[" + book + "," + find + "," + found + "," + four + "]")
-                        .out("[" + reserve + "]")
-                        .build(),
-                span("t1", "y", "tool").parent("a").at(310, 390).build(),
-                span("t1", "l3", "llm")
-                        .parent("a")
-                        .at(400, 490)
-                        .in("[" + book + "," + find + "," + found + "," + four + "," + reserve + "," + reserved + "]")
-                        .out("Booked for 4.")
-                        .build());
+                span("t1", "a", "agent", null, 0, 500, list(book), booked),
+                span("t1", "l1", "llm", "a", 10, 100, list(book), list(find)),
+                span("t1", "x", "tool", "a", 110, 200, null, null),
+                span("t1", "l2", "llm", "a", 210, 300, list(book, find, found, four), list(reserve)),
+                span("t1", "y", "tool", "a", 310, 390, null, null),
+                span("t1", "l3", "llm", "a", 400, 490, list(book, find, found, four, reserve, reserved), booked));
 
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of(
-                        "t1/a#user:0 book a table",
-                        "t1/l2#user:0 actually make it for 4 people",
-                        "t1/l3#reply:0 Booked for 4."),
+                """
+                t1/a#user:0 book a table
+                t1/l2#user:0 actually make it for 4 people
+                t1/l3#reply:0 Booked for 4.
+                """,
                 messages(timeline),
                 "the agent input is taken as the only source of the turn's user messages, so the person's message"
                         + " that only a later call holds is dropped");
-        assertEquals(
-                List.of(
-                        "t1/a#user:0",
-                        "t1/l1",
-                        "t1/x",
-                        "t1/l2#user:0",
-                        "t1/l2",
-                        "t1/y",
-                        "t1/l3",
-                        "t1/l3#reply:0",
-                        "t1/a"),
-                timeline.events().stream().map(Event::id).toList());
+        assertEquals("t1/a#user:0 t1/l1 t1/x t1/l2#user:0 t1/l2 t1/y t1/l3 t1/l3#reply:0 t1/a", ids(timeline));
     }
 
     @Test
     void anAppWithoutAgentSpansRepliesFromEachTextCall() {
-        String toolCallOnly = "[{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\","
-                + "\"type\":\"function\",\"function\":{\"name\":\"x\",\"arguments\":\"{}\"}}]}]";
         List<TimelineSpan> spans = List.of(
-                span("tr-l", "l1", "llm").at(0, 10).out("A").build(),
-                span("tr-l", "l2", "llm").at(20, 30).out(toolCallOnly).build(),
-                span("tr-l", "l3", "llm").at(40, 50).out("B").build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-l", "l1", "llm", null, 0, 10, null, "A"),
+                span("tr-l", "l2", "llm", null, 20, 30, null, list(calling(null, "c1", "x"))),
+                span("tr-l", "l3", "llm", null, 40, 50, null, "B"));
 
         assertEquals(
-                List.of("tr-l/l1#reply:0", "tr-l/l3#reply:0"),
-                replyIds(timeline),
+                "tr-l/l1#reply:0 tr-l/l3#reply:0",
+                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a tool-call-only output is not a reply, and an app with no agent span still has replies");
     }
 
@@ -578,23 +299,13 @@ class SessionTimelineBuilderTest {
     @Test
     void aRetrievalTheQuestionCausedComesAfterTheQuestion() {
         List<TimelineSpan> spans = List.of(
-                span("tr-1", "w", "workflow")
-                        .at(0, 400)
-                        .in("{\"question\":\"what is the refund policy?\"}")
-                        .build(),
-                span("tr-1", "r", "retrieval").parent("w").at(10, 100).build(),
-                span("tr-1", "l", "llm")
-                        .parent("w")
-                        .at(150, 300)
-                        .in("[" + SYS + ",{\"role\":\"user\",\"content\":\"what is the refund policy?\"}]")
-                        .out("Refunds take 5 days.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-1", "w", "workflow", null, 0, 400, "{\"question\":\"what is the refund policy?\"}", null),
+                span("tr-1", "r", "retrieval", "w", 10, 100, null, null),
+                span("tr-1", "l", "llm", "w", 150, 300, list(SYS, user("what is the refund policy?")), REFUNDS));
 
         assertEquals(
                 List.of("tr-1/l#user:0 0", "tr-1/r 100", "tr-1/l 300", "tr-1/l#reply:0 300", "tr-1/w 400"),
-                idsAndMillis(timeline),
+                idsAndMillis(SessionTimelineBuilder.build("p1", "s", spans)),
                 "the question is placed at the start of the turn that received it, before the work it caused");
     }
 
@@ -602,20 +313,13 @@ class SessionTimelineBuilderTest {
     @Test
     void aGuardrailBeforeTheFirstModelCallComesAfterTheMessage() {
         List<TimelineSpan> spans = List.of(
-                span("tr-2", "w", "workflow").at(0, 300).build(),
-                span("tr-2", "g", "guardrail").parent("w").at(5, 40).build(),
-                span("tr-2", "l", "llm")
-                        .parent("w")
-                        .at(50, 250)
-                        .in("[{\"role\":\"user\",\"content\":\"hi\"}]")
-                        .out("Hello.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-2", "w", "workflow", null, 0, 300, null, null),
+                span("tr-2", "g", "guardrail", "w", 5, 40, null, null),
+                span("tr-2", "l", "llm", "w", 50, 250, list(user("hi")), "Hello."));
 
         assertEquals(
                 List.of("tr-2/l#user:0 0", "tr-2/g 40", "tr-2/l 250", "tr-2/l#reply:0 250", "tr-2/w 300"),
-                idsAndMillis(timeline),
+                idsAndMillis(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a guardrail that checks the message comes after it");
     }
 
@@ -625,25 +329,15 @@ class SessionTimelineBuilderTest {
      */
     @Test
     void aRetrievalUnderAnAgentWithCallArgumentsComesAfterTheMessage() {
+        String question = "{\"input\":\"what is the refund policy?\"}";
         List<TimelineSpan> spans = List.of(
-                span("tr-3", "a", "agent")
-                        .at(0, 500)
-                        .in("{\"input\":\"what is the refund policy?\"}")
-                        .out("{\"result\":\"done\"}")
-                        .build(),
-                span("tr-3", "r", "retrieval").parent("a").at(10, 60).build(),
-                span("tr-3", "l", "llm")
-                        .parent("a")
-                        .at(70, 400)
-                        .in("[{\"role\":\"user\",\"content\":\"what is the refund policy?\"}]")
-                        .out("Refunds take 5 days.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-3", "a", "agent", null, 0, 500, question, "{\"result\":\"done\"}"),
+                span("tr-3", "r", "retrieval", "a", 10, 60, null, null),
+                span("tr-3", "l", "llm", "a", 70, 400, list(user("what is the refund policy?")), REFUNDS));
 
         assertEquals(
                 List.of("tr-3/l#user:0 0", "tr-3/r 60", "tr-3/l 400", "tr-3/l#reply:0 400", "tr-3/a 500"),
-                idsAndMillis(timeline),
+                idsAndMillis(SessionTimelineBuilder.build("p1", "s", spans)),
                 "the message is placed at the start of the agent span that holds the model call carrying it");
     }
 
@@ -654,19 +348,12 @@ class SessionTimelineBuilderTest {
     @Test
     void aToolThatTakesAndReturnsTextKeepsItsInputAndOutput() {
         List<TimelineSpan> spans = List.of(
-                span("tr-t", "t1", "tool")
-                        .at(0, 20)
-                        .in("friday")
-                        .out("free at 8")
+                rich("tr-t", "t1", "tool", null, 0, 20, "friday", "free at 8")
                         .tool("find_slot", null, null)
                         .build(),
-                span("tr-t", "t2", "tool")
-                        .at(30, 40)
-                        .out("ok")
+                rich("tr-t", "t2", "tool", null, 30, 40, null, "ok")
                         .tool("book", "{\"day\":\"fri\"}", null)
                         .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
                 List.of(
@@ -674,51 +361,31 @@ class SessionTimelineBuilderTest {
                                 + "\"input\":\"friday\",\"output\":\"free at 8\"}"),
                         json("{\"name\":\"book\",\"mcp\":false,\"status\":null,\"error_type\":null,"
                                 + "\"input\":{\"day\":\"fri\"},\"output\":\"ok\"}")),
-                data(timeline),
+                data(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a tool's text input or result is in its event");
     }
 
     @Test
     void anOpenSpanGivesItsUserMessageButNoEventOrReply() {
-        List<TimelineSpan> spans = List.of(span("tr-o", "o1", "llm")
-                .at(0, null)
-                .in("[{\"role\":\"user\",\"content\":\"hello\"}]")
-                .out("[{\"role\":\"assistant\",\"content\":\"hi\"}]")
-                .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+        List<TimelineSpan> spans =
+                List.of(span("tr-o", "o1", "llm", null, 0, null, list(user("hello")), list(assistant("hi"))));
 
         assertEquals(
-                List.of(new Row(
-                        "tr-o/o1#user:0",
-                        "user_message",
-                        0,
-                        at(0),
-                        1,
-                        "o1",
-                        "llm",
-                        List.of("llm"),
-                        null,
-                        "tr-o",
-                        null)),
-                rows(timeline),
+                table("tr-o/o1#user:0 user_message 0 0 1 o1 llm llm - tr-o -"),
+                rows(SessionTimelineBuilder.build("p1", "s", spans)),
                 "an incomplete span is judged, or the user message is lost while the span runs");
     }
 
     @Test
     void aDetachedSubAgentTraceHasNoMessagesOfThePerson() {
-        List<TimelineSpan> spans = List.of(span("tr-d", "d1", "agent")
-                .parentTrace("tr-parent")
-                .at(0, 100)
-                .in("[{\"role\":\"user\",\"content\":\"summarise the ticket\"}]")
-                .out("summary")
-                .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+        List<TimelineSpan> spans =
+                List.of(rich("tr-d", "d1", "agent", null, 0, 100, list(user("summarise the ticket")), "summary")
+                        .parentTrace("tr-parent")
+                        .build());
 
         assertEquals(
-                List.of(new Row("tr-d/d1", "agent", 0, at(100), 0, null, null, List.of(), null, "tr-d", null)),
-                rows(timeline),
+                table("tr-d/d1 agent 0 100 0 - - - - tr-d -"),
+                rows(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a message a model wrote to a detached sub-agent is counted as the person's");
     }
 
@@ -726,12 +393,10 @@ class SessionTimelineBuilderTest {
     void aToolResultSentUnderTheUserRoleIsNotAUserMessage() {
         String toolResult =
                 "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"ok\"}]}";
-        List<TimelineSpan> spans = List.of(span("tr-k", "k1", "llm")
-                .at(0, 100)
-                .in(
-                        "[{\"role\":\"user\",\"content\":\"q\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\","
-                                + "\"id\":\"t1\",\"name\":\"x\",\"input\":{}}]}," + toolResult + "]")
-                .build());
+        String toolUse =
+                "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"x\",\"input\":{}}]}";
+        List<TimelineSpan> spans =
+                List.of(span("tr-k", "k1", "llm", null, 0, 100, list(user("q"), toolUse, toolResult), null));
 
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
@@ -739,30 +404,25 @@ class SessionTimelineBuilderTest {
                 List.of("llm"),
                 timeline.events().stream().map(Event::kind).toList(),
                 "an Anthropic tool result is counted as the person's words");
-        assertEquals(json("[" + toolResult + "]"), data(timeline).get(0).get("new_messages"));
+        assertEquals(json(list(toolResult)), data(timeline).get(0).get("new_messages"));
     }
 
     @Test
     void anOrphanSpanIsARootOfItsOwn() {
-        List<TimelineSpan> spans =
-                List.of(span("tr-x", "x1", "llm").parent("missing").at(0, 100).build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+        List<TimelineSpan> spans = List.of(span("tr-x", "x1", "llm", "missing", 0, 100, null, null));
 
         assertEquals(
-                List.of(new Row("tr-x/x1", "llm", 0, at(100), 0, "missing", null, List.of(), null, "tr-x", null)),
-                rows(timeline),
+                table("tr-x/x1 llm 0 100 0 missing - - - tr-x -"),
+                rows(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a span whose parent never arrived crashes the builder or gets a wrong depth");
     }
 
     @Test
     void aKindTheBuilderDoesNotKnowPassesThrough() {
-        List<TimelineSpan> spans =
-                List.of(span("tr-n", "n1", "reranker").at(0, 100).build());
+        List<TimelineSpan> spans = List.of(span("tr-n", "n1", "reranker", null, 0, 100, null, null));
 
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+        Event event = SessionTimelineBuilder.build("p1", "s", spans).events().get(0);
 
-        Event event = timeline.events().get(0);
         assertEquals("reranker", event.kind(), "a new canonical kind is dropped or renamed");
         List<String> keys = new ArrayList<>();
         event.data().fieldNames().forEachRemaining(keys::add);
@@ -778,18 +438,13 @@ class SessionTimelineBuilderTest {
         SessionTimeline two = full.tail(b12 + b13);
         SessionTimeline one = full.tail(b12 + b13 - 1);
 
-        assertEquals(
-                List.of("tr-b/b1", "tr-b/b1#reply:0"),
-                two.events().stream().map(Event::id).toList());
+        assertEquals("tr-b/b1 tr-b/b1#reply:0", ids(two));
         assertEquals(
                 List.of(0, 1),
                 two.events().stream().map(Event::position).toList(),
                 "a tail that keeps the old positions");
         assertEquals(true, two.truncated());
-        assertEquals(
-                List.of("tr-b/b1#reply:0"),
-                one.events().stream().map(Event::id).toList(),
-                "a tail that cuts from the wrong end");
+        assertEquals("tr-b/b1#reply:0", ids(one), "a tail that cuts from the wrong end");
         assertEquals(full, full.tail(full.bytes()), "a tail that fits the whole timeline is the timeline");
         assertEquals(false, full.truncated());
     }
@@ -797,67 +452,42 @@ class SessionTimelineBuilderTest {
     @Test
     void twoTracesThatReuseASpanIdGiveDistinctEventIds() {
         List<TimelineSpan> spans = List.of(
-                span("tr-1", "s1", "llm")
-                        .at(0, 100)
-                        .in("[{\"role\":\"user\",\"content\":\"hi\"}]")
-                        .out("hello")
-                        .build(),
-                span("tr-2", "s1", "llm")
-                        .at(200, 300)
-                        .in("[{\"role\":\"user\",\"content\":\"bye\"}]")
-                        .out("goodbye")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("tr-1", "s1", "llm", null, 0, 100, list(user("hi")), "hello"),
+                span("tr-2", "s1", "llm", null, 200, 300, list(user("bye")), "goodbye"));
 
         assertEquals(
-                List.of("tr-1/s1#user:0", "tr-1/s1", "tr-1/s1#reply:0", "tr-2/s1#user:0", "tr-2/s1", "tr-2/s1#reply:0"),
-                timeline.events().stream().map(Event::id).toList(),
+                "tr-1/s1#user:0 tr-1/s1 tr-1/s1#reply:0 tr-2/s1#user:0 tr-2/s1 tr-2/s1#reply:0",
+                ids(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a span id is unique only inside its trace, so a bare span id gives two events one id");
     }
 
     @Test
     void aPlainStringInputIsOneUserMessage() {
-        List<TimelineSpan> spans = List.of(
-                span("tr-p", "p1", "llm").at(0, 100).in("the export is empty").build());
+        List<TimelineSpan> spans = List.of(span("tr-p", "p1", "llm", null, 0, 100, "the export is empty", null));
 
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of("tr-p/p1#user:0", "tr-p/p1"),
-                timeline.events().stream().map(Event::id).toList(),
+                "tr-p/p1#user:0 tr-p/p1",
+                ids(timeline),
                 "a producer that sends a plain string loses the person's message");
         assertEquals(
                 json("{\"text\":\"the export is empty\",\"from_person\":true}"),
                 data(timeline).get(0));
         assertEquals(
-                json("[{\"role\":\"user\",\"content\":\"the export is empty\"}]"),
-                data(timeline).get(1).get("new_messages"));
+                json(list(user("the export is empty"))), data(timeline).get(1).get("new_messages"));
     }
 
     @Test
     void aLongAgentLoopReadsEachInputOnce() {
         int calls = 400;
         List<TimelineSpan> spans = new ArrayList<>();
-        spans.add(span("tr-c", "c", "agent").at(0, calls * 10 + 5).out("Done.").build());
-        StringBuilder history = new StringBuilder("{\"role\":\"user\",\"content\":\"fix the build\"}");
+        spans.add(span("tr-c", "c", "agent", null, 0, calls * 10 + 5, null, "Done."));
+        StringBuilder history = new StringBuilder(user("fix the build"));
         for (int i = 0; i < calls; i++) {
-            String step =
-                    "{\"role\":\"assistant\",\"content\":\"Step " + i + ": checking.\",\"tool_calls\":[{\"id\":\"c" + i
-                            + "\",\"type\":\"function\",\"function\":{\"name\":\"run\",\"arguments\":\"{}\"}}]}";
-            spans.add(span("tr-c", "l" + i, "llm")
-                    .parent("c")
-                    .at(i * 10L, i * 10 + 9)
-                    .in("[" + history + "]")
-                    .out("[" + step + "]")
-                    .build());
-            history.append(',')
-                    .append(step)
-                    .append(",{\"role\":\"tool\",\"tool_call_id\":\"c")
-                    .append(i)
-                    .append("\",\"content\":\"")
-                    .append("x".repeat(200))
-                    .append("\"}");
+            String step = calling("Step " + i + ": checking.", "c" + i, "run");
+            spans.add(span("tr-c", "l" + i, "llm", "c", i * 10L, i * 10 + 9, list(history.toString()), list(step)));
+            history.append(',').append(step).append(',').append(toolResult("c" + i, "x".repeat(200)));
         }
 
         SessionTimeline timeline = assertTimeoutPreemptively(
@@ -865,57 +495,38 @@ class SessionTimelineBuilderTest {
                 () -> SessionTimelineBuilder.build("p1", "s", spans),
                 "each text of each call parses every input of the trace again, so a long loop takes minutes");
 
-        assertEquals(calls, replyIds(timeline).size(), "every step the next call received, and the agent's answer");
+        assertEquals(
+                calls,
+                replyIds(timeline).split(" ").length,
+                "every step the next call received, and the agent's answer");
     }
 
     @Test
     void anAgentPayloadThatIsNotAMessageListGivesNoMessage() {
+        String args = "{\"args\":[],\"kwargs\":{\"question\":\"where is order 42\"}}";
         List<TimelineSpan> spans = List.of(
-                span("T", "a1", "agent")
-                        .at(0, 500)
-                        .in("{\"args\":[],\"kwargs\":{\"question\":\"where is order 42\"}}")
-                        .out("{\"answer\":\"Order 42 ships tomorrow.\"}")
-                        .build(),
-                span("T", "l1", "llm")
-                        .parent("a1")
-                        .at(10, 400)
-                        .in("[" + SYS + ",{\"role\":\"user\",\"content\":\"where is order 42\"}]")
-                        .out("[{\"role\":\"assistant\",\"content\":\"Order 42 ships tomorrow.\"}]")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("T", "a1", "agent", null, 0, 500, args, "{\"answer\":\"Order 42 ships tomorrow.\"}"),
+                span("T", "l1", "llm", "a1", 10, 400, list(SYS, user("where is order 42")), list(R1)));
 
         assertEquals(
-                List.of("T/l1#user:0 where is order 42", "T/l1#reply:0 Order 42 ships tomorrow."),
-                messages(timeline),
+                """
+                T/l1#user:0 where is order 42
+                T/l1#reply:0 Order 42 ships tomorrow.
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "the agent's call arguments read as the person's message and its return object as the reply");
     }
 
     @Test
     void aTraceWhoseTopAgentHasNotArrivedGivesNoMessageUntilItDoes() {
-        String where = "{\"role\":\"user\",\"content\":\"where is order 42\"}";
-        TimelineSpan a1 =
-                span("T", "a1", "agent").at(0, 1000).in("[" + where + "]").build();
-        TimelineSpan l1 = span("T", "l1", "llm")
-                .parent("a1")
-                .at(100, 190)
-                .in("[" + SYS + "," + where + "]")
-                .out("[" + TC1 + "]")
-                .build();
-        TimelineSpan s1 = span("T", "s1", "agent").parent("a1").at(200, 600).build();
-        TimelineSpan l2 = span("T", "l2", "llm")
-                .parent("s1")
-                .at(250, 550)
-                .in("[{\"role\":\"user\",\"content\":\"find shipping docs for order 42\"}]")
-                .out("internal: carrier is DHL")
-                .build();
-        TimelineSpan l3 = span("T", "l3", "llm")
-                .parent("a1")
-                .at(700, 950)
-                .in("[" + SYS + "," + where + "," + TC1
-                        + ",{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"DHL\"}]")
-                .out("Order 42 ships via DHL tomorrow.")
-                .build();
+        String where = user("where is order 42");
+        TimelineSpan a1 = span("T", "a1", "agent", null, 0, 1000, list(where), null);
+        TimelineSpan l1 = span("T", "l1", "llm", "a1", 100, 190, list(SYS, where), list(TC1));
+        TimelineSpan s1 = span("T", "s1", "agent", "a1", 200, 600, null, null);
+        String docs = list(user("find shipping docs for order 42"));
+        String dhl = "Order 42 ships via DHL tomorrow.";
+        TimelineSpan l2 = span("T", "l2", "llm", "s1", 250, 550, docs, "internal: carrier is DHL");
+        TimelineSpan l3 = span("T", "l3", "llm", "a1", 700, 950, list(SYS, where, TC1, toolResult("c1", "DHL")), dhl);
 
         SessionTimeline inFlight = SessionTimelineBuilder.assemble(
                 "p1", "s", SessionTimelineBuilder.derive(List.of(l1, s1, l2, l3), false), false);
@@ -923,349 +534,213 @@ class SessionTimelineBuilderTest {
                 "p1", "s", SessionTimelineBuilder.derive(List.of(l1, s1, l2, l3, a1), false), false);
 
         assertEquals(
-                List.of("T/l1", "T/l2", "T/s1", "T/l3"),
-                inFlight.events().stream().map(Event::id).toList(),
+                "T/l1 T/l2 T/s1 T/l3",
+                ids(inFlight),
                 "a sub-agent whose top agent is not loaded yet reads as the agent the person talks to");
-        assertEquals(
-                List.of("T/a1#user:0 where is order 42", "T/l3#reply:0 Order 42 ships via DHL tomorrow."),
-                messages(arrived));
+        assertEquals("""
+            T/a1#user:0 where is order 42
+            T/l3#reply:0 Order 42 ships via DHL tomorrow.
+            """, messages(arrived));
     }
 
     @Test
     void aSettledTraceWhoseRootIsNotStoredStillHasItsMessages() {
-        List<TimelineSpan> spans = List.of(span("tr-x", "x1", "llm")
-                .parent("upstream")
-                .at(0, 100)
-                .in("[{\"role\":\"user\",\"content\":\"hi\"}]")
-                .out("hello")
-                .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+        List<TimelineSpan> spans = List.of(span("tr-x", "x1", "llm", "upstream", 0, 100, list(user("hi")), "hello"));
 
         assertEquals(
-                List.of("tr-x/x1#user:0 hi", "tr-x/x1#reply:0 hello"),
-                messages(timeline),
+                """
+                tr-x/x1#user:0 hi
+                tr-x/x1#reply:0 hello
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a turn whose parent span lives in a service that does not export loses the person's words");
     }
 
     @Test
     void theAgentOutputsHistoryIsNotANewReply() {
-        String q1 = "{\"role\":\"user\",\"content\":\"where is order 42?\"}";
-        String r1 = "{\"role\":\"assistant\",\"content\":\"It ships tomorrow.\"}";
-        String q2 = "{\"role\":\"user\",\"content\":\"thanks, expedite it\"}";
-        String r2 = "{\"role\":\"assistant\",\"content\":\"Done.\"}";
+        String q1 = user("where is order 42?");
+        String r1 = assistant("It ships tomorrow.");
+        String q2 = user("thanks, expedite it");
         List<TimelineSpan> spans = List.of(
-                span("t1", "a1", "agent")
-                        .at(0, 100)
-                        .in("[" + q1 + "]")
-                        .out("[" + q1 + "," + r1 + "]")
-                        .build(),
-                span("t2", "b1", "agent")
-                        .at(200, 300)
-                        .in("[" + q1 + "," + r1 + "," + q2 + "]")
-                        .out("[" + q1 + "," + r1 + "," + q2 + "," + r2 + "]")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("t1", "a1", "agent", null, 0, 100, list(q1), list(q1, r1)),
+                span("t2", "b1", "agent", null, 200, 300, list(q1, r1, q2), list(q1, r1, q2, assistant("Done."))));
 
         assertEquals(
-                List.of(
-                        "t1/a1#user:0 where is order 42?",
-                        "t1/a1#reply:0 It ships tomorrow.",
-                        "t2/b1#user:0 thanks, expedite it",
-                        "t2/b1#reply:0 Done."),
-                messages(timeline),
+                """
+                t1/a1#user:0 where is order 42?
+                t1/a1#reply:0 It ships tomorrow.
+                t2/b1#user:0 thanks, expedite it
+                t2/b1#reply:0 Done.
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "an agent that returns the whole chat gives the last turn's reply again in this turn");
     }
 
     @Test
     void anLlmOutputThatHoldsTheWholeChatKeepsOnlyThisCallsOutput() {
-        String toolResult = "{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"ships tomorrow\"}";
-        String done = "{\"role\":\"assistant\",\"content\":\"Done.\"}";
-        String history = Q1 + "," + TC1 + "," + toolResult + "," + R1 + "," + EXPEDITE;
-        List<TimelineSpan> spans = List.of(span("t2", "l1", "llm")
-                .at(0, 100)
-                .in("[" + history + "]")
-                .out("[" + history + "," + done + "]")
-                .build());
+        String history = String.join(",", Q1, TC1, toolResult("c1", "ships tomorrow"), R1, EXPEDITE);
+        List<TimelineSpan> spans =
+                List.of(span("t2", "l1", "llm", null, 0, 100, list(history), list(history, assistant("Done."))));
 
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
-        Event llm = timeline.events().stream()
-                .filter(e -> e.kind().equals("llm"))
-                .findFirst()
-                .orElseThrow();
         assertEquals(
                 json("{\"text\":\"Done.\",\"tool_calls\":[],\"reasoning\":null}"),
-                json(llm.data().get("output").toString()),
+                llmOutput(timeline),
                 "an output that holds the whole chat gives the llm event the replies and tool calls of earlier turns");
-        assertEquals(List.of("t2/l1#user:0 can you expedite it?", "t2/l1#reply:0 Done."), messages(timeline));
+        assertEquals("""
+            t2/l1#user:0 can you expedite it?
+            t2/l1#reply:0 Done.
+            """, messages(timeline));
     }
 
     @Test
     void anLlmEventsOutputCarriesItsReasoningAndPartFormToolCalls() {
         String toolUse = "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"lookup_order\",\"input\":{\"id\":42}}";
-        List<TimelineSpan> spans = List.of(span("T", "l1", "llm")
-                .at(0, 100)
-                .in("[" + Q1 + "]")
-                .out("[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"text\":\"look it up\"},"
-                        + "{\"type\":\"text\",\"text\":\"Let me check.\"}," + toolUse + "]}]")
-                .build());
+        String parts = "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"text\":\"look it up\"},"
+                + "{\"type\":\"text\",\"text\":\"Let me check.\"}," + toolUse + "]}";
+        List<TimelineSpan> spans = List.of(span("T", "l1", "llm", null, 0, 100, list(Q1), list(parts)));
 
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
-
-        Event llm = timeline.events().stream()
-                .filter(e -> e.kind().equals("llm"))
-                .findFirst()
-                .orElseThrow();
         assertEquals(
                 json("{\"text\":\"Let me check.\",\"tool_calls\":[" + toolUse + "],\"reasoning\":\"look it up\"}"),
-                json(llm.data().get("output").toString()),
+                llmOutput(SessionTimelineBuilder.build("p1", "s", spans)),
                 "an Anthropic call's reasoning or tool_use part is missing from the llm event's output");
     }
 
     @Test
     void theAgentLoopsRepeatedTextIsTwoReplies() {
-        String u = "{\"role\":\"user\",\"content\":\"expedite 42\"}";
-        String first = "{\"role\":\"assistant\",\"content\":\"Let me check.\",\"tool_calls\":[{\"id\":\"c1\","
-                + "\"type\":\"function\",\"function\":{\"name\":\"expedite\",\"arguments\":\"{}\"}}]}";
-        String second = "{\"role\":\"assistant\",\"content\":\"Let me check.\",\"tool_calls\":[{\"id\":\"c2\","
-                + "\"type\":\"function\",\"function\":{\"name\":\"status\",\"arguments\":\"{}\"}}]}";
-        String t1 = "{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"queued\"}";
-        String t2 = "{\"role\":\"tool\",\"tool_call_id\":\"c2\",\"content\":\"done\"}";
+        String u = user("expedite 42");
+        String first = calling("Let me check.", "c1", "expedite");
+        String second = calling("Let me check.", "c2", "status");
+        String t1 = toolResult("c1", "queued");
         List<TimelineSpan> spans = List.of(
-                span("t", "g1", "agent").at(0, 500).out("Done.").build(),
-                span("t", "g2", "llm")
-                        .parent("g1")
-                        .at(10, 100)
-                        .in("[" + u + "]")
-                        .out("[" + first + "]")
-                        .build(),
-                span("t", "g4", "llm")
-                        .parent("g1")
-                        .at(200, 300)
-                        .in("[" + u + "," + first + "," + t1 + "]")
-                        .out("[" + second + "]")
-                        .build(),
-                span("t", "g6", "llm")
-                        .parent("g1")
-                        .at(400, 490)
-                        .in("[" + u + "," + first + "," + t1 + "," + second + "," + t2 + "]")
-                        .out("Done.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("t", "g1", "agent", null, 0, 500, null, "Done."),
+                span("t", "g2", "llm", "g1", 10, 100, list(u), list(first)),
+                span("t", "g4", "llm", "g1", 200, 300, list(u, first, t1), list(second)),
+                span("t", "g6", "llm", "g1", 400, 490, list(u, first, t1, second, toolResult("c2", "done")), "Done."));
 
         assertEquals(
-                List.of("t/g2#reply:0", "t/g4#reply:0", "t/g6#reply:0"),
-                replyIds(timeline),
+                "t/g2#reply:0 t/g4#reply:0 t/g6#reply:0",
+                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a second message with the same text is taken for the first one");
     }
 
     @Test
     void aPersonWhoSaysTheSameWordsTwiceInOneTurnGivesTwoMessages() {
-        String yes = "{\"role\":\"user\",\"content\":\"yes\"}";
-        String ask = "{\"role\":\"assistant\",\"content\":\"Delete all 3 files, ok?\"}";
+        String yes = user("yes");
+        String ask = assistant("Delete all 3 files, ok?");
         List<TimelineSpan> spans = List.of(
-                span("T", "l1", "llm")
-                        .at(0, 100)
-                        .in("[" + SYS + "," + yes + "]")
-                        .out("[" + ask + "]")
-                        .build(),
-                span("T", "l2", "llm")
-                        .at(200, 300)
-                        .in("[" + SYS + "," + yes + "," + ask + "," + yes + "]")
-                        .out("Deleted.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("T", "l1", "llm", null, 0, 100, list(SYS, yes), list(ask)),
+                span("T", "l2", "llm", null, 200, 300, list(SYS, yes, ask, yes), "Deleted."));
 
         assertEquals(
-                List.of(
-                        "T/l1#user:0 yes",
-                        "T/l1#reply:0 Delete all 3 files, ok?",
-                        "T/l2#user:0 yes",
-                        "T/l2#reply:0 Deleted."),
-                messages(timeline),
-                "an answer the person gave after a reply of this turn is dropped because an earlier message had its text");
+                """
+                T/l1#user:0 yes
+                T/l1#reply:0 Delete all 3 files, ok?
+                T/l2#user:0 yes
+                T/l2#reply:0 Deleted.
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
+                "an answer the person gave after a reply of this turn is dropped because an earlier message had its"
+                        + " text");
     }
 
     @Test
     void aPersonWhoRepeatsTheOpeningWordsWhileTheAgentRunsGivesTwoMessages() {
-        String yes = "{\"role\":\"user\",\"content\":\"yes\"}";
-        String ask = "{\"role\":\"assistant\",\"content\":\"Delete all 3 files, ok?\"}";
+        String yes = user("yes");
+        String ask = assistant("Delete all 3 files, ok?");
         List<TimelineSpan> spans = List.of(
-                span("T3", "a", "agent")
-                        .at(0, 500)
-                        .in("[" + yes + "]")
-                        .out("Deleted.")
-                        .build(),
-                span("T3", "l1", "llm")
-                        .parent("a")
-                        .at(10, 100)
-                        .in("[" + yes + "]")
-                        .out("[" + ask + "]")
-                        .build(),
-                span("T3", "l2", "llm")
-                        .parent("a")
-                        .at(200, 490)
-                        .in("[" + yes + "," + ask + "," + yes + "]")
-                        .out("Deleted.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("T3", "a", "agent", null, 0, 500, list(yes), "Deleted."),
+                span("T3", "l1", "llm", "a", 10, 100, list(yes), list(ask)),
+                span("T3", "l2", "llm", "a", 200, 490, list(yes, ask, yes), "Deleted."));
 
         assertEquals(
-                List.of(
-                        "T3/a#user:0 yes",
-                        "T3/l1#reply:0 Delete all 3 files, ok?",
-                        "T3/l2#user:0 yes",
-                        "T3/l2#reply:0 Deleted."),
-                messages(timeline),
+                """
+                T3/a#user:0 yes
+                T3/l1#reply:0 Delete all 3 files, ok?
+                T3/l2#user:0 yes
+                T3/l2#reply:0 Deleted.
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "the person's second yes is taken for the agent's opening message, so the answer to the question is"
                         + " dropped");
     }
 
     @Test
     void anAgentThatCarriesOnlyTheNewMessageDoesNotCountItTwice() {
-        String yes = "{\"role\":\"user\",\"content\":\"yes\"}";
-        String sure = "{\"role\":\"assistant\",\"content\":\"Sure?\"}";
+        String yes = user("yes");
         List<TimelineSpan> spans = List.of(
-                span("T2", "b1", "agent")
-                        .at(0, 500)
-                        .in("[" + yes + "]")
-                        .out("Done.")
-                        .build(),
-                span("T2", "b2", "llm")
-                        .parent("b1")
-                        .at(10, 490)
-                        .in("[" + SYS + "," + yes + "," + sure + "," + yes + "]")
-                        .out("Done.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("T2", "b1", "agent", null, 0, 500, list(yes), "Done."),
+                span("T2", "b2", "llm", "b1", 10, 490, list(SYS, yes, assistant("Sure?"), yes), "Done."));
 
         assertEquals(
-                List.of("T2/b1#user:0 yes", "T2/b2#reply:0 Done."),
-                messages(timeline),
+                """
+                T2/b1#user:0 yes
+                T2/b2#reply:0 Done.
+                """,
+                messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "the history of an earlier turn makes the model call's copy of the message a second message");
     }
 
     @Test
     void aTurnThatStartsWhenThePreviousEndsComesAfterIt() {
-        String q1 = "{\"role\":\"user\",\"content\":\"where is order 42?\"}";
-        String r1 = "{\"role\":\"assistant\",\"content\":\"It ships tomorrow.\"}";
-        String q2 = "{\"role\":\"user\",\"content\":\"expedite it\"}";
+        String q1 = user("where is order 42?");
+        String r1 = assistant("It ships tomorrow.");
         List<TimelineSpan> spans = List.of(
-                span("t1", "a1", "agent")
-                        .at(0, 100)
-                        .in("[" + q1 + "]")
-                        .out("[" + r1 + "]")
-                        .build(),
-                span("t2", "b1", "agent")
-                        .at(100, 300)
-                        .in("[" + q1 + "," + r1 + "," + q2 + "]")
-                        .out("Done.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("t1", "a1", "agent", null, 0, 100, list(q1), list(r1)),
+                span("t2", "b1", "agent", null, 100, 300, list(q1, r1, user("expedite it")), "Done."));
 
         assertEquals(
-                List.of("t1/a1#user:0", "t1/a1", "t1/a1#reply:0", "t2/b1#user:0", "t2/b1", "t2/b1#reply:0"),
-                timeline.events().stream().map(Event::id).toList(),
+                "t1/a1#user:0 t1/a1 t1/a1#reply:0 t2/b1#user:0 t2/b1 t2/b1#reply:0",
+                ids(SessionTimelineBuilder.build("p1", "s", spans)),
                 "the next turn's message, one level deeper, sorts before the turn that ended in its instant");
     }
 
     @Test
     void aTurnOfTheSameTraceThatStartsWhenThePreviousEndsComesAfterIt() {
-        String hi = "{\"role\":\"user\",\"content\":\"hi\"}";
-        String hello = "{\"role\":\"assistant\",\"content\":\"Hello, how can I help?\"}";
-        String cancel = "{\"role\":\"user\",\"content\":\"cancel my order\"}";
+        String hi = user("hi");
+        String hello = assistant("Hello, how can I help?");
+        String cancel = user("cancel my order");
         List<TimelineSpan> spans = List.of(
-                span("t3", "root", "workflow").at(0, 1000).build(),
-                span("t3", "ag1", "agent")
-                        .parent("root")
-                        .at(10, 400)
-                        .in("[" + hi + "]")
-                        .out("Hello, how can I help?")
-                        .build(),
-                span("t3", "ag2", "agent")
-                        .parent("root")
-                        .at(400, 900)
-                        .in("[" + hi + "," + hello + "," + cancel + "]")
-                        .out("Done, it is cancelled.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("t3", "root", "workflow", null, 0, 1000, null, null),
+                span("t3", "ag1", "agent", "root", 10, 400, list(hi), "Hello, how can I help?"),
+                span("t3", "ag2", "agent", "root", 400, 900, list(hi, hello, cancel), "Done, it is cancelled."));
 
         assertEquals(
-                List.of(
-                        "t3/ag1#user:0",
-                        "t3/ag1",
-                        "t3/ag1#reply:0",
-                        "t3/ag2#user:0",
-                        "t3/ag2",
-                        "t3/ag2#reply:0",
-                        "t3/root"),
-                timeline.events().stream().map(Event::id).toList(),
+                "t3/ag1#user:0 t3/ag1 t3/ag1#reply:0 t3/ag2#user:0 t3/ag2 t3/ag2#reply:0 t3/root",
+                ids(SessionTimelineBuilder.build("p1", "s", spans)),
                 "the next turn's message, one level deeper, sorts before the turn of the same trace that ended in"
                         + " its instant, so it comes before the reply it answers");
     }
 
     @Test
     void aModelCallThatStartsWhenThePreviousEndsComesAfterItsReply() {
-        String book = "{\"role\":\"user\",\"content\":\"book a table\"}";
-        String which = "{\"role\":\"assistant\",\"content\":\"Which day?\"}";
-        String friday = "{\"role\":\"user\",\"content\":\"friday\"}";
+        String book = user("book a table");
+        String which = assistant("Which day?");
         List<TimelineSpan> spans = List.of(
-                span("t", "w", "workflow").at(0, 300).build(),
-                span("t", "l1", "llm")
-                        .parent("w")
-                        .at(10, 100)
-                        .in("[" + book + "]")
-                        .out("[" + which + "]")
-                        .build(),
-                span("t", "l2", "llm")
-                        .parent("w")
-                        .at(100, 290)
-                        .in("[" + book + "," + which + "," + friday + "]")
-                        .out("Booked for friday.")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("t", "w", "workflow", null, 0, 300, null, null),
+                span("t", "l1", "llm", "w", 10, 100, list(book), list(which)),
+                span("t", "l2", "llm", "w", 100, 290, list(book, which, user("friday")), "Booked for friday."));
 
         assertEquals(
-                List.of("t/l1#user:0", "t/l1", "t/l1#reply:0", "t/l2#user:0", "t/l2", "t/l2#reply:0", "t/w"),
-                timeline.events().stream().map(Event::id).toList(),
+                "t/l1#user:0 t/l1 t/l1#reply:0 t/l2#user:0 t/l2 t/l2#reply:0 t/w",
+                ids(SessionTimelineBuilder.build("p1", "s", spans)),
                 "the person's answer sorts before the question it answers when the next call starts in the instant"
                         + " the last one ended");
     }
 
     @Test
     void aMessageComesBeforeTheSpansAboveItThatEndInItsInstant() {
-        String a = "{\"role\":\"user\",\"content\":\"a\"}";
-        String b = "{\"role\":\"assistant\",\"content\":\"b\"}";
-        String c = "{\"role\":\"user\",\"content\":\"c\"}";
+        String a = user("a");
+        String b = assistant("b");
         List<TimelineSpan> spans = List.of(
-                span("z", "w", "workflow").at(0, 400).build(),
-                span("z", "l0", "llm")
-                        .parent("w")
-                        .at(100, 400)
-                        .in("[" + a + "]")
-                        .out("[" + b + "]")
-                        .build(),
-                span("z", "l1", "llm")
-                        .parent("w")
-                        .at(400, 400)
-                        .in("[" + a + "," + b + "," + c + "]")
-                        .out("d")
-                        .build());
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+                span("z", "w", "workflow", null, 0, 400, null, null),
+                span("z", "l0", "llm", "w", 100, 400, list(a), list(b)),
+                span("z", "l1", "llm", "w", 400, 400, list(a, b, user("c")), "d"));
 
         assertEquals(
-                List.of("z/l0#user:0", "z/l0", "z/l0#reply:0", "z/l1#user:0", "z/l1", "z/l1#reply:0", "z/w"),
-                timeline.events().stream().map(Event::id).toList(),
+                "z/l0#user:0 z/l0 z/l0#reply:0 z/l1#user:0 z/l1 z/l1#reply:0 z/w",
+                ids(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a span that ends in the instant its zero-length child starts comes before the child, or the"
                         + " message comes before a reply it answers");
     }
@@ -1286,118 +761,128 @@ class SessionTimelineBuilderTest {
 
     /** Section 5.1 of the CC-01 plan: two turns, a nested billing agent, a resent history, a reply on an agent. */
     static List<TimelineSpan> acceptanceSession() {
+        String checkRefund = user("check refund status for 42");
+        String noRefund = list(assistant("no refund pending"));
+        String expedite = "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c3\","
+                + "\"type\":\"function\",\"function\":{\"name\":\"expedite\",\"arguments\":\"{\\\"id\\\":42}\"}}]}";
+        String turnA = list(
+                SYS,
+                Q1,
+                TC1,
+                toolResult("c1", "{\\\"eta\\\":\\\"tomorrow\\\"}"),
+                calling(null, "c2", "billing"),
+                toolResult("c2", "no refund pending"));
         return List.of(
-                span("tr-a", "a1", "agent")
+                rich("tr-a", "a1", "agent", null, 0, 900, list(Q1), list(R1))
                         .name("support")
                         .callSite("cs-agent")
-                        .at(0, 900)
-                        .in("[" + Q1 + "]")
-                        .out("[" + R1 + "]")
                         .build(),
-                span("tr-a", "a2", "llm")
-                        .parent("a1")
+                rich("tr-a", "a2", "llm", "a1", 10, 200, list(SYS, Q1), list(TC1))
                         .callSite("cs-llm")
-                        .at(10, 200)
                         .model("gpt-x")
                         .usage(50L, 10L)
-                        .in("[" + SYS + "," + Q1 + "]")
-                        .out("[" + TC1 + "]")
                         .build(),
-                span("tr-a", "a3", "tool")
-                        .parent("a1")
+                rich("tr-a", "a3", "tool", "a1", 210, 300, null, null)
                         .name("execute_tool")
                         .callSite("cs-turn-a")
                         .status("ok")
-                        .at(210, 300)
                         .tool("lookup_order", "{\"id\":42}", "{\"eta\":\"tomorrow\"}")
                         .build(),
-                span("tr-a", "a4", "agent")
-                        .parent("a1")
+                rich("tr-a", "a4", "agent", "a1", 310, 600, list(checkRefund), noRefund)
                         .name("billing")
                         .callSite("cs-billing")
-                        .at(310, 600)
-                        .in("[{\"role\":\"user\",\"content\":\"check refund status for 42\"}]")
-                        .out("[{\"role\":\"assistant\",\"content\":\"no refund pending\"}]")
                         .build(),
-                span("tr-a", "a5", "llm")
-                        .parent("a4")
+                rich("tr-a", "a5", "llm", "a4", 320, 590, list(SYSTEM_BILLING, checkRefund), noRefund)
                         .callSite("cs-billing-llm")
-                        .at(320, 590)
-                        .in("[{\"role\":\"system\",\"content\":\"You are billing.\"},"
-                                + "{\"role\":\"user\",\"content\":\"check refund status for 42\"}]")
-                        .out("[{\"role\":\"assistant\",\"content\":\"no refund pending\"}]")
                         .build(),
-                span("tr-a", "a6", "llm")
-                        .parent("a1")
+                rich("tr-a", "a6", "llm", "a1", 610, 900, turnA, list(R1))
                         .callSite("cs-llm")
-                        .at(610, 900)
-                        .in("[" + SYS + "," + Q1 + "," + TC1
-                                + ",{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"{\\\"eta\\\":\\\"tomorrow\\\"}\"},"
-                                + "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c2\",\"type\":\"function\","
-                                + "\"function\":{\"name\":\"billing\",\"arguments\":\"{}\"}}]},"
-                                + "{\"role\":\"tool\",\"tool_call_id\":\"c2\",\"content\":\"no refund pending\"}]")
-                        .out("[" + R1 + "]")
                         .build(),
-                span("tr-b", "b1", "agent")
+                rich("tr-b", "b1", "agent", null, 1000, 1500, list(Q1, R1, EXPEDITE), "Yes, I expedited order 42.")
                         .name("support")
                         .callSite("cs-agent")
-                        .at(1000, 1500)
-                        .in("[" + Q1 + "," + R1 + "," + EXPEDITE + "]")
-                        .out("Yes, I expedited order 42.")
                         .build(),
-                span("tr-b", "b4", "step")
-                        .parent("b1")
+                rich("tr-b", "b4", "step", "b1", 1001, 1005, null, null)
                         .name("stt")
                         .callSite("cs-turn-b")
-                        .at(1001, 1005)
                         .build(),
-                span("tr-b", "b2", "llm")
-                        .parent("b1")
+                rich("tr-b", "b2", "llm", "b1", 1010, 1400, list(SYS, Q1, R1, EXPEDITE), list(expedite))
                         .callSite("cs-llm")
-                        .at(1010, 1400)
-                        .in("[" + SYS + "," + Q1 + "," + R1 + "," + EXPEDITE + "]")
-                        .out("[{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c3\","
-                                + "\"type\":\"function\",\"function\":{\"name\":\"expedite\","
-                                + "\"arguments\":\"{\\\"id\\\":42}\"}}]}]")
                         .build(),
-                span("tr-b", "b3", "mcp")
-                        .parent("b1")
+                rich("tr-b", "b3", "mcp", "b1", 1410, 1450, null, null)
                         .name("execute_tool")
                         .callSite("cs-turn-b")
                         .status("error")
                         .errorType("timeout")
-                        .at(1410, 1450)
                         .tool("expedite", "{\"id\":42}", null)
                         .build());
     }
 
-    private static Instant at(long ms) {
-        return T0.plusMillis(ms);
+    private static String user(String text) {
+        return "{\"role\":\"user\",\"content\":\"" + text + "\"}";
     }
 
-    private static List<Row> rows(SessionTimeline timeline) {
+    private static String assistant(String text) {
+        return "{\"role\":\"assistant\",\"content\":\"" + text + "\"}";
+    }
+
+    private static String toolResult(String callId, String content) {
+        return "{\"role\":\"tool\",\"tool_call_id\":\"" + callId + "\",\"content\":\"" + content + "\"}";
+    }
+
+    /** An assistant message that calls {@code tool} with no arguments; a null text is a tool-call-only message. */
+    private static String calling(@Nullable String text, String callId, String tool) {
+        return "{\"role\":\"assistant\",\"content\":" + (text == null ? "null" : "\"" + text + "\"")
+                + ",\"tool_calls\":[{\"id\":\"" + callId + "\",\"type\":\"function\",\"function\":{\"name\":\"" + tool
+                + "\",\"arguments\":\"{}\"}}]}";
+    }
+
+    private static String list(String... messages) {
+        return "[" + String.join(",", messages) + "]";
+    }
+
+    /**
+     * Each event as one row: id, kind, position, millis after T0, depth, parent id, parent kind, ancestor kinds,
+     * agent id, turn, call site; a dash for a null or empty value.
+     */
+    private static String rows(SessionTimeline timeline) {
         return timeline.events().stream()
-                .map(e -> new Row(
+                .map(e -> String.join(
+                        " ",
                         e.id(),
                         e.kind(),
-                        e.position(),
-                        e.at(),
-                        e.depth(),
-                        e.parentId(),
-                        e.parentKind(),
-                        e.ancestorKinds(),
-                        e.agentId(),
+                        String.valueOf(e.position()),
+                        millis(e.at()),
+                        String.valueOf(e.depth()),
+                        dash(e.parentId()),
+                        dash(e.parentKind()),
+                        e.ancestorKinds().isEmpty() ? "-" : String.join(",", e.ancestorKinds()),
+                        dash(e.agentId()),
                         e.turn(),
-                        e.callSiteId()))
-                .toList();
+                        dash(e.callSiteId())))
+                .collect(Collectors.joining("\n", "", "\n"));
     }
 
-    /** Each message event as {@code "<id> <text>"}, in timeline order. */
-    private static List<String> messages(SessionTimeline timeline) {
+    /** A hand-written {@link #rows} table, its columns aligned with any run of spaces. */
+    private static String table(String rows) {
+        return rows.strip().replaceAll(" +", " ") + "\n";
+    }
+
+    private static String dash(@Nullable String value) {
+        return value == null ? "-" : value;
+    }
+
+    private static String millis(Instant at) {
+        Duration since = Duration.between(T0, at);
+        return since.toNanosPart() % 1_000_000 == 0 ? String.valueOf(since.toMillis()) : at.toString();
+    }
+
+    /** Each message event as {@code "<id> <text>"}, one per line, in timeline order. */
+    private static String messages(SessionTimeline timeline) {
         return timeline.events().stream()
                 .filter(e -> e.kind().equals(Event.USER_MESSAGE) || e.kind().equals(Event.ASSISTANT_REPLY))
-                .map(e -> e.id() + " " + e.data().get("text").asText())
-                .toList();
+                .map(e -> e.id() + " " + e.data().get("text").asText() + "\n")
+                .collect(Collectors.joining());
     }
 
     /** Each event as {@code "<id> <ms after T0>"}, in timeline order. */
@@ -1407,11 +892,25 @@ class SessionTimelineBuilderTest {
                 .toList();
     }
 
-    private static List<String> replyIds(SessionTimeline timeline) {
+    private static String ids(SessionTimeline timeline) {
+        return timeline.events().stream().map(Event::id).collect(Collectors.joining(" "));
+    }
+
+    private static String replyIds(SessionTimeline timeline) {
         return timeline.events().stream()
                 .filter(e -> e.kind().equals(Event.ASSISTANT_REPLY))
                 .map(Event::id)
-                .toList();
+                .collect(Collectors.joining(" "));
+    }
+
+    private static JsonNode llmOutput(SessionTimeline timeline) {
+        return json(timeline.events().stream()
+                .filter(e -> e.kind().equals("llm"))
+                .findFirst()
+                .orElseThrow()
+                .data()
+                .get("output")
+                .toString());
     }
 
     /** The data nodes re-read from text, so a long the builder wrote compares equal to the int a test parses. */
@@ -1427,8 +926,36 @@ class SessionTimelineBuilderTest {
         }
     }
 
-    private static SpanBuilder span(String traceId, String spanId, String kind) {
-        return new SpanBuilder(traceId, spanId, kind);
+    /** A span named "chat", ending {@code endMs} after T0, or still open when that is null. */
+    private static TimelineSpan span(
+            String traceId,
+            String spanId,
+            String kind,
+            @Nullable String parentSpanId,
+            long startMs,
+            @Nullable Integer endMs,
+            @Nullable String input,
+            @Nullable String output) {
+        return rich(traceId, spanId, kind, parentSpanId, startMs, endMs, input, output)
+                .build();
+    }
+
+    private static SpanBuilder rich(
+            String traceId,
+            String spanId,
+            String kind,
+            @Nullable String parentSpanId,
+            long startMs,
+            @Nullable Integer endMs,
+            @Nullable String input,
+            @Nullable String output) {
+        SpanBuilder b = new SpanBuilder(traceId, spanId, kind);
+        b.parentSpanId = parentSpanId;
+        b.startedAt = T0.plusMillis(startMs);
+        b.endedAt = endMs == null ? null : T0.plusMillis(endMs);
+        b.input = input;
+        b.output = output;
+        return b;
     }
 
     private static final class SpanBuilder {
@@ -1460,11 +987,6 @@ class SessionTimelineBuilderTest {
             return this;
         }
 
-        SpanBuilder parent(String v) {
-            this.parentSpanId = v;
-            return this;
-        }
-
         SpanBuilder name(String v) {
             this.name = v;
             return this;
@@ -1485,12 +1007,6 @@ class SessionTimelineBuilderTest {
             return this;
         }
 
-        SpanBuilder at(long startMs, @Nullable Integer endMs) {
-            this.startedAt = SessionTimelineBuilderTest.at(startMs);
-            this.endedAt = endMs == null ? null : SessionTimelineBuilderTest.at(endMs);
-            return this;
-        }
-
         SpanBuilder model(String v) {
             this.model = v;
             return this;
@@ -1498,16 +1014,6 @@ class SessionTimelineBuilderTest {
 
         SpanBuilder usage(Long in, Long out) {
             this.usage = new TimelineSpan.Usage(in, out, null, null, null, null);
-            return this;
-        }
-
-        SpanBuilder in(String v) {
-            this.input = v;
-            return this;
-        }
-
-        SpanBuilder out(String v) {
-            this.output = v;
             return this;
         }
 

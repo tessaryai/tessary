@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Rail preview of a trace, opened from the Traces index row click.
- * URL-addressable via ?trace=<id> — TracesIndex owns the URL and stays mounted,
- * so the list renders behind the rail (unlike navigating to /traces/:id, which
- * would replace it). Opening the panel beside the row IS the industry
- * convention this surface conforms to.
- *
- * ⤢ opens the full trace page in a NEW TAB, so the list keeps its filters and
- * scroll position.
- */
+// ?trace=<id>: TracesIndex owns the URL and stays mounted behind the rail. ⤢ opens a new tab.
 import { useState } from "react";
 import { ErrorNote, LoadingRow, Rail } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";

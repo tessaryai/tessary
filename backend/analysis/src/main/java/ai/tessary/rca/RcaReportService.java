@@ -8,10 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 /**
- * The read side of the signal-RCA surface: rows out of {@link RcaReportRepository} rendered as the
- * wire {@link RcaReportView}. One seam for every reader — {@link RcaController}, {@code CaseService}
- * and {@link RcaTriggerService} — so a report reads identically whichever door it comes through, and
- * project scoping is applied in exactly one place.
+ * Renders {@link RcaReportRepository} rows as {@link RcaReportView} for every reader, so a report reads the same
+ * through any door and project scoping lives in one place.
  */
 @Service
 public class RcaReportService {
@@ -24,19 +22,17 @@ public class RcaReportService {
         this.mapper = mapper;
     }
 
-    /** One report by id, scoped to the project. Throws {@code COMMON.NOT_FOUND} when it isn't there. */
+    /** Throws {@code COMMON.NOT_FOUND} when absent. */
     public RcaReportView get(String projectId, String id) {
         return reports.findById(projectId, id)
                 .map(row -> RcaReportView.of(row, mapper))
                 .orElseThrow(() -> new TessaryException(CommonError.NOT_FOUND, id));
     }
 
-    /** A row the caller already holds, rendered as the same view {@link #get} returns. */
     public RcaReportView view(RcaReportRow row) {
         return RcaReportView.of(row, mapper);
     }
 
-    /** The report for a job, if the job has one. */
     public RcaReportView getByJobId(String projectId, String jobId) {
         return reports.findByJobId(projectId, jobId)
                 .map(row -> RcaReportView.of(row, mapper))

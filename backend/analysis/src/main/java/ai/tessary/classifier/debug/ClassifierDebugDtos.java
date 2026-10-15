@@ -6,22 +6,16 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Wire DTOs for the classifier debug surface — everything the platform already computes for one
- * classifier but the product surface (the {@code ClassifierRail} detail panel) does not render.
- * Snake_case on the wire, camelCase in Java, mirroring {@code ClassifierDtos}.
- *
- * <p>Deliberately read-only and additive: every field here is sourced from a table the production
- * classifier surface already reads from ({@code job}, {@code metric_baseline}) — nothing is computed
- * fresh and nothing is written.
+ * Debug DTOs for one classifier: what the platform already computes but the product does not render. Read-only, from
+ * tables the product surface already reads.
  */
 public final class ClassifierDebugDtos {
 
     private ClassifierDebugDtos() {}
 
     /**
-     * The debug bundle for one classifier. {@code metricBaselines} is populated for the metric-drift
-     * family only, and {@code null} otherwise, not an empty list, so a reader can tell "not this
-     * family" apart from "this family, nothing fitted yet".
+     * {@code metricBaselines} is null outside the metric-drift family, not empty, so "not this family" differs from
+     * "nothing fitted yet".
      */
     public record ClassifierDebugView(
             String id,
@@ -30,7 +24,7 @@ public final class ClassifierDebugDtos {
             SweepView sweep,
             @JsonProperty("metric_baselines") @Nullable List<MetricBaselineView> metricBaselines) {
 
-        /** The families the backend actually dispatches on — {@code BuiltInClassifierCatalog}'s tiers. */
+        /** {@code BuiltInClassifierCatalog}'s tiers. */
         public static final class Family {
             private Family() {}
 
@@ -41,11 +35,7 @@ public final class ClassifierDebugDtos {
         }
     }
 
-    /**
-     * The sweep-job row in full — a superset of {@code ClassifierHealthView}, which reports only
-     * {@code status}/{@code attempts}/{@code lastError}/{@code lastSweptAt}. The cursor and lease are
-     * the fields a "why is this quiet" question actually needs.
-     */
+    /** A superset of {@code ClassifierHealthView}: the cursor and lease answer "why is this quiet". */
     public record SweepView(
             @Nullable String status,
             int attempts,
@@ -56,16 +46,12 @@ public final class ClassifierDebugDtos {
             @JsonProperty("lease_expires_at") @Nullable String leaseExpiresAt,
             @JsonProperty("updated_at") @Nullable String updatedAt) {
 
-        /** The honest empty state for a signal whose sweep has never been enqueued. */
         public static SweepView neverSwept() {
             return new SweepView(null, 0, null, null, null, null, null, null);
         }
     }
 
-    /**
-     * One {@code metric_baseline} row — cost_drift/duration_drift's per-(bucket × measure) window
-     * state. Not exposed by any other endpoint today; see {@code MetricBaselineRepository}.
-     */
+    /** Not exposed by any other endpoint; see {@code MetricBaselineRepository}. */
     public record MetricBaselineView(
             String measure,
             @JsonProperty("bucket_kind") String bucketKind,
@@ -80,7 +66,6 @@ public final class ClassifierDebugDtos {
             @Nullable SketchSummary prev,
             @Nullable SketchSummary current) {}
 
-    /** A sketch reduced to what a debug reader needs: how many samples, and whether it's comparable. */
     public record SketchSummary(
             long count, @JsonProperty("grid_id") String gridId) {}
 }

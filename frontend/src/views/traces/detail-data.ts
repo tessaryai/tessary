@@ -1,28 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Trace interior — data layer over the trace detail API.
- *
- * `GET {base}/traces/:traceId` returns two things: the trace's own row, rollup
- * columns and all, and its spans. All three renderings are views over the spans
- * — Conversation reads their dialogue, Tree reads their nesting, Timeline reads
- * their timing — while the header reads the trace.
- *
- * WHAT THE HEADER NO LONGER DOES IS ADD ANYTHING UP. It used to reduce over the
- * span list for a token total and scan it for a time envelope, which meant the
- * detail could quietly disagree with the list row for the same trace: the list
- * showed the rollup worker's numbers and the header showed whatever spans had
- * arrived by the time this request ran. Both read `trace` now, so they cannot
- * disagree, and an unsettled trace says so instead of presenting a partial sum
- * as a finished one.
- */
+// The header reads the trace row's rollups, never sums spans, so it cannot disagree with the list row.
 import { useQuery } from "@tanstack/react-query";
 import type { TraceDetailView } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
 
-/** One step of a trace — the v2 `span`. Formerly `observation`. */
 export type Span = TraceDetailView["spans"][number];
 
-/** The trace's own row: identity, timing, and the rollup columns the worker wrote. */
 export type TraceRollup = TraceDetailView["trace"];
 
 export function useTraceDetail(traceId: string | null | undefined) {
@@ -35,21 +18,14 @@ export function useTraceDetail(traceId: string | null | undefined) {
 }
 
 /**
- * Parent first, then siblings by clock — the order the work actually happened in.
- *
- * The API returns observations in no particular order: a trace routinely lists
- * an `execute_tool` span *before* the agent span that called it, which reads as
- * a tool running before the question that prompted it. Sorting by `started_at`
- * alone is not enough either, since a parent and its first child can share a
- * timestamp. All three views order through here so they agree.
+ * The API returns spans unordered (a tool span can precede its agent), and a parent can share its
+ * child's timestamp. All three views order through here.
  */
 export function spanOrder(spans: Span[], parentOf?: Map<string, string>): Span[] {
   const byId = new Map(spans.map((o) => [o.id, o]));
   const children = new Map<string | null, Span[]>();
   for (const o of spans) {
-    // A parent outside this trace is treated as a root, not dropped. `parent_span_id` is the
-    // producer's own statement; `path` is what the platform derived from it, and a null path means
-    // "ancestry not resolved yet", never "root".
+    // A parent outside this trace makes a root. A null `path` means ancestry not resolved yet, never root.
     const declared = parentOf?.get(o.id) ?? o.parent_span_id;
     const key = declared != null && byId.has(declared) ? declared : null;
     children.set(key, [...(children.get(key) ?? []), o]);
@@ -73,13 +49,7 @@ export function spanOrder(spans: Span[], parentOf?: Map<string, string>): Span[]
   return out;
 }
 
-/**
- * Depth of each observation in the parent chain, for the Tree view's indent.
- *
- * `parentOf` re-parents a span for display without touching the data: a trace
- * parents its tool spans to the agent, so the llm call that actually requested
- * them is their sibling. Passing the request→execution links nests them under it.
- */
+/** `parentOf` re-parents tool spans under the llm call that requested them, for display only. */
 export function depthOf(spans: Span[], parentOf: Map<string, string>): Map<string, number> {
   const byId = new Map(spans.map((o) => [o.id, o]));
   const depths = new Map<string, number>();
@@ -87,7 +57,6 @@ export function depthOf(spans: Span[], parentOf: Map<string, string>): Map<strin
   const resolve = (o: Span, seen: Set<string>): number => {
     const cached = depths.get(o.id);
     if (cached != null) return cached;
-    // A cycle would be corrupt data rather than a deep trace; stop rather than hang.
     if (seen.has(o.id)) return 0;
     seen.add(o.id);
     const declared = parentOf.get(o.id) ?? o.parent_span_id;
@@ -101,14 +70,7 @@ export function depthOf(spans: Span[], parentOf: Map<string, string>): Map<strin
   return depths;
 }
 
-/**
- * Wall-clock bounds of the trace, for the Timeline's waterfall scale.
- *
- * The trace's own `started_at`/`ended_at` are the scale where it has both — they
- * are the turn the user actually waited on, and they include time no span
- * covers. A trace still in flight has no end, and there the spans on screen are
- * the only bound available.
- */
+/** The trace's own bounds where it has both, since they include time no span covers. */
 export function traceBounds(trace: TraceRollup | undefined, spans: Span[]): { start: number; end: number } | null {
   if (trace?.started_at && trace.ended_at) {
     const start = new Date(trace.started_at).getTime();
@@ -128,19 +90,7 @@ export function traceBounds(trace: TraceRollup | undefined, spans: Span[]): { st
   return { start, end };
 }
 
-/**
- * The whole trace in one line, read off the trace row.
- *
- * Conversation deliberately carries no per-span headers — a reader following the
- * dialogue does not want a latency figure between two sentences — so the counts
- * live here, once, at the top.
- *
- * Every figure is the rollup worker's. The client-side reduce this replaced
- * produced a different number from the list row whenever a span had arrived
- * since the last rollup, and there was nothing on screen to say which was right.
- * When the trace has not settled the line says so rather than presenting a
- * partial as a total.
- */
+/** Every figure is the rollup worker's; an unsettled trace says so rather than show a partial sum. */
 export function traceSummary(trace: TraceRollup | undefined, spans: Span[]): string {
   const count = trace?.span_count ?? spans.length;
   const parts = [`${count} step${count === 1 ? "" : "s"}`];
@@ -158,8 +108,6 @@ export function traceSummary(trace: TraceRollup | undefined, spans: Span[]): str
 
 export function formatDuration(ms: number | null | undefined): string {
   if (ms == null) return "—";
-  // Minutes past a minute: a hung tool call runs to seven figures of milliseconds, and `1029.68s`
-  // is a number a reader has to divide before it means anything.
   if (ms >= 60_000) {
     const mins = Math.floor(ms / 60_000);
     return `${mins}m ${Math.round((ms % 60_000) / 1000)}s`;

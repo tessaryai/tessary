@@ -24,8 +24,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const me = await authApi.me();
       setUser(me);
     } catch (e) {
-      // 401 → not signed in; any other error we still treat as "no user" so the
-      // route guard redirects to WorkOS (/auth/login) rather than spinning forever.
       if (e instanceof ApiError && e.status !== 401) {
         // eslint-disable-next-line no-console
         console.warn("auth/me failed:", e.message);
@@ -38,13 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void refetch();
-    /*
-     * Warm the current route's chunk in the same tick as the sign-in check rather than after it.
-     * `ProtectedRoute` renders nothing until `refetch` resolves, so React.lazy's import used to be
-     * strictly downstream of this round trip — a chunk whose bytes have nothing to do with identity
-     * waiting on identity. Deliberately fire-and-forget: it warms the module cache and moves no
-     * data request, so nothing here can fail in a way the user should see.
-     */
+    /* Warm the route's chunk alongside the sign-in check rather than after it. Fire-and-forget. */
     preloadRouteChunk(window.location.pathname);
   }, [refetch]);
 

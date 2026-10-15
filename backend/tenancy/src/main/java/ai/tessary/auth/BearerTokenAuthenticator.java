@@ -10,15 +10,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * The single source of truth for {@code Authorization: Bearer <token>} → {@link TenantContext} resolution.
- *
- * <p>Parses the header value, verifies the presented MCP token ({@link ApiKeyService#verify}), resolves
- * its project ({@link ProjectRepository#findById}), and builds a project-bound {@link TenantContext} (role
- * {@code member}, as MCP tokens always act as a member). Extracted so every transport that authenticates a
- * bearer token resolves it <em>identically</em>: the servlet {@link AuthFilter} (cookies → bearer fallback
- * for {@code /mcp} and {@code /api/**}) and the OTLP gRPC receiver's {@code ServerInterceptor}, which
- * is not a servlet request and so cannot reuse the filter. Keeping one resolver prevents the two paths from
- * diverging on token semantics (orphaned-project handling, the hardcoded role, the MCP-token requirement).
+ * Resolves {@code Authorization: Bearer <token>} to a project-bound {@link TenantContext} (role {@code member}). Shared
+ * by {@link AuthFilter} and the OTLP gRPC interceptor, which is not a servlet request, so both paths agree on token
+ * semantics.
  */
 @Component
 public class BearerTokenAuthenticator {
@@ -34,11 +28,8 @@ public class BearerTokenAuthenticator {
     }
 
     /**
-     * Resolve a raw {@code Authorization} header value to a project-bound context.
-     *
-     * @param authorizationHeader the full header value (e.g. {@code "Bearer tsy_..."}), or {@code null}
-     * @return the resolved context, or empty when the header is absent/not a bearer token, the token fails
-     *     verification, or its project does not exist (an orphaned token)
+     * @return empty when the header is absent or not a bearer token, the token fails verification, or its project no
+     * longer exists
      */
     public Optional<TenantContext> authenticate(@Nullable String authorizationHeader) {
         if (authorizationHeader == null || !authorizationHeader.startsWith(BEARER_PREFIX)) {

@@ -21,11 +21,7 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
-/**
- * Assembles the debug bundle for one classifier, read-only against tables the production sweep
- * already writes: {@code job} (via {@link ClassifierJobRepository}) and {@code metric_baseline}.
- * Nothing here is computed fresh.
- */
+/** Debug bundle for one classifier, read-only from tables the sweep already writes. Nothing is computed fresh. */
 @Service
 public class ClassifierDebugService {
 
@@ -45,9 +41,7 @@ public class ClassifierDebugService {
         this.mapper = mapper;
     }
 
-    /**
-     * The debug family a detector belongs to: {@code BuiltInClassifierCatalog}'s execution tiers.
-     */
+    /** {@code BuiltInClassifierCatalog}'s execution tiers. */
     private static String familyOf(String detector) {
         if (Kind.ENCODER_BACKED.contains(detector)) return Family.ENCODER;
         return switch (detector) {
@@ -72,7 +66,7 @@ public class ClassifierDebugService {
         return new ClassifierDebugView(row.id(), row.detector(), family, sweep, metric);
     }
 
-    /** The one job row for this signal, or the "never enqueued" empty state {@code health()} also uses. */
+    /** Empty state matches {@code health()}. */
     private SweepView sweepFor(String projectId, String classifierId) {
         return jobs.listByProject(projectId).stream()
                 .filter(j -> j.classifierId().equals(classifierId))
@@ -105,9 +99,7 @@ public class ClassifierDebugService {
                 b.lastEventAt(),
                 b.pinnedAt(),
                 sketchSummary(b.pinnedSketchJson()),
-                // The control's newest day rather than the retired prev slot. A debug view exists to
-                // answer "what is this bucket being judged against", and after the rolling control
-                // landed the honest answer to that is the ring, of which this is the freshest slice.
+                // The rolling control's newest day, since the ring is what the bucket is now judged against.
                 sketchSummary(newestControlDay(b)),
                 sketchSummary(b.currentSketchJson()));
     }
@@ -117,14 +109,14 @@ public class ClassifierDebugService {
         return day == null ? null : day.sketchJson();
     }
 
-    /** Parses just enough of a sketch to be useful in a debug view: how full it is, and its grid identity. */
+    /** How full the sketch is, and its grid identity. */
     private static @Nullable SketchSummary sketchSummary(@Nullable String sketchJson) {
         if (sketchJson == null || sketchJson.isBlank()) return null;
         try {
             MetricSketch sketch = MetricSketch.fromJson(sketchJson);
             return new SketchSummary(sketch.count(), sketch.gridId());
         } catch (RuntimeException e) {
-            // A sketch predating a grid/format change should not 500 the debug view; it should say so.
+            // A sketch predating a grid or format change should not 500 the debug view.
             return null;
         }
     }

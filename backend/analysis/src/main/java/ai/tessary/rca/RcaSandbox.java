@@ -4,43 +4,22 @@ package ai.tessary.rca;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Runs one agentic RCA investigation in an environment that can clone the target repo, materialize
- * the finding's evidence dossier, and execute the agent over it. {@link E2bRcaSandbox} drives an E2B
- * microVM via the launcher sidecar. Selected by {@code tessary.rca.agentic.sandbox}.
- */
+/** Runs one agentic RCA investigation; selected by {@code tessary.rca.agentic.sandbox}. */
 public interface RcaSandbox {
 
-    /** Selector key, matched against {@code tessary.rca.agentic.sandbox}. */
     String key();
 
     /**
-     * Run the agent over the finding's evidence and (when the project has one) its repository. This
-     * is not fail-open: it always either returns a completed run or throws {@link
-     * ai.tessary.open.errors.TessaryException} — a user-triggered RCA must stamp
-     * {@code failed} rather than silently degrade to a bogus "no cause found" verdict.
+     * Not fail-open: returns a completed run or throws, so a user-triggered RCA stamps {@code failed} rather than a
+     * bogus "no cause found".
      */
     SandboxRun run(SandboxRequest req);
 
     /**
-     * @param projectId the project being analyzed (for trace/cost attribution)
-     * @param subjectId the mover subject (trace metadata only)
-     * @param cloneUrl authenticated clone URL — embeds a short-lived token, never logged. Null for a
-     *     project with no repository connected: the run is evidence-only and the sandbox skips the
-     *     clone entirely (see {@code AgenticRcaEngine} on the ceiling that lowers)
-     * @param headSha commit to check out; null with {@code cloneUrl}
-     * @param onsetAt the finding's onset (ISO-8601), from which the sandbox resolves the commit live at the
-     *     onset after the clone; null with {@code cloneUrl}
-     * @param files evidence dossier, relative path → content, written under the sandbox dossier dir
-     * @param prompt the analysis task handed to the agent
-     * @param jsonSchema schema the agent's final output is constrained to
-     * @param mcpUrl platform API base for live MCP reads
-     * @param mcpToken short-lived MCP key — sent to the launcher, never logged
-     * @param reportId the {@code rca_report} row this run is investigating — F2's ledger subject, so
-     *     an RCA's cost is attributable to the report it was spent on, the same way a triage ruling's
-     *     cost is attributed to the finding ({@code E2bTriageSandbox.SUBJECT_KIND}). Never null: every
-     *     agentic RCA run is triggered against an already-created report row (see {@code
-     *     AgenticRcaEngine#run}).
+     * @param cloneUrl embeds a short-lived token, never logged; null means an evidence-only run with no clone @param
+     * headSha null with {@code cloneUrl} @param onsetAt the sandbox resolves the commit live at the onset; null with
+     * {@code cloneUrl} @param mcpToken sent to the launcher, never logged @param reportId the ledger subject, so an
+     * RCA's cost is attributable to its report; never null
      */
     record SandboxRequest(
             String projectId,
@@ -55,6 +34,6 @@ public interface RcaSandbox {
             String mcpToken,
             String reportId) {}
 
-    /** The agent's run: {@code resultText} is its final message (the schema-constrained JSON). */
+    /** {@code resultText} is the schema-constrained JSON. */
     record SandboxRun(String resultText) {}
 }

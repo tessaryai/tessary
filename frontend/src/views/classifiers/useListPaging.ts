@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useRef } from "react";
 
-/** The slice of an infinite query the paging needs. */
 type Pages = {
   hasNextPage: boolean;
   isPlaceholderData: boolean;
@@ -10,12 +9,8 @@ type Pages = {
 };
 
 /**
- * Infinite scroll for a list that switches filters: the next page is read when the list's last row
- * scrolls into view, and a filter switch returns the list to its top. No page is read ahead while the
- * previous filter's rows are still standing in as placeholders, since the end being in view is then
- * a fact about the old list.
- *
- * Attach `list` to the scrolling `<ul>` and `end` to the row after the last item.
+ * No page is read ahead while the previous filter's rows stand in as placeholders: the end being in view
+ * is then a fact about the old list.
  */
 export function useListPaging(filterKey: string, pages: Pages) {
   const list = useRef<HTMLUListElement>(null);

@@ -26,17 +26,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * A person's reset of one classifier: forget what it found and learned, and check every trace still kept
- * again from the start.
- *
- * <p>What goes: its detections, its assessments, the rate state and baselines it learned, and its open
- * findings with no ruling. A kind a registered sweep runs keeps its assessments and state in tables only that
- * sweep knows, so the reset asks it to forget them ({@code ClassifierSweep#reset}). What stays: ruled findings and the cases they back, alert rules, and the cost
- * ledger. A provider-backed classifier pays again for every trace it re-checks, which is why the UI asks
- * twice.
- *
- * <p>The rate state tables carry no {@code classifier_id}; they are cleared by the project, which is
- * correct only because each is owned by one built-in per project.
+ * Resets one classifier: drops its detections, assessments, learned state and unruled open findings, then rechecks
+ * every kept trace. Ruled findings, their cases, alert rules and the cost ledger stay. A provider-backed classifier
+ * pays again per trace, which is why the UI asks twice. Rate-state tables carry no {@code classifier_id} and are
+ * cleared by project, correct only because each belongs to one built-in.
  */
 @Service
 public class ClassifierReset {
@@ -90,10 +83,8 @@ public class ClassifierReset {
     }
 
     /**
-     * Reset the classifier {@code id}. The job restart comes first: it locks the sweep job until this
-     * transaction commits, so no sweep can write into the tables while they are cleared.
-     *
-     * @throws TessaryException {@link ClassifierError#SWEEP_RUNNING} when a worker holds the sweep now
+     * The job restart comes first: it locks the sweep job until commit, so no sweep writes into the tables while they
+     * are cleared. @throws TessaryException {@link ClassifierError#SWEEP_RUNNING} when a worker holds the sweep now
      */
     @Transactional
     public ClassifierRow reset(String projectId, String id, @Nullable String actor) {

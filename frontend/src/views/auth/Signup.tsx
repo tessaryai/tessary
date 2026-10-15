@@ -8,16 +8,8 @@ import { ApiError } from "../../api/types";
 import { Button, Field, Input, Spinner } from "../../ui";
 
 /**
- * The frontend's own {@code /signup} screen — mirrors {@link Login}'s auth plumbing exactly
- * (see that file's header for the shared reasoning on why this sits outside ProtectedRoute/
- * TenantProvider and polls {@code GET /auth/mode}). On success, {@code TenantService#ensureDefaultOrg}
- * (backend, runs on every signup) has already minted the org and its default project, so {@code
- * RootRedirect} lands the fresh account straight on it — there is no org-creation step here any more.
- *
- * <p>Chrome is Screen 1 of the two-step first-run flow: a wordmark, "Step 1
- * of 2", and "Create your account". Step 2 is the connect
- * gate ({@code ConnectGate.tsx}), which the newly-created default project renders in place of the
- * shell until a tagged span arrives.
+ * Screen 1 of first run. The backend mints the org and default project on signup, so RootRedirect
+ * lands on it; step 2 is ConnectGate.
  */
 export function Signup() {
   const [params] = useSearchParams();
@@ -51,7 +43,6 @@ export function Signup() {
   }
 
   if (mode.data?.redirectFlow) {
-    // Same reasoning as Login: a redirect-flow provider (WorkOS) has no local form to render.
     window.location.replace(auth.loginUrl(returnTo));
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">

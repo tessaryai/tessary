@@ -7,16 +7,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Cookie payload. We stash what we need to short-circuit auth on subsequent requests without a
- * WorkOS round-trip: the principal's WorkOS id, the refresh token and org for refresh, and the
- * access-token expiry so we know when to refresh, and the provider's session id so sign-out can end
- * the provider's session as well as ours.
- *
- * <p>The expiry is materialised explicitly rather than derived from the provider's token —
- * AES-GCM has already authenticated the cookie body, so we trust the value at face.</p>
- *
- * <p>Unknown properties are ignored so cookies sealed with fields this record has since dropped
- * still unseal.</p>
+ * Cookie payload, enough to skip the provider round trip on later requests. The expiry is trusted at face because
+ * AES-GCM already authenticated the body. Unknown properties are ignored so cookies sealed with since-dropped fields
+ * still unseal.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)

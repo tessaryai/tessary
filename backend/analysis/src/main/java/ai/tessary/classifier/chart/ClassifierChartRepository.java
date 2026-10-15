@@ -26,21 +26,15 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The hourly series behind the Classifiers page charts, its case strips and its selectors. Every hour is cut with
- * {@code date_trunc('hour', x, 'UTC')}: the hourly reads the detectors replay truncate without a zone, which in a
- * session zone off UTC by a half hour is not a UTC hour, and are not reused here. The last-day reads stay UTC dates.
+ * Every hour is cut with {@code date_trunc('hour', x, 'UTC')}: the detectors' zone-less truncation is not a UTC hour in
+ * a half-hour-offset session zone, so it is not reused here.
  */
 @Repository
 public class ClassifierChartRepository {
 
-    /** The key a trace with no call site is indexed under ({@code ix_trace_scope_settled_started}). */
     static final String UNATTRIBUTED = "__unattributed__";
 
-    /**
-     * {@code ToolErrorRepository}'s join from a tool call to its span and the span's trace, copied so the chart counts
-     * the calls the detector counts. {@link ToolFailure#SQL_PREDICATE} reads the {@code tc}, {@code o} and {@code pl}
-     * aliases.
-     */
+    /** Copied from {@code ToolErrorRepository} so the chart counts the calls the detector counts. */
     private static final String TOOL_SPAN_JOIN = """
             JOIN span o ON o.project_id = tc.project_id
                        AND o.trace_id = tc.trace_id AND o.id = tc.span_id
@@ -56,7 +50,6 @@ public class ClassifierChartRepository {
                AND tr.is_settled
             """;
 
-    /** The first parentless span of a trace: the turn, as {@code MetricSourceRepository#turnFacts} reads it. */
     private static final String ROOT_LATERAL = """
             JOIN LATERAL (
                 SELECT s.started_at, s.ended_at
@@ -67,7 +60,7 @@ public class ClassifierChartRepository {
                  LIMIT 1) root ON TRUE
             """;
 
-    /** Settled live traces of one call site since {@code :from}, spelled as the index is. */
+    /** Spelled as the index is. */
     private static final String TURNS_WHERE = """
              WHERE tr.project_id = :pid AND tr.is_settled AND tr.is_deleted IS NOT TRUE
                AND COALESCE(tr.call_site_id, '__unattributed__') = :callSite
@@ -76,7 +69,6 @@ public class ClassifierChartRepository {
 
     private static final String HOUR_OF_TURN = "date_trunc('hour', tr.started_at, 'UTC')";
 
-    /** The start of the {@code :grain}-second bucket a detection falls in, as the arming bar cuts its windows. */
     private static final String GRAIN = "(floor(extract(epoch FROM d.subject_started_at) / :grain)::bigint * :grain)";
 
     private static final String TURN_MS = "EXTRACT(EPOCH FROM (root.ended_at - root.started_at))::float8 * 1000";
@@ -86,7 +78,6 @@ public class ClassifierChartRepository {
     private static final String PRICED =
             " AND tr.total_cost IS NOT NULL AND tr.total_cost >= 0" + " AND COALESCE(tr.unpriced_spans, 0) = 0";
 
-    /** A tool span's name as {@code MetricSourceRepository#toolSpanFacts} resolves it. */
     private static final String TOOL_SPANS = """
               FROM span s
               JOIN trace tr ON tr.project_id = s.project_id AND tr.id = s.trace_id
@@ -111,31 +102,18 @@ public class ClassifierChartRepository {
             + " WHEN s.ended_at IS NOT NULL AND s.ended_at >= s.started_at"
             + " THEN EXTRACT(EPOCH FROM (s.ended_at - s.started_at))::float8 * 1000 END";
 
-    /** One rate hour: trials checked and flagged. */
     public record RateRow(Instant hour, long checked, long flagged) {}
 
-    /** One range hour's samples in one bin of the card's grid. */
     public record RangeRow(Instant hour, int bin, long n) {}
 
-    /**
-     * One count bucket: a window of a fixed number of seconds counted from the epoch, as the arming bar cuts its own.
-     *
-     * @param events detections the bar's band and scope admit, in the busiest facet
-     * @param sessions distinct sessions among them, in the busiest facet
-     * @param total every detection on the call site
-     */
     public record CountRow(Instant start, long events, long sessions, long total) {}
 
-    /** Whose findings a card's case strip shows. */
     public sealed interface CaseScope {}
 
-    /** A per-span or rate classifier on one call site: findings it filed with that call site. */
     public record ClassifierOnCallSite(String classifierKey, String callSiteId) implements CaseScope {}
 
-    /** A drift card: findings on its {@code metric_baseline} bucket. */
     public record DriftBucket(String measure, String bucketKind, String bucketKey) implements CaseScope {}
 
-    /** The Tool Errors card: findings on the tool. */
     public record ToolErrorTool(String toolKey) implements CaseScope {}
 
     private final JdbcClient jdbc;
@@ -146,12 +124,9 @@ public class ClassifierChartRepository {
         this.detections = detections;
     }
 
-    // ---- rate cards ---------------------------------------------------------------------------------
-
     /**
-     * Frustration sessions on {@code callSite} per UTC hour of their first scored turn. Sessions are grouped from
-     * {@code groupFrom}, before the range, so a session that began before {@code from} keeps its own first hour and
-     * every range reads the same trials; only sessions whose first turn is at or after {@code from} are returned.
+     * Grouped from {@code groupFrom}, before the range, so a session that began before {@code from} keeps its own first
+     * hour.
      */
     public List<RateRow> frustrationHours(
             String projectId,
@@ -193,7 +168,6 @@ public class ClassifierChartRepository {
                 .list();
     }
 
-    /** The last UTC day before {@code before} with a scored turn on {@code callSite}. */
     public Optional<LocalDate> frustrationLastDay(
             String projectId, String classifierId, String scorerVersion, String callSite, Instant before) {
         return lastDay("""
@@ -203,11 +177,6 @@ public class ClassifierChartRepository {
                         """, projectId, classifierId, scorerVersion, callSite, before);
     }
 
-    /**
-     * Groundedness traces on {@code callSite} per UTC hour of their first scored answer, grouped from {@code
-     * groupFrom} as {@link #frustrationHours} groups sessions. A trace is flagged while one of its flagged answers
-     * has an uncleared detection.
-     */
     public List<RateRow> groundednessHours(
             String projectId,
             String classifierId,
@@ -248,7 +217,6 @@ public class ClassifierChartRepository {
                 .list();
     }
 
-    /** The last UTC day before {@code before} with a scored answer on {@code callSite}. */
     public Optional<LocalDate> groundednessLastDay(
             String projectId, String classifierId, String scorerVersion, String callSite, Instant before) {
         return lastDay("""
@@ -271,9 +239,7 @@ public class ClassifierChartRepository {
     }
 
     /**
-     * Malformed Output's checked and failed outputs on {@code callSite} per UTC hour. A span counts once the sweep
-     * has stored past it: {@code created_at} before the cursor, the ingest clock the sweep walks, so a backfilled
-     * span the sweep has not reached is not a pass.
+     * A span counts once the sweep has stored past it, so a backfilled span the sweep has not reached is not a pass.
      */
     public List<RateRow> malformedHours(
             String projectId, String classifierId, String callSite, Instant from, String checkedBefore) {
@@ -303,7 +269,6 @@ public class ClassifierChartRepository {
                 .list();
     }
 
-    /** The last UTC day before {@code before} with an output Malformed Output checked on {@code callSite}. */
     public Optional<LocalDate> malformedLastDay(
             String projectId, String callSite, Instant before, String checkedBefore) {
         return jdbc.sql("""
@@ -326,8 +291,8 @@ public class ClassifierChartRepository {
     }
 
     /**
-     * Tool calls and failed ones per UTC hour, for the raw {@code tool_call.name} values of one tool key. The names
-     * come from {@code ToolErrorRepository#namesByToolKey}: a key is a normalization and never matches a name.
+     * A tool key is a normalization and never matches a raw name, so the names come from
+     * {@code ToolErrorRepository#namesByToolKey}.
      */
     public List<RateRow> toolErrorHours(String projectId, Collection<String> names, Instant from) {
         if (names.isEmpty()) return List.of();
@@ -344,7 +309,6 @@ public class ClassifierChartRepository {
                 .list();
     }
 
-    /** The last UTC day before {@code before} with a call of one of {@code names}. */
     public Optional<LocalDate> toolCallLastDay(String projectId, Collection<String> names, Instant before) {
         if (names.isEmpty()) return Optional.empty();
         return jdbc.sql("SELECT MAX(tc.started_at) AS last_at FROM tool_call tc " + TOOL_SPAN_JOIN + TOOL_CALLS_WHERE
@@ -356,10 +320,6 @@ public class ClassifierChartRepository {
                 .single();
     }
 
-    /**
-     * One tool's raw name in the range, with the call site of each trace that called it and how often: the tool
-     * selector's read, over the calls Tool Errors counts.
-     */
     public record ToolCallerRow(String name, @Nullable String callSiteId, long calls) {}
 
     public List<ToolCallerRow> toolCallers(String projectId, Instant from) {
@@ -373,12 +333,7 @@ public class ClassifierChartRepository {
                 .list();
     }
 
-    // ---- range cards --------------------------------------------------------------------------------
-
-    /**
-     * Turn duration on {@code callSite} per UTC hour and bin of {@code grid}: the root span's own interval in ms,
-     * never {@code trace.latency_ms}, which a child that outlives the root stretches.
-     */
+    /** The root span's own interval, never {@code trace.latency_ms}, which a child that outlives the root stretches. */
     public List<RangeRow> turnDurationHours(String projectId, String callSite, Instant from, Grid grid) {
         return histogram(
                 "SELECT " + HOUR_OF_TURN + " AS hour, " + TURN_MS + " AS v FROM trace tr " + ROOT_LATERAL + TURNS_WHERE
@@ -389,7 +344,6 @@ public class ClassifierChartRepository {
                 grid);
     }
 
-    /** The 95th percentile of every turn on {@code callSite} since {@code from}, pooled: the headline. */
     public @Nullable Double turnDurationP95(String projectId, String callSite, Instant from) {
         return pooled(
                 "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY " + TURN_MS + ") AS p95" + " FROM trace tr "
@@ -399,10 +353,6 @@ public class ClassifierChartRepository {
                 from);
     }
 
-    /**
-     * Cost per turn on {@code callSite} per UTC hour and bin of {@code grid}, in USD, over turns whose every span was
-     * priced.
-     */
     public List<RangeRow> costHours(String projectId, String callSite, Instant from, Grid grid) {
         return histogram(
                 "SELECT " + HOUR_OF_TURN + " AS hour, tr.total_cost::float8 AS v FROM trace tr " + TURNS_WHERE + PRICED,
@@ -412,7 +362,6 @@ public class ClassifierChartRepository {
                 grid);
     }
 
-    /** The pooled 95th percentile cost per turn on {@code callSite} since {@code from}. */
     public @Nullable Double costP95(String projectId, String callSite, Instant from) {
         return pooled(
                 "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY tr.total_cost::float8) AS p95" + " FROM trace tr "
@@ -422,7 +371,6 @@ public class ClassifierChartRepository {
                 from);
     }
 
-    /** The last UTC day before {@code before} with a settled turn on {@code callSite}; a priced one when {@code priced}. */
     public Optional<LocalDate> turnLastDay(String projectId, String callSite, Instant before, boolean priced) {
         return jdbc.sql("""
                         SELECT MAX(tr.started_at) AS last_at FROM trace tr
@@ -459,7 +407,6 @@ public class ClassifierChartRepository {
                 .orElse(null);
     }
 
-    /** Every name a tool span in the range carries, before it is folded to a tool key. */
     public List<String> toolSpanNames(String projectId, Instant from) {
         return jdbc
                 .sql("SELECT DISTINCT " + TOOL_NAME + " AS name " + TOOL_SPANS)
@@ -472,11 +419,6 @@ public class ClassifierChartRepository {
                 .toList();
     }
 
-    /**
-     * Tool span duration per UTC hour and bin of {@code grid}, in ms, for the names of one tool key: the span's own
-     * latency, else its interval. {@code callSiteIds} limits it to traces of those call sites when the classifier is
-     * limited.
-     */
     public List<RangeRow> toolDurationHours(
             String projectId,
             Collection<String> names,
@@ -498,7 +440,6 @@ public class ClassifierChartRepository {
                 .list();
     }
 
-    /** The pooled 95th percentile tool span duration since {@code from}. */
     public @Nullable Double toolDurationP95(
             String projectId, Collection<String> names, @Nullable Collection<String> callSiteIds, Instant from) {
         if (names.isEmpty()) return null;
@@ -514,7 +455,6 @@ public class ClassifierChartRepository {
                 .orElse(null);
     }
 
-    /** The last UTC day in {@code [from, before)} with a timed tool span of one of {@code names}. */
     public Optional<LocalDate> toolDurationLastDay(
             String projectId,
             Collection<String> names,
@@ -551,14 +491,9 @@ public class ClassifierChartRepository {
         return callSiteIds == null ? spec : spec.param("callSites", callSiteIds.isEmpty() ? List.of("") : callSiteIds);
     }
 
-    // ---- count cards --------------------------------------------------------------------------------
-
     /**
-     * Detections of a per-span classifier on {@code callSite} per {@code grainSeconds} bucket of the span, cut from
-     * the epoch as the arming bar cuts its windows. {@code events} and {@code sessions} are counted in the HIGH band
-     * when {@code highOnly}. With {@code facet} set (Secret Leak), they are the busiest value of that evidence member
-     * in the bucket, because the bar counts each facet on its own. Distinct sessions do not add across buckets, so a
-     * caller reads each grain it needs.
+     * With {@code facet} set, counts are the busiest facet's, because the bar counts each facet on its own. Distinct
+     * sessions do not add across buckets, so a caller reads each grain it needs.
      */
     public List<CountRow> countBuckets(
             String detectorKind,
@@ -599,10 +534,6 @@ public class ClassifierChartRepository {
         return spec.query((rs, n) -> countRow(rs, rs.getLong("total"))).list();
     }
 
-    /**
-     * A whole-project classifier's detections per {@code grainSeconds} bucket, every call site and none: what its
-     * bar counts. Read beside {@link #countBuckets}, whose {@code total} stays the call site's own.
-     */
     public List<CountRow> projectCountBuckets(
             String detectorKind,
             String projectId,
@@ -625,7 +556,6 @@ public class ClassifierChartRepository {
                 .list();
     }
 
-    /** The last UTC day before {@code before} with a detection on {@code callSite}. */
     public Optional<LocalDate> countLastDay(
             String detectorKind, String projectId, String classifierId, String callSite, Instant before) {
         String table = Objects.requireNonNull(detections.tableFor(detectorKind));
@@ -642,13 +572,7 @@ public class ClassifierChartRepository {
                 .single();
     }
 
-    // ---- cases --------------------------------------------------------------------------------------
-
-    /**
-     * Every finding of {@code scope} that opened or joined a case and overlaps {@code [from, toExclusive)}: open
-     * cases first, then newest onset. A finding without a case never shows. Times are compared as instants, not as
-     * the ISO text the columns hold, which drops a zero fraction and so does not sort.
-     */
+    /** Compared as instants, not as the ISO text the columns hold, which drops a zero fraction and so does not sort. */
     public List<CaseSpan> caseSpans(String projectId, CaseScope scope, Instant from, Instant toExclusive) {
         String join = "";
         String filter;
@@ -702,11 +626,7 @@ public class ClassifierChartRepository {
                 .list();
     }
 
-    /**
-     * Open cases per call site, over the scopes the call-site cards read: findings of {@code classifierKeys} filed
-     * with a call site, and turn-duration and cost drift on a call-site bucket. A
-     * tool-grain drift case counts for its tool, never for the call site it names.
-     */
+    /** A tool-grain drift case counts for its tool, never for the call site it names. */
     public Map<String, Integer> openCasesByCallSite(String projectId, Collection<String> classifierKeys) {
         Map<String, Integer> out = new HashMap<>();
         jdbc.sql("""
@@ -735,8 +655,8 @@ public class ClassifierChartRepository {
     }
 
     /**
-     * Open cases per tool key, over Tool Errors and tool-grain Duration Drift. A tool-grain duration bucket also
-     * holds {@code mcp:} and {@code retrieval:} actions, and only {@code tool:} keys are tools.
+     * A tool-grain duration bucket also holds {@code mcp:} and {@code retrieval:} actions; only {@code tool:} keys are
+     * tools.
      */
     public Map<String, Integer> openCasesByTool(String projectId) {
         Map<String, Integer> out = new HashMap<>();
@@ -762,7 +682,6 @@ public class ClassifierChartRepository {
         return out;
     }
 
-    /** Settled live traces per call site since {@code from}. */
     public Map<String, Long> turnsByCallSite(String projectId, Instant from) {
         Map<String, Long> out = new HashMap<>();
         jdbc.sql("""
@@ -778,8 +697,6 @@ public class ClassifierChartRepository {
                 .forEach(e -> out.put(e.getKey(), e.getValue()));
         return out;
     }
-
-    // ---- helpers ------------------------------------------------------------------------------------
 
     private static RateRow rateRow(ResultSet rs) throws SQLException {
         return new RateRow(hour(rs), rs.getLong("checked"), rs.getLong("flagged"));
@@ -798,11 +715,7 @@ public class ClassifierChartRepository {
         return rs.getObject("hour", OffsetDateTime.class).toInstant();
     }
 
-    /**
-     * The 0-based bin of {@code value} on the grid the {@code :logLo}, {@code :logHi} and {@code :bins} parameters
-     * lay out. A value outside the grid is clamped into the first or last bin, and one at or below zero, which has no
-     * log, is the first.
-     */
+    /** Out-of-grid values clamp into the first or last bin; a value at or below zero has no log and is the first. */
     private static String bin(String value) {
         return "CASE WHEN " + value + " <= 0 THEN 0 ELSE GREATEST(0, LEAST(CAST(:bins AS int) - 1, width_bucket(ln("
                 + value + "), CAST(:logLo AS float8), CAST(:logHi AS float8), CAST(:bins AS int)) - 1)) END";

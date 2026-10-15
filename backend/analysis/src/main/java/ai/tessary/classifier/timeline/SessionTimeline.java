@@ -4,25 +4,20 @@ package ai.tessary.classifier.timeline;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * The ordered events of one session.
- *
- * @param truncated older events of the session are not in {@code events}
- */
+/** @param truncated older events of the session are not in {@code events} */
 public record SessionTimeline(String projectId, String sessionId, List<Event> events, boolean truncated) {
 
     public SessionTimeline {
         events = List.copyOf(events);
     }
 
-    /** The summed size of the events. */
     public long bytes() {
         return events.stream().mapToLong(Event::bytes).sum();
     }
 
     /**
-     * The longest run of newest events whose summed size is at most {@code maxBytes}, numbered again from 0. The
-     * result is truncated when this timeline was, or when an event was cut.
+     * The longest newest-first run within {@code maxBytes}, renumbered from 0. Truncated when this timeline was or an
+     * event was cut.
      */
     public SessionTimeline tail(long maxBytes) {
         int from = events.size();

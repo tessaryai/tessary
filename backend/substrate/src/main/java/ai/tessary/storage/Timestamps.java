@@ -7,17 +7,14 @@ import java.time.OffsetDateTime;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Read helper for the substrate's {@code timestamptz} columns.
- * The {@code *Row} records carry timestamps as ISO-8601 {@code String}s (bound on write with explicit
- * {@code ::timestamptz} casts); this reads a {@code timestamptz} column back and reformats it to a
- * canonical ISO-8601 instant (e.g. {@code 2026-07-02T12:00:00Z}) so the wire shape is stable and
- * independent of Postgres's textual timestamptz rendering.
+ * Reads a {@code timestamptz} back as a canonical ISO-8601 instant, so the wire shape does not depend on Postgres's
+ * text rendering.
  */
 public final class Timestamps {
 
     private Timestamps() {}
 
-    /** A {@code timestamptz} column as an ISO-8601 instant string, or null when the column is null. */
+    /** Null when the column is null. */
     public static @Nullable String iso(ResultSet rs, String column) throws SQLException {
         OffsetDateTime odt = rs.getObject(column, OffsetDateTime.class);
         return odt == null ? null : odt.toInstant().toString();

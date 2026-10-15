@@ -30,17 +30,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Re-scores Frustration turns with the deployment's shadow decision model and keeps both answers
- * ({@link FrustrationShadowProperties}). Runs on a schedule; each run probes the shadow's
- * {@code /health} and, while it answers, drains the backlog in batches: the assessment's own request
- * body is sent as is, with only {@code model} replaced, so the shadow sees exactly what the reference
- * saw, and its probability of {@code unhappy_with_assistant} is flagged against the classifier's
- * current threshold, the rule the reference used.
- *
- * <p>Failure handling follows the server's nature, a GPU instance that stops itself when idle: a
- * transport failure or a 5xx ends the run quietly (the server is going down, the next run tries again),
- * a 4xx is recorded as a refusal so the turn is not re-sent forever, and a run yields after its time
- * budget. Nothing here pauses or touches the classifier; the shadow has no effect on what is flagged.
+ * Re-scores Frustration turns with the shadow model ({@link FrustrationShadowProperties}), sending the assessment's own
+ * request body with only {@code model} replaced and flagging against the current threshold. The server is a GPU
+ * instance that stops when idle: a transport failure or 5xx ends the run quietly, a 4xx is recorded as a refusal so the
+ * turn is not re-sent forever, and a run yields after its budget. The shadow never affects what is flagged.
  */
 @Component
 public class FrustrationShadowSweep {
@@ -85,7 +78,6 @@ public class FrustrationShadowSweep {
         this.clock = clock;
     }
 
-    /** What one run did. */
     public record Run(int sent, int scored, int refused, boolean serverUp, boolean budgetSpent) {}
 
     @Scheduled(fixedDelayString = "${tessary.frustration.shadow.sweep-ms:300000}", initialDelayString = "60000")
@@ -98,7 +90,7 @@ public class FrustrationShadowSweep {
         }
     }
 
-    /** One run: nothing while the shadow is down, else the backlog until it is empty or the budget is spent. */
+    /** Nothing while the shadow is down, else the backlog until empty or the budget is spent. */
     public Run sweep() {
         if (!props.enabled()) return new Run(0, 0, 0, false, false);
         if (!healthy()) {
@@ -179,7 +171,7 @@ public class FrustrationShadowSweep {
         }
     }
 
-    /** The shadow's answer to one turn; null when the server failed to answer at all. */
+    /** Null when the server failed to answer at all. */
     record Answer(@Nullable Double score, String responseJson, int latencyMs) {}
 
     @Nullable

@@ -17,11 +17,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * CRUD + credential sealing for per-project alert channels. Mirrors
- * {@code git/GitIntegrationService}: the channel's config (target URL + credentials) is sealed with
- * {@link SecretBox} (AES-256-GCM, {@code tessary.secret-key}) before it touches the DB and is never
- * returned over the API. The fan-out path ({@code AlertDeliveryDispatcher}) opens the sealed config just
- * before delivery.
+ * Alert channel CRUD. Config is sealed with {@link SecretBox} before it touches the DB and is never returned;
+ * {@code AlertDeliveryDispatcher} opens it just before delivery.
  */
 @Service
 public class AlertChannelService {
@@ -65,7 +62,7 @@ public class AlertChannelService {
     public AlertChannelRow update(String projectId, String id, UpsertChannelRequest req) {
         AlertChannelRow existing = require(projectId, id);
         AlertChannelKind kind = parseKind(req.kind());
-        // Re-seal config only when a new config object is supplied; otherwise keep the stored secret.
+        // Re-seal only when new config is supplied; otherwise keep the stored secret.
         var cfg = req.config();
         String configEnc = cfg != null && !cfg.isEmpty() ? sealConfig(kind, cfg) : existing.configEnc();
         Boolean requested = req.enabled();

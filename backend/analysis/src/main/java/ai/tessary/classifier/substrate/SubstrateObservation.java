@@ -6,31 +6,9 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A substrate SPAN flattened for signal evaluation: the {@code span} row plus the correlation handles
- * it carries denormalized ({@code traceId} / {@code sessionId} / {@code projectVersionId}) and the
- * worst tool-error seen on it (for the tool-failure built-in). Read-only projection over the v2
- * substrate; the {@code signal/} slice owns this read repository, mirroring {@code risk/}'s
- * {@code VerdictSignalRepository}.
- *
- * <h2>There is no turn id any more</h2>
- *
- * <p>v1 addressed a turn with its own {@code context} row and hung the trace off it. In v2 the TURN
- * IS THE TRACE (substrate-model.md §2), so what used to be {@code turnId} is {@link #traceId()} —
- * one id where there were two that had to be kept agreeing. Callers that grouped by turn now group by
- * {@code traceId}. The field is deleted rather than aliased: an alias leaves two names for one value
- * and invites them to drift apart again.
- *
- * <p>{@code sessionId} is nullable, which is the honest shape rather than new laxity. A producer that
- * sends no session id leaves {@code trace.session_id} NULL and the trace belongs to no session;
- * nothing is synthesized to fill the hole (spec §2.1). v1 could not express that, so it invented a
- * session context for anonymous traffic and every reader believed it.
- *
- * <p>{@code input}/{@code output} are the raw payload columns read from {@code span_payload} — the
- * role-tagged {@code gen_ai} message envelope on the native OTLP path (kept raw for rendering
- * fidelity). Text detectors must NOT read them directly: they read {@link #inputText()} /
- * {@link #outputText()} / {@link #groundingPremiseText()}, each unwrapped from the envelope so a
- * classifier never scores envelope JSON. The frustration classifier parses the envelope message by
- * message.
+ * A substrate span flattened for signal evaluation. The turn is the trace, so callers group by {@link #traceId()}.
+ * {@code sessionId} is null when the producer sent none; nothing is synthesized. Text detectors must read
+ * {@link #inputText()}, {@link #outputText()} or {@link #groundingPremiseText()}, never the raw envelope columns.
  */
 public record SubstrateObservation(
         String observationId,
@@ -45,27 +23,18 @@ public record SubstrateObservation(
         @Nullable String output,
         @Nullable String toolError,
         String createdAt,
-        /** The credentials redaction removed from this span's payload, as {@code span_payload.redactions}
-         *  holds them (a JSON array of rule, field and anchored). Null when it removed none, or the payload
-         *  has aged out. */
+        /** A JSON array of rule, field and anchored; null when nothing was removed or the payload aged out. */
         @Nullable String redactionsJson) {
 
-    /** The user-side text of {@link #input}, unwrapped from the gen_ai message envelope. */
     public String inputText() {
         return ContentExtractor.columnText(input, "user");
     }
 
-    /**
-     * The Groundedness built-in's premise source: system AND user text combined, unlike the user-only
-     * {@link #inputText()}. Source content commonly rides in either — a system message ("here is the
-     * document: …") or a pasted-inline user message — so both roles are kept for the premise, unlike
-     * the frustration thread, which excludes system.
-     */
+    /** System and user text, since source content rides in either; the frustration thread excludes system. */
     public String groundingPremiseText() {
         return ContentExtractor.columnTextForRoles(input, Set.of("system", "user"));
     }
 
-    /** The assistant-side text of {@link #output}, unwrapped from the gen_ai message envelope. */
     public String outputText() {
         return ContentExtractor.columnText(output, "assistant");
     }

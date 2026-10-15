@@ -5,17 +5,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.jspecify.annotations.Nullable;
 
 /**
- * What a detector ASSERTED, with nothing that was later ruled about it.
- *
- * <p>This projection exists for exactly one reader — RCA — and it is the context firewall in record
- * form. Layer 2 runs a cheap model over the same finding and writes {@code triage_verdict},
- * {@code triage_summary}, {@code triage_citations} and {@code triage_action} onto the row; those are
- * Layer 2's conclusions, and a mistake in them must never arrive at Layer 3 as a premise. A person may
- * read every one of them and then press "Run RCA"; the agent may not.
- *
- * <p>Enforcement is the SELECT list, not a convention: {@code FindingRepository.findClaim} names these
- * columns and no others, so there is no triage value in scope for a dossier builder to leak by
- * accident. Anything that needs the rulings reads {@link FindingRow} instead.
+ * What a detector asserted, without anything later ruled about it: the context firewall for RCA. Triage's conclusions
+ * must never reach Layer 3 as premises. Enforced by the SELECT list in {@code FindingRepository.findClaim}, so no
+ * triage value is in scope to leak; anything needing rulings reads {@link FindingRow}.
  */
 public record FindingClaim(
         String id,
@@ -36,19 +28,18 @@ public record FindingClaim(
         @Nullable String evidenceCountsJson,
         String createdAt) {
 
-    /** How many refs the detector wrote under one {@link FindingEvidenceRow.Role} — see
-     *  {@link FindingRow#evidenceCount}, which reads the same counter the same way. */
+    /** Reads the same counter as {@link FindingRow#evidenceCount}. */
     public long evidenceCount(String role) {
         return FindingPayload.count(evidenceCountsJson, role);
     }
 
-    /** A top-level number off the classifier's payload, 0 when absent or not a number. */
+    /** 0 when absent or not a number. */
     public double payloadNumber(String key) {
         JsonNode node = FindingPayload.tree(payloadJson).path(key);
         return node.isNumber() ? node.asDouble() : 0.0;
     }
 
-    /** The classifier's own cause key, with the uniqueness scope stripped back off. */
+    /** With the uniqueness scope stripped back off. */
     public String nativeCauseKey() {
         String native0 = FindingPayload.text(payloadJson, "native_cause_key");
         return native0 == null ? causeKey : native0;

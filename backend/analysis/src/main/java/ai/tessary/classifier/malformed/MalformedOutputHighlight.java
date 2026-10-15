@@ -11,20 +11,15 @@ import java.util.Map;
 import java.util.TreeSet;
 
 /**
- * Where a failing field sits in a pretty-printed document: a second, location-tracking parse of the
- * exact text a reader is shown, so a highlighted line always names a real line of what's on their
- * screen rather than one recomputed from a different serialization.
- *
- * <p>A field's collapsed path ({@code items[].sku}) can own more than one span — one array element's
- * {@code sku} for every element that violated it — so every match highlights, not only the first.
- * {@code required}'s span does not exist in the document (the property is the thing that is missing),
- * so it falls back to the line the parent object opens on.
+ * Locates a failing field in the exact pretty-printed text a reader sees, so a highlighted line is always real. A
+ * collapsed path can own many spans, so every match highlights. A {@code required} violation has no span, so it falls
+ * back to the parent object's opening line.
  */
 final class MalformedOutputHighlight {
 
     private MalformedOutputHighlight() {}
 
-    /** One node's line span in the document: {@code start == end} for a scalar. */
+    /** {@code start == end} for a scalar. */
     private record Span(int start, int end) {}
 
     static List<Integer> forField(ObjectMapper mapper, String prettyJson, String field) {
@@ -83,7 +78,7 @@ final class MalformedOutputHighlight {
         index.computeIfAbsent(collapse(path), k -> new ArrayList<>()).add(new Span(start, end));
     }
 
-    /** The same {@code []}-collapsing convention {@code MalformedOutputDetector} writes violations in. */
+    /** Same convention {@code MalformedOutputDetector} writes violations in. */
     private static String collapse(List<Object> path) {
         StringBuilder sb = new StringBuilder();
         for (Object element : path) {

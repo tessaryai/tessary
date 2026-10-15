@@ -22,12 +22,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * AES-256-GCM envelope for ingestion-source credentials.
- * Format on disk: {@code base64( IV(12B) || ciphertext+tag(16B) )}.
- * <p>Master key from {@code tessary.secret-key} (base64 of 32 raw bytes). If absent,
- * encryption methods throw — callers should refuse to create sources without it.
- * Decryption similarly throws on a missing or wrong key, on tampered ciphertext,
- * or on malformed input.
+ * AES-256-GCM for ingestion-source credentials: {@code base64(IV(12B) || ciphertext+tag)}. The key is
+ * {@code tessary.secret-key}; without it encryption throws, and decryption throws on a missing or wrong key or tampered
+ * input.
  */
 @Component
 public final class SecretBox {

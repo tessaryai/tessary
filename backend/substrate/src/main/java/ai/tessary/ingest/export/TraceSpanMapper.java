@@ -21,54 +21,33 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Maps a platform {@link RawEntry} (one ingested observation) to a single
- * OpenTelemetry GenAI span, JSON-encoded as one JSONL line — the input format
- * the evals plugin's Path A consumes (<code>--traces traces.jsonl</code>).
- *
- * <p>The plugin reads only <code>gen_ai.*</code> attributes and accepts the
- * "messages-as-attributes" shape: <code>gen_ai.input.messages</code> /
- * <code>gen_ai.output.messages</code> are JSON-encoded arrays of
- * <code>{role, parts:[{type:"text", content}]}</code> (see the plugin's
- * {@code examples/sample_traces.jsonl}). {@code trace_id} is preserved verbatim
- * so the plugin's multi-turn grouping (spans sharing a trace) stays intact.
- *
- * <p><b>The ids that come out are now the ids that went in.</b> The export ({@link SpanRowMapper}) hands
- * this mapper the producer's trace id and the composite span handle, so
- * {@code context.trace_id} and {@code context.span_id} carry what the SDK actually emitted rather than
- * surrogates the platform minted. Nothing in this class changed to make that true — it always wrote
- * {@code raw.traceId()} and {@code raw.sourceExternalId()} through untouched — which is why the round trip
- * is exact rather than approximately preserved. Grouping is unaffected: it keys on {@code trace_id}, and
- * a raw OTel hex trace id groups exactly as a ULID did.
+ * Emits the "messages-as-attributes" shape the evals plugin's Path A reads. Trace and span ids are written through
+ * untouched, so the round trip is exact.
  */
 public final class TraceSpanMapper {
 
-    // Deliberately a static bare mapper, not the shared JacksonConfig bean: this is a
-    // non-Spring static utility, and the @Primary bean has identical strict semantics.
+    // A static bare mapper, not the JacksonConfig bean: this is a non-Spring utility, and the @Primary bean has
+    // identical strict semantics.
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private TraceSpanMapper() {}
 
-    /** One OTel GenAI span as a compact JSON string (no trailing newline). {@code mediaStore} +
-     *  {@code projectId} let an {@code image_ref}/{@code document_ref} block re-hydrate to real bytes
-     *  (see {@link #toSpan(RawEntry, String, MediaStore, String)}); pass {@code null} for both to keep
-     *  such blocks as their honest {@code omitted} label instead. */
+    /**
+     * Pass {@code null} for {@code mediaStore} and {@code projectId} to keep ref blocks as their {@code omitted} label.
+     */
     public static String toSpanLine(
             RawEntry raw, String serviceName, @Nullable MediaStore mediaStore, @Nullable String projectId) {
         return toSpan(raw, serviceName, mediaStore, projectId).toString();
     }
 
     /**
-     * Build the span. {@code mediaStore} + {@code projectId} are threaded through to
-     * {@link #mediaPart} so an externalized {@code image_ref}/{@code document_ref} block can rehydrate
-     * to real bytes for the export rather than staying a bare label; pass {@code null} for both
-     * when no store is available (the block then keeps its honest {@code omitted} label — still
-     * lossless-or-labeled, never a silent collapse).
+     * Pass {@code null} for both when no store is available; the block then keeps its {@code omitted} label, never a
+     * silent collapse.
      */
     public static ObjectNode toSpan(
             RawEntry raw, String serviceName, @Nullable MediaStore mediaStore, @Nullable String projectId) {
-        // Prefer an authoritative provider/system declared upstream (e.g. an OpenInference llm.system threaded
-        // into metadata by OpenInferenceNormalizer) over re-deriving it from the model name — otherwise a
-        // declared provider whose model inferSystem can't recognize would silently collapse to "other".
+        // Prefer a provider declared upstream over inferring from the model name, which would collapse an unrecognized
+        // model to "other".
         String system = declaredSystem(raw.metadata());
         if (system == null) system = inferSystem(raw.model());
 
@@ -88,18 +67,15 @@ public final class TraceSpanMapper {
 
         ObjectNode attrs = span.putObject("attributes");
         attrs.put(GenAiAttributes.SYSTEM, system);
-        // Honor the canonical operation kind rather than hard-coding "chat": an invoke_agent/execute_tool entry
-        // must re-emit with its truthful gen_ai.operation.name (defaults to "chat" when kind is unknown).
+        // Honor the canonical operation kind rather than hard-coding "chat".
         attrs.put(GenAiAttributes.OPERATION_NAME, KindNormalizer.operationName(raw.operationKind()));
         if (raw.model() != null) attrs.put(GenAiAttributes.REQUEST_MODEL, raw.model());
-        // The plugin expects the message arrays JSON-encoded as string attribute values.
         attrs.put(
                 GenAiAttributes.INPUT_MESSAGES,
                 writeArray(normalizeMessages(raw.input(), "user", false, mediaStore, projectId)));
         attrs.put(
                 GenAiAttributes.OUTPUT_MESSAGES,
                 writeArray(normalizeMessages(raw.output(), "assistant", true, mediaStore, projectId)));
-        // Adopt standard usage/tool attrs where the upstream carried them (never invent where a standard exists).
         emitUsageAndTool(attrs, raw.metadata());
 
         span.putArray("events");
@@ -111,13 +87,7 @@ public final class TraceSpanMapper {
         return span;
     }
 
-    /**
-     * Build a {@code [{role, parts:[{type:"text", content}]}]} array from a raw
-     * payload. If the payload parses as a role-tagged messages array, roles are
-     * preserved; otherwise the whole payload becomes a single message with the
-     * given default role. When {@code addFinishReason}, each message carries
-     * {@code finish_reason:"end_turn"} (the output shape).
-     */
+    /** When {@code addFinishReason}, each message carries {@code finish_reason:"end_turn"}. */
     static ArrayNode normalizeMessages(
             @Nullable String payload,
             String defaultRole,
@@ -137,7 +107,6 @@ public final class TraceSpanMapper {
             if (!out.isEmpty()) return out;
         }
 
-        // Fallback: a single message carrying the whole payload (or flattened JSON).
         if (root != null) {
             out.add(message(defaultRole, root, addFinishReason, mediaStore, projectId));
         } else {
@@ -147,19 +116,8 @@ public final class TraceSpanMapper {
     }
 
     /**
-     * Build one {@code {role, parts:[…]}} message from a content node, preserving media as real
-     * inlined bytes where possible and a labeled placeholder otherwise (the lossless-or-labeled
-     * invariant this class has always documented, now backed by real preservation instead of always a
-     * label).
-     *
-     * <p>The consuming evals-plugin's documented Path-A input format ({@code contract/output_format.md})
-     * carries message {@code content} as a plain string, so this does not introduce a new typed part —
-     * a real media byte payload is inlined as a base64 {@code data:} URI
-     * <em>inside that same plain-string content field</em> (see {@link #mediaPart}), never a new
-     * part-shape or a bundled/referenced export. The message is flagged {@code has_media:true}
-     * (renamed from {@code has_image} now that documents are covered too; zero known consumers, per
-     * {@code grep -rn "has_image"} at the time of this rename) so a plugin reader can find media parts
-     * without scanning every part's content for a label.
+     * Media is inlined as a base64 {@code data:} URI inside the plain-string content field the plugin's Path-A format
+     * specifies, never a new part shape. {@code has_media:true} lets a reader find media without scanning every part.
      */
     private static ObjectNode message(
             String role,
@@ -169,8 +127,7 @@ public final class TraceSpanMapper {
             @Nullable String projectId) {
         var blocks = ContentExtractor.blocksFromContent(contentNode);
         if (blocks.isEmpty()) {
-            // Object/array with no recognised parts (e.g. a tool payload) — keep the JSON-flatten
-            // behaviour so non-message content still rides through as text.
+            // Keep the JSON-flatten behaviour so non-message content still rides through as text.
             String text = ContentExtractor.flattenContentText(contentNode);
             return textMessage(role, text, addFinishReason);
         }
@@ -196,7 +153,6 @@ public final class TraceSpanMapper {
         return msg;
     }
 
-    /** Append the accumulated text as one {@code {type:text}} part and reset the buffer. */
     private static void flushText(ArrayNode parts, StringBuilder textRun) {
         if (textRun.length() == 0) return;
         parts.addObject().put("type", "text").put("content", textRun.toString());
@@ -204,17 +160,9 @@ public final class TraceSpanMapper {
     }
 
     /**
-     * A media (image or document) block's export part, inlining real bytes where possible — see
-     * {@link #inlineDataUri}. When bytes cannot be recovered (no store handed in, an unresolvable ref, a
-     * real http(s) URL that is deliberately never fetched at export time — same no-fetch posture the
-     * judge boundary and ingest already hold for URLs), a document block falls back to its
-     * already-extracted {@code text} when one is present (see {@link #documentTextFallback}) — mirroring
-     * {@code ContentBlocks.documentRefContent}'s identical text-first priority at the judge boundary, so
-     * a media-store miss (e.g. retention GC'ing the backing {@code media_object}) doesn't discard PDF
-     * text extracted for free at ingest. Only when neither bytes nor text are recoverable does this fall
-     * to the honest content-free label this class has always emitted: {@code [image: <url>]} /
-     * {@code [image omitted: <mediaType>]}, and their {@code document} counterparts. Never a silent
-     * collapse either way.
+     * An http(s) URL is never fetched at export time. Without bytes a document falls back to its ingest-extracted text,
+     * as the judge boundary does, so a media-store miss doesn't discard free PDF text; only then the content-free
+     * label.
      */
     private static ObjectNode mediaPart(ContentBlock b, @Nullable MediaStore mediaStore, @Nullable String projectId) {
         String kind = b.isDocument() ? "document" : "image";
@@ -229,12 +177,7 @@ public final class TraceSpanMapper {
     }
 
     /**
-     * A document block's already-extracted {@code text} (populated at ingest by
-     * {@code MediaExternalizer}), labeled the same way the judge boundary labels it — or
-     * {@link Optional#empty()} when there is no usable text: an image block (images carry no extracted
-     * text), a blank/missing {@code text} field, or {@code text} equal to
-     * {@link PdfTextExtractor#DOCUMENT_TEXT_UNAVAILABLE_MARKER} (extraction itself failed at ingest, so
-     * the marker is not real content and must not be shipped as if it were).
+     * The {@link PdfTextExtractor#DOCUMENT_TEXT_UNAVAILABLE_MARKER} means extraction failed, so it is not real content.
      */
     private static Optional<String> documentTextFallback(ContentBlock b) {
         if (!b.isDocument()) return Optional.empty();
@@ -246,16 +189,8 @@ public final class TraceSpanMapper {
     }
 
     /**
-     * The real bytes as an inline {@code data:<mime>;base64,<bytes>} URI, or {@code null} when they
-     * cannot be recovered without a network fetch this class does not perform:
-     * <ul>
-     *   <li>{@code image_b64}/{@code document_b64} — the bytes are already inline verbatim; no
-     *       MediaStore needed at all.</li>
-     *   <li>{@code image_url}/{@code document_url} — inlined only when {@code url} is ITSELF already a
-     *       {@code data:} URI (verbatim reuse); a real http(s) URL is never fetched here.</li>
-     *   <li>{@code image_ref}/{@code document_ref} — rehydrated via {@code mediaStore.get}; {@code null}
-     *       when the store is absent or the id does not resolve.</li>
-     * </ul>
+     * Null when the bytes cannot be recovered without a network fetch: a {@code *_url} is inlined only when it is
+     * already a {@code data:} URI, and a {@code *_ref} needs the store.
      */
     private static @Nullable String inlineDataUri(
             ContentBlock b, @Nullable MediaStore mediaStore, @Nullable String projectId) {
@@ -268,7 +203,6 @@ public final class TraceSpanMapper {
                 String u = b.url();
                 yield u != null && u.regionMatches(true, 0, "data:", 0, 5) ? u : null;
             }
-            // The only media types left: image_ref and document_ref (only media blocks reach this method).
             default -> {
                 if (mediaStore == null || projectId == null || b.data() == null) yield null;
                 Optional<StoredMedia> stored = mediaStore.get(projectId, new MediaRef(b.data()));
@@ -280,20 +214,14 @@ public final class TraceSpanMapper {
         };
     }
 
-    /** {@code b.mediaType()}, defaulted by modality when blank ({@code image/png} / {@code application/pdf}
-     *  — the same defaults {@link ContentBlock}'s own factories use). */
     private static String defaultedMediaType(ContentBlock b) {
-        // Read the accessor ONCE into a local: calling b.mediaType() again after the null guard is a
-        // fresh @Nullable return as far as SpotBugs is concerned, and it fails the build on it
-        // (NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE).
+        // Read the accessor once: SpotBugs treats a second {@code b.mediaType()} after the null guard as a fresh
+        // @Nullable return (NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE).
         String mediaType = b.mediaType();
         if (mediaType != null && !mediaType.isBlank()) return mediaType;
         return b.isDocument() ? "application/pdf" : "image/png";
     }
 
-    /** The honest placeholder label — still emitted whenever {@link #inlineDataUri} can't
-     *  recover real bytes (see its doc for the three cases). A URL-bearing block labels with the URL; a
-     *  bytes-bearing block labels with its media type. */
     private static String fallbackLabel(ContentBlock b, String kind) {
         String url = b.url();
         if (url != null) return "[" + kind + ": " + url + "]";
@@ -333,12 +261,7 @@ public final class TraceSpanMapper {
         return node.toString();
     }
 
-    /**
-     * Emit {@code gen_ai.usage.*} and {@code gen_ai.tool.*} attributes when the upstream supplied them in
-     * {@link RawEntry#metadata()} (e.g. set by {@link ai.tessary.ingest.OpenInferenceNormalizer} from
-     * OpenInference {@code llm.token_count.*}). We adopt the standard attribute key where one exists and accept a
-     * couple of common provider aliases; absent values are simply not emitted. Token values coerce to long.
-     */
+    /** Adopts the standard key where one exists and accepts common provider aliases; absent values are not emitted. */
     private static void emitUsageAndTool(ObjectNode attrs, @Nullable Map<String, Object> metadata) {
         if (metadata == null || metadata.isEmpty()) return;
         putLong(
@@ -365,7 +288,6 @@ public final class TraceSpanMapper {
                 "tool_call_id");
     }
 
-    /** Put the first present metadata key as a long attribute, coercing numbers/numeric strings. */
     private static void putLong(ObjectNode attrs, String attrKey, Map<String, Object> metadata, String... metaKeys) {
         for (String k : metaKeys) {
             Object v = metadata.get(k);
@@ -378,13 +300,11 @@ public final class TraceSpanMapper {
                     attrs.put(attrKey, Long.parseLong(s.trim()));
                     return;
                 } catch (NumberFormatException ignored) {
-                    // not a numeric string — try the next alias
                 }
             }
         }
     }
 
-    /** Put the first present non-blank metadata key as a string attribute. */
     private static void putString(ObjectNode attrs, String attrKey, Map<String, Object> metadata, String... metaKeys) {
         for (String k : metaKeys) {
             Object v = metadata.get(k);
@@ -395,11 +315,7 @@ public final class TraceSpanMapper {
         }
     }
 
-    /**
-     * An explicitly-declared provider/system from upstream metadata, if any. Accepts either the export name
-     * ({@code gen_ai.system}) or the renamed live-path name ({@code gen_ai.provider.name}); returns {@code null}
-     * when neither is present, so the caller falls back to {@link #inferSystem(String)} on the model.
-     */
+    /** Accepts {@code gen_ai.system} or {@code gen_ai.provider.name}. */
     private static @Nullable String declaredSystem(@Nullable Map<String, Object> metadata) {
         if (metadata == null) return null;
         for (String k : new String[] {GenAiAttributes.SYSTEM, GenAiAttributes.PROVIDER_NAME}) {
@@ -408,7 +324,6 @@ public final class TraceSpanMapper {
         return null;
     }
 
-    /** Map a model name to the OTel {@code gen_ai.system} value the plugin keys on. */
     public static String inferSystem(@Nullable String model) {
         if (model == null) return "other";
         String m = model.toLowerCase(Locale.ROOT);

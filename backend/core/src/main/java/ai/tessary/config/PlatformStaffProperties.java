@@ -9,21 +9,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * The platform-staff allowlist, bound from {@code tessary.platform.staff-emails}: the identities
- * {@code PlatformStaff} lets through to the non-public {@code /actuator/**} paths.
- *
- * <p><b>Empty means nobody.</b> Unlike a capability default, an unset {@code
- * TESSARY_PLATFORM_STAFF_EMAILS} grants no one anything: a deployment that forgets the variable
- * keeps those paths closed rather than opening them.
- *
- * <p>The entries are matched against the email on the principal row, which WorkOS verified at
- * sign-up and which no request header can influence. Comparison is lowercase so a
- * differently-cased sign-in still matches.
+ * The platform-staff allowlist ({@code tessary.platform.staff-emails}) for non-public {@code /actuator/**}. Empty means
+ * nobody, so a forgotten variable keeps those paths closed. Matched case-insensitively against the WorkOS-verified
+ * principal email, which no request header can influence.
  */
 @ConfigurationProperties(prefix = "tessary.platform")
 public record PlatformStaffProperties(@DefaultValue Set<String> staffEmails) {
 
-    /** Whether {@code email} is on the allowlist. False for null/blank, and false when the list is empty. */
+    /** False for null or blank, and when the list is empty. */
     public boolean isStaffEmail(@Nullable String email) {
         if (email == null || email.isBlank()) {
             return false;

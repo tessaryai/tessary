@@ -4,21 +4,11 @@ package ai.tessary.ingest;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A credential redaction removed from a span on the way in: which corpus rule matched, in which field, and
- * whether that rule anchors on a literal the provider stamps into the credential.
- *
- * <p>This is the record a leak detector reads afterwards. Redaction replaces a credential with a token before
- * anything is stored, so by the time a detector sweeps the span the credential is gone, and a token like
- * {@code [REDACTED_SECRET]} cannot say whether it replaced an AWS key or a word after {@code password=}. The
- * stamp can, and it carries nothing of the credential itself.
- *
- * @param rule the gitleaks rule id, such as {@code aws-access-token}
- * @param field {@link #INPUT}, {@link #OUTPUT} or {@link #ATTRIBUTES}
- * @param anchored whether the rule matched on a literal the provider puts in the credential, rather than on a
- *     vendor name near a random-looking string
- * @param masked {@code ai.tessary.redaction.CredentialMasking#maskedKey}, computed from the raw match before
- *     it was replaced. Forward-only: null on a stamp written before this field existed, which a reader
- *     degrades to an unknown key rather than treating as a broken row.
+ * A credential redaction made on the way in, read later by leak detectors: once replaced by a token the credential is
+ * gone, but the stamp still says which rule matched. Carries nothing of the credential itself. @param rule the gitleaks
+ * rule id @param anchored whether the rule matched a provider-stamped literal rather than a vendor name near a
+ * random-looking string @param masked {@code ai.tessary.redaction.CredentialMasking#maskedKey} of the raw match; null
+ * on older stamps, read as an unknown key
  */
 public record RedactionStamp(
         String rule,
@@ -32,6 +22,5 @@ public record RedactionStamp(
     /** The span's output, or its output messages. */
     public static final String OUTPUT = "output";
 
-    /** A string attribute on the span. */
     public static final String ATTRIBUTES = "attributes";
 }

@@ -12,26 +12,13 @@ import org.springframework.jdbc.core.simple.JdbcClient.StatementSpec;
 import org.springframework.stereotype.Repository;
 
 /**
- * The raw inserts behind {@link SampleProjectSeedListener}'s fabricated demo data —
- * {@code job}/{@code finding}/{@code eval_case}/{@code rca_report} rows for a project's sample
- * data, direct rather than through each table's own business-logic repository (see that class's
- * header for why). Split into its own {@code *Repository} class rather than holding {@link
- * JdbcClient} on the listener itself: {@code ArchitectureRulesTest#jdbc_client_only_in_repositories}
- * requires raw JdbcClient access to live behind a class named {@code *Repository}.
- *
- * <p>The showcase project's {@code trace}/{@code span}/{@code span_payload} volume is also
- * inserted from here, as multi-row batched SQL rather than through {@code TraceV2Repository}'s /
- * {@code SpanRepository}'s batch write methods — those exist for live ingest's replay semantics
- * (last-write-wins on a natural key), which a one-shot fabricated seed does not need. The row shapes are the real substrate
- * records ({@link TraceV2Row}, {@link SpanRow}, {@link SpanPayloadRow}) so a batch here can never
- * drift from what those tables actually contain.
+ * Raw inserts for {@link SampleProjectSeedListener}'s demo data, bypassing the business-logic repositories. Trace and
+ * span volume is multi-row batched SQL: the live ingest writers carry replay semantics a one-shot seed does not need.
  */
 @Repository
 public class SampleDataRepository {
 
-    /** Rows per multi-row INSERT statement — comfortably under Postgres's bind-parameter limit
-     *  even for {@link SpanRow}'s ~40 columns, and large enough that ~2,000 spans is a handful of
-     *  round trips rather than one per row. */
+    /** Comfortably under Postgres's bind-parameter limit even for {@link SpanRow}'s ~40 columns. */
     private static final int BATCH_SIZE = 200;
 
     private final JdbcClient jdbc;
@@ -40,11 +27,7 @@ public class SampleDataRepository {
         this.jdbc = jdbc;
     }
 
-    /**
-     * A minimal, already-{@code done} {@code job} row of kind {@code rca} — {@code
-     * rca_report.job_id} is a real FK to {@code job(id)}, since in live use an RCA report is always
-     * produced by a queued job. Returns the minted id for the caller to reference.
-     */
+    /** {@code rca_report.job_id} is a real FK to {@code job(id)}. */
     public String insertDoneRcaJob(String id, String projectId, String now) {
         jdbc.sql("""
                 INSERT INTO job (id, project_id, kind, status, created_at, updated_at)
@@ -53,10 +36,7 @@ public class SampleDataRepository {
         return id;
     }
 
-    /** A {@code finding} row — triaged and case-linked when {@code triageVerdict} is non-null,
-     *  open and untriaged when it is null (the {@code finding_triage_paired_check} constraint
-     *  requires {@code triageVerdict}/{@code triageAction}/{@code triagedAt} to be all-null or
-     *  all-set together). */
+    /** {@code finding_triage_paired_check} requires the triage columns to be all-null or all-set. */
     public void insertFinding(Finding f) {
         jdbc.sql("""
                 INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
@@ -92,18 +72,8 @@ public class SampleDataRepository {
     }
 
     /**
-     * The trace refs a seeded finding rests on, one role at a time.
-     *
-     * <p>Without these a seeded finding is not analysable: {@code RcaAnalysisService} dereferences
-     * {@code finding_evidence} into a baseline and a flagged side and throws when both come back
-     * empty, so every "Run RCA" press on the sample project failed with {@code SUBJECT_NOT_FOUND} —
-     * a message naming the finding, over a table that was never written. The seeder inserts rows
-     * directly (see this class's header for why it does not go through the production repositories),
-     * so it also has to write this table directly rather than inheriting the write {@code
-     * ClassifierArming} does in the same transaction as a real finding.
-     *
-     * <p>{@code evidence_counts} is bumped to match, because that is what a reader consults to tell
-     * "I hold the whole enumerated population" from "the write was interrupted".
+     * Without these, RCA fails with {@code SUBJECT_NOT_FOUND} on a seeded finding. {@code evidence_counts} is bumped so
+     * readers see the population as complete.
      */
     public void insertFindingEvidence(
             String projectId, String findingId, String role, List<String> traceIds, String now) {
@@ -142,16 +112,10 @@ public class SampleDataRepository {
                 .update();
     }
 
+    /** An open {@code eval_case} row plus {@code finding.case_id}, committed together in the caller's transaction. */
     /**
-     * An open {@code eval_case} row, and the reverse link a triaged finding takes now instead of the
-     * case carrying a forward {@code finding_id} (migration {@code 0011}): {@code finding.case_id} is
-     * set directly here, same table both statements touch, so the case and its finding commit
-     * together in the caller's transaction.
-     */
-    /**
-     * Declare a call site's shape, as a bundle import would. A direct write rather than {@code
-     * PipelineService}'s import path: the seed has no bundle, and announcing the change would rewind sweeps
-     * over data the seed wrote for them.
+     * A direct write rather than {@code PipelineService}'s import path: announcing the change would rewind sweeps over
+     * seeded data.
      */
     public void setCallSiteShape(String projectId, String callSiteId, String shape) {
         jdbc.sql("UPDATE call_site SET shape = :shape WHERE project_id = :pid AND id = :id")
@@ -196,7 +160,6 @@ public class SampleDataRepository {
                 .update();
     }
 
-    /** A completed {@code rca_report} row, referencing the same finding and an already-done job. */
     public void insertCompletedRcaReport(SampleRcaReport r) {
         jdbc.sql("""
                 INSERT INTO rca_report (id, project_id, job_id, subject_kind, subject_id, subject_label,
@@ -234,7 +197,6 @@ public class SampleDataRepository {
                 .update();
     }
 
-    /** Batched {@code trace} rows, rollup columns included — see the class header. */
     public void insertTraces(List<TraceV2Row> rows) {
         for (List<TraceV2Row> chunk : chunks(rows)) {
             StringBuilder values = new StringBuilder();
@@ -356,9 +318,10 @@ public class SampleDataRepository {
         }
     }
 
-    /** Batched {@code span} rows — every producer-sourced column {@code SpanRepository.upsertAll}
-     *  writes, minus the three GENERATED ones ({@code depth}, {@code total_tokens},
-     *  {@code total_cost}) a batch insert may not name. */
+    /**
+     * Every column {@code SpanRepository.upsertAll} writes, minus the GENERATED ones ({@code depth},
+     * {@code total_tokens}, {@code total_cost}) an insert may not name.
+     */
     public void insertSpans(List<SpanRow> rows) {
         for (List<SpanRow> chunk : chunks(rows)) {
             StringBuilder values = new StringBuilder();
@@ -502,7 +465,6 @@ public class SampleDataRepository {
         }
     }
 
-    /** Batched {@code span_payload} rows. */
     public void insertSpanPayloads(List<SpanPayloadRow> rows) {
         for (List<SpanPayloadRow> chunk : chunks(rows)) {
             StringBuilder values = new StringBuilder();

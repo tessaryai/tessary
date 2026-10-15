@@ -12,34 +12,18 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * What the groundedness model is sent for an answer: the passages, the question and the answer. The
- * detector reads its inputs here and so does anything that later shows a scored answer, so the
- * sentence offsets the model returned index into the same answer string a reader is shown.
- *
- * <p>The rules, in the order they apply. An answer is scored only on a call site whose shape carries
- * source content ({@link #GROUNDED_SHAPES}), only when it is not blank, and only when it asserts
- * something checkable ({@link VerifiableClaims}). Its passages are the retrieved documents, with the
- * user's text as the question, or, when the turn retrieved nothing, the prompt as one passage with no
- * question. A {@code rag_answer} turn whose conversation reached outside and captured nothing readable
- * is abstained: its source is not ours to judge. Anything this skips is not a trial.
+ * What the groundedness model is sent for an answer. Shared by the detector and every reader so returned sentence
+ * offsets index into the same answer string. Only {@link #GROUNDED_SHAPES}, non-blank answers that assert something
+ * checkable are scored; a {@code rag_answer} turn that reached outside and captured nothing readable is abstained.
  */
 public final class GroundednessInputs {
 
-    /**
-     * Call-site shapes where the input plausibly carries verifiable source content (see
-     * {@code CallSite}'s {@code shape} enum). Deliberately excludes {@code draft}/{@code agent_step}/
-     * {@code conversational_turn}/etc. — open generation, no source to be ungrounded from.
-     */
+    /** Open-generation shapes have no source to be ungrounded from. */
     static final Set<String> GROUNDED_SHAPES = Set.of("summarize", "extract", "rag_answer");
 
     /**
-     * The shapes whose source material lives OUTSIDE the prompt, and which therefore have nothing to
-     * fall back on when a trace reached outside and captured nothing readable.
-     *
-     * <p>{@code extract} and {@code summarize} are deliberately absent: for those the prompt IS the
-     * document by definition of the shape, so a tool span elsewhere in the trace must not cost them
-     * the premise they already had. Abstaining on every grounded shape would silence a
-     * document-in-prompt turn merely for sharing a trace with a tool call.
+     * {@code extract} and {@code summarize} are absent: their document is in the prompt, so a tool span elsewhere in
+     * the trace must not cost them their premise.
      */
     private static final Set<String> EVIDENCE_EXPECTED_SHAPES = Set.of("rag_answer");
 
@@ -47,11 +31,8 @@ public final class GroundednessInputs {
             new GroundingEvidenceReads.Evidence(List.of(), false);
 
     /**
-     * One answer's model inputs.
-     *
-     * @param question the user's text when the passages are retrieved documents; null when the prompt is
-     *     the passage
-     * @param premiseHadEvidence whether the passages are retrieved documents rather than the prompt
+     * @param question null when the prompt is the passage @param premiseHadEvidence whether the passages are retrieved
+     * documents rather than the prompt
      */
     public record Inputs(List<String> passages, @Nullable String question, String answer, boolean premiseHadEvidence) {}
 
@@ -63,10 +44,7 @@ public final class GroundednessInputs {
         this.evidenceReads = evidenceReads;
     }
 
-    /**
-     * The inputs for each observation in {@code batch}, index-aligned: null for one that is not scored.
-     * One shape read and one evidence read for the whole batch, which is one project's.
-     */
+    /** Index-aligned, null when not scored. One shape read and one evidence read per batch. */
     public List<@Nullable Inputs> read(List<SubstrateObservation> batch) {
         List<@Nullable Inputs> out = new ArrayList<>(batch.size());
         Set<String> siteIds = new HashSet<>();
@@ -102,15 +80,11 @@ public final class GroundednessInputs {
             SubstrateObservation o, String siteShape, GroundingEvidenceReads.Evidence ev) {
         String answer = o.outputText();
         if (answer.isBlank()) return null;
-        // An answer that asserts nothing checkable never reaches the head: measured on real turns with
-        // no evidence, greetings and questions were 48 of 54 false firings. See VerifiableClaims. The
-        // head scores the WHOLE answer; this is a gate, not a splitter.
+        // Greetings and questions were 48 of 54 false firings on evidence-less turns. A gate, not a splitter: the head
+        // scores the whole answer.
         if (VerifiableClaims.of(answer).isEmpty()) return null;
         List<String> documents = ev.documents();
-        // ABSTAIN only when BLIND on a shape that HAS no prompt fallback — the conversation reached
-        // outside and captured nothing readable, so the answer's source is not ours to judge. Not
-        // abstained: a conversation that reached outside for nothing (the prompt is the whole world),
-        // and extract/summarize, whose document is in the prompt.
+        // Abstain only when BLIND on a shape with no prompt fallback.
         if (documents.isEmpty() && ev.conversationDidExternalWork() && EVIDENCE_EXPECTED_SHAPES.contains(siteShape)) {
             return null;
         }

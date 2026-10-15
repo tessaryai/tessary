@@ -11,21 +11,10 @@ import ai.tessary.llmspi.ModelLane;
 import java.util.Optional;
 
 /**
- * Project to decision target: the decision lane's provider and model for this project, then the org's
- * key for that provider, decrypted.
- *
- * <p>The provider comes from {@link ProjectModelSettings}, so a project that pinned OpenRouter on the
- * lane runs there even when the org also holds a TypeSafe key, and an unpinned lane follows
- * {@code LanePriority} (TypeSafe first). Empty when the org holds a key for no provider the lane
- * offers, which a caller treats as "no provider".
- *
- * <p>Registered by {@code LlmSeamConfig} only when no other build supplies one, so a build that offers
- * {@link ModelProvider#PLATFORM} can extend this class and resolve that provider to a target of its
- * own. It may throw an exception implementing {@link ai.tessary.llm.PlatformCreditExhausted} when the
- * org has no credit left for it. This build never resolves {@code PLATFORM}: no credential row backs it.
- *
- * <p>{@link #hasProvider} answers only whether the lane has somewhere to run and never calls
- * {@link #resolve}, so a subclass's credit check cannot reach it.
+ * Resolves the decision lane's provider (pinned, else {@code LanePriority}) and the org's decrypted key; empty means no
+ * provider. Another build may extend it to resolve {@link ModelProvider#PLATFORM}, throwing
+ * {@link ai.tessary.llm.PlatformCreditExhausted} when out of credit. {@link #hasProvider} never calls {@link #resolve},
+ * so a credit check cannot reach it.
  */
 public class DecisionProviderResolver {
 
@@ -45,17 +34,14 @@ public class DecisionProviderResolver {
         this.orgResolver = orgResolver;
     }
 
-    /**
-     * Whether the lane has a provider to run on: the org holds a key for it, or it is the deployment's
-     * own. Opens no key and asks nothing about credit, which is the difference from {@link #resolve}.
-     */
+    /** Opens no key and asks nothing about credit. */
     public boolean hasProvider(String projectId, ModelLane lane) {
         String orgId = orgResolver.orgIdFor(projectId);
         if (orgId == null) return false;
         Optional<ProjectModelSettings.ResolvedDecisionModel> model = settings.resolveDecisionModel(projectId, lane);
         if (model.isEmpty()) return false;
         ModelProvider provider = model.get().provider();
-        // ProjectModelSettings offers PLATFORM only when the deployment supplies it to this org.
+        // Offered only when the deployment supplies it to this org.
         return provider == ModelProvider.PLATFORM
                 || credentials
                         .findByOrgAndProvider(orgId, provider)

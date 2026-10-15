@@ -9,41 +9,22 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Decides whether a user turn is sent to the frustration decision model, and builds the state it is
- * sent as: the current user message and the four messages before it, oldest first.
- *
- * <p><b>Eligibility.</b> A turn is sent only when the four messages immediately before it are exactly
- * user, assistant, user, assistant, each with real text, the current message has real text, and neither
- * assistant turn ended on a tool call with no text after it. So a conversation's opener and its second
- * user turn are never sent, and an assistant message is never sent empty. An ineligible turn is not
- * sent and nothing is recorded for it.
- *
- * <p><b>Caps.</b> Pastes are marked first ({@link PasteMarker}), then each message is cut to its cap
- * ({@link HeadTailClip}): the current user message gets the most room, the latest assistant reply
- * more than the older one. If the total still exceeds the budget, the oldest user and assistant pair is
- * dropped; the current message and the newest pair are never dropped.
+ * Eligibility: the four prior messages must be exactly user, assistant, user, assistant with real text, the current one
+ * has text, and neither assistant turn ended on a bare tool call; ineligible turns are not recorded. Pastes are marked
+ * ({@link PasteMarker}), then each message is clipped ({@link HeadTailClip}); over budget, the oldest pair is dropped,
+ * never the current message or newest pair.
  */
 public final class FrustrationTurnBuilder {
 
     private static final int PRIOR_MESSAGES = 4;
 
-    /**
-     * Per-message caps and the total budget, in chars (a token is about four).
-     *
-     * @param currentUser the message being judged
-     * @param earlierUser each earlier user message
-     * @param latestAssistant the reply the current message answers
-     * @param olderAssistant the reply before that
-     * @param budget all messages together
-     */
+    /** In chars (a token is about four). */
     public record Caps(int currentUser, int earlierUser, int latestAssistant, int olderAssistant, int budget) {
         public static final Caps DEFAULT = new Caps(1_600, 600, 512, 128, 4_096);
     }
 
-    /** One earlier message, as the decision model reads it. */
     public record EarlierMessage(String role, String content) {}
 
-    /** The state sent for one turn. */
     @JsonPropertyOrder({"current_user_message", "earlier_messages"})
     public record TurnState(
             @JsonProperty("current_user_message") String currentUserMessage,
@@ -54,11 +35,7 @@ public final class FrustrationTurnBuilder {
         }
     }
 
-    /**
-     * An eligible turn: the state to send and which user turn of its conversation it is.
-     *
-     * @param userTurn the scored turn's 1-based position among its conversation's turns (traces)
-     */
+    /** @param userTurn the scored turn's 1-based position among its conversation's traces */
     public record EligibleTurn(TurnState state, int userTurn) {}
 
     private final ConversationThreadAssembler assembler;
@@ -73,17 +50,14 @@ public final class FrustrationTurnBuilder {
         this.caps = caps;
     }
 
-    /**
-     * The state to send for {@code scored}, with the scored turn's position among its conversation's
-     * turns, or empty when the turn is not eligible.
-     */
+    /** Empty when the turn is not eligible. */
     public Optional<EligibleTurn> buildTurn(SubstrateObservation scored) {
         return assembler
                 .assembleStructured(scored)
                 .flatMap(thread -> format(thread, caps).map(state -> new EligibleTurn(state, thread.turn())));
     }
 
-    /** {@link #buildTurn}'s pure half: eligibility, pastes, caps and budget over an assembled thread. */
+    /** The pure half. */
     static Optional<TurnState> format(StructuredThread thread, Caps caps) {
         List<StructuredThread.Message> earlier = thread.earlier();
         if (!thread.current().hasText() || earlier.size() < PRIOR_MESSAGES) {

@@ -5,15 +5,11 @@ import ai.tessary.model.JobStatus;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The leased sweep coordinator for one signal, mirroring {@code observer_job}: one row
- * per {@code (project, signal)}, claimed {@code FOR UPDATE SKIP LOCKED} so running N backends is safe.
- *
- * @param cursorAt the {@code observation.created_at} component of the keyset high-water mark this signal
- *     has swept up to; the worker claims observations strictly after {@code (cursorAt, cursorId)}, then
- *     advances them. Monotonic + resumable; {@code null} sweeps from the beginning.
- * @param cursorId the {@code observation.id} tiebreaker of the keyset cursor, making it gap-free across a
- *     batch boundary that falls inside a group of observations sharing one {@code created_at}.
- * @param pageRetries consecutive holds of the page past the cursor; see {@code ClassifierJobRepository#holdPage}
+ * The leased sweep coordinator for one signal: one row per {@code (project, signal)}, claimed
+ * {@code FOR UPDATE SKIP LOCKED}. @param cursorAt keyset high-water mark; the worker claims observations strictly after
+ * {@code (cursorAt, cursorId)}; null sweeps from the beginning @param cursorId tiebreaker that keeps the cursor
+ * gap-free across rows sharing one {@code created_at} @param pageRetries consecutive holds of the page past the cursor;
+ * see {@code ClassifierJobRepository#holdPage}
  */
 public record ClassifierJobRow(
         String id,
@@ -34,12 +30,8 @@ public record ClassifierJobRow(
     public static final String CLAIMED = JobStatus.CLAIMED;
 
     /**
-     * Terminal past the attempt cap, distinct from {@link JobStatus#FAILED} (still retryable). A signal job is
-     * resurrected by every heartbeat's re-pend, so its cap-crossing needs a state that routine re-pend
-     * won't touch until the dead-letter cooldown elapses. Both exhaustion legs write it: a fast-failing
-     * sweep via {@code ClassifierJobRepository#markFailed}, and a hung/crashed sweep whose lease expired via
-     * {@code ClassifierJobRepository#failExhausted} — see {@code #markPending} for the cooldown-gated
-     * revival.
+     * Terminal past the attempt cap, unlike retryable {@link JobStatus#FAILED}: every heartbeat re-pends signal jobs,
+     * so exhaustion needs a state that re-pend skips until the dead-letter cooldown elapses.
      */
     public static final String DEAD = JobStatus.DEAD;
 }

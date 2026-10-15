@@ -17,7 +17,6 @@ import java.time.Duration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-/** The real {@link GithubManifestExchange}: an actual HTTPS call to {@code api.github.com}. */
 @Component
 public class GithubManifestHttpExchange implements GithubManifestExchange {
 
@@ -33,7 +32,7 @@ public class GithubManifestHttpExchange implements GithubManifestExchange {
                 "https://" + GithubAppProperties.DEFAULT_API_HOST);
     }
 
-    /** The transport and the api.github.com origin as seams, so a test can answer without DNS or a network. */
+    /** Test seams. */
     GithubManifestHttpExchange(ObjectMapper mapper, HttpClient http, String apiOrigin) {
         this.mapper = mapper;
         this.http = http;
@@ -58,7 +57,7 @@ public class GithubManifestHttpExchange implements GithubManifestExchange {
             throw new TessaryException(GitError.MANIFEST_CONVERSION_FAILED, e);
         }
         if (res.statusCode() / 100 != 2) {
-            // A reused/expired code lands here (GitHub rejects the second conversion of a one-shot code).
+            // GitHub rejects a second conversion of a one-shot code.
             throw new TessaryException(GitError.MANIFEST_CONVERSION_FAILED);
         }
         try {

@@ -13,33 +13,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Copies correlation handles down from a trace onto spans that arrived without them, as a micro-batch over
- * {@code ix_span_uncorrelated} (substrate-model.md §6.3).
- *
- * <h2>The fallback, not the path</h2>
- *
- * <p>Every span is supposed to describe itself: our SDK puts the session, user and trace name in
- * OpenTelemetry Baggage, so the correlation columns are populated at write and no server-side join is
- * needed to read a span. This exists for third-party OTel producers that propagate none of that, whose
- * spans land with a null {@code session_id} and only find out which session they belong to once their
- * trace row states it.
- *
- * <h2>Anonymous traffic is a terminal state, not a backlog</h2>
- *
- * <p>A trace with no session id is not a trace whose session is late — it is anonymous traffic, and there
- * will never be anything to copy. Left {@code pending}, every one of those spans would be re-read on every
- * tick forever; anonymous traffic is a large and permanent population, so as soon as it outgrew the batch
- * limit the spans that DID have a session waiting for them would stop being selected at all. Marking them
- * {@code correlation_state = 'none'} once their trace settles is what keeps the queue drainable — the same
- * device, for the same reason, as {@code path_state = 'orphan'}. Its one exit is a later batch that gives the
- * trace its session, which ingest copies down itself ({@link SpanRepository#adoptTraceSession}).
- *
- * <h2>The kill switch</h2>
- *
- * <p>These two are the only {@code @Scheduled} beans in the backend that tick every second, so they carry
- * one — default ON, the same shape a background job worker would. It is not a rollout flag: it exists so
- * an operator can stop a background job competing with ingest for connections, and so a test that counts
- * fixpoint passes is not racing a scheduler while it does.
+ * Copies correlation handles from a trace onto spans that arrived without them (third-party producers without our
+ * Baggage), as a micro-batch over {@code ix_span_uncorrelated}. Spans of anonymous traces are marked
+ * {@code correlation_state = 'none'} at settle so they cannot starve the queue; a later batch that brings the session
+ * puts them back ({@link SpanRepository#adoptTraceSession}). The kill switch lets an operator stop a once-a-second job.
  */
 @Component
 @ConditionalOnProperty(
@@ -59,7 +36,6 @@ public class CorrelationBackfiller {
         this.props = props;
     }
 
-    /** One tick's work: spans given their trace's handles, and spans retired as never having any. */
     public record Pass(int correlated, int anonymous) {
 
         int total() {
@@ -82,7 +58,7 @@ public class CorrelationBackfiller {
         }
     }
 
-    /** Run one pass synchronously and report what it did — the seam the starvation test drives. */
+    /** The seam the starvation test drives. */
     public Pass runOnce() {
         Instant started = Instant.now();
         int limit = props.resolverBatchSize();

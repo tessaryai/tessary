@@ -7,12 +7,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, PageBody, PageHeader, Section, Spinner, Toggle, useToast } from "../../ui";
 
-/**
- * Settings → Features. The org's capability overrides, limited to the ones an operator should decide:
- * today only automatic triage. The row reads the build's own default from the server, so a build that
- * ships it on shows "Default: on" without this page knowing which build it is in. Flipping the toggle
- * pins an override; the server resolves the override over the default.
- */
+/** The row reads the build's default from the server; the toggle pins an override over it. */
 
 const TRIAGE_AUTOMATIC: CapabilityWire = "triage_automatic_enabled";
 
@@ -32,8 +27,7 @@ export function Features() {
   });
 
   const me = members.data?.find((m) => m.user_id === user?.id);
-  // Mirrors the server CAPABILITIES_MANAGE permission (owner + admin). Affordance only: the backend
-  // re-checks on every write.
+  // Affordance only: the backend re-checks CAPABILITIES_MANAGE on every write.
   const canManage = me?.role === "owner" || me?.role === "admin";
   const triage = overrides.data?.find((o) => o.capability === TRIAGE_AUTOMATIC);
 

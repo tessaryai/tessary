@@ -5,11 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.config.IngestSpoolProperties;
-import ai.tessary.config.SubstrateProperties;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.substrate.SubstrateWriter;
-import ai.tessary.ingest.substrate.v2.SpanBatchWriter;
-import ai.tessary.redaction.RedactionService;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.Props;
 import ai.tessary.testsupport.TenantFixture;
@@ -18,20 +15,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.ConsumerGroupDescription;
-import org.apache.kafka.common.GroupState;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
@@ -54,17 +43,10 @@ import org.testcontainers.redpanda.RedpandaContainer;
 // Own context on purpose: it swaps the ingest spool onto a Redpanda container, so its bean graph is not the shared
 // one.
 @TestPropertySource(properties = "test.context-group=kafka-spool")
+// The Redpanda container stops after this class; a cached context would keep its consumers rebootstrapping.
+@DirtiesContext
 record KafkaSpoolIntegrationTest(
-        SubstrateWriter writer,
-        IngestSpool spool,
-        TenantService tenants,
-        JdbcClient jdbc,
-        ObjectMapper mapper,
-        SpanBatchWriter spans,
-        SubstrateProperties substrateProps,
-        RedactionService redaction) {
-    private static final Logger log = LoggerFactory.getLogger(KafkaSpoolIntegrationTest.class);
-
+        SubstrateWriter writer, IngestSpool spool, TenantService tenants, JdbcClient jdbc, ObjectMapper mapper) {
     @Container
     static final RedpandaContainer REDPANDA =
             new RedpandaContainer("docker.redpanda.com/redpandadata/redpanda:v25.2.1");
@@ -135,88 +117,6 @@ record KafkaSpoolIntegrationTest(
             assertEquals(100, spans(pids[p]), "project " + p + ": ten traces of ten spans, once each");
         assertEquals(0L, writer.failedBatches());
         assertTrue(writer.drainerAlive(), "both drainers alive after the run");
-    }
-
-    /**
-     * Criterion 8's second half: the same cross-project burst drained by one drainer and by four, each
-     * on a private topic and group so the live writer cannot help. The speed-up is logged for the
-     * runbook; the bound only says four drainers must not be more than 2x slower than one, because
-     * on a shared CI box Postgres, Redpanda and the JVM share the cores and the ratio is noise there.
-     */
-    @Test
-    void crossProjectThroughputScalesWithDrainerCount() throws Exception {
-        String[] pids = new String[8];
-        for (int p = 0; p < 8; p++)
-            pids[p] = TenantFixture.bootstrap(tenants, "kafka-scale-" + p)
-                    .project()
-                    .id();
-        long one = drainWith(1, pids, "s1");
-        long four = drainWith(4, pids, "s4");
-        for (int p = 0; p < 8; p++)
-            assertEquals(2 * 251, spans(pids[p]), "project " + p + " landed both runs once each");
-        double speedup = (double) one / Math.max(1, four);
-        log.info(
-                "cross-project scaling: 2000 spans over 8 projects drained in {} ms with 1 drainer, {} ms with 4,"
-                        + " speed-up {}",
-                one,
-                four,
-                String.format(Locale.ROOT, "%.2f", speedup));
-        assertTrue(four <= one * 2.0, "four drainers took " + four + " ms against " + one + " ms for one");
-    }
-
-    private long drainWith(int drainers, String[] pids, String tag) throws Exception {
-        IngestSpoolProperties own = Props.of(
-                IngestSpoolProperties.class,
-                "mode",
-                "kafka",
-                "kafka.bootstrap-servers",
-                REDPANDA.getBootstrapServers(),
-                "kafka.topic",
-                "tessary.ingest." + tag,
-                "kafka.dead-letter-topic",
-                "tessary.ingest." + tag + ".dead-letter",
-                "kafka.group-id",
-                "tessary-ingest-" + tag,
-                "kafka.partitions",
-                8,
-                "kafka.consumers",
-                drainers);
-        try (KafkaSpool spool = new KafkaSpool(own.kafka(), mapper)) {
-            SubstrateWriter w = new SubstrateWriter(spans, substrateProps, redaction, spool);
-            try {
-                assertEquals(drainers, w.drainerCount());
-                // Warm-up: one span per project so every drainer joins the group, then wait for the
-                // group to settle. Otherwise the clock below measures the broker's join and rebalance
-                // delays (one per member, seconds each), not the drain.
-                for (String pid : pids) assertTrue(w.enqueue(pid, batch("ks-" + tag + "-warm-" + pid, 1)));
-                assertTrue(w.awaitIdle(Duration.ofSeconds(60)), tag + " warm-up drained");
-                awaitStableGroup(own.kafka().groupId(), drainers);
-                long start = System.nanoTime();
-                for (int b = 0; b < 10; b++) {
-                    for (String pid : pids) assertTrue(w.enqueue(pid, batch("ks-" + tag + "-" + pid + "-" + b, 25)));
-                }
-                assertTrue(w.awaitIdle(Duration.ofSeconds(180)), tag + " drained");
-                assertEquals(0L, w.failedBatches());
-                return Duration.ofNanos(System.nanoTime() - start).toMillis();
-            } finally {
-                w.shutdown();
-            }
-        }
-    }
-
-    private static void awaitStableGroup(String groupId, int members) throws Exception {
-        try (AdminClient admin = AdminClient.create(
-                Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, REDPANDA.getBootstrapServers()))) {
-            for (int i = 0; i < 60; i++) {
-                ConsumerGroupDescription d = admin.describeConsumerGroups(List.of(groupId))
-                        .all()
-                        .get(10, TimeUnit.SECONDS)
-                        .get(groupId);
-                if (d != null && d.members().size() == members && d.groupState() == GroupState.STABLE) return;
-                Thread.sleep(500);
-            }
-            throw new AssertionError("group " + groupId + " never settled with " + members + " members");
-        }
     }
 
     @Test

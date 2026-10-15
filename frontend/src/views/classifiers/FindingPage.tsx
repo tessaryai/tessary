@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * One finding, drawn from its own evidence.
- *
- * This page shows the numbers: the measure's own quantiles then and now, the workload block
- * beside them, and for a cost shift the token decomposition that names what got more expensive.
- * Triage's ruling sits under the figures rather than in place of them, and it is a decision, not
- * a second opinion: it is what settled whether anyone was ever paged about this. So the citations
- * that back it are shown in full, including the check scripts the agent wrote, which is the only
- * part of a ruling a reader can re-run for themselves.
- *
- * The order is the argument: measure first (what moved), then workload (whether the input moved
- * with it), then the decomposition (which component of the measure carries it). That is the order
- * the ruling is made in, and reversing it would present the explanation before the thing being
- * explained.
- */
+// Measure, then workload, then decomposition: the order the ruling is made in. The ruling's citations
+// are shown in full, check scripts included, since they are the part a reader can re-run.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
@@ -55,13 +42,7 @@ export function FindingPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { findingId = "" } = useParams();
-  /*
-   * Absolute, like every other detail page in the app. A relative `..` was pointing at Triage: this
-   * route's path is the flat `classifiers/findings/:findingId`, and React Router resolves `..` against
-   * the ROUTE rather than the URL, so one step up pops all three segments and lands on the project
-   * root. Nothing about that is visible from here, which is exactly why the rest of the app builds
-   * these from the slugs instead.
-   */
+  /* Absolute: React Router resolves `..` against the flat route, which would land on the project root. */
   const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
   const traceLink = traceLinker(basePath);
 
@@ -71,7 +52,6 @@ export function FindingPage() {
     enabled: findingId !== "",
   });
 
-  // Both verbs remove this finding from the queue, so the page it was opened from is where to land.
   const done = () => {
     void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
     navigate("..");
@@ -101,9 +81,6 @@ export function FindingPage() {
   const frustration = detail.frustration;
   const groundedness = detail.groundedness;
   const classifierDetail = detail.classifierDetail;
-  /* All seven tell a before-and-after story with a figure, pins and a ruling. Six put their verbs
-     behind triage; frustration is ruled when it is filed. The rest of the detectors keep the older
-     layout until they get a story of their own. */
   const story = shift ?? rate ?? secretLeak ?? malformedOutput ?? frustration ?? groundedness ?? classifierDetail;
 
   return (
@@ -169,10 +146,7 @@ export function FindingPage() {
             {!triaged && (
               <RunTriageButton finding={finding} busy={busy} onAnalyze={() => analyzeM.mutate()} />
             )}
-            {/* A ruling freezes the finding by construction (decision 1): once triaged is true a
-                verdict is stood, and every verb on it — triage's own or a person's — 409s. So the
-                verbs stop being offered the moment there is one, rather than staying up as an
-                "override" that would just fail. */}
+            {/* A ruling freezes the finding: every verb on it 409s. */}
             {!triaged && (
               <ResolveVerbs busy={busy} onResolve={(action) => resolveM.mutate(action)} />
             )}
@@ -190,19 +164,15 @@ export function FindingPage() {
 
       {resolveM.isError && <ErrorNote error={resolveM.error} />}
       {analyzeM.isError && <ErrorNote error={analyzeM.error} />}
-      {/* A dead-lettered run is revived only once its cooldown has passed; before that the press lands
-          on the same dead job, and saying nothing would read as the button not working. */}
+      {/* A dead-lettered run revives only after its cooldown; before that the press lands on the dead job. */}
       {analyzeM.data?.jobStatus === "dead" && (
         <p className="text-muted text-small mt-2 mb-0">
           Triage gave up on this finding recently. It can run again once its cooldown has passed.
         </p>
       )}
 
-      {/* The ruling is the decision this finding ended on, so it sits above the evidence rather than
-          under it. Its receipts do not: the citations and the check scripts are how a reader CHECKS
-          the ruling, and checking comes after reading what was ruled on. No verbs here: a ruled
-          finding is frozen (decision 1), so there is nothing left to override. A frustration finding
-          states its ruling and links its case in its own header, so it skips this card. */}
+      {/* The ruling sits above the evidence; its receipts come after. A frustration finding states its ruling
+         in its own header. */}
       {story && triaged && !frustration && (
         <div
           className="flex flex-col rounded-card border border-border-strong bg-surface gap-2.5 mt-5 py-4.25 px-4.75">
@@ -377,9 +347,6 @@ export function FindingPage() {
 
       {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
-      {/* A frustration finding's evidence is its sessions, and a groundedness finding's its answers, drawn
-          above; a detailed finding's flagged trials are listed by its owner. The raw witness rows would list
-          the same traces again as bare ids. */}
       {!frustration && !groundedness && !classifierDetail && (
         <section className="mt-7">
           <h2 className="font-mono text-label uppercase text-muted mb-1.5">
@@ -391,13 +358,6 @@ export function FindingPage() {
     </div>
   );
 
-  /**
-   * The header of a shift finding: what this is, what the measure did, and the one action available.
-   *
-   * <p>The right slot holds exactly one thing, and which one is the whole state of the finding. Before
-   * triage it is the button that runs it; after, it is what triage ruled. A label reading "Not triaged"
-   * beside a button that runs triage said the same thing twice and gave the eye two places to land.
-   */
   function ShiftHeader({
     shift: sh,
     finding: f,
@@ -438,9 +398,6 @@ export function FindingPage() {
           </span>
         }
         subtitle={
-          /* Everything a reader needs about identity (which bucket, over what window, against
-             what) says itself here in words; the raw cause key stays reachable as the line's
-             title. */
           <span title={f.causeKey}>
             {[bucket, window && `${window} vs ${referenceWords(sh.reference)}`].filter(Boolean).join(" · ")}
           </span>
@@ -459,13 +416,6 @@ export function FindingPage() {
     );
   }
 
-  /**
-   * The header of a rate finding. Same anatomy as {@link ShiftHeader}, different claim.
-   *
-   * <p>The one action lives here and nowhere else before triage. The resolve verbs appear only
-   * inside the ruling, as overrides of a decision that has actually been made, not as a way to
-   * skip past the evidence for it.
-   */
   function RateHeader({
     rate: r,
     finding: f,
@@ -524,19 +474,6 @@ export function FindingPage() {
   }
 }
 
-/**
- * What triage ruled, and everything it ruled on.
- *
- * <p>The verdict line first, because the verdict is what happened to this finding (`positive`
- * handed it to a person, `negative` closed it), and a reader who stops after one line should
- * have that fact rather than the prose.
- *
- * <p>Then the citations, which are two different objects wearing the same shape. An evidence
- * pointer is a claim about something already on this page ("window.n_cur", a trace id the agent
- * fetched) and reads as one line. A check script is code the agent wrote, ran in its sandbox, and
- * is offering as a receipt, so it is shown as code, with what it printed under it. Flattening a
- * script into a line of prose would hide the one part of a ruling a reader can actually re-run.
- */
 function TriageRuling({ finding, basePath }: { finding: Detail["finding"]; basePath: string }) {
   const scripts = finding.triageCitations.filter((c) => c.stdout !== null);
   const pointers = finding.triageCitations.filter((c) => c.stdout === null);
@@ -602,13 +539,11 @@ function TriageRuling({ finding, basePath }: { finding: Detail["finding"]; baseP
   );
 }
 
-/** The verdict as a sentence, because the bare word says what it concluded and not what it did. */
 const VERDICT_WORDS: Record<string, string> = {
   positive: "Positive: the claim holds, and a case is open on it.",
   negative: "Negative: the measurement is wrong, so there is nothing to explain.",
 };
 
-/** One check script: the file, what it established, and its output. */
 function CheckScript({ citation }: { citation: TriageCitation }) {
   return (
     <div className="rounded-card border border-border bg-surface py-2.5 px-3 mt-2.5">
@@ -632,19 +567,10 @@ function CheckScript({ citation }: { citation: TriageCitation }) {
   );
 }
 
-/**
- * What is behind a rate shift: the failure signatures, then instances of them.
- *
- * <p>The rate itself is not repeated here: stating it as a percent change of a percentage (e.g.
- * `1.28 → 2.49  +94%`) is the single most misleading way to write it. The chart above says it as
- * a share of calls and the pins say it as a count per hundred; a table here would only
- * reintroduce that column.
- */
+/** The rate is not repeated: a percent change of a percentage is the most misleading way to write it. */
 function ToolErrorEvidence({ rate }: { rate: NonNullable<Detail["toolError"]> }) {
   return (
     <>
-      {/* Direction from the rates, which are measured, rather than from the pattern rows, which
-          carry no reference side. */}
       <PatternBlock
         patterns={rate.patterns}
         truncated={rate.patternsTruncated}

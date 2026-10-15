@@ -22,15 +22,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The PII redaction rules playground: per-project CRUD over redaction rules plus a preview
- * endpoint that applies a (possibly unsaved) rule, or the whole active rule set, to sample text. The rules
- * managed here are exactly the rules the server-side write-path guard ({@code SubstrateWriter} →
- * {@code RedactionService}) applies before persistence.
- *
- * <p><b>Split by capability, not by page.</b> Reading the rules, toggling a built-in and previewing the
- * active set are open to every org — that is the "what do you strip before you store it" answer a security
- * review needs. Authoring a rule of your own (create / update / delete, and previewing an unsaved pattern)
- * requires {@link CustomRuleGate}, which resolves {@code custom_redaction_enabled}.
+ * Redaction rules CRUD and preview; these are the rules {@code RedactionService} applies before persistence. Reading,
+ * toggling built-ins and previewing the active set are open to every org; authoring requires {@link CustomRuleGate}.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/redaction")
@@ -130,7 +123,7 @@ public class RedactionController {
         if (pattern == null || pattern.isBlank()) {
             result = service.previewAll(r.project().id(), req.sampleText());
         } else {
-            // A pattern in the body means an unsaved rule is being tried out, which is authoring.
+            // Previewing an unsaved pattern is authoring.
             customRules.requireCustomRules(r.org().id());
             result = service.preview(pattern, replacement == null ? "" : replacement, req.sampleText());
         }

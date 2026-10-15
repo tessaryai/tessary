@@ -40,7 +40,6 @@ public final class TestPostgres {
 
     private TestPostgres() {}
 
-    /** Create an empty database in the singleton container and return its name. */
     public static String createIsolatedDatabase() {
         return createDatabase("");
     }
@@ -93,9 +92,8 @@ public final class TestPostgres {
     }
 
     /**
-     * Everything in a {@link #jdbcUrl(String)} up to and including the final slash, so a caller about to do something
-     * destructive can prove the connection it holds points at this throwaway container. The mapped port is assigned
-     * by Docker per run, which is what makes this worth checking rather than assuming.
+     * Lets a destructive caller prove its connection points at this throwaway container; the mapped port changes per
+     * run.
      */
     public static String urlPrefix() {
         return "jdbc:postgresql://"

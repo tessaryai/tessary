@@ -38,7 +38,7 @@ public class OrganizationRepository {
                 .optional();
     }
 
-    /** The install's first organization: the one whose settings govern instance-wide policy. */
+    /** The install's first organization, whose settings govern instance-wide policy. */
     public Optional<Organization> findOldest() {
         return jdbc.sql("SELECT * FROM organization ORDER BY created_at ASC, id ASC LIMIT 1")
                 .query(OrganizationRepository::map)
@@ -46,18 +46,11 @@ public class OrganizationRepository {
     }
 
     /**
-     * Serialize org creation per owner for the rest of the CURRENT transaction. The
-     * owned-org cap ({@code OrgCreationLimit}) is a check-then-insert; without this, two concurrent
-     * creates by the same user both pass the count before either inserts and the cap is exceeded.
-     * {@code pg_advisory_xact_lock} blocks a second caller with the same key until the first
-     * transaction commits or rolls back, and needs no schema change — {@code hashtext} folds the
-     * ULID to the {@code bigint} key the lock takes. Must be called INSIDE the transaction that
-     * does the count and the insert, or it serializes nothing.
+     * Serialize org creation per owner for the rest of the current transaction: the owned-org cap is check-then-insert,
+     * so two concurrent creates would both pass the count. Must run inside the transaction that counts and inserts.
      */
     /**
-     * How many organizations this user OWNS — one query, not a membership scan plus a lookup per
-     * org. Mirrors {@link #findByUserId}'s own filters so the two never disagree
-     * about which orgs count. Meant to run under {@link #lockOrgCreationFor} so the answer is exact.
+     * Mirrors {@link #findByUserId}'s filters so the two never disagree. Exact only under {@link #lockOrgCreationFor}.
      */
     public long countOwnedBy(String userId) {
         return jdbc.sql("""
@@ -72,7 +65,6 @@ public class OrganizationRepository {
     }
 
     public void lockOrgCreationFor(String ownerUserId) {
-        // Same idiom as CaseRepository#lockProject — one advisory-lock shape in the codebase.
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtext(:uid))")
                 .param("uid", ownerUserId)
                 .query()
@@ -107,9 +99,7 @@ public class OrganizationRepository {
     }
 
     /**
-     * Partial update: only overwrite a column when the caller actually supplies a value.
-     * A {@code null} name/settings leaves the existing value untouched (COALESCE-merge), so a
-     * name-only PATCH never wipes the settings blob and vice-versa.
+     * A {@code null} name or settings leaves the column untouched, so a name-only PATCH never wipes the settings blob.
      */
     public void update(String id, String name, String settings) {
         jdbc.sql("""

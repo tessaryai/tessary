@@ -4,11 +4,8 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 /**
- * Errors raised by the generic agent-sandbox run and session ({@code agentrun/}). Six outcomes, split
- * by who has to act: the launcher could not be reached, the launcher is refusing every request until a
- * person changes the deployment, this run failed on its own terms, the agent finished but answered
- * with nothing usable, the run hit its wall clock, or the launcher has no room for another session. A
- * caller retries the first and the last, parks on the second, and spends an attempt on the other three.
+ * Errors for agent-sandbox runs and sessions. Callers retry an unreachable launcher or a full one, park on a launcher
+ * refusing until the deployment changes, and spend an attempt on a run failure, an unusable answer or a timeout.
  */
 public enum AgentRunError implements ErrorCode {
     LAUNCHER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "The agent launcher is not answering: %s"),

@@ -10,21 +10,9 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.stereotype.Component;
 
 /**
- * Fails boot loudly, naming the kind and the table, when a registered {@link DetectionTable} points
- * at a relation that does not exist in the connected database.
- *
- * <p>Runs from {@link #afterSingletonsInstantiated()}, which Spring Boot calls after every singleton
- * bean has been fully initialized, including any {@code SpringLiquibase} bean, whose DDL runs inside
- * its own {@code afterPropertiesSet()} during singleton instantiation, strictly before
- * {@code SmartInitializingSingleton} callbacks fire. So this check is guaranteed to run after every
- * Liquibase master present has already applied, with no explicit {@code @DependsOn} — the ordering
- * falls out of the Spring Boot lifecycle contract itself, not out of a string naming a bean. That
- * guarantee holds only as long as nothing in the chain becomes {@code @Lazy}; a lazy Liquibase bean
- * would defer its DDL past this check silently.
- *
- * <p>No-ops when no {@code DataSource} bean is present, the shape every
- * {@code ApplicationContextRunner} test in this codebase uses, so this class never forces a
- * container onto a context that was never asking for a live database.
+ * Fails boot, naming kind and table, when a registered {@link DetectionTable} has no relation. Runs from
+ * {@link #afterSingletonsInstantiated()}, after every Liquibase bean has applied, as long as none is {@code @Lazy}.
+ * No-op without a {@code DataSource}.
  */
 @Component
 public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
@@ -49,14 +37,12 @@ public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
     }
 
     /**
-     * The event-time column migration {@code 0012} added to every open detection table, and which a
-     * paid overlay's own tables must carry in the same release ({@code AGENTS.md}'s paired-PR rule
-     * for that migration) — checked here rather than left for the writer's insert to fail on at the
-     * first detection, which would surface as a classifier silently never writing anything.
+     * Added by migration {@code 0012}; an overlay's tables must carry it too. Checked here because a missing column
+     * would otherwise surface as a classifier silently never writing.
      */
     private static final String SUBJECT_STARTED_AT = "subject_started_at";
 
-    /** The column a clearable table marks a false alarm in; a reader that filters on it fails on a table without. */
+    /** A reader filtering on it fails on a table without it. */
     private static final String CLEARED_AT = "cleared_at";
 
     private void assertExists(DataSource ds, DetectionTable table) {

@@ -1,78 +1,37 @@
 # Frontend production image — Vite build → Caddy serves static + proxies /api.
 #
-# Build context is the REPO ROOT — NOT because Caddy needs anything outside frontend/ (it doesn't,
-# see below), but because the `build` stage's `COPY frontend/...` lines need it. docker-compose.yml
-# sets the context accordingly.
+# Build context is the repo root (docker-compose.yml sets it).
 
 # ---- build ----
 FROM node:24-alpine AS build
 WORKDIR /app
 
-# pnpm by explicit global install rather than corepack: image builds then never depend on
-# corepack's registry signature check. PNPM_VERSION is supplied by the build orchestrator (the
-# Taskfile locally, the PNPM_VERSION Actions variable in CI); the default is the same pin so a bare
-# `docker build` works.
+# A global install, not corepack, so the build never depends on corepack's registry signature check.
 ARG PNPM_VERSION=11.15.1
 RUN npm i -g pnpm@${PNPM_VERSION}
 
-# Cache deps. pnpm-workspace.yaml is NOT optional here: pnpm 11 keeps settings there rather than in
-# package.json, and this package's override (the openapi-typescript peer) is
-# load-bearing. Omit it and the install silently resolves a different tree.
+# pnpm-workspace.yaml carries the openapi-typescript peer override; without it the install resolves a different tree.
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# Source + config
+# The type-check runs in CI (pnpm run lint), not here.
 COPY frontend/tsconfig.json frontend/vite.config.ts frontend/index.html ./
-# tokens.css is NOT optional and NOT part of ./src: `src/index.css` does `@import "../tokens.css"`,
-# so the design-token layer has to land at /app/tokens.css, one level above the source tree, or the
-# Tailwind plugin fails the build with "Can't resolve '../tokens.css' in '/app/src'". A local
-# `vite build` never noticed the omission — the file is on disk there either way — so only this
-# image build could catch it. Any future file `src/` reaches for with `../` needs a line here too.
+# src/index.css imports ../tokens.css; anything else src/ reaches with ../ needs a line here too.
 COPY frontend/tokens.css ./
 COPY frontend/public ./public
 COPY frontend/src ./src
-# src/api/client.contract.test.ts imports the backend's OpenAPI document by relative path, and
-# `tsc -b` type-checks the tests along with the app. Put the one file it needs where the repo
-# keeps it, relative to /app, so the image build sees the same tree the checkout does.
-COPY backend/contract/src/main/resources/openapi/tessary-api.json /backend/contract/src/main/resources/openapi/tessary-api.json
-# scripts/ is part of `pnpm run build`, not a side tool: the build's last step is
-# `node scripts/copy-dep-licenses.mjs`, which copies the font and icon packages' license text out
-# of node_modules into dist/licenses/ so it travels into /srv with the binaries it covers (SIL OFL
-# 1.1 §2 / ISC — see that script's header). Omit this line and the build dies at MODULE_NOT_FOUND
-# rather than shipping quietly, which is the failure mode we want, but the fix is here.
+# `pnpm run build` ends with scripts/copy-dep-licenses.mjs (font and icon license text into dist/licenses/).
 COPY frontend/scripts ./scripts
 
 RUN pnpm run build
 
 # ---- runtime ----
-# Stock caddy:2-alpine, no custom xcaddy build. The Cloudflare DNS-01 directives that used to
-# justify a bespoke binary here were shaped for OUR OWN Cloudflare-proxied box, not for a
-# self-hosted open image. The configuration is rendered at container start by
-# frontend/caddy/render.sh from SITE_DOMAIN and TLS_MODE: Let's Encrypt over TLS-ALPN-01,
-# an operator-mounted certificate, or plain HTTP behind the operator's own TLS terminator with
-# TRUSTED_PROXIES honoured.
+# Stock caddy:2-alpine; frontend/caddy/render.sh renders the config at start from SITE_DOMAIN and TLS_MODE.
 FROM caddy:2-alpine AS runtime
 
-# Non-root runtime — this was the one image of six that never dropped root. `setcap` runs in
-# THIS stage, on the binary `caddy:2-alpine` already ships, in the same layer it's granted in —
-# capabilities set on a binary do not survive a `COPY --from=`, so this only works because there is
-# no cross-stage copy of the caddy binary any more. The grant itself is required, not optional: the
-# TLS decision above means Caddy still binds :443, a privileged port, as a non-root process.
-# `apk upgrade` and the curl removal are the two halves of this image's critical count, and they
-# are deliberately different moves. UPGRADE what we run: caddy:2-alpine is rebuilt on Caddy's
-# release cadence, not Alpine's, so its openssl (libcrypto3/libssl3) lags the patched
-# 3.5.8-r0 sitting in the 3.23 repo. DELETE what we don't: the base bundles a curl binary purely
-# as a convenience, and nothing here calls it — Caddy is a static Go binary that uses crypto/tls
-# and never links libcurl, the compose healthcheck uses busybox wget, and caddy/entrypoint.sh
-# shells out to neither. Deleting is the stronger of the two because it is permanent, where an
-# upgrade only holds until the next advisory. libcurl has exactly one reverse dependency — curl
-# itself — so `apk del` takes the whole subtree with it: NINE packages, not two. Measured, in
-# order: curl, libcurl, libpsl, nghttp2-libs, zstd-libs, brotli-libs, c-ares, libidn2,
-# libunistring. Two of those names look alarming for a web server and are not: Caddy is a static
-# Go binary that links none of them, and `encode gzip` in caddy/base.caddy is the only compression
-# this site configures — brotli and zstd were never enabled, so purging their C libraries changes
-# nothing. Verified on the built image, both arches: caddy serves, gzip still negotiates, busybox
-# wget still does HTTPS.
+# Non-root, so setcap must run in this stage (capabilities do not survive COPY --from) to let caddy
+# bind :443. apk upgrade picks up the openssl the base image lags on; curl and libcurl are deleted
+# because nothing here calls them (the healthcheck uses busybox wget, caddy links no libcurl).
 RUN apk upgrade --no-cache \
     && apk del --no-cache curl libcurl \
     && apk add --no-cache libcap \
@@ -83,8 +42,6 @@ RUN apk upgrade --no-cache \
 COPY --from=build --chown=caddy:caddy /app/dist /srv
 COPY --chown=caddy:caddy frontend/caddy/ /etc/caddy/
 
-# The image's version identity; same convention and same "dev" fallback as
-# backend/Dockerfile, so another frontend layer can one day compare against it the same way.
 ARG IMAGE_VERSION=dev
 ARG IMAGE_REVISION=unknown
 LABEL org.opencontainers.image.version=$IMAGE_VERSION \

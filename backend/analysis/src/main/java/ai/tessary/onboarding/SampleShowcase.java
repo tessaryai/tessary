@@ -33,29 +33,14 @@ import java.util.zip.Deflater;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Generates the sample project's "AI customer-support agent" showcase: ~500+ support-ticket
- * traces over a 14-day window, threaded through a 7-call-site pipeline, with six of them carrying a
- * real cost/duration/error-rate drift visible when the generated spans are aggregated by day and call
- * site. Pure and deterministic (seeded {@link Random}, no clock reads beyond one {@code now} anchor
- * passed in); no LLM calls, no I/O; {@link SampleProjectSeedListener} does all the writing.
- *
- * <p>Every trace is a flat, sequentially nested pipeline:
- * {@code assemble_ticket_context -> classify_intent -> kb_search -> generate_response ->}
- * optionally {@code refund_api}/{@code ticket_escalation} {@code -> } optionally
- * {@code export_ticket}, chosen per scenario category, so a trace reads as one coherent ticket
- * handled end to end rather than unrelated spans sharing a trace id.
- *
- * <p>Some tickets are threads: the customer writes back twice, each reply its own trace in one session.
- * Those threads are what the Frustration classifier scores, and the replies {@code generate_response}
- * writes from its knowledge-base articles are what the Groundedness classifier scores. From
- * {@link #UNGROUNDED_ONSET_DAY} the replies start promising things the articles never say, and the
- * customers they were promised to come back annoyed, so the two findings tell one story.
+ * Generates the sample project's customer-support agent: ~500 ticket traces over 14 days through a 7-call-site
+ * pipeline, six of them carrying a real drift. Pure and deterministic (seeded {@link Random}, one {@code now} anchor);
+ * {@link SampleProjectSeedListener} does the writing. From {@link #UNGROUNDED_ONSET_DAY} replies promise things the
+ * articles never say and customers come back annoyed, so the groundedness and frustration findings tell one story.
  */
 final class SampleShowcase {
 
     private SampleShowcase() {}
-
-    // ---- call sites --------------------------------------------------------------------------
 
     static final String ASSEMBLE = "assemble_ticket_context";
     static final String CLASSIFY = "classify_intent";
@@ -69,24 +54,14 @@ final class SampleShowcase {
 
     static final int WINDOW_DAYS = 14;
 
-    // ---- scenario taxonomy --------------------------------------------------------------------
-
     /**
-     * Which vocabulary a template's {@code {product\}} placeholder draws from.
-     *
-     * <p>Templates used to share ONE flat pool of "products", which is how the sample project ended up
-     * asking "How do I add teammates to Storage upgrade?" and "How to cancel API credits subscription".
-     * A support ticket names a plan, an integration, a screen or a line item, and those four are not
-     * interchangeable in a sentence, so each template declares which one its wording needs.
+     * A plan, an integration, a screen and a line item are not interchangeable in a sentence, so each template declares
+     * which its wording needs.
      */
     private enum Noun {
-        /** A subscription tier: "upgrade to …", "cancel …", "our workspace is on …". */
         PLAN,
-        /** A third-party system data flows to: "our … integration", "webhooks to …". */
         INTEGRATION,
-        /** A screen or feature inside the product: "… crashes", "settings in …". */
         AREA,
-        /** A billed line item: "charged $40 for …", "refund …". */
         ITEM
     }
 
@@ -537,10 +512,8 @@ final class SampleShowcase {
     }
 
     /**
-     * Openers a customer's earlier messages on the same thread might have carried. Real thread history
-     * is not one sentence repeated N times, and the point of this list is what {@code
-     * assemble_ticket_context} is shown to be forwarding once the drift starts: a reader who opens one
-     * of those spans has to see something that reads like a conversation.
+     * A reader who opens a drifted {@code assemble_ticket_context} span has to see something that reads like a
+     * conversation.
      */
     private static final String[] PRIOR_MESSAGES = {
         "Following up on this, still not resolved.",
@@ -553,12 +526,7 @@ final class SampleShowcase {
         "Looping in our account owner on this one."
     };
 
-    /**
-     * What a reply adds that its knowledge-base articles never support, per category that searches the
-     * knowledge base, and what the customer writes back once it turns out to be false.
-     *
-     * @param contradicts whether the promise contradicts an article, rather than going beyond them
-     */
+    /** {@code contradicts}: the promise contradicts an article rather than going beyond it. */
     private record Promise(String sentence, String complaint, boolean contradicts) {}
 
     private static final Map<String, Promise> PROMISES = Map.of(
@@ -591,7 +559,6 @@ final class SampleShowcase {
                     "You said engineering already shipped a fix. It's still broken. Did anyone actually check?",
                     false));
 
-    /** The customer's first reply on a thread, before anything has gone wrong. */
     private static final String[] FOLLOW_UPS = {
         "Thanks. Is there anything I need to do on my side?",
         "Okay. Can you confirm this is tied to order {orderId}?",
@@ -603,12 +570,10 @@ final class SampleShowcase {
             "Nothing else is needed from you, {customer}. I'll keep this ticket open until it's confirmed on your"
                     + " side.";
 
-    /** The customer's last reply when the ticket went fine. */
     private static final String[] CALM_CLOSERS = {
         "That fixed it, thanks.", "All good now, I appreciate the help.", "Great, I'll reply here if it happens again."
     };
 
-    /** The customer's last reply when they are annoyed with the agent for a reason other than a promise. */
     private static final String[] ANNOYED_CLOSERS = {
         "This is the third time I've explained this. Please read what I wrote before replying.",
         "You keep sending me the same answer and it doesn't help."
@@ -618,8 +583,6 @@ final class SampleShowcase {
 
     private static final String APOLOGY_REPLY =
             "I'm sorry, {customer}. I've passed order {orderId} to a senior specialist to check what went wrong.";
-
-    // ---- baseline operating point per call site ------------------------------------------------
 
     static final double CLASSIFY_BASE_INPUT_TOKENS = 190;
     private static final double CLASSIFY_BASE_OUTPUT_TOKENS = 25;
@@ -640,42 +603,28 @@ final class SampleShowcase {
     private static final long EXPORT_BASE_LATENCY_MS = 340;
 
     /**
-     * What {@code refund_api} and {@code ticket_escalation} fail at when nothing is wrong: the
-     * reference the drift is measured against, so it has to be a rate the reference window can
-     * actually EXHIBIT. At 1% it could not: 38 pre-onset refund calls drew zero failures, and the
-     * finding then claimed a move "from 0.0%", which is not a rate a tool has, it is a window too
-     * small to have seen one.
+     * Must be a rate the reference window can actually exhibit: at 1% the 38 pre-onset calls drew zero failures and the
+     * finding claimed a move "from 0.0%".
      */
     private static final double TOOL_BASELINE_ERROR_RATE = 0.04;
 
-    // ---- drift shapes (design spec) --------------------------------------------------------
-
-    /** Day (1..14, 14 = today) the classify_intent cost stepped, per the design spec. */
     private static final int CLASSIFY_STEP_DAY = 10;
 
-    /**
-     * Where {@code generate_response}'s smooth cost ramp is cut into a before and an after. Unlike the
-     * other five rows there is no step to find here: the ramp is continuous by design, one call site
-     * that is drifting rather than one that broke, so this is a reporting split, not an onset.
-     */
+    /** The ramp is continuous by design, so this is a reporting split, not an onset. */
     private static final int GENERATE_SPLIT_DAY = 8;
 
     private static final int DURATION_RAMP_START_DAY = 10;
     private static final int TOOL_ERROR_RAMP_START_DAY = 11;
 
-    /** Day the replies start carrying unsupported promises: the onset of both the groundedness and the
-     *  frustration finding. */
     static final int UNGROUNDED_ONSET_DAY = 11;
 
-    /** Share of knowledge-base replies carrying a promise before and from {@link #UNGROUNDED_ONSET_DAY}. */
     private static final double BASELINE_PROMISE_RATE = 0.03;
 
     private static final double DRIFT_PROMISE_RATE = 0.22;
 
     /**
-     * Share of tickets the customer writes back on. Higher after a promise, because a customer promised
-     * something is the one who checks. Sized so the frustration reference holds about 50 threads: short of
-     * the 200 the live classifier learns over, which a 14-day sample cannot reach without swamping the rest.
+     * Higher after a promise, because a promised customer checks. Sized so the frustration reference holds about 50
+     * threads.
      */
     private static final double THREAD_SHARE = 0.17;
 
@@ -684,17 +633,13 @@ final class SampleShowcase {
     private static final double FRUSTRATED_IF_PROMISED = 0.75;
     private static final double FRUSTRATED_OTHERWISE = 0.04;
 
-    /** Turns in a thread: the third user message is the first one with four messages before it, the
-     *  earliest turn Frustration scores. */
+    /** The third user message is the earliest turn Frustration scores. */
     private static final int TURNS_PER_THREAD = 3;
 
-    /** A customer's reply is answered straight from the thread, with no fresh search or tool call. */
     private static final String[] FOLLOW_UP_CHAIN = {ASSEMBLE, CLASSIFY, GENERATE};
 
-    /** The groundedness flag cutoff; a flagged answer scores at or above it, a clean one well below. */
     private static final double GROUNDEDNESS_THRESHOLD = 0.975;
 
-    /** The frustration flag cutoff; a turn is flagged above it. */
     private static final double FRUSTRATION_THRESHOLD = 0.40;
 
     private static double costMultiplier(String callSite, int day) {
@@ -720,11 +665,8 @@ final class SampleShowcase {
         return TOOL_BASELINE_ERROR_RATE;
     }
 
-    // ---- output shape ---------------------------------------------------------------------
-
     record MediaAttach(String traceId, String spanId, String mediaId) {}
 
-    /** One drift row's real, generated-data statistics, in the design spec's array order. */
     record DriftStat(
             String classifierKey,
             String callSiteId,
@@ -741,14 +683,9 @@ final class SampleShowcase {
             String lastSeenAt,
             List<String> sampleTraceIdsPost,
             /**
-             * The finding's evidence, in the three roles {@code RcaAnalysisService.sides} splits on.
-             * {@code baseline} is what the drift was measured against (the days before onset);
-             * {@code member} is the population being complained about; {@code witness} is the failing
-             * subset of it, which only {@code tool_error} draws; a metric-drift finding leaves it
-             * empty and its members ARE the flagged side.
-             *
-             * <p>Without these a seeded finding has no {@code finding_evidence} rows, and RCA on it
-             * fails before it starts: the sample project's whole point is a Run RCA press that works.
+             * {@code baseline} is the days before onset, {@code member} the complained-about population,
+             * {@code witness} its failing subset (tool_error only). Without these, RCA on a seeded finding fails before
+             * it starts.
              */
             List<String> baselineTraceIds,
             List<String> memberTraceIds,
@@ -759,12 +696,7 @@ final class SampleShowcase {
         }
     }
 
-    /**
-     * One {@code generate_response} answer the groundedness model scored, as its assessment and, when
-     * flagged, its detection need it.
-     *
-     * @param flagged the unsupported sentence, in UTF-16 offsets into the answer; null when the answer passed
-     */
+    /** {@code flagged} is the unsupported sentence in UTF-16 offsets, null when the answer passed. */
     record ScoredAnswer(
             String traceId,
             String spanId,
@@ -776,7 +708,6 @@ final class SampleShowcase {
 
     record FlaggedSentence(int start, int end, String text) {}
 
-    /** One thread's third user turn, the one the frustration model scored, with the state it was sent. */
     record ScoredTurn(
             String conversationId,
             String traceId,
@@ -786,12 +717,7 @@ final class SampleShowcase {
             boolean frustrated,
             FrustrationTurnBuilder.TurnState state) {}
 
-    /**
-     * One rate test's two windows, counted from the generated rows: trials before the onset (the learned
-     * reference) and since it, with the failures in each, and the evidence refs the live service writes.
-     *
-     * @param lastBucket the hour of the newest trial, the spell's last folded hour
-     */
+    /** {@code lastBucket} is the hour of the newest trial, the spell's last folded hour. */
     record RateStat(
             String callSiteId,
             Instant onset,
@@ -816,15 +742,10 @@ final class SampleShowcase {
             RateStat groundedness,
             RateStat frustration) {}
 
-    // ---- generation -------------------------------------------------------------------------
-
     /**
-     * @param exportPdfMediaId the already-stored media id every {@code export_ticket} span's
-     *     {@code document_ref} block points at: one real {@code media_object} row for the whole
-     *     dataset (content-addressed dedup makes this the correct outcome even if it were stored
-     *     per-trace: every export carries the same placeholder PDF).
-     * @param screenshotPngMediaId likewise for the {@code image_ref} block on every
-     *     {@code assemble_ticket_context} span: the screenshot a customer attached to their ticket.
+     * One stored media object backs every {@code export_ticket} {@code document_ref} and one every
+     * {@code assemble_ticket_context} {@code image_ref}; content-addressed dedup would collapse per-trace copies
+     * anyway.
      */
     static Dataset generate(
             String projectId, long seed, Instant now, String exportPdfMediaId, String screenshotPngMediaId) {
@@ -870,9 +791,7 @@ final class SampleShowcase {
                 String amount = String.format(Locale.ROOT, "$%.2f", amountValue);
                 long offsetSeconds = (long) (rnd.nextDouble() * capSeconds);
                 Instant ticketStart = dayStart.plusSeconds(offsetSeconds);
-                // The date a ticket REFERS to is always before the ticket itself. Formatting the trace's
-                // own start here made every ticket say "I was charged on <today>, and it still hasn't
-                // been refunded", a complaint about something that had not happened yet.
+                // The date a ticket refers to is always before the ticket itself.
                 String date = dateFmt.format(ticketStart.minus(2 + rnd.nextInt(9), ChronoUnit.DAYS));
 
                 String ticketSubject = fill(template.subject(), customer, orderId, product, amount, date);
@@ -896,7 +815,6 @@ final class SampleShowcase {
                 Instant lastActivity = ticketStart;
 
                 for (int turn = 0; turn < turns; turn++) {
-                    // A reply that would land after now is one the customer has not sent yet.
                     if (turn > 0 && turnStart.plusSeconds(30).isAfter(now)) break;
                     Instant traceStart = turnStart;
                     String subject = turn == 0 ? ticketSubject : "Re: " + ticketSubject;
@@ -964,10 +882,8 @@ final class SampleShowcase {
                         long latencyMs;
                         String input;
                         String output;
-                        // What the trace and span LISTS show. Defaulted to the payload itself, and
-                        // overridden by the two steps whose payload is a wire-shaped JSON message array:
-                        // truncating that to 240 characters put `[{"role":"user","content":[{"type":"te`
-                        // in the column a reader scans to find a ticket.
+                        // Overridden for the two steps whose payload is a JSON message array, whose 240-char cut showed
+                        // `[{"role":"user","content":[{"type":"te`.
                         @Nullable String inputPreview = null;
                         @Nullable String outputPreview = null;
                         @Nullable String attachedMediaId = null;
@@ -977,20 +893,15 @@ final class SampleShowcase {
                                 kind = KindNormalizer.TOOL;
                                 latencyMs = jitter(rnd, ASSEMBLE_BASE_LATENCY_MS, 0.2);
                                 int priorMessages = day < CLASSIFY_STEP_DAY ? 1 : 3 + rnd.nextInt(5);
-                                // An image_ref against a real stored media object, not a dead URL: a support
-                                // ticket usually does arrive with a screenshot, and this is the only place
-                                // the sample project exercises the image viewer at all (export_ticket
-                                // demonstrates document_ref; nothing else demonstrates the image path).
-                                // Nothing is fetched over the network, so there is no broken chip to render.
+                                // A real stored media object, not a dead URL: the only place the sample project
+                                // exercises the image viewer.
                                 input = toMessageJson(
                                         mapper,
                                         "user",
                                         List.of(
                                                 ContentBlock.text(body),
                                                 ContentBlock.imageRef(screenshotPngMediaId, "image/png")));
-                                // Set whether or not the image stays: a lone text block is still a wire
-                                // message ARRAY, so the trace list showed `[{"role":"user","content":...`
-                                // either way.
+                                // Set whether or not the image stays: a lone text block is still a message array.
                                 inputPreview = body;
                                 attachedMediaId = screenshotPngMediaId;
                                 StringBuilder threadHistory = new StringBuilder();
@@ -1074,9 +985,8 @@ final class SampleShowcase {
                                 outputCost = outC.toPlainString();
                                 costSource = SpanRow.CostSource.PROVIDED;
                                 latencyMs = jitter(rnd, GENERATE_BASE_LATENCY_MS, 0.2);
-                                // The instructions and the articles as the system message and the customer's
-                                // text as the user message, so what a reader sees as the question the answer
-                                // replied to is the customer's words, not the prompt around them.
+                                // The customer's text is the user message, so the question shown is the customer's
+                                // words, not the prompt around them.
                                 input = toMessagesJson(
                                         mapper,
                                         List.of(
@@ -1260,8 +1170,7 @@ final class SampleShowcase {
                             subject,
                             null,
                             null,
-                            // status. Left null, a trace carrying a failed refund_api span rendered with no
-                            // status at all next to the error count that contradicts it.
+                            // Left null, a trace with a failed refund_api span showed no status beside its error count.
                             errorCount > 0 ? "error" : "ok",
                             traceStart.toString(),
                             traceEnd.toString(),
@@ -1330,11 +1239,7 @@ final class SampleShowcase {
                         todayMidnight,
                         now,
                         classifyPostStepTraceIds),
-                // "previous", like every other row here, because it has to be TRUE: the reference this
-                // seeder actually computes is the call site's own earlier days, and the baseline row it
-                // writes is armed with nothing pinned. Claiming "pinned" put the words "versus its own
-                // recent window (pinned reference)" into the finding's basis, a sentence contradicting
-                // itself, over a comparison the UI could not have shown.
+                // "previous" because it must be TRUE: this seeder's baseline row is armed with nothing pinned.
                 generateCost.stat(
                         "cost_drift", GENERATE, "cost", "previous", GENERATE_SPLIT_DAY, todayMidnight, now, List.of()),
                 kbDuration.stat(
@@ -1373,16 +1278,9 @@ final class SampleShowcase {
                 frustrationRate(turnsScored, ungroundedOnset));
     }
 
-    // ---- helpers ------------------------------------------------------------------------------
-
     /**
-     * Which call sites a ticket of this category runs through, end to end.
-     *
-     * <p>Every branch reaches {@code generate_response}: a trace that stopped after
-     * {@code classify_intent} with an {@code ok} status on every span and no reply to the customer
-     * is not an abandoned conversation a reader can interpret, it is a trace that looks like the
-     * seed ran out halfway. If this dataset ever wants to show an abandoned ticket, it has to carry
-     * the error or the cancellation that says so.
+     * Every branch reaches {@code generate_response}: a trace that stops early with all spans ok reads as a seed that
+     * ran out halfway.
      */
     private static String[] chainFor(String category, Random rnd) {
         double roll = rnd.nextDouble();
@@ -1411,11 +1309,7 @@ final class SampleShowcase {
         };
     }
 
-    /**
-     * What the groundedness model makes of one answer: a score at or above the threshold on the promise
-     * sentence when there is one, else a score well below it. Clean answers sit low with a long tail, as
-     * the model's do on replies that restate their articles.
-     */
+    /** Clean answers sit low with a long tail, as the model's do on replies that restate their articles. */
     private static ScoredAnswer scoredAnswer(
             Random rnd,
             String traceId,
@@ -1441,12 +1335,7 @@ final class SampleShowcase {
                 new FlaggedSentence(start, start + promise.sentence().length(), promise.sentence()));
     }
 
-    /**
-     * Groundedness's rate test over the generated answers, as its replay counts it: a trace is one trial on
-     * {@code generate_response}, bucketed at its first scored answer, and fails when any answer in it was
-     * flagged. Members are every trial since onset, newest first; witnesses are each failed trial followed by
-     * its flagged answers.
-     */
+    /** A trace is one trial, bucketed at its first scored answer, failing when any answer was flagged. */
     private static RateStat groundednessRate(List<ScoredAnswer> answers, Instant onset) {
         Map<String, List<ScoredAnswer>> byTrace = new LinkedHashMap<>();
         for (ScoredAnswer a : answers)
@@ -1465,11 +1354,7 @@ final class SampleShowcase {
         return rate(GENERATE, trials, onset);
     }
 
-    /**
-     * Frustration's rate test over the scored turns: a thread is one trial on the call site of its scored
-     * turn, and fails when that turn was flagged. Members are the sessions, witnesses each
-     * frustrated session followed by the turn that fired.
-     */
+    /** A thread is one trial, failing when its scored turn was flagged. */
     private static RateStat frustrationRate(List<ScoredTurn> turns, Instant onset) {
         List<Trial> trials = new ArrayList<>();
         for (ScoredTurn t : turns) {
@@ -1483,7 +1368,6 @@ final class SampleShowcase {
         return rate(ASSEMBLE, trials, onset);
     }
 
-    /** One trial of a rate test: when it counts, its member ref, and its witness refs when it failed. */
     private record Trial(
             Instant at, FindingEvidenceRepository.Ref member, List<FindingEvidenceRepository.Ref> witness) {}
 
@@ -1548,8 +1432,7 @@ final class SampleShowcase {
 
     private static final int PREVIEW_CHARS = 240;
 
-    /** Trimmed on a word boundary and marked as trimmed: a hard cut at 240 left previews ending
-     *  mid-word, which reads as corrupted data rather than as a summary. */
+    /** A hard cut mid-word reads as corrupted data rather than a summary. */
     private static @Nullable String preview(@Nullable String text) {
         if (text == null) return null;
         String flat = text.replaceAll("\\s+", " ").strip();
@@ -1570,12 +1453,8 @@ final class SampleShowcase {
     }
 
     /**
-     * A real, decodable PNG: the "screenshot" every ticket arrives with. Hand-encoded (one IHDR, one
-     * zlib-wrapped IDAT, one IEND, each with its own CRC) rather than pulled through ImageIO, which
-     * this module does not otherwise depend on and which is headless-hostile in a container.
-     *
-     * <p>A 320×180 slate panel with a lighter band across the top, so a reader who opens the image
-     * viewer sees a deliberate placeholder rather than a broken-image icon or a 1×1 pixel.
+     * Hand-encoded rather than via ImageIO, which this module does not otherwise use and which is headless-hostile in a
+     * container. A deliberate-looking placeholder, not a broken-image icon.
      */
     static byte[] minimalScreenshotPng() {
         final int width = 320;
@@ -1583,7 +1462,7 @@ final class SampleShowcase {
         byte[] raw = new byte[height * (1 + width * 3)];
         int p = 0;
         for (int y = 0; y < height; y++) {
-            raw[p++] = 0; // filter type 0 (None), one per scanline, as the PNG spec requires
+            raw[p++] = 0; // filter type 0, one per scanline, as the PNG spec requires
             boolean band = y < 28;
             for (int x = 0; x < width; x++) {
                 raw[p++] = (byte) (band ? 0x33 : 0x1B);
@@ -1607,7 +1486,7 @@ final class SampleShowcase {
         ByteArrayOutputStream ihdr = new ByteArrayOutputStream();
         writeInt(ihdr, width);
         writeInt(ihdr, height);
-        ihdr.writeBytes(new byte[] {8, 2, 0, 0, 0}); // 8-bit, truecolour RGB, no interlace
+        ihdr.writeBytes(new byte[] {8, 2, 0, 0, 0});
         writeChunk(png, "IHDR", ihdr.toByteArray());
         writeChunk(png, "IDAT", compressed.toByteArray());
         writeChunk(png, "IEND", new byte[0]);
@@ -1632,8 +1511,6 @@ final class SampleShowcase {
         out.write(value);
     }
 
-    /** A minimal, correctly cross-referenced single-page PDF: real bytes for the {@code export_ticket}
-     *  document_ref demo, not a placeholder that would fail to open. */
     static byte[] minimalExportPdf() {
         String streamContent = "BT /F1 14 Tf 20 100 Td (Tessary Support -- Ticket Export) Tj ET";
         List<String> objects = List.of(
@@ -1664,21 +1541,14 @@ final class SampleShowcase {
     }
 
     /**
-     * How many trace ids a seeded finding cites per evidence role.
-     *
-     * <p>Production writes the whole population uncapped ({@code FindingEvidenceRepository}'s class
-     * comment argues why: a claim about a population cannot be audited against somebody else's
-     * undisclosed sample). A seeder is not making an auditable claim; it is furnishing a sample
-     * project, so it takes a bounded slice, sized to what a real sweep on this dataset produced,
-     * and keeps the seed insert a predictable size.
+     * Production writes the whole population uncapped; a sample project makes no auditable claim, so it takes a bounded
+     * slice.
      */
     private static final int EVIDENCE_PER_ROLE = 100;
 
-    /** Per-(callSite) running sums of a value (cost or duration) by day, for real drift statistics. */
     private static final class DayAccumulator {
         private final double[] sum = new double[WINDOW_DAYS + 1];
         private final long[] count = new long[WINDOW_DAYS + 1];
-        /** Which traces landed on which day, so `stat` can split them on the same boundary as the means. */
         private final Map<Integer, List<String>> traceIdsByDay = new LinkedHashMap<>();
 
         void add(int day, double value, String traceId) {
@@ -1712,9 +1582,8 @@ final class SampleShowcase {
             double meanPre = preN == 0 ? 0 : preSum / preN;
             double meanPost = postN == 0 ? meanPre : postSum / postN;
             Instant onset = todayMidnight.minus(WINDOW_DAYS - triggerDay, ChronoUnit.DAYS);
-            // The same boundary the means were split on, so the evidence and the numbers describe
-            // the same two windows: a baseline trace the agent reads must be one the "before" mean
-            // was actually computed from.
+            // The same boundary as the means, so a baseline trace the agent reads is one the "before" mean was computed
+            // from.
             List<String> baseline = sliceTraces(traceIdsByDay, 1, triggerDay - 1);
             List<String> members = sliceTraces(traceIdsByDay, triggerDay, WINDOW_DAYS);
             return new DriftStat(
@@ -1731,26 +1600,19 @@ final class SampleShowcase {
                     postN,
                     onset.toString(),
                     now.toString(),
-                    // The citation list the finding's own basis text quotes, unchanged. Only one of
-                    // the four metric stats is given one; the evidence sides below are populated for
-                    // all of them, which is what RCA reads.
+                    // Only one stat carries a citation list; the evidence sides are populated for all, which is what
+                    // RCA reads.
                     sampleTraceIdsPost,
                     baseline,
                     members,
-                    // A metric drift draws no narrower subset: the whole post-onset population IS
-                    // what it is complaining about, so `sides` reads the members as the flagged side.
+                    // The whole post-onset population is the flagged side.
                     List.of());
         }
     }
 
     /**
-     * Turns a target failure rate into actual failures, deterministically rather than by coin flip.
-     *
-     * <p>A Bernoulli draw per call is the obvious thing and the wrong one here: the reference window
-     * is only a few dozen calls wide, so whether the demo's tool-error finding compares against 0%,
-     * 2.6% or 5.3% came down to which way the RNG fell for one project id. Accumulating the rate and
-     * failing whenever a whole call's worth has built up spreads failures evenly and makes the
-     * observed rate converge on the target one from the first handful of calls.
+     * Deterministic rather than a Bernoulli draw: the reference window is a few dozen calls, so the RNG alone decided
+     * whether the finding compared against 0% or 5.3%.
      */
     private static final class RateSchedule {
         private double credit;
@@ -1765,11 +1627,9 @@ final class SampleShowcase {
         }
     }
 
-    /** Per-(callSite) running failure counts by day, for a real tool-error rate stat. */
     private static final class DayErrorAccumulator {
         private final long[] calls = new long[WINDOW_DAYS + 1];
         private final long[] failures = new long[WINDOW_DAYS + 1];
-        /** Every call, and the failing subset: the two halves of the fraction this detector claims. */
         private final Map<Integer, List<String>> traceIdsByDay = new LinkedHashMap<>();
 
         private final Map<Integer, List<String>> failedTraceIdsByDay = new LinkedHashMap<>();
@@ -1817,16 +1677,13 @@ final class SampleShowcase {
                     now.toString(),
                     List.of(),
                     sliceTraces(traceIdsByDay, 1, triggerDay - 1),
-                    // Both halves of the fraction, which is what tool_error writes in production and
-                    // what `failingCohortShape` needs kept apart: members are every call in the
-                    // window, healthy ones included, and the witnesses are the failing subset. Hand
-                    // it only the members and the check describes ordinary traffic.
+                    // Members are every call in the window and witnesses the failing subset, as tool_error writes and
+                    // `failingCohortShape` needs.
                     sliceTraces(traceIdsByDay, triggerDay, WINDOW_DAYS),
                     sliceTraces(failedTraceIdsByDay, triggerDay, WINDOW_DAYS));
         }
     }
 
-    /** The first {@link #EVIDENCE_PER_ROLE} distinct trace ids recorded on days {@code from..to}. */
     private static List<String> sliceTraces(Map<Integer, List<String>> byDay, int from, int to) {
         Set<String> out = new LinkedHashSet<>();
         for (int d = from; d <= to && out.size() < EVIDENCE_PER_ROLE; d++) {

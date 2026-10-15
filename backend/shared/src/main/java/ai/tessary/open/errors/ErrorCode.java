@@ -5,15 +5,8 @@ import java.util.Locale;
 import org.springframework.http.HttpStatus;
 
 /**
- * Marker for hierarchical, structurally-unique error codes.
- *
- * <p>Implementations are always enums; the wire code is derived as
- * {@code <DOMAIN>.<NAME>} where {@code DOMAIN} comes from the enum's
- * declaring class (the {@code Error} suffix is stripped) and {@code NAME}
- * is the enum constant name. The compiler enforces within-domain
- * uniqueness; cross-domain uniqueness is structural (the domain string
- * differs by class). {@link ErrorCatalog} adds a fail-fast startup check
- * for the (rare) case of two enum classes resolving to the same domain.
+ * Implemented by enums only. The wire code is {@code <DOMAIN>.<NAME>}, the domain being the declaring class minus its
+ * {@code Error} suffix. {@link ErrorCatalog} fails startup if two classes resolve to the same domain.
  */
 public interface ErrorCode {
 

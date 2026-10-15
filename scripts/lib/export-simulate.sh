@@ -1,23 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The faithful export simulation, extracted so "what would the export actually look like on disk"
-# has one home; do not re-derive it inline at a new call site.
-#
-# Usage:
-#   d=$(bash scripts/lib/export-simulate.sh)          # mktemp's its own dir, prints it on success
-#   bash scripts/lib/export-simulate.sh /existing/dir  # exports into a dir you already own
-#
-# On success, exit 0 and (destination-arg form only) print nothing extra; the no-arg form is the
-# one that prints the path, because that's what makes `d=$(...)` work standalone. On failure,
-# exit 1 with a message on stderr and print nothing to stdout.
-#
-# It copies the working tree, not HEAD, and not with `cp -r` or `rsync`: only what
-# `git ls-files --cached --others --exclude-standard` names, so gitignored and unreferenced
-# material (.env, node_modules/, build output, .git) is never copied. That also makes the export
-# faithful to uncommitted changes rather than silently reverting to the last commit.
-#
-# The fresh index and the disk are checked against each other after the copy, so the two never
-# disagree about what was exported.
+# The export simulation: copies exactly what `git ls-files --cached --others --exclude-standard` names
+# from the working tree (so .env and build output never come along), then checks index against disk.
+# d=$(bash scripts/lib/export-simulate.sh)   or   bash scripts/lib/export-simulate.sh /existing/dir
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -47,20 +32,12 @@ if [ -z "$DEST" ]; then
     _own_tmp=1
 fi
 
-# Copy the working tree, not HEAD: tracked files as they sit on disk right now (staged or
-# unstaged edits included) plus untracked-but-not-ignored files, exactly the set
-# `git ls-files --cached --others --exclude-standard` names. This is what makes the export
-# faithful to an uncommitted diff instead of silently reverting to the last commit.
+# Tracked files as on disk plus untracked-but-not-ignored, so uncommitted edits are exported.
 git ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do
-    # A tracked file can be listed by --cached (it's in the index) yet be gone from disk: an
-    # uncommitted `rm` or `git rm --cached`-then-delete. That's real dirty state too: the file
-    # genuinely isn't there to export, so skip it rather than let a missing-source `cp` abort
-    # the whole run.
+    # A tracked file deleted but not committed is skipped rather than aborting the copy.
     if [ -e "$f" ] || [ -L "$f" ]; then
         mkdir -p "$DEST/$(dirname "$f")"
-        # -P, not just -p: a tracked symlink must copy AS a symlink (matching what git itself
-        # stores, mode 120000), not get dereferenced into a regular file holding the target's
-        # content -- exactly the silent-divergence class this script exists to eliminate.
+        # -P so a tracked symlink stays a symlink, as git stores it.
         cp -pP "$f" "$DEST/$f"
     fi
 done

@@ -1,31 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-// Shapes returned by the new tenant-aware backend.
 
 /** Org-level RBAC roles. Mirrors the backend `Role` enum. */
 export type OrgRole = "owner" | "admin" | "member" | "viewer" | "billing";
 
 /**
- * `GET /auth/mode`: which flow the active {@code AuthProvider} drives. `redirectFlow=true` means
- * WorkOS (or any future redirect-based provider) is active and the Login/Signup views must bounce
- * to `auth.loginUrl()` instead of rendering a form; `false` means the dependency-free
- * email/password provider is active and the form is the real UI. Polled on mount rather than baked
- * into the client bundle so a deployment can switch providers (e.g. a self-hoster adding WorkOS
- * credentials) without a rebuild.
+ * `GET /auth/mode`: `redirectFlow` means the Login/Signup views bounce to `auth.loginUrl()` instead of
+ * rendering a form. Read at runtime so a deployment can switch providers without a rebuild.
  */
 export interface AuthMode {
   redirectFlow: boolean;
   /**
-   * True when this deployment has no account yet, so `/login` hands the visitor straight to
-   * `/signup` rather than showing a sign-in form nothing can satisfy. Always false under a
-   * redirect-flow provider, which owns its own signup screen. Goes false for good the moment the
-   * first account exists.
+   * True while the deployment has no account, so `/login` hands the visitor to `/signup`. Always false
+   * under a redirect-flow provider.
    */
   firstRun: boolean;
-  /**
-   * The sign-up policy in force: `open`, `domain`, or `invite`. A courtesy for the sign-up screen,
-   * so it can say what the server will refuse before the visitor fills in a form; the enforcement
-   * is server-side regardless.
-   */
+  /** A courtesy for the sign-up screen; enforcement is server-side. */
   signupPolicy: SignupPolicyMode;
 }
 
@@ -36,21 +25,14 @@ export interface SignupPolicy {
   mode: SignupPolicyMode;
   /** Email domains admitted without an invitation; only consulted in `domain` mode. */
   domains: string[];
-  /**
-   * The policy is instance-wide and lives on the install's first organization. True when the
-   * organization this was read through is that one; a PUT through any other is refused.
-   */
+  /** The policy lives on the install's first organization; a PUT through any other is refused. */
   governing: boolean;
   governing_org_slug: string | null;
   /** The governing organization's display name, what the UI shows; the slug is the URL segment. */
   governing_org_name: string | null;
 }
 
-/**
- * The 200 body of `POST /auth/signup` and `POST /auth/login`, mirrors
- * `AuthController.establishSession`'s `Map.of("id", ..., "email", ..., "orgId", ...)`. Not
- * generated: springdoc can't infer a type from a raw `Map` response.
- */
+/** Hand-written: springdoc cannot type `AuthController.establishSession`'s raw Map. */
 export interface CredentialAuthResult {
   id: string;
   email: string;
@@ -68,12 +50,7 @@ export interface Me {
   id: string;
   email: string;
   orgs: MeOrg[];
-  /**
-   * Whether this user is on the deployment's platform-staff allowlist. A rendering hint only, with
-   * no reader today: it stays on the wire because the staff routes it hints at are still live
-   * (`/api/admin/orgs/{orgSlug}/plan`), and because every staff route re-checks identity and
-   * owner/admin standing in the target org server-side, so nothing is gated on this value.
-   */
+  /** A rendering hint with no reader; every staff route re-checks server-side. */
   platform_staff: boolean;
 }
 
@@ -103,22 +80,15 @@ export interface Project {
   /** The one guaranteed default project per organization. */
   is_default: boolean;
   /**
-   * One-way delete marker (ISO instant). Non-null means DELETE was accepted: the project's API keys
-   * are already revoked, every project-scoped route now 404s, and a background worker is removing its
-   * data. Unlike `archived_at` this never clears: the row's next state is gone. Only the org's
-   * project list still returns these, so settings can show the state instead of the row vanishing
-   * before its data has actually drained.
+   * One-way delete marker: keys are revoked, project routes 404 and a worker drains the data. Only the
+   * org's project list still returns these, so settings can show the state.
    */
   deleting_at: string | null;
 }
 
 /**
- * Mirrors the backend's {@code Project#isSample()}: true for the quiet, lazily-created sample
- * project a "Start with a sample project" click mints, marked by {@code {"sample": true}} in the
- * project's own `settings` blob rather than a dedicated column. A malformed or absent `settings`
- * reads as false, the same false-negative-is-safe direction the backend takes: this flag only picks
- * which shell chrome renders and which project implicit "first project" navigation skips, never
- * anything that should 500 on a parse failure.
+ * Mirrors the backend's Project#isSample(). A malformed `settings` reads as false, the safe direction:
+ * this only picks shell chrome and skips the project in implicit navigation.
  */
 export function isSampleProject(project: Pick<Project, "settings">): boolean {
   if (!project.settings) return false;
@@ -169,14 +139,8 @@ export interface IssueTokenResponse {
 }
 
 // ---- Managed API keys: project-scoped, ORG_MANAGE to mint ----
-// Distinct from the member-mintable MCP personal tokens: managed keys add scope
-// (write/query/admin), per-environment scoping, rotation, and an audit trail.
 
-/**
- * What an API key may do, the backend's wire vocabulary (`KeyScope`): `write` ingests traces,
- * `query` reads the query API, `admin` grants tool access over /mcp (and is the superset that
- * also satisfies write/query).
- */
+/** `admin` grants tool access over /mcp and also satisfies write/query. */
 export type KeyScope = "write" | "query" | "admin";
 
 /** Non-secret view of a managed key. Omits the token hash and project id by design. */
@@ -193,7 +157,6 @@ export interface ApiKey {
   created_by_user_id: string;
 }
 
-/** Create request body. Name and scope are both required. */
 export interface CreateKeyRequest {
   name: string;
   scope: KeyScope;
@@ -211,16 +174,13 @@ export interface RevokeKeyResponse {
   revoked: boolean;
 }
 
-/** Audit-log action wire values (lowercase of CREATED|ROTATED|REVOKED). */
 export type AuditAction = "created" | "rotated" | "revoked";
 
 /** One audit-trail entry; newest-first, capped at 200 rows server-side. */
 export interface ApiKeyAudit {
   id: string;
   project_id: string;
-  /** The key the action targeted. */
   api_key_id: string | null;
-  /** Who performed it. */
   actor_user_id: string | null;
   action: AuditAction;
   details: string | null;
@@ -228,21 +188,11 @@ export interface ApiKeyAudit {
 }
 
 // ---- Capabilities ----
-// Stable snake_case wire values from the backend `Capability` enum. This build has one tier and
-// uncapped ingest, so there is no tier to name and no cap to report.
 
-/**
- * Every capability key, the mirror of the backend `ai.tessary.plan.Capability` enum's `wire()`
- * values, which are also the `org_feature_flag` keys. Keep in sync with that enum.
- *
- * The browser has no flag client and no plan logic: the backend resolves all of this per session and
- * the SPA only reads the answer.
- */
+/** Mirror of the backend Capability enum's `wire()` values. Keep in sync. */
 export type CapabilityWire =
-  // "graders_enabled", "observer_enabled", "human_review_enabled" and "agentic_synthesis_enabled"
-  // were here until grading, the observer and the review queues were removed. Do not reintroduce
-  // one of those keys: the backend enum no longer defines it, so a gate reading it would fail closed
-  // on every org.
+  // The graders, observer, review and agentic-synthesis keys are gone from the backend enum; a gate
+  // reading one would fail closed on every org.
   | "ci_integration_enabled"
   | "rca_enabled"
   | "api_access_enabled"
@@ -259,11 +209,7 @@ export type CapabilityWire =
   | "malformed_output_enabled"
   | "triage_automatic_enabled";
 
-/**
- * The org's capability object (`GET /api/orgs/{org}/capabilities`), the any-member read the whole
- * SPA is assembled from. Every capability is present with an explicit boolean, so an absent key is
- * a version skew rather than a meaningful "off".
- */
+/** Every capability is present, so an absent key is version skew rather than "off". */
 export interface CapabilitiesView {
   capabilities: Record<CapabilityWire, boolean>;
 }

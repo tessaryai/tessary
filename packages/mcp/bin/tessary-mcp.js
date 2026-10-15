@@ -2,12 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 "use strict";
 
-// stdio<->streamable-HTTP bridge for Tessary's MCP server. Reads one JSON-RPC
-// message per line from stdin, POSTs it as-is to <origin>/mcp with the bearer
-// token, and writes whatever comes back as one line on stdout. Exists for MCP
-// clients that only know how to launch a stdio server (e.g. via `npx`) and
-// have no streamable-HTTP transport of their own — the origin can otherwise
-// be reached directly, no bridge required.
+// stdio <-> streamable-HTTP bridge for Tessary's MCP server, for clients that can only launch a stdio
+// server: each stdin line is POSTed as-is to <origin>/mcp with the bearer token, each reply is one stdout line.
 
 const readline = require("node:readline");
 

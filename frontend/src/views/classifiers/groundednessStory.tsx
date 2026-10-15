@@ -1,18 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * A groundedness finding told as a rate of traces: the share of this call site's traces with an answer
- * flagged as unsupported since the onset, against the rate the call site learned as its normal. The
- * answers themselves are {@link FlaggedAnswers}, shared with the case page.
- *
- * <h2>Flagged, not wrong</h2>
- * The model's flags include false alarms and miss real ones, so the direction of the rate is reliable
- * and its size is not. The title says only the direction; every number on the page is labelled as a
- * flagged share, never as a share of wrong answers.
- *
- * <h2>Triaged like a rate finding</h2>
- * Unlike frustration, a groundedness finding goes through triage, so before a ruling the header offers
- * the triage run and the two resolve verbs, and after one it shows the ruling and the case it opened.
- */
+// The model's flags include false alarms and miss real ones, so only the rate's direction is reliable:
+// every number is labelled a flagged share, never a share of wrong answers.
 import { Link } from "react-router-dom";
 import type { BehaviorFinding, GroundednessDetail } from "../../api/types";
 import { PageHeader } from "../../ui";
@@ -20,7 +8,7 @@ import { ResolveVerbs, RunTriageButton, detectorLabel, triageState } from "./sha
 import { Pin, PinList, RateChart } from "./rateStory";
 import { dateTime } from "./groundedness";
 
-/** `0.0642` → `6.4%`. One decimal in the pins: the flagged share is a direction, not a measurement. */
+/** One decimal: the flagged share is a direction, not a measurement. */
 function pinRate(r: number): string {
   return `${(r * 100).toFixed(1)}%`;
 }
@@ -80,10 +68,6 @@ export function GroundednessHeader({
   );
 }
 
-/**
- * "What changed": the rate chart tool error uses, and the two numbers behind it in traces. `opened` names
- * what the rate opened: the finding on its own page, the case on the case page.
- */
 export function GroundednessRate({
   detail,
   opened = "the finding",

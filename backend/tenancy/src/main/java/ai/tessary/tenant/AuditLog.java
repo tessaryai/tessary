@@ -5,11 +5,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One immutable audit row — the {@code audit_log} table. It records a
- * governed action against a typed subject ({@code subjectKind},
- * {@code subjectId}) — an API key today, any governed resource tomorrow — by a {@code principalId},
- * optionally within an {@code organizationId}, with an optional structured {@code changes} diff. Never
- * updated after insert.
+ * One immutable {@code audit_log} row: a governed action on a typed subject by a principal, with an optional
+ * {@code changes} diff.
  */
 public record AuditLog(
         String id,
@@ -24,10 +21,9 @@ public record AuditLog(
         @Nullable String attributes,
         @JsonProperty("occurred_at") String occurredAt) {
 
-    /** The subject kind used for API-key lifecycle audit rows. */
     public static final String SUBJECT_API_KEY = "api_key";
 
-    /** The lifecycle actions we record. The wire value is the lowercase name. */
+    /** The wire value is the lowercase name. */
     public enum Action {
         CREATED,
         ROTATED,
@@ -38,7 +34,6 @@ public record AuditLog(
         }
     }
 
-    /** Build an API-key audit row (subject_kind='api_key') for key lifecycle events. */
     public static AuditLog forApiKey(
             String id,
             String projectId,

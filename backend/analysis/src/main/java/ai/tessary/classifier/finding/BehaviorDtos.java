@@ -20,43 +20,22 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The wire shapes of the behaviour-drift read surface. Field names are camelCase on the wire here,
- * deliberately unlike the snake_case {@code .tessary/} bundle DTOs: nothing in this surface is part
- * of the synthesis output contract: it is a product read model consumed only by the app's own
- * Classifiers / Baseline-changelog views.
+ * camelCase on the wire, unlike the snake_case {@code .tessary/} bundle DTOs: this is a product read model, not the
+ * synthesis contract.
  */
 public final class BehaviorDtos {
 
-    /** Reader for the stored citation array; view-local so the DTO stays a pure mapping. */
     private static final com.fasterxml.jackson.databind.ObjectReader CITATIONS =
             new ObjectMapper().readerFor(new TypeReference<List<BehaviorTriageVerdict.Citation>>() {});
 
     private BehaviorDtos() {}
 
-    /**
-     * The findings page: what the Layer-2 gate let through, and enough context to read that honestly.
-     *
-     * @param lane which Layer-2 lane this project's findings are ruled on, as
-     *     {@link TriageLane#wire()}. Always the same value: triage reads no repository, so there
-     *     is nothing left for it to vary with.
-     */
+    /** {@code lane} is always the same value now that triage reads no repository. */
     public record BehaviorFindingsView(List<BehaviorFindingView> findings, String lane) {}
 
     /**
-     * How big one finding's evidence set is, in both readings. Counts only: {@code refs} is always
-     * empty, {@code nextCursor} null and {@code rowsOmitted} true, kept for wire compatibility.
-     *
-     * <p>The two count maps disagree on purpose. {@code counts} is a live {@code count(*)}: what
-     * survives and can still be opened. {@code recordedCounts} is {@code finding.evidence_counts},
-     * written by the same call that inserted the rows. Live below recorded is retention (refs age
-     * out with the substrate they point at); live above recorded cannot happen. Both zero for a
-     * role is a fact about the detector, not a failed write: metric drift's rolling-control arm
-     * compares against a fitted summary and has no {@code baseline} rows to enumerate (see
-     * {@link FindingEvidenceRow.Role#BASELINE}). Every role appears in both maps, zeros included,
-     * so "none" is never indistinguishable from "not reported".
-     *
-     * @param rowsOmitted always true, so an empty {@code refs} beside non-zero counts doesn't read as an
-     *     evidence set that vanished.
+     * Counts only; {@code refs} stays empty for wire compatibility. {@code counts} is live and {@code recordedCounts}
+     * is what was written, so live below recorded is retention. Every role appears in both, zeros included.
      */
     public record FindingEvidencePage(
             List<Object> refs,
@@ -66,18 +45,8 @@ public final class BehaviorDtos {
             Map<String, Long> recordedCounts) {}
 
     /**
-     * One row of a finding's evidence, joined: the ref, and the span it names. Rendered by the finding
-     * page's evidence table, and returned on the MCP door minus the two previews.
-     *
-     * <p>The unit here is whatever the detector measured; for tool error and both drift measures
-     * that is a span, one ref per call. Rendering these as traces would print the same trace four
-     * times with four identical cells.
-     *
-     * <p>Every span field is nullable, and they go null together in two situations a reader must
-     * tell apart from the ids beside them: the substrate aged out from under a ref that was real
-     * when it was written, or the ref is trace-grain and the trace has no logical root to stand in
-     * for it. {@code tokens} and {@code cost} are a third case, not a gap: a tool span has neither,
-     * so those cells are empty on every tool-error row by construction.
+     * One evidence ref joined to the span it names. Span fields go null together when the substrate aged out or a
+     * trace-grain ref has no root; tool spans never have tokens or cost.
      */
     public record EvidenceSpanView(
             String role,
@@ -92,33 +61,20 @@ public final class BehaviorDtos {
             @Nullable String errorType,
             @Nullable String startedAt,
             @Nullable Long latencyMs,
-            /** See {@code FindingEvidenceRepository.SpanRef#totalTokens}: this span's own total on a
-             *  single-step row, the trace rollup on a whole-run row. */
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
-            /** The distinct models behind this row — see {@code FindingEvidenceRepository.SpanRef#models}. */
             List<String> models,
-            /** True on a whole-run row whose trace has not rolled up yet. Always false on a single-step row. */
             boolean notRolledUp,
-            /** True on a whole-run row whose trace carries unpriced spans. Always false on a single-step row. */
             boolean partialCost,
-            /** True on a whole-run row whose trace rollup is not settled. Always false on a single-step row. */
             boolean staleTotals,
             @Nullable String callSiteId,
-            /** The head of what the span was given and what it returned: see
-             *  {@code FindingEvidenceRepository.SpanRef}. Null where the payload aged out. */
+            /** Null where the payload aged out. */
             @Nullable String inputPreview,
             @Nullable String outputPreview,
-            /**
-             * The masked key that leaked and whether it is still stored raw, filled only on a
-             * secret-leak finding's evidence table — see {@code FindingEvidenceRepository.SpanRef}.
-             */
+            /** Filled only on a secret-leak finding's evidence. */
             @Nullable String secretKey,
             @Nullable String storedAs,
-            /**
-             * The schema-violation message this row's own output failed with, filled only on a
-             * malformed-output finding's evidence table — see {@code FindingEvidenceRepository.SpanRef}.
-             */
+            /** Filled only on a malformed-output finding's evidence. */
             @Nullable String violation) {
 
         public static EvidenceSpanView of(FindingEvidenceRepository.SpanRef r) {
@@ -150,13 +106,7 @@ public final class BehaviorDtos {
         }
     }
 
-    /**
-     * A page of the evidence table, with the same two counters {@link FindingEvidencePage} carries.
-     *
-     * <p>The counts ride every page rather than the first only, because they are what the table's footer
-     * says: a reader who has paged 40 of 27,142 rows needs the 27,142 in front of them, or ten rows of a
-     * huge population read as the whole of it.
-     */
+    /** The counts ride every page, or ten rows of a huge population read as the whole of it. */
     public record FindingEvidenceSpanPage(
             List<EvidenceSpanView> rows,
             @Nullable String nextCursor,
@@ -164,67 +114,29 @@ public final class BehaviorDtos {
             Map<String, Long> recordedCounts) {}
 
     /**
-     * One finding with its evidence parsed: what the finding's own page is drawn from. A finding's
-     * argument is quantitative (two distributions, the workload that did or did not move with them,
-     * and for a rate shift the signature that took over), so this view renders the numbers
-     * themselves rather than a prose summary of them.
-     *
-     * <p>Exactly one of {@code metric}, {@code toolError}, {@code malformedOutput}, {@code secretLeak},
-     * {@code armedWindow}, {@code frustration} and {@code groundedness} is set, chosen by cause kind, and all
-     * seven are null for a behaviour-drift cause (which carries no measured shift) or for any finding whose blob
-     * is missing or unreadable. A caller renders the finding regardless: the headline and the verdict don't depend
-     * on the evidence parsing, and a page that vanished because one column was malformed would be a
-     * worse failure than a page with no chart on it.
+     * At most one of the cause-kind blocks is set; none for behaviour drift or an unreadable blob, and the finding
+     * still renders.
      */
     public record BehaviorFindingDetailView(
             BehaviorFindingView finding,
             @Nullable ShiftDetail metric,
             @Nullable RateDetail toolError,
             /**
-             * Set exactly on a {@code malformed_rate} finding: the rate, the declared schema annotated
-             * with per-field failure counts, and the not-JSON / pre-rework buckets. Built off the
-             * database rather than the payload alone (unlike {@link #metric} and {@link #toolError}), so
-             * it is supplied by the caller rather than derived here — see {@link
-             * ai.tessary.classifier.malformed.MalformedOutputDetailService#detail}.
+             * DB-backed, so supplied by the caller; see
+             * {@link ai.tessary.classifier.malformed.MalformedOutputDetailService#detail}.
              */
             @Nullable MalformedDetail malformedOutput,
-            /**
-             * Set exactly on a {@code secret_leak} facet's {@code armed_window} finding: the rule, the
-             * leak count, and the per-key and per-leak breakdowns. Also DB-backed rather than payload
-             * alone — see {@link ai.tessary.classifier.secretleak.SecretLeakDetailService#detail}.
-             */
+            /** DB-backed; see {@link ai.tessary.classifier.secretleak.SecretLeakDetailService#detail}. */
             @Nullable SecretLeakDetail secretLeak,
-            /**
-             * Set exactly on an {@code armed_window} finding from a classifier with no richer detail of
-             * its own: any regex/threshold classifier. Null for Secret Leak, whose {@link #secretLeak}
-             * carries the same bar plus the per-key and per-leak breakdowns it enumerates from the detection
-             * table.
-             */
+            /** For an armed-window classifier with no richer detail of its own; null for Secret Leak. */
             @Nullable ArmedWindowDetail armedWindow,
-            /**
-             * Set exactly on a {@code frustration_rate} finding: the frustrated-conversation rate against the
-             * call site's learned rate, and the conversations the finding cites with the turn that fired in
-             * each. DB-backed — see {@link ai.tessary.classifier.frustration.FrustrationDetailService#detail}.
-             */
+            /** DB-backed; see {@link ai.tessary.classifier.frustration.FrustrationDetailService#detail}. */
             @Nullable FrustrationDetail frustration,
-            /**
-             * Set exactly on a {@code groundedness_rate} finding: the flagged-answer rate against the call
-             * site's learned rate, and the flagged answers the finding cites with the sentences marked in each.
-             * DB-backed; see {@link ai.tessary.classifier.detector.groundedness.GroundednessDetailService#detail}.
-             */
+            /** DB-backed; see {@link ai.tessary.classifier.detector.groundedness.GroundednessDetailService#detail}. */
             @Nullable GroundednessDetail groundedness,
-            /**
-             * Set on a finding an adapter owns and reports numbers for: the flagged rate against its reference
-             * and the display text the page shows. Supplied by the owner through
-             * {@link FindingAdapters#detail}, and independent of the cause-kind blocks above.
-             */
+            /** Supplied by the owning adapter through {@link FindingAdapters#detail}. */
             @Nullable ClassifierDetail classifierDetail) {
 
-        /**
-         * The detail view, with the DB-backed blocks the caller read for this finding's cause, the owning
-         * adapter's detail, and its dead-lettered triage when it has one; see
-         * {@link BehaviorFindingView#of(FindingRow, FailedTriage)}.
-         */
         public static BehaviorFindingDetailView of(
                 FindingRow row,
                 @Nullable MalformedDetail malformedOutput,
@@ -251,57 +163,25 @@ public final class BehaviorDtos {
         }
     }
 
-    /**
-     * What a hand-pressed <em>Run analysis</em> on a finding produced.
-     *
-     * <p>{@code already_escalated} says the finding had been handed to Layer 2 before: a second press
-     * lands on the existing job rather than buying a second run, so reporting a fresh one would be a lie.
-     * The UI reads it to say "already analyzed" instead.
-     *
-     * <p>{@code lane} is the lane selected at the moment of the press. Reported rather than left implicit
-     * because the two lanes answer with different authority and a user pressing the button deserves to
-     * know which one they are buying before the verdict lands on the row.
-     */
+    /** {@code already_escalated}: a second press lands on the existing job rather than buying a second run. */
     public record BehaviorAnalysisView(String jobId, String jobStatus, boolean alreadyEscalated, String lane) {}
 
     /**
-     * One cause that fired, with the exemplar the Layer-2 escalation was pointed at.
-     *
-     * <p>{@code behavior_finding.since_version_id} is deliberately not exposed: the sweep sets it
-     * to the exemplar's project version, which is the version that happened to be running, not
-     * evidence that a deploy caused the finding. Rendering it as "new since &lt;sha&gt;" would
-     * attribute every finding on a version-tagged project to a release.
-     *
-     * <p>The triage fields are exposed, and they are a decision rather than a second opinion: the
-     * ruling decided whether a person ever sees this finding ({@code positive} opened a case,
-     * {@code negative} closed it). It doesn't touch detector state: the status, the allowlist, and
-     * the reference are still only a human's to move.
-     *
-     * <p>{@code triageCitations} carries what the ruling rests on: evidence pointers, repo paths,
-     * and the agent's own check scripts. An uncited ruling is never recorded at all, so the
-     * citations are the reason a human should believe the one that made it here.
+     * {@code since_version_id} is deliberately not exposed: it is whatever version was running, and "new since this
+     * release" would blame every release. {@code triageCitations} is what the ruling rests on; an uncited ruling is
+     * never recorded.
      */
     public record BehaviorFindingView(
             String id,
-            /** Null for a finding filed against a scope no call site owns: a tool. */
+            /** Null for a scope no call site owns, such as a tool. */
             @Nullable String callSiteId,
             String causeKind,
             String causeKey,
-            /**
-             * The cause as a sentence (e.g. {@code "policy-gpt.member-chat turns are 1.47x more
-             * expensive"}), built from this finding's own evidence by {@link FindingTitle}, which is
-             * the same code that names the case this finding opens in Triage. Falls back to
-             * {@link #causeKey()} for a cause that carries no measured magnitude.
-             */
+            /** Built by {@link FindingTitle}, the same code that names the case in Triage. */
             String title,
             /**
-             * The classifier that opened this finding, as a {@code BuiltInDetector.Kind}, or null for
-             * a cause no classifier here claims.
-             *
-             * <p>Derived by the classifier itself rather than stored: three classifiers share this
-             * table and no column records which wrote a row. It is exposed because the findings queue
-             * tags every row with its detector, and a client re-deriving it from {@code causeKind}
-             * would be a third copy of a mapping that must not drift.
+             * Derived rather than stored, since no column records which classifier wrote a row; exposed so clients do
+             * not keep a third copy of the mapping.
              */
             @Nullable String detector,
             String workflowKey,
@@ -310,50 +190,26 @@ public final class BehaviorDtos {
             long traceCount,
             String status,
             @Nullable String triageVerdict,
-            /**
-             * What the ruling did: {@code opened_case} or {@code closed}. Fixed by the verdict, so it
-             * carries no information the verdict doesn't; it is exposed because it is what the reader
-             * is actually being told, and a client deriving it would be a second copy of the mapping.
-             */
             @Nullable String triageAction,
             @Nullable String triageSummary,
             List<BehaviorTriageVerdict.Citation> triageCitations,
             @Nullable String triagedAt,
             String triageStatus,
-            /** When a human ruled on this cause; null while it is still an unreviewed lead. */
             @Nullable String humanVerdictAt,
-            /** The case this finding opened or joined ({@code finding.case_id}), or null while it backs
-             *  none — a negative verdict, or a positive still waiting on {@code CaseOpener}. */
+            /** Null for a negative verdict, or a positive still waiting on {@code CaseOpener}. */
             @Nullable String caseId) {
 
-        /**
-         * Where this finding is in the Layer-2 pipeline. A null verdict alone is ambiguous: it is
-         * the state for "not escalated yet", "deferred by the sweep cap", "in flight", and "gave up
-         * after maxAttempts" alike, and an operator reading the table cannot tell a finding nobody
-         * has looked at from one the analysis failed on.
-         */
+        /** A null verdict alone cannot tell "not escalated yet" from "in flight" or "gave up". */
         public static final class TriageStatus {
             private TriageStatus() {}
 
-            /**
-             * Not scheduled yet: the finding has not crossed the recurrence bar, the org has not
-             * opted into autonomy, or nobody has pressed <em>Run analysis</em> on it.
-             */
             public static final String PENDING = "pending";
 
-            /** Scheduled; the microVM has not reported back yet. */
             public static final String IN_FLIGHT = "in_flight";
 
-            /** A verdict was recorded. */
             public static final String DONE = "done";
 
-            /**
-             * Scheduled, and the run gave up: the job spent every attempt and dead-lettered.
-             *
-             * <p>Indistinguishable from {@link #IN_FLIGHT} on the {@code finding} table alone, because
-             * a failed run records no verdict and nothing clears {@code escalated_at}. It is read
-             * from the job that owns the finding.
-             */
+            /** Read from the owning job: a failed run records no verdict and nothing clears {@code escalated_at}. */
             public static final String FAILED = "failed";
         }
 
@@ -363,7 +219,7 @@ public final class BehaviorDtos {
             return failed == null ? TriageStatus.IN_FLIGHT : TriageStatus.FAILED;
         }
 
-        /** Parse the stored citations; a malformed blob degrades to none rather than failing the row. */
+        /** A malformed blob degrades to none rather than failing the row. */
         public static List<BehaviorTriageVerdict.Citation> citations(@Nullable String json) {
             if (json == null || json.isBlank()) return List.of();
             try {
@@ -373,24 +229,14 @@ public final class BehaviorDtos {
             }
         }
 
-        /**
-         * The list form, carrying the finding's dead-lettered triage when it has one: read once for
-         * the whole page, because the {@code finding} table cannot tell a failed run from a running
-         * one.
-         *
-         * <p>Carries no evidence: a list render that attached every ref of every finding would ship
-         * an unbounded population to draw a page that shows none of them. The population is paged
-         * through {@code GET /findings/{id}/evidence}.
-         */
+        /** Carries no evidence: the population is paged through {@code GET /findings/{id}/evidence}. */
         public static BehaviorFindingView of(FindingRow row, @Nullable FailedTriage failed) {
             return new BehaviorFindingView(
                     row.id(),
                     row.callSiteId(),
                     row.causeKind(),
-                    // The classifier's OWN key, with the storage scope stripped back off. `cause_key`
-                    // carries the profile or baseline it is unique within so one partial index can
-                    // replace four; a case cuts its identity on this string, so shipping the scoped form
-                    // would change what every case is ABOUT the moment the tables merged.
+                    // The classifier's OWN key: a case cuts its identity on this string, so the scoped form would
+                    // change what every case is about.
                     row.nativeCauseKey(),
                     FindingTitle.of(row),
                     row.classifierKey(),
@@ -409,21 +255,13 @@ public final class BehaviorDtos {
                     row.caseId());
         }
 
-        /** The form for a caller that has not read the finding's triage job. */
         public static BehaviorFindingView of(FindingRow row) {
             return of(row, null);
         }
 
         /**
-         * This view with the triage ruling removed, for the agent-facing surface.
-         *
-         * <p>Layer-3 RCA receives a finding id and nothing else: no ruling, no summary, no
-         * rule-outs, not even the fact that a triage pass happened. "Nothing happened here" is a
-         * supported RCA conclusion, and it is the only check on the triage gate, so an RCA that
-         * read the ruling first would be worth nothing to the engineer who acts on it.
-         *
-         * <p>{@code triageStatus} survives deliberately: it says whether a ruling exists, which the
-         * findings list needs to render at all, and it carries no opinion about the claim.
+         * RCA must reach its own conclusion, and "nothing happened here" is a supported one, so the ruling is removed.
+         * {@code triageStatus} and {@code caseId} survive: they carry no opinion about the claim.
          */
         public BehaviorFindingView withoutTriage() {
             return new BehaviorFindingView(
@@ -444,20 +282,13 @@ public final class BehaviorDtos {
                     List.of(),
                     null,
                     triageStatus,
-                    // Nulled along with the verdict: under the open/closed model a human ruling is a
-                    // ruling like any other, so leaving this set would tell RCA the direction a person
-                    // decided even though the columns that say what they decided are gone.
+                    // Nulled with the verdict, or it would tell RCA which way a person decided.
                     null,
-                    // caseId survives: it says which case this finding backs, carrying no opinion about
-                    // who ruled it or which way — the same reason triageStatus survives just above.
                     caseId);
         }
     }
 
-    /**
-     * The correction. Exactly three outcomes exist and the third is silence. The critical property
-     * is that the default is right: an unengaged customer's noise decays on its own.
-     */
+    /** Exactly three outcomes, and the third is silence: an unengaged customer's noise decays on its own. */
     public record BehaviorResolutionRequest(@NotBlank String action) {
 
         public static final String EXPECTED = "expected";

@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Vitals — the pulse strip's full-size page.
- *
- * A roll-up and nothing else: what the project spent, how many traces ran, how long they took and
- * how many tokens they used over the window, then the same broken down by call site or by model.
- * No comparison with an earlier window and no tint. The server still sends deltas and `flagged`,
- * and this page deliberately reads neither: a moved number is something to open a case about, not
- * something to color here.
- *
- * Row click → Traces filtered to the call site (`?call_site=`). The unpriced-models caveat is a
- * footnote linking Settings → Models; cache/token economics stay org-level in Settings.
- */
+// A roll-up of spend, traces, latency and tokens by call site or model. The server sends deltas and
+// `flagged`; this page deliberately reads neither.
 import { useMemo, useState, type ReactNode } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";

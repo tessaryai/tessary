@@ -14,15 +14,8 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
- * Sentry connector: creates a Sentry issue by POSTing an event to a project's Store API
- * ({@code POST {storeUrl}} with header {@code X-Sentry-Auth}). The store URL and public key come from
- * the project's DSN; we take them as explicit config to avoid DSN-string parsing. A stable
- * {@code fingerprint} ({@link AlertPayload#dedupKey}) groups re-deliveries of the same alert into one
- * Sentry issue rather than spawning duplicates.
- *
- * <p>Config JSON shape: {@code {"store_url": "https://oXXX.ingest.sentry.io/api/<projectId>/store/",
- * "public_key": "<dsn public key>"}}. The store URL is re-validated against SSRF on every send by
- * {@link ChannelHttp}.
+ * Creates a Sentry issue via the Store API. Config is {@code {"store_url", "public_key"}} rather than a DSN, to avoid
+ * parsing it. A stable {@code fingerprint} ({@link AlertPayload#dedupKey}) groups re-deliveries into one issue.
  */
 @Component
 public class SentryChannel implements AlertChannel {
@@ -48,10 +41,8 @@ public class SentryChannel implements AlertChannel {
         }
 
         ObjectNode body = mapper.createObjectNode();
-        // Sentry's Store API requires event_id to be a 32-char hex string. event.id() is a 26-char
-        // Crockford-base32 ULID (no dashes, non-hex), which Sentry rejects/drops — so generate a fresh
-        // 32-hex id per send (Sentry's documented format). Re-delivery grouping is handled by the stable
-        // `fingerprint` (AlertPayload.dedupKey) below, not by event_id.
+        // Sentry requires a 32-hex event_id and drops a ULID, so a fresh one is generated per send; grouping comes from
+        // the fingerprint.
         body.put("event_id", java.util.UUID.randomUUID().toString().replace("-", ""));
         body.put("timestamp", event.occurredAt());
         body.put("platform", "other");
@@ -64,7 +55,7 @@ public class SentryChannel implements AlertChannel {
 
         String json = body.toString();
 
-        // Sentry classic auth header. The secret key is optional for event ingestion.
+        // The secret key is optional for event ingestion.
         String auth = "Sentry sentry_version=7, sentry_client=tessary/1.0, sentry_key=" + publicKey;
         try {
             HttpResponse<String> res = ChannelHttp.post(storeUrl, Map.of("X-Sentry-Auth", auth), json);

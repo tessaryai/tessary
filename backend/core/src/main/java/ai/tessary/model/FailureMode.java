@@ -7,25 +7,9 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One failure mode (evals plugin schema v0.3).
- *
- * <p>{@code layer} is {@code "A" | "B" | "C" | null}: A = mechanical /
- * structural, B = judgmental, C = adversarial / operational (new in v0.2).
- * Chain failures use {@code null}.
- *
- * <p>{@code packIds} is the set of packs that contributed this failure (one
- * failure can belong to N packs — set-valued). Empty/[] = baseline.
- *
- * <p>{@code complianceTags} is the union of contributing packs' control IDs,
- * narrowed by interview answers. Free-form strings (e.g.
- * {@code EU-AI-Act.Art-13}, {@code HIPAA-164.502}).
- *
- * <p>{@code graderDeferred} (evals plugin v0.7): true when the authoring sweep chose
- * not to synthesise a grader for this failure yet (medium/low severity). A
- * deferred failure carries {@code graderId == null} and has no grader file — it
- * is recorded but not gradeable until a later authoring pass (the observer, or a
- * human editing the bundle) clears it. Distinguishes "intentionally not graded
- * yet" from "grader missing (bug)".
+ * One failure mode (evals plugin schema v0.3). {@code layer} is A (mechanical), B (judgmental), C (adversarial) or null
+ * for chain failures. Empty {@code packIds} means baseline. {@code graderDeferred} means grading was intentionally
+ * postponed: {@code graderId} is null and no grader file exists, which is distinct from a missing grader.
  */
 public record FailureMode(
         String id,

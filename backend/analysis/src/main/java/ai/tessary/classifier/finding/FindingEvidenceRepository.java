@@ -17,61 +17,31 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The evidence set behind a finding: append-only, uncapped, written in the same transaction that opens
- * the finding while the rows it points at are still guaranteed to exist.
- *
- * <p>The whole population a classifier's claim rests on is written down, not a sample: a claim about a
- * population can't be audited against a sample someone else drew and didn't describe, so sampling becomes
- * a read-time decision the reading agent states instead. Retention treats these rows as pinned, so a
- * large evidence set widens what it has to keep, but that's the trade auditability costs.
- *
- * <p>Counts are written alongside the rows: {@link #record} bumps {@code finding.evidence_counts} in the
- * same call, so a reader can tell "the population is fully enumerated" from "the write was interrupted"
- * without a {@code count(*)}.
- *
- * <p>Rows are appended, never rewritten: a classifier may add witnesses while a finding is open, but
- * never re-points what a ruling was made about. {@code ux_finding_evidence_ref} makes a repeated
- * reference a no-op, so a sweep that re-reads the same window is idempotent.
+ * The evidence behind a finding: append-only, uncapped, written in the transaction that opens the finding. The whole
+ * population is written, not a sample, so a claim can be audited; retention treats the rows as pinned. {@link #record}
+ * bumps {@code finding.evidence_counts} in the same call, and {@code ux_finding_evidence_ref} makes repeats a no-op.
  */
 @Repository
 public class FindingEvidenceRepository {
 
-    /**
-     * Rows per INSERT statement. Not a cap on the set: the caller's whole list is written, in as many
-     * statements as it takes. The bound is the wire protocol's: a statement carries at most 65535 bind
-     * parameters, and each row here binds five that are not hoisted into the shared ones.
-     */
+    /** Not a cap: a statement carries at most 65535 binds, and each row binds five. */
     private static final int INSERT_CHUNK = 2000;
 
     private static final String COLS =
             "id, project_id, finding_id, session_id, trace_id, span_id, role, rank, created_at";
 
-    /**
-     * The one ordering this table is read in, by every reader: the detector's own order inside each role.
-     * ASC is NULLS LAST in Postgres, which is also the order {@code ix_finding_evidence_finding
-     * (finding_id, role, rank)} stores, so the scan and the sort agree.
-     */
+    /** ASC is NULLS LAST, the order {@code ix_finding_evidence_finding} stores, so scan and sort agree. */
     private static final String ORDER = "role, rank NULLS LAST, id";
 
-    /**
-     * Where a null {@code rank} sorts in the cursor comparison, past every real rank, matching the
-     * NULLS LAST in {@link #ORDER}. Not a value anything writes; {@link #record} always assigns a rank.
-     */
+    /** Only for the cursor comparison; {@link #record} always assigns a rank. */
     private static final int RANK_TAIL = Integer.MAX_VALUE;
 
-    /**
-     * How much of a span's input and output {@link #spanPage} returns per row.
-     *
-     * <p>Enough for a reader to recognise the call and see the error it returned; far short of enough
-     * to render the payload, which is what the trace view is for. Applied with SQL {@code left()} so
-     * the bytes never leave Postgres rather than being fetched and then thrown away.
-     */
+    /** Enough to recognise the call and its error. Cut with SQL {@code left()} so the bytes never leave Postgres. */
     private static final int PREVIEW_CHARS = 200;
 
-    /** Cursor field separator: the unit separator, as in every other keyset cursor on this stack. */
     private static final char CURSOR_SEP = '\u001f';
 
-    /** The cursor generation. A token of any other shape restarts at the first page rather than mis-resuming. */
+    /** Any other token shape restarts at the first page rather than mis-resuming. */
     private static final String CURSOR_VERSION = "v1";
 
     private final JdbcClient jdbc;
@@ -80,41 +50,32 @@ public class FindingEvidenceRepository {
         this.jdbc = jdbc;
     }
 
-    /** One reference the classifier chose, at whichever grain it saw the claim. */
     public record Ref(
             @Nullable String sessionId,
             @Nullable String traceId,
             @Nullable String spanId) {
 
-        /** A turn, the grain every classifier writing today records. */
         public static Ref trace(String traceId) {
             return new Ref(null, traceId, null);
         }
 
-        /** One step inside a turn. Both halves of the composite span key, or it resolves to nothing. */
+        /** Both halves of the composite span key, or it resolves to nothing. */
         public static Ref span(String traceId, String spanId) {
             return new Ref(null, traceId, spanId);
         }
 
-        /** The container above a turn. */
         public static Ref session(String sessionId) {
             return new Ref(sessionId, null, null);
         }
     }
 
     /**
-     * Record {@code refs} under one role, in order. Returns how many rows were actually written;
-     * repeats are silently skipped, so this is safe to call on every sweep pass, not just the pass that
-     * opened the finding.
-     *
-     * <p>Written in multi-row INSERTs rather than one statement per ref, since the set can be large.
-     * {@code rank} is the caller's order, offset past whatever is already stored, so a second batch of
-     * witnesses sorts after the first. It's assigned positionally across the batch, so a re-record leaves
-     * gaps where rows conflicted rather than renumbering: rank orders the set, it doesn't enumerate it.
+     * Repeats are skipped, so this is safe on every pass. {@code rank} continues past what is stored, so a re-record
+     * leaves gaps rather than renumbering.
      */
     public int record(String projectId, String findingId, String role, List<Ref> refs, String now) {
         if (refs.isEmpty()) return 0;
-        // Distinct-preserving: a caller that hands the same trace twice must not spend two ranks on it.
+        // Distinct-preserving: the same trace twice must not spend two ranks.
         Map<String, Ref> unique = new LinkedHashMap<>();
         for (Ref ref : refs) {
             if (ref.sessionId() == null && ref.traceId() == null) continue;
@@ -162,12 +123,8 @@ public class FindingEvidenceRepository {
     }
 
     /**
-     * {@link #record}, stopping once {@code role} holds {@code max} rows for this finding.
-     *
-     * <p>Only for a role that promises no enumeration, which is {@link FindingEvidenceRow.Role#WITNESS}: a
-     * reader wants to open a few instances of the same failure, and a detector that keeps firing on one
-     * cause must not pin an ever-growing slice of retention to it. A ref already stored still spends a slot
-     * in the trimmed list and writes nothing, so a set short of {@code max} fills on a later pass.
+     * Only for {@link FindingEvidenceRow.Role#WITNESS}, which promises no enumeration: a cause that keeps firing must
+     * not pin ever more retention. A ref already stored still spends a slot.
      */
     public int recordUpTo(String projectId, String findingId, String role, List<Ref> refs, int max, String now) {
         int remaining = max - countFor(findingId, role);
@@ -175,11 +132,7 @@ public class FindingEvidenceRepository {
         return record(projectId, findingId, role, refs.size() <= remaining ? refs : refs.subList(0, remaining), now);
     }
 
-    /**
-     * Add what this call wrote to the finding's per-role tally. Accumulates rather than assigns, since
-     * a role can be appended to across passes. Deliberately does not touch {@code updated_at}: recording
-     * what a claim already rested on is not a change to the claim.
-     */
+    /** Does not touch {@code updated_at}: recording what a claim rested on does not change the claim. */
     private void recordCount(String projectId, String findingId, String role, int written) {
         if (written == 0) return;
         jdbc.sql("""
@@ -198,17 +151,9 @@ public class FindingEvidenceRepository {
     }
 
     /**
-     * Re-point one role's whole set at {@code refs}, discarding what was there.
-     *
-     * <p>The one exception to append-never-rewrite, and it's narrow on purpose: callers must establish
-     * that no ruling stands on the finding first ({@code FindingRepository.Recorded#ruled()} is that
-     * test), because a distribution shift re-fires on every window close and a finding that kept only its
-     * opening window's rows would end up citing evidence never drawn from the traffic it claims about.
-     * Deleting also unpins the dropped rows from retention, which is the right trade only under the same
-     * condition.
-     *
-     * <p>An empty {@code refs} is a no-op rather than a truncation, since some reference sets (a merge of
-     * per-day histograms rather than a window) legitimately carry no rows at all.
+     * The one exception to append-never-rewrite: callers must first establish that no ruling stands on the finding
+     * ({@code FindingRepository.Recorded#ruled()}). An empty {@code refs} is a no-op, since some references
+     * legitimately have no rows.
      */
     public int replace(String projectId, String findingId, String role, List<Ref> refs, String now) {
         if (refs.isEmpty()) return 0;
@@ -217,8 +162,7 @@ public class FindingEvidenceRepository {
                 .param("fid", findingId)
                 .param("role", role)
                 .update();
-        // Zeroed rather than left to drift: `record` accumulates onto this tally, so a stale count would
-        // survive the delete and report a population larger than the rows behind it.
+        // Zeroed, or `record` would accumulate onto a stale count after the delete.
         jdbc.sql("""
                 UPDATE finding
                    SET evidence_counts = jsonb_set(
@@ -234,13 +178,7 @@ public class FindingEvidenceRepository {
         return record(projectId, findingId, role, refs, now);
     }
 
-    /**
-     * The finding's whole evidence set, role then rank, the order the detector wrote it in.
-     *
-     * <p>Unpaged, so it is for the callers that render a finding's own page and hold the result in
-     * memory. A population can now be six figures; a reader that does not need all of it at once takes
-     * {@link #spanPage} or {@link #claimFirst} instead.
-     */
+    /** Unpaged; a reader that does not need six figures at once takes {@link #spanPage} or {@link #claimFirst}. */
     public List<FindingEvidenceRow> listByFinding(String projectId, String findingId) {
         return jdbc.sql("SELECT " + COLS + " FROM finding_evidence"
                         + " WHERE project_id = :pid AND finding_id = :fid"
@@ -251,17 +189,11 @@ public class FindingEvidenceRepository {
                 .list();
     }
 
-    /** The first rows of a finding's evidence, and whether more follow. */
     public record Head(List<FindingEvidenceRow> rows, boolean more) {}
 
     /**
-     * The first {@code limit} rows of a finding's evidence with the rows that carry the claim first:
-     * {@code witness}, then {@code baseline}, then every other role, each in the detector's own order. A
-     * population of healthy members must not crowd the failing rows out of a bounded read.
-     *
-     * <p>One bounded read per tier, each ordered the way {@code ix_finding_evidence_finding} stores it, so a
-     * six-figure member population is never sorted whole. Over-fetches by one, so whether more follow needs no
-     * count.
+     * Witnesses, then baseline, then the rest, so healthy members cannot crowd failing rows out of a bounded read. One
+     * index-ordered read per tier, over-fetching one to detect more.
      */
     public Head claimFirst(String projectId, String findingId, int limit) {
         String where = " FROM finding_evidence WHERE project_id = :pid AND finding_id = :fid AND ";
@@ -282,13 +214,7 @@ public class FindingEvidenceRepository {
         return new Head(List.copyOf(rows.subList(0, limit)), true);
     }
 
-    /**
-     * One evidence ref with the span it points at, what the finding page's evidence table renders.
-     *
-     * <p>Span-shaped, not trace-shaped: a {@code member} is a span, and tool error enumerates one ref per
-     * call, so several refs routinely name the same trace. {@code tokens} and {@code cost} are null on a
-     * tool span since they're an LLM span's properties, and the table simply leaves those cells empty.
-     */
+    /** Span-shaped: tool error writes one ref per call, so several refs routinely name the same trace. */
     public record SpanRef(
             String role,
             @Nullable Integer rank,
@@ -303,93 +229,38 @@ public class FindingEvidenceRepository {
             @Nullable String startedAt,
             @Nullable Long latencyMs,
             /**
-             * On a single-step row, this span's own total; on a whole-run row ({@link #spanId} null),
-             * the trace rollup, since a run's tokens and cost are not one span's property. Null on a
-             * tool span, which has neither, and on a whole-run row whose trace has not rolled up.
+             * The span's own total on a single-step row; the trace rollup on a whole-run row ({@link #spanId} null).
              */
             @Nullable Long totalTokens,
             @Nullable Double totalCost,
-            /**
-             * The distinct {@code provided_model_name} values behind this row: one entry (or none, on a
-             * tool span) for a single-step row, every model the run called for a whole-run row.
-             */
             List<String> models,
-            /** True on a whole-run row whose trace has not rolled up yet: {@link #totalTokens} and
-             *  {@link #totalCost} are not yet trustworthy. Always false on a single-step row. */
+            /** True on a whole-run row whose trace has not rolled up yet. */
             boolean notRolledUp,
-            /** True on a whole-run row whose trace carries unpriced spans: {@link #totalCost} is a
-             *  floor, not the true total. Always false on a single-step row. */
+            /** {@link #totalCost} is then a floor. */
             boolean partialCost,
-            /** True on a whole-run row whose trace rollup is not settled: late spans can still change
-             *  {@link #totalTokens} and {@link #totalCost}. Always false on a single-step row. */
+            /** Late spans can still change the totals. */
             boolean staleTotals,
             @Nullable String callSiteId,
             /**
-             * The first {@link #PREVIEW_CHARS} characters of what the span was given and what it
-             * returned, or null where the payload was never written or has aged out. Truncated in SQL
-             * rather than Java, since a single LLM span's output can run to megabytes; masked in Java by
-             * {@link ai.tessary.redaction.CredentialMasking#mask}, since a project with redaction disabled
-             * can store one raw.
+             * Truncated in SQL, since one LLM output can be megabytes; masked by
+             * {@link ai.tessary.redaction.CredentialMasking#mask}, since a project with redaction off can store a raw
+             * key.
              */
             @Nullable String inputPreview,
             @Nullable String outputPreview,
-            /**
-             * The masked key that leaked, and whether it is still sitting in stored output unredacted:
-             * {@code secret_leak_detection.evidence ->> 'masked'} / {@code 'stored'}, joined on this
-             * ref's trace/span. Null on any finding that is not a secret-leak facet — see
-             * {@link #spanPage}'s {@code secretLeak} parameter — and on a leak the join found no
-             * detection row for.
-             */
+            /** Null unless {@link #spanPage} was asked for a secret-leak facet. */
             @Nullable String secretKey,
             @Nullable String storedAs,
-            /**
-             * The schema-violation message this row's own output failed with: {@code "not JSON"} for a
-             * not-JSON detection, else the first structured violation's {@code message}. Joined from
-             * {@code malformed_output_detection} on this ref's trace/span. Null on any finding that is
-             * not a malformed-output facet — see {@link #spanPage}'s {@code malformedOutput} parameter —
-             * and on a row the join found no detection for.
-             */
+            /** Null unless {@link #spanPage} was asked for a malformed-output facet. */
             @Nullable String violation) {}
 
-    /** A page of {@link SpanRef}s and the cursor that resumes after it, null when this was the last. */
     public record SpanPage(List<SpanRef> rows, @Nullable String nextCursor) {}
 
     /**
-     * One page of a finding's evidence refs in the detector's own order, optionally narrowed to a role,
-     * with the span each ref names joined on, so a reader judging one row (a person at the table, an
-     * agent on the MCP door) sees what was measured on it.
-     *
-     * <p>The keyset is {@code (role, rank, id)}, not {@code rank}: rank is neither dense nor unique
-     * across the set (two roles number from zero independently, and gaps appear where a re-record
-     * conflicted), so paging on rank alone would skip rows and interleave roles. The id tiebreak makes
-     * the order total. A null rank sorts to the tail, matching {@code ix_finding_evidence_finding}'s
-     * NULLS LAST, and the cursor comparison coalesces it to {@link #RANK_TAIL} so those rows stay
-     * reachable on later pages rather than silently dropping out.
-     *
-     * <p>The join is LEFT and falls back to the trace's logical root for a trace-grain ref, so a
-     * behaviour-drift finding still renders a name and a time rather than an id and four dashes. Its call
-     * site is the trace's, not that root's: the finding was bucketed by the trace's call site, and an
-     * untagged root takes it from a tagged span below. A ref whose substrate has aged out keeps its ids
-     * and carries nulls.
-     *
-     * <p><b>LATERAL, and one row per ref.</b> {@code is_logical_root} is not unique within a trace — it
-     * marks every sub-agent boundary — so a plain {@code ON} with that fallback multiplied a trace-grain
-     * ref by however many agents ran inside it. That put copies in
-     * the page, disagreed with {@link #countsByRole} on the same evidence, and handed a reader told to
-     * compute over every row a set padded with sub-agent roots whose {@code latency_ms} is zero. The
-     * subquery picks the ref's own span where it has one, else the outermost root: parentless first,
-     * then shallowest, then earliest, then by id so the choice is stable across pages.
-     *
-     * <p>Payloads are normally kept off list and sweep surfaces; this join is the bounded exception, a
-     * keyset page of at most {@code limit} spans, 1:1 on the span primary key, with columns truncated in
-     * SQL so a page costs {@code limit × 2 × PREVIEW_CHARS} however large the payloads behind it are. The
-     * previews are for the table; the MCP door drops them and sends callers to {@code get_span}.
-     *
-     * @param secretLeak true exactly for a secret-leak finding's own page: only then is {@code
-     *     secret_leak_detection} joined for {@link SpanRef#secretKey} / {@link SpanRef#storedAs}, so a
-     *     span that happens to carry an unrelated leak on some other finding's page stays silent about it
-     * @param malformedOutput true exactly for a malformed-output finding's own page: only then is
-     *     {@code malformed_output_detection} joined for {@link SpanRef#violation}, for the same reason
+     * Keyset on {@code (role, rank, id)}: rank is neither dense nor unique, and a null rank coalesces to
+     * {@link #RANK_TAIL} so it stays reachable. A trace-grain ref joins LATERAL to one outermost root, since
+     * {@code is_logical_root} marks every sub-agent boundary and a plain join multiplied rows. Previews are cut in SQL.
+     * The leak and violation joins run only on that finding's own page.
      */
     public SpanPage spanPage(
             String projectId,
@@ -472,21 +343,14 @@ public class FindingEvidenceRepository {
                 .list();
         List<SpanRef> refs = rows.stream().map(Seeded::ref).toList();
         if (refs.size() <= limit) return new SpanPage(refs, null);
-        // Seeded from the last row of THIS page: the over-fetched row is the
-        // first row of the NEXT page, and seeding from it would skip it.
+        // Seeded from THIS page's last row; the over-fetched row starts the next page.
         Seeded last = rows.get(limit - 1);
         return new SpanPage(
                 List.copyOf(refs.subList(0, limit)),
                 encodeCursor(last.ref().role(), last.ref().rank(), last.evidenceId()));
     }
 
-    /**
-     * How many refs of each role survive, counted now, every role in the vocabulary, zeros included.
-     * Deliberately not {@code finding.evidence_counts} (the count as written): refs age out with the
-     * substrate they point at, so this comes in at or below the stored number. A caller that wants the
-     * stored number reads {@link FindingRow#evidenceCount}; a caller that wants what it can actually open
-     * reads this.
-     */
+    /** Counted now, so at or below {@code finding.evidence_counts} once refs age out. */
     public Map<String, Long> countsByRole(String projectId, String findingId) {
         Map<String, Long> out = new LinkedHashMap<>();
         for (String role : FindingEvidenceRow.Role.ALL) out.put(role, 0L);
@@ -502,11 +366,7 @@ public class FindingEvidenceRepository {
         return out;
     }
 
-    /**
-     * The evidence sets of many findings at once, keyed by finding id, what a page of findings needs so
-     * rendering a list is one query rather than one per row. Findings with no surviving evidence are
-     * simply absent from the map: an empty set is a real state and the caller renders it as one.
-     */
+    /** A finding with no surviving evidence is absent, a real state the caller renders. */
     public Map<String, List<FindingEvidenceRow>> listByFindings(String projectId, List<String> findingIds) {
         Map<String, List<FindingEvidenceRow>> out = new LinkedHashMap<>();
         if (findingIds.isEmpty()) return out;
@@ -535,16 +395,9 @@ public class FindingEvidenceRepository {
                 rs.getString("created_at"));
     }
 
-    /** The point on {@link #ORDER} a cursor resumes after. */
     private record Key(String role, int rank, String id) {}
 
-    /**
-     * Decode a cursor, or null for "start at the first page".
-     *
-     * <p>Null covers every unusable token, absent, corrupt, a foreign generation, because there is
-     * nothing a caller could do differently about any of them and the first page is a correct answer to
-     * all three. Same posture as the trace and case cursors.
-     */
+    /** Null for every unusable token: the first page is a correct answer to all of them. */
     private static @Nullable Key decodeCursor(@Nullable String cursor) {
         String token = PreviewCursor.decode(cursor).token();
         if (token == null) return null;
@@ -558,7 +411,6 @@ public class FindingEvidenceRepository {
         }
     }
 
-    /** The keyset, from its three parts, shared so the ref page and the span page tokenize identically. */
     private static String encodeCursor(String role, @Nullable Integer rank, String id) {
         return PreviewCursor.encode(
                 CURSOR_VERSION + CURSOR_SEP + role + CURSOR_SEP + (rank == null ? RANK_TAIL : rank) + CURSOR_SEP + id,
@@ -588,9 +440,7 @@ public class FindingEvidenceRepository {
                 rs.getString("status"),
                 rs.getString("level"),
                 rs.getString("error_type"),
-                // ISO-8601, like every other instant this surface returns. rs.getString on a timestamptz
-                // gives Postgres's own rendering ("2026-08-03 08:50:24.015+00"), which no Date parser on
-                // the other side reads the same way twice.
+                // rs.getString on a timestamptz gives Postgres's own rendering, which clients parse inconsistently.
                 rs.getObject("started_at", OffsetDateTime.class) == null
                         ? null
                         : rs.getObject("started_at", OffsetDateTime.class)
@@ -614,7 +464,6 @@ public class FindingEvidenceRepository {
     }
 
     private int countFor(String findingId, String role) {
-        // count(*) is never null, so this is unwrapped rather than defaulted.
         return jdbc.sql("SELECT count(*) FROM finding_evidence WHERE finding_id = :fid AND role = :role")
                 .param("fid", findingId)
                 .param("role", role)

@@ -52,18 +52,7 @@ class RcaTriggerServiceTest {
     @Test
     void aGroundednessReportReadsTheFlaggedRateAgainstTheLearnedOne() {
         when(findings.findClaim("proj", "fnd_1")).thenReturn(Optional.of(claim()));
-        when(jobs.createOrGet(
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        any(Instant.class),
-                        any(Instant.class),
-                        any(Instant.class),
-                        any(),
-                        isNull()))
-                .thenReturn("job_1");
+        jobIs("job_1");
 
         trigger.trigger("proj", "fnd_1", "user_1", null);
 
@@ -143,6 +132,21 @@ class RcaTriggerServiceTest {
                         anyString());
     }
 
+    private void jobIs(String jobId) {
+        when(jobs.createOrGet(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(Instant.class),
+                        any(Instant.class),
+                        any(Instant.class),
+                        any(),
+                        isNull()))
+                .thenReturn(jobId);
+    }
+
     /** Triggers RCA on an {@code owned-x} finding that asserted a 0.9 severity, with an adapter that owns the key. */
     private void ownedFindingTriggered() {
         when(findings.findClaim("proj", "fnd_o"))
@@ -164,18 +168,7 @@ class RcaTriggerServiceTest {
                         "{\"cause_kind\":\"owned_rate\",\"baseline_rate\":0.02,\"current_rate\":0.09}",
                         null,
                         "2026-05-04T01:00:00Z")));
-        when(jobs.createOrGet(
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        any(Instant.class),
-                        any(Instant.class),
-                        any(Instant.class),
-                        any(),
-                        isNull()))
-                .thenReturn("job_1");
+        jobIs("job_1");
 
         new RcaTriggerService(
                         findings,
@@ -196,18 +189,7 @@ class RcaTriggerServiceTest {
         when(findings.findClaim("proj", "fnd_2"))
                 .thenReturn(Optional.of(toolErrorClaim("fnd_2", "2026-05-04T00:00:00Z", "not-a-time", "not-a-time")));
         when(findings.findClaim("proj", "fnd_3")).thenReturn(Optional.of(toolErrorClaim("fnd_3", "x", "y", "z")));
-        when(jobs.createOrGet(
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        any(Instant.class),
-                        any(Instant.class),
-                        any(Instant.class),
-                        any(),
-                        isNull()))
-                .thenReturn("job_2");
+        jobIs("job_2");
 
         Instant before = Instant.now();
         trigger.trigger("proj", "fnd_2", "user_1", null);

@@ -8,14 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
 /**
- * Stable byte form for a JSON value stored in a {@code text} column and compared as text — sorted
- * object keys, no incidental whitespace.
- *
- * <p>Exists because {@code call_site.output_schema} is compared across imports: the same schema
- * declared by two bundles (re-serialized from YAML, keys in whatever order the producer emitted them)
- * must read as unchanged, or a no-op import would rewind the Malformed Output built-in's entire swept
- * history. Key order carries no meaning in JSON Schema, so sorting is safe; arrays (including {@code
- * required}) keep their order.
+ * Stable byte form for JSON stored in a {@code text} column and compared as text: sorted keys, no incidental
+ * whitespace. Two bundles' {@code output_schema} must compare equal, or a no-op import would rewind Malformed Output's
+ * swept history. Arrays, {@code required} included, keep their order.
  */
 final class CanonicalJson {
 

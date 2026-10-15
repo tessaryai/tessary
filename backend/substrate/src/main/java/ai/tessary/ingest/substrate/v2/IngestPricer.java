@@ -27,74 +27,31 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Turns one arriving span's reported usage into the typed token and cost columns of {@code span}
- * (substrate-model.md §6.5).
- *
- * <h2>Priced on arrival, never repriced</h2>
- *
- * <p>A recorded cost is a fact about what a call was billed at, not a derivation that moves when a rate
- * file is refreshed. The order is fixed:
- *
- * <ol>
- *   <li>The producer sent a cost — store it verbatim, {@code cost_source = 'provided'}, no book stamped.
- *   <li>Otherwise resolve the reported model name and price each bucket against the book in force —
- *       {@code cost_source = 'inferred'}, stamped with the version that produced the number.
- *   <li>Otherwise every cost column stays null and {@code cost_source = 'unpriced'}. <b>Never zero.</b> A
- *       zero would render real spend as free, and the trace rollup counts these so a low total is never
- *       mistaken for a cheap turn.
- * </ol>
- *
- * <h2>Container kinds carry their children's numbers, so they carry none of their own</h2>
- *
- * <p>The producers that report cumulative usage on an {@code agent} span report cumulative COST on it
- * too. §7.2 sums every span of a trace, so storing either verbatim would double-count the whole subtree
- * into {@code trace.total_cost} — permanently, because cost is never repriced. Both are therefore routed
- * to {@code span_payload.provided_usage} as a receipt and the typed columns are left null with
- * {@code cost_source = 'unpriced'}.
- *
- * <p>The rule is a DENYLIST of container kinds rather than an allowlist of {@code llm}/{@code embedding}/
- * {@code reranker}. An allowlist reads the same for every producer seen so far and is wrong the first time
- * a {@code guardrail} span — a moderation LLM call, with real tokens and a real bill — arrives: its spend
- * would vanish from the rollup entirely, and §7.3's promise that {@code unpriced_spans} counts unpriced
- * spend "of any kind" would be false. Only containers double-count, so only containers are stripped.
- *
- * <h2>The cache-inclusive correction happens here</h2>
- *
- * <p>The OTel gen_ai semantic convention defines {@code gen_ai.usage.input_tokens} as the CACHE-INCLUSIVE
- * prompt size — fresh tokens plus everything served from or written to cache — while every rate table
- * prices the three buckets independently. Pricing the reported input as-is therefore bills the cached
- * tokens twice: once at the full input rate and again at their own read/write rate. The correction is
- * applied at WRITE time and the corrected input is what {@code span.input_tokens} stores, because
- * {@code span.total_tokens} sums all five buckets and an uncorrected input double-counts into the token
- * total as well as the bill. The producer's own figures survive verbatim in
- * {@code span_payload.provided_usage}.
+ * Priced on arrival, never repriced: provided cost verbatim, else inferred from the book in force, else
+ * {@code unpriced} with null costs, never zero. Container kinds carry their subtree's cumulative usage, so their
+ * numbers go only to {@code provided_usage}; a denylist of containers, not an allowlist, so a guardrail LLM call's
+ * spend is not lost. {@code input_tokens} is cache-inclusive per OTel, so the fresh share is stored, or cached tokens
+ * would be billed and counted twice.
  */
 @Component
 public class IngestPricer {
 
     private static final Logger log = LoggerFactory.getLogger(IngestPricer.class);
 
-    /**
-     * Kinds whose reported usage and cost describe their children rather than themselves. {@code chain}
-     * (the OpenInference name) normalizes to {@link KindNormalizer#WORKFLOW} at the ingest edge, so the
-     * two entries here are the same two the implementation plan names.
-     */
+    /** {@code chain} normalizes to {@link KindNormalizer#WORKFLOW} at the ingest edge. */
     private static final Set<String> CONTAINER_KINDS = Set.of(KindNormalizer.AGENT, KindNormalizer.WORKFLOW);
 
     private static final BigDecimal PER_MTOK = new BigDecimal(1_000_000);
 
-    /** {@code numeric(18,12)} is the column; rounding at the column's own scale keeps the write lossless. */
     private static final int COST_SCALE = 12;
 
     /**
-     * How long a resolved model id or rate is trusted before it is looked up again. Price books change on
-     * a boot or a daily import, so minutes of staleness costs nothing — whereas resolving per span is
-     * three queries per span, and the drain has a 200-span/second budget to keep. The bound on staleness
-     * is what a newly imported book waits before it prices anything.
+     * Resolving per span is three queries, against a 200-span/second drain budget; minutes of staleness on a book that
+     * changes daily costs nothing.
      */
     private static final long CACHE_TTL_NANOS = java.time.Duration.ofMinutes(5).toNanos();
 
-    /** Cache ceiling. A project fuzzing model names must not turn the cache into a leak. */
+    /** A project fuzzing model names must not turn the cache into a leak. */
     private static final int CACHE_MAX_ENTRIES = 20_000;
 
     private final ModelResolver models;
@@ -106,10 +63,8 @@ public class IngestPricer {
     private final AtomicLong cacheLoadedAt = new AtomicLong(System.nanoTime());
 
     /**
-     * Models already warned about for reporting a spec-violating input count. A misbehaving producer
-     * sends the same violation on every one of its spans, so without this one bad integration would be
-     * the log volume of the whole drain; the set is cleared on the same TTL as the rate caches, so the
-     * warning re-fires while the condition lasts instead of going silent forever.
+     * One bad integration repeats the violation on every span. Cleared on the cache TTL so the warning re-fires while
+     * the condition lasts.
      */
     private final Set<String> warnedNonInclusiveModels = ConcurrentHashMap.newKeySet();
 
@@ -120,10 +75,8 @@ public class IngestPricer {
     }
 
     /**
-     * The typed usage and cost columns for one span, plus the {@code span_payload.provided_usage} receipt.
-     *
-     * @param providedUsage the producer's raw usage/cost object, kept verbatim as an audit copy and never
-     *     read for arithmetic. It is the only place a container kind's cumulative numbers survive.
+     * @param providedUsage an audit copy, never read for arithmetic; the only place a container's cumulative numbers
+     * survive
      */
     public record Priced(
             @Nullable Long inputTokens,
@@ -140,7 +93,6 @@ public class IngestPricer {
             @Nullable String modelId,
             @Nullable String providedUsage) {}
 
-    /** Price one span. {@code kind} is the normalized {@link KindNormalizer} kind already resolved for it. */
     public Priced price(RawEntry raw, String kind) {
         Map<String, Object> attrs = raw.metadata();
         String receipt = receipt(attrs);
@@ -225,24 +177,10 @@ public class IngestPricer {
                 receipt);
     }
 
-    // ----- usage ------------------------------------------------------------------------------------
-
     /**
-     * The FRESH share of the reported prompt: {@code gen_ai.usage.input_tokens} with both cache buckets
-     * carved out, so the five buckets on {@code span} are disjoint and summing or pricing them is honest.
-     *
-     * <p><b>Unconditional, because the wire contract says so.</b> The OTel gen_ai convention defines
-     * {@code input_tokens} as cache-INCLUSIVE, and every producer reaching this class speaks OTLP carrying
-     * those keys. An earlier version instead guessed the convention from the model name and subtracted
-     * only the cache-READ bucket, which left Anthropic traffic billed at 5.75x: the whole inclusive input
-     * priced at the full rate, then both cache buckets priced again on top.
-     *
-     * <p>The one test kept is the only one that is logically sound. A total cannot be smaller than its
-     * parts, so {@code input < cacheRead + cacheWrite} proves the producer is NOT using the inclusive
-     * convention and is sending disjoint buckets in violation of the spec; subtracting there would strip
-     * real fresh tokens. The converse is not a test — a spec-violating disjoint sender with a large fresh
-     * prompt also satisfies {@code input >= read + write}, so treating that as evidence of inclusiveness
-     * would misprice exactly the traffic the guard exists to protect.
+     * Unconditional: OTel defines {@code input_tokens} as cache-inclusive. Guessing by model name once billed Anthropic
+     * traffic at 5.75x. The one sound test is {@code input < cacheRead + cacheWrite}, which proves a spec-violating
+     * disjoint sender; the converse proves nothing.
      */
     private @Nullable Long freshInput(
             @Nullable Long input, @Nullable Long cacheRead, @Nullable Long cacheWrite, @Nullable String model) {
@@ -257,9 +195,7 @@ public class IngestPricer {
     }
 
     private void warnNonInclusiveInput(@Nullable String model, long input, long cached) {
-        // The warn-once set is cleared by the same TTL as the rate caches, so the line re-fires while the
-        // condition lasts. Sweep from here too: a producer that states no model never reaches
-        // resolveModelId's cache, and would otherwise warn once at boot and stay silent forever.
+        // Sweep here too: a producer that states no model never reaches resolveModelId's cache.
         expireCacheIfStale();
         String key = model == null ? "" : model.trim().toLowerCase(Locale.ROOT);
         if (!warnedNonInclusiveModels.add(key)) return;
@@ -274,10 +210,7 @@ public class IngestPricer {
                 .log();
     }
 
-    /**
-     * The producer's raw usage and cost keys, verbatim, for {@code span_payload.provided_usage}. Null when
-     * the producer reported neither — an empty receipt would claim we were sent something we were not.
-     */
+    /** Null when the producer reported neither; an empty receipt would claim we were sent something. */
     private @Nullable String receipt(@Nullable Map<String, Object> attrs) {
         if (attrs == null) return null;
         ObjectNode node = mapper.createObjectNode();
@@ -295,8 +228,6 @@ public class IngestPricer {
         return node.isEmpty() ? null : node.toString();
     }
 
-    // ----- provided cost ----------------------------------------------------------------------------
-
     private record ProvidedCost(
             @Nullable String input,
             @Nullable String output,
@@ -304,13 +235,8 @@ public class IngestPricer {
             @Nullable String cacheWrite) {}
 
     /**
-     * The producer's own cost figures, or null when it reported none.
-     *
-     * <p>Per-bucket attributes win when present. <b>A lone total lands in {@code input_cost}</b>, because
-     * {@code span.total_cost} is a generated sum of the four buckets and an undecomposed total has to be
-     * visible to it somewhere; splitting it ourselves would be a derivation, and §6.5 rule 1 says verbatim.
-     * The split is the producer's to state, {@code cost_source = 'provided'} says whose number it is, and
-     * every surface that matters reads the total.
+     * A lone total lands in {@code input_cost} so the generated {@code total_cost} sees it; splitting it ourselves
+     * would be a derivation.
      */
     private @Nullable ProvidedCost providedCost(@Nullable Map<String, Object> attrs) {
         if (attrs == null) return null;
@@ -326,12 +252,8 @@ public class IngestPricer {
         return total == null ? null : new ProvidedCost(total, null, null, null);
     }
 
-    // ----- inferred cost ----------------------------------------------------------------------------
-
     /**
-     * One bucket's cost. A null token count means the producer never reported that bucket, so its cost is
-     * unknown and stays null; a null RATE means this model is never billed for that bucket, which
-     * contributes exactly zero (spec §5.3).
+     * A null token count is unknown and stays null; a null rate means never billed for that bucket, contributing zero.
      */
     private static @Nullable String cost(@Nullable Long tokens, @Nullable BigDecimal ratePerMtok) {
         if (tokens == null) return null;
@@ -344,8 +266,6 @@ public class IngestPricer {
                 .divide(PER_MTOK, COST_SCALE, RoundingMode.HALF_UP)
                 .toPlainString();
     }
-
-    // ----- resolution cache -------------------------------------------------------------------------
 
     private @Nullable String resolveModelId(@Nullable String providedModelName) {
         if (providedModelName == null || providedModelName.isBlank()) return null;
@@ -361,9 +281,8 @@ public class IngestPricer {
     }
 
     /**
-     * Drop both caches once the TTL is up, or once either has grown past the ceiling. Wholesale rather
-     * than per-entry: the importer replaces a whole book at a time, so an entry-level expiry would let one
-     * batch price half its spans against the old book and half against the new.
+     * Wholesale rather than per-entry: the importer replaces a whole book, and per-entry expiry would price one batch
+     * against two books.
      */
     private void expireCacheIfStale() {
         long loadedAt = cacheLoadedAt.get();
@@ -377,8 +296,6 @@ public class IngestPricer {
             warnedNonInclusiveModels.clear();
         }
     }
-
-    // ----- attribute readers ------------------------------------------------------------------------
 
     private static @Nullable Long firstLong(@Nullable Map<String, Object> attrs, String... keys) {
         for (String key : keys) {
@@ -409,7 +326,7 @@ public class IngestPricer {
         return null;
     }
 
-    /** A cost attribute as an exact decimal string. Money is never carried as a double past this point. */
+    /** Money is never carried as a double past this point. */
     private static @Nullable String decimalAttr(@Nullable Map<String, Object> attrs, String key) {
         Object v = attrs == null ? null : attrs.get(key);
         if (v == null) return null;

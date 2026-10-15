@@ -1,20 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Triage — the front door: an inbox that wants to be empty.
- *
- * Two sections. Cases is ONE ranked list, worst first. No claimed/unclaimed bands and no owner column:
- * nothing in this product is assigned, so ranking is magnitude then recency and the server does it
- * (`ix_eval_case_live_rank`). The week's closures are a filter, not furniture. Findings
- * below it holds what has not become a case yet (see `OpenFindings`).
- *
- * Until a case or a finding is open, the setup screen (traces → findings → cases) takes the Cases section and
- * Findings is not drawn: two empty tables say less than the pipeline, which shows what is being watched. Once
- * a finding is open with no case, Cases says "Nothing needs you." above the findings list, unless the
- * empty-state ladder still has a step for the reader to take (no provider key, a stopped exporter).
- *
- * This reads `GET {base}/cases` — an indexed table read. The CUSUM replay that
- * decides what is degrading runs on a worker, never on this page load.
- */
+// Cases is one ranked list, worst first (`ix_eval_case_live_rank`); Findings below holds what has not
+// become a case. Until either is open, the setup pipeline takes the Cases section.
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -41,14 +27,8 @@ export function Triage() {
   const vitalsQ = useQuery({ queryKey: ["vitals", "triage", api.base], queryFn: () => api.getVitals(7) });
   const onboarding = useOnboarding();
   /*
-   * Whether the org holds a model provider key — the fact that separates "triage looked and found
-   * nothing" from "triage never ran". Read from `model-settings` rather than the providers list:
-   * `configured_providers` is org-scoped data on an ungated project route, while the providers list
-   * itself is gated on `byo_provider_keys_enabled` and ERRORS for an org without it, which is
-   * exactly the org this screen most needs the answer for.
-   *
-   * Cached for the session-ish: a credential is not something that changes while someone reads an
-   * empty queue, and this read is on the path of every arrival at the front door.
+   * Whether the org holds a provider key, from `model-settings`: the providers list is gated on
+   * `byo_provider_keys_enabled` and errors for exactly the org this screen most needs the answer for.
    */
   const modelSettingsQ = useQuery({
     queryKey: ["model-settings", api.base],
@@ -98,8 +78,6 @@ export function Triage() {
           {triageQ.isLoading && <TableSkeleton rows={5} cols={3} />}
           {triageQ.isError && <ErrorNote error={triageQ.error} />}
 
-          {/* Which empty state it is, and where it sends the reader, is `resolveState`'s call; see its
-              header for why an empty queue is several states and not one. */}
           {showSetup && <PipelineEmpty state={setup} />}
 
           {triageQ.data && !showSetup && (
@@ -155,9 +133,7 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
         <span className="block truncate text-fg text-body">
           {item.title}
         </span>
-        {/* What the analysis concluded, on its own line rather than appended to the title. Appending
-            it produces one unreadable run-on — the title is already a whole sentence and a cause is
-            another — and it is the second thing scanned, not part of the first. */}
+        {/* The analysis conclusion goes on its own line; appended to the title it makes one run-on sentence. */}
         {cause && (
           <span className="block truncate text-muted mt-0.75 text-small">
             {cause}
@@ -194,11 +170,7 @@ function ms(value: number | null | undefined): string {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`;
 }
 
-/**
- * Deterministic vitals with their deltas, one line, never paged. Values come
- * from the same `/vitals` read the Vitals page uses, so the strip and the page
- * cannot disagree.
- */
+/** Deterministic vitals with their deltas, from the same `/vitals` read as the Vitals page. */
 function PulseStrip({ vitals, vitalsTo }: { vitals: Vitals; vitalsTo: string }) {
   const t = vitals.total;
   const entries = [
@@ -207,11 +179,8 @@ function PulseStrip({ vitals, vitalsTo }: { vitals: Vitals; vitalsTo: string }) 
   ];
 
   return (
-    // Wraps rather than overflows. Every child is `nowrap` — a metric must never break between its
-    // label and its number — so with a single non-wrapping row the strip had no way to absorb a
-    // narrow main column (a wide sidebar, a small window) except by running "Open Vitals" off the
-    // right edge. `flex-wrap` lets the link, and then a metric, drop to a second line instead; the
-    // link keeps its `ml-auto` so it stays right-aligned on whichever line it ends up on.
+    // Every child is `nowrap`, so `flex-wrap` is what lets a narrow column move the link, then a metric, to a
+    // second line instead of overflowing.
     <div
       className="flex flex-wrap items-center bg-surface gap-x-4.5 gap-y-2 py-3 px-4"
       style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-card)" }}
@@ -220,8 +189,7 @@ function PulseStrip({ vitals, vitalsTo }: { vitals: Vitals; vitalsTo: string }) 
         Vitals 7d
       </span>
       {entries.map((p, i) => (
-        // Not a wrapping container itself: the separator belongs to the metric after it, and a line
-        // that began with a bare rule would read as a typo.
+        // Not wrapping itself: the separator belongs to the metric after it.
         <span key={p.label} className="flex items-baseline gap-4.5">
           {i > 0 && (
             <span aria-hidden="true" style={{ color: "var(--color-border-strong)" }}>

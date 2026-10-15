@@ -6,11 +6,7 @@ import ai.tessary.classifier.catalog.ClassifierModelModule.Deps;
 import ai.tessary.classifier.catalog.DetectorSupplier;
 import org.springframework.stereotype.Component;
 
-/**
- * Hands the catalog the Frustration detector. The detector is a Spring bean because it needs the
- * decision client, the provider resolver and its own repositories, which the catalog's shared
- * {@link Deps} do not carry, so the frustration module declares no factory and this supplies it.
- */
+/** The detector is a Spring bean because it needs collaborators the catalog's {@link Deps} do not carry. */
 @Component
 public class FrustrationDetectorSupplier implements DetectorSupplier {
 

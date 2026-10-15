@@ -13,30 +13,20 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A size-capped {@code BodyHandler<String>} for credentialed outbound calls. It counts bytes as
- * they arrive and, on overflow, cancels the upstream and fails the body future — so a hostile or
- * broken response never buffers more than the cap into the heap. Shared by every outbound client
- * (the Git provider clients among them), the same way {@link UrlGuard}
- * is the shared SSRF guard for those calls.
- *
- * <p>The handler stays typed {@code <String>}, so it is a drop-in for
- * {@code HttpResponse.BodyHandlers.ofString()} and leaves callers (and the tests that swap the
- * {@code HttpClient}) unchanged.
+ * A size-capped {@code BodyHandler<String>} for credentialed outbound calls: on overflow it cancels the upstream and
+ * fails the body, so a hostile response never buffers past the cap. A drop-in for {@code BodyHandlers.ofString()}.
  */
 public final class BoundedBody {
 
-    /** Ceiling for a JSON response body — far above any real trace page / API payload, low enough
-     *  that a runaway upstream can't OOM the box. */
+    /** Far above any real payload, low enough that a runaway upstream can't OOM the box. */
     public static final long MAX_RESPONSE_BYTES = 32L * 1024 * 1024;
 
     private BoundedBody() {}
 
-    /** A string body handler capped at {@link #MAX_RESPONSE_BYTES}. */
     public static HttpResponse.BodyHandler<String> string() {
         return info -> new BoundedStringSubscriber(MAX_RESPONSE_BYTES);
     }
 
-    /** Delegates to the JDK UTF-8 string subscriber, counting bytes and aborting past the cap. */
     private static final class BoundedStringSubscriber implements HttpResponse.BodySubscriber<String> {
         private final long maxBytes;
         private final HttpResponse.BodySubscriber<String> delegate =
@@ -67,7 +57,7 @@ public final class BoundedBody {
                     buffers.stream().mapToLong(ByteBuffer::remaining).sum());
             if (total > maxBytes) {
                 if (done.compareAndSet(false, true)) {
-                    // onSubscribe always precedes onNext per the Flow contract, so subscription is set.
+                    // Flow guarantees onSubscribe precedes onNext.
                     Flow.Subscription s = subscription;
                     if (s != null) s.cancel();
                     delegate.onError(new IOException("response exceeded " + maxBytes + " bytes"));

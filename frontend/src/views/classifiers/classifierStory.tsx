@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * A finding its owning adapter details, told as a rate of flagged trials against a reference rate. The
- * adapter writes every word the figure shows (the trial's noun, the note, the reference, when a trial
- * counts), so this file only lays them out: it holds no wording of any one classifier.
- *
- * <h2>Triaged like a rate finding</h2>
- * Before a ruling the header offers the triage run and the two resolve verbs; after one it shows the ruling
- * and the case it opened.
- */
+// The owning adapter writes every word the figure shows; this file only lays them out.
 import { Link } from "react-router-dom";
 import type { BehaviorFinding, ClassifierDetail } from "../../api/types";
 import { PageHeader } from "../../ui";
 import { ResolveVerbs, RunTriageButton, detectorLabel, triageState } from "./shared";
 import { RateFigure } from "./frustrationStory";
 
-/**
- * The id of the element a detailed finding's flagged list sits in on the case page, which a cause's "Show"
- * scrolls to. The open pages draw no such list, so there the scroll finds nothing.
- */
 export const FLAGGED_LIST_ID = "flagged-list";
 
 export function ClassifierHeader({
@@ -66,7 +54,6 @@ export function ClassifierHeader({
   );
 }
 
-/** "What changed": the rate figure, every word of it from the detail's words. */
 export function ClassifierRate({ detail }: { detail: ClassifierDetail }) {
   const words = detail.words;
   return (

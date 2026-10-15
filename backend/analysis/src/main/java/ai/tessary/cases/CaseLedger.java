@@ -10,30 +10,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The case table's write side: given one finding whose ruling just qualified it for a case, make the
- * ledger agree. Called from {@link CaseOpener}, itself called from inside the same transaction as the
- * ruling write — a case that exists with no "opened" or "recurred" line in its trail is a case a reader
- * cannot account for, so every state change and its activity-trail entry commit together.
- *
- * <p><b>Event-driven, not swept.</b> There is no longer a live set to reconcile: a ruling freezes the
- * finding it landed on (decision 1), so nothing here ever needs to ask "is this detection still firing"
- * — the finding either joined a case when it was ruled, or it did not, and it stays exactly as ruled
- * from then on. A case closes only when a person resolves or absorbs it.
+ * Called inside the ruling's transaction, so every state change commits with its trail entry. Event-driven: a ruling
+ * freezes its finding, so nothing here asks whether a detection is still firing.
  */
 @Service
 public class CaseLedger {
 
-    /**
-     * How much worse a live case has to get before the trail records it. Without a floor, every finding
-     * that joins a slowly-bleeding case would append a line, and the trail — whose job is to still read
-     * clearly months later — would drown in its own heartbeat.
-     */
+    /** Without a floor, every finding joining a slowly worsening case would append a trail line. */
     private static final double ESCALATION_STEP = 0.1;
 
     private final CaseRepository cases;
     private final CaseEventRepository events;
-    /** Links the joining finding to the case ({@link FindingRepository#attachToCase}) and closes a
-     *  case's findings when it resolves or is absorbed ({@link #closeFindings}). */
     private final FindingRepository findings;
 
     public CaseLedger(CaseRepository cases, CaseEventRepository events, FindingRepository findings) {
@@ -43,21 +30,8 @@ public class CaseLedger {
     }
 
     /**
-     * Open a case for {@code detection}, or join it onto the live, unlocked case already open for its
-     * key. Either way the case comes back with {@code detection}'s finding linked
-     * ({@code finding.case_id}).
-     *
-     * <ul>
-     *   <li><b>No live case on the key</b>: a new case opens, with an {@code opened} event.
-     *   <li><b>A live, unlocked case exists</b>: the finding is linked to it, a {@code recurred} event is
-     *       appended (skipped on a re-apply that finds the finding already linked — see
-     *       {@link #join}), the headline (title, basis, the value triple) refreshes to this finding's
-     *       own account, severity only ever rises to the new peak, and an {@code escalated} event marks
-     *       a material one. The onset never moves: the case's story is still the same spell.
-     *   <li><b>A live case is locked</b> (1c: RCA has been pressed on it): {@link CaseRepository#findLive}
-     *       does not see it, so this opens a fresh case instead of joining one an agent may already be
-     *       mid-analysis on.
-     * </ul>
+     * Severity only rises; the onset never moves. A locked case is invisible to {@link CaseRepository#findLive}, so
+     * this opens a fresh case rather than joining one an agent may be analysing.
      */
     @Transactional
     public CaseRow openOrJoin(String projectId, CaseDetection detection, @Nullable String actor, Instant now) {
@@ -78,8 +52,7 @@ public class CaseLedger {
                     now);
             return opened.get();
         }
-        // Lost the race to a concurrent opener on the same key; the winner's case is the case, so this
-        // is a join rather than a second open.
+        // Lost the race to a concurrent opener; join the winner.
         CaseRow winner = cases.findLive(projectId, detection.key())
                 .orElseThrow(() -> new IllegalStateException("case open declined with no live case on key detector="
                         + detection.key().detector() + " subject="
@@ -89,15 +62,8 @@ public class CaseLedger {
     }
 
     /**
-     * Close one case as <em>absorbed</em>: a human ruled the shift legitimate and the detector's reference
-     * has already been moved to include it, so the level is the new baseline rather than a regression
-     * anyone will be asked about again.
-     *
-     * <p>Here rather than in {@link CaseService} for this class's stated reason: the state change and its
-     * trail entry commit together, and a {@code @Transactional} method invoked through {@code this} gets
-     * neither a proxy nor a transaction. The re-pin itself is the finding's, and has already committed by
-     * the time this is called — deliberately in that order, since a case closed against a bar that never
-     * moved would look wrong the moment it reopened.
+     * Here rather than in {@link CaseService} because a {@code @Transactional} method called through {@code this} gets
+     * no transaction. The re-pin has already committed by the time this runs.
      */
     @Transactional
     public void absorb(String projectId, String caseId, @Nullable String actor, Instant now) {
@@ -107,8 +73,6 @@ public class CaseLedger {
         events.append(projectId, caseId, CaseEventRow.Kind.ABSORBED, actor, reason, null, now);
     }
 
-    /** Close every open finding this case holds — the finding half of resolving or absorbing a case,
-     *  in the same transaction as the case's own close. */
     private void closeFindings(String projectId, String caseId, Instant now) {
         findings.closeByCase(projectId, caseId, now.toString());
     }
@@ -116,10 +80,7 @@ public class CaseLedger {
     private CaseRow join(String projectId, CaseRow row, CaseDetection detection, @Nullable String actor, Instant now) {
         boolean linked = findings.attachToCase(projectId, detection.findingId(), row.id(), now.toString());
         if (!linked && !alreadyLinkedHere(projectId, detection.findingId(), row.id())) {
-            // The finding is claimed by a different case already. Never true for a ruling this is called
-            // from — a finding that just qualified for a case has case_id NULL by construction — but a
-            // defensive no-op rather than an overwrite if it ever happens: this case is not the finding's
-            // case, so its headline must not be rewritten from a detection that is not really about it.
+            // Defensive no-op rather than overwriting the headline of a case that is not the finding's.
             return row;
         }
 
@@ -127,9 +88,7 @@ public class CaseLedger {
         boolean escalated = detection.severity() - row.severity() >= ESCALATION_STEP;
         cases.refresh(projectId, row.id(), withSeverity(detection, severity), now);
 
-        // recurred fires only on an actual join, never on a re-apply of a finding already linked here —
-        // ClassifierArming re-evaluates a still-firing facet on every sweep, and a trail line per sweep
-        // would drown the one that mattered.
+        // Only on an actual join: ClassifierArming re-evaluates a firing facet every sweep.
         if (linked) {
             events.append(
                     projectId,
@@ -160,11 +119,7 @@ public class CaseLedger {
                 .orElse(false);
     }
 
-    /** {@code detection} with its severity replaced by the case's running peak — everything else (the
-     *  title, basis and value triple) still comes from the newest finding, unchanged. Always rebuilt
-     *  rather than short-circuited on equality: {@code severity} is the {@code Math.max} of two doubles,
-     *  and comparing floating-point values for equality is the kind of "optimization" that quietly
-     *  breaks on a value that is merely very close. */
+    /** Always rebuilt rather than short-circuited on floating-point equality. */
     private static CaseDetection withSeverity(CaseDetection detection, double severity) {
         return new CaseDetection(
                 detection.key(),

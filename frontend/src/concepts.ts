@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Single source of truth for every domain noun the UI surfaces.
- * Mirrors the canonical nomenclature of the `evals` Claude Code plugin
- * (see tessaryai/plugins/plugins/evals/output_format.md). When the plugin's
- * vocabulary changes, update here and the platform follows.
- *
- * Components read this via <ConceptPopover concept="pipeline" />.
- */
+// Every domain noun the UI surfaces, mirroring the `evals` plugin's nomenclature
+// (tessaryai/plugins/plugins/evals/output_format.md).
 
 export type ConceptId =
   | "pipeline"

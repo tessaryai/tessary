@@ -37,6 +37,8 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /** The pure rules behind a chart card. */
 class ChartSeriesTest {
@@ -54,10 +56,6 @@ class ChartSeriesTest {
         return new RateRow(at(hour), checked, flagged);
     }
 
-    private static ChartPoint ratePoint(int start, int end, long checked, long flagged, boolean open) {
-        return ChartPoint.rate(at(start), at(end), open, checked, flagged);
-    }
-
     // ---- ranges -------------------------------------------------------------------------------------
 
     @Test
@@ -67,50 +65,49 @@ class ChartSeriesTest {
 
     // ---- the merge rule -----------------------------------------------------------------------------
 
-    /** A busy stretch closes a point every time it reaches 500, long before a day has passed. */
-    @Test
-    void merge_busyStretchClosesAtFiveHundred() {
-        List<RateRow> rows = new ArrayList<>();
-        for (int h = 0; h < 6; h++) rows.add(rate(h, 250, 10));
-
-        List<ChartPoint> points = ChartSeries.ratePoints(FROM, at(5).plusSeconds(1800), rows);
+    /**
+     * Each row: the hours with items as hour:checked/flagged, the read time as hour+seconds, the points expected as
+     * start-end:checked/flagged (a trailing * marks the one still open), and the bug it catches. A point closes when it
+     * reaches 500, spans at most 24 hours, and stays open only while it holds the current hour.
+     */
+    @ParameterizedTest(name = "{3}")
+    @CsvSource(delimiter = '|', textBlock = """
+        0:250/10 1:250/10 2:250/10 3:250/10 4:250/10 5:250/10 | 5+1800 | 0-2:500/20 2-4:500/20 4-6:500/20* | a busy stretch is not closed at 500
+        0:300/3 1:300/3       | 1+60     | 0-2:600/6*          | a point closed at 500 is final while its last hour is still filling
+        0:300/3 1:300/3       | 2        | 0-2:600/6           | a point closed at 500 stays open once its hours are over
+        10:3/0                | 33       | 10-11:3/0*          | a last point the current hour can still join is closed
+        10:3/0                | 34       | 10-11:3/0           | a last point the current hour would stretch past 24 hours stays open
+        10:3/0                | 156+1800 | 10-11:3/0           | a days-old point is still filling
+        0:5/1 3:5/0 7:5/2     | 10       | 0-8:15/3*           | an empty hour inside a point moves its end
+        0:600/6 5:10/1        | 8        | 0-1:600/6 5-6:10/1* | empty hours after a closed point start the next point
+        0:100/1 1:700/7 2:3/0 | 2        | 0-2:800/8 2-3:3/0*  | one hour alone holding 500 does not close the point it joins
+        -1:400/4 0:200/2      | 0        | 0-1:200/2*          | the walk does not start at the first hour of the range
+        0:5/0 3:5/0           | 2+3599   | 0-1:5/0*            | an hour after the current one is walked
+        """)
+    void merge(String hours, String now, String expected, String bug) {
+        String[] read = (now + "+0").split("\\+");
+        List<RateRow> rows =
+                Arrays.stream(hours.split(" ")).map(ChartSeriesTest::hour).toList();
 
         assertEquals(
-                List.of(
-                        ratePoint(0, 2, 500, 20, false),
-                        ratePoint(2, 4, 500, 20, false),
-                        ratePoint(4, 6, 500, 20, true)),
-                points,
-                "three points of two hours each, closed at 500; the last holds the current hour, so it is still open");
+                Arrays.stream(expected.split(" ")).map(ChartSeriesTest::point).toList(),
+                ChartSeries.ratePoints(FROM, at(Integer.parseInt(read[0])).plusSeconds(Long.parseLong(read[1])), rows),
+                bug);
     }
 
-    /** A point that reached 500 in an hour already over is final; only one holding the current hour can still grow. */
-    @Test
-    void merge_pointClosedAtTargetIsOpenOnlyWhileItHoldsTheCurrentHour() {
-        List<RateRow> rows = List.of(rate(0, 300, 3), rate(1, 300, 3));
-
-        assertEquals(
-                List.of(ratePoint(0, 2, 600, 6, true)),
-                ChartSeries.ratePoints(FROM, at(1).plusSeconds(60), rows),
-                "hour 1 is still filling: the next read can count more in it");
-        assertEquals(
-                List.of(ratePoint(0, 2, 600, 6, false)), ChartSeries.ratePoints(FROM, at(2), rows), "hour 1 is over");
+    private static RateRow hour(String hour) {
+        String[] f = hour.split("[:/]");
+        return rate(Integer.parseInt(f[0]), Long.parseLong(f[1]), Long.parseLong(f[2]));
     }
 
-    /** The last point is open only while the current hour could still join it, within 24 hours of its start. */
-    @Test
-    void merge_lastPointTooOldToJoinIsClosed() {
-        List<RateRow> rows = List.of(rate(10, 3, 0));
-
-        assertEquals(List.of(ratePoint(10, 11, 3, 0, true)), ChartSeries.ratePoints(FROM, at(33), rows));
-        assertEquals(
-                List.of(ratePoint(10, 11, 3, 0, false)),
-                ChartSeries.ratePoints(FROM, at(34), rows),
-                "hour 34 would make it 25 hours long, so it starts a new point: this one can no longer change");
-        assertEquals(
-                List.of(ratePoint(10, 11, 3, 0, false)),
-                ChartSeries.ratePoints(FROM, at(6 * 24 + 12).plusSeconds(1800), rows),
-                "days old, so not still filling");
+    private static ChartPoint point(String point) {
+        String[] f = point.split("[-:/*]");
+        return ChartPoint.rate(
+                at(Integer.parseInt(f[0])),
+                at(Integer.parseInt(f[1])),
+                point.endsWith("*"),
+                Long.parseLong(f[2]),
+                Long.parseLong(f[3]));
     }
 
     /** A quiet stretch never reaches 500: a point spans at most 24 hours, then the next one starts. */
@@ -122,59 +119,9 @@ class ChartSeriesTest {
         List<ChartPoint> points = ChartSeries.ratePoints(FROM, at(29), rows);
 
         assertEquals(
-                List.of(ratePoint(0, 24, 24, 0, false), ratePoint(24, 30, 6, 0, true)),
+                List.of(point("0-24:24/0"), point("24-30:6/0*")),
                 points,
                 "hour 23 ends exactly 24h after the start and joins; hour 24 would make it 25h and starts a new one");
-    }
-
-    /** An empty hour neither starts a point nor stretches one: the point ends where its last item's hour ends. */
-    @Test
-    void merge_emptyHoursInsideAPointDoNotMoveItsEnd() {
-        List<RateRow> rows = List.of(rate(0, 5, 1), rate(3, 5, 0), rate(7, 5, 2));
-
-        List<ChartPoint> points = ChartSeries.ratePoints(FROM, at(10), rows);
-
-        assertEquals(List.of(ratePoint(0, 8, 15, 3, true)), points);
-    }
-
-    /** After a point closes, empty hours leave a gap: the next point starts at the next hour with items. */
-    @Test
-    void merge_gapOfEmptyHoursBetweenPoints() {
-        List<RateRow> rows = List.of(rate(0, 600, 6), rate(5, 10, 1));
-
-        List<ChartPoint> points = ChartSeries.ratePoints(FROM, at(8), rows);
-
-        assertEquals(List.of(ratePoint(0, 1, 600, 6, false), ratePoint(5, 6, 10, 1, true)), points);
-    }
-
-    /** One hour that alone holds 500 or more closes the point it joins, whatever it held before. */
-    @Test
-    void merge_hourAloneAboveTargetClosesThePoint() {
-        List<RateRow> rows = List.of(rate(0, 100, 1), rate(1, 700, 7), rate(2, 3, 0));
-
-        List<ChartPoint> points = ChartSeries.ratePoints(FROM, at(2), rows);
-
-        assertEquals(List.of(ratePoint(0, 2, 800, 8, false), ratePoint(2, 3, 3, 0, true)), points);
-    }
-
-    /** The walk starts at the range's first hour: an hour before it is not on the chart, the first hour is. */
-    @Test
-    void merge_startsAtTheRangeStart() {
-        List<RateRow> rows = List.of(rate(-1, 400, 4), rate(0, 200, 2));
-
-        List<ChartPoint> points = ChartSeries.ratePoints(FROM, at(0), rows);
-
-        assertEquals(List.of(ratePoint(0, 1, 200, 2, true)), points);
-    }
-
-    /** An hour after the current one is not walked. */
-    @Test
-    void merge_stopsAtTheCurrentHour() {
-        List<RateRow> rows = List.of(rate(0, 5, 0), rate(3, 5, 0));
-
-        List<ChartPoint> points = ChartSeries.ratePoints(FROM, at(2).plusSeconds(3599), rows);
-
-        assertEquals(List.of(ratePoint(0, 1, 5, 0, true)), points);
     }
 
     // ---- range points -------------------------------------------------------------------------------

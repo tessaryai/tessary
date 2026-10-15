@@ -6,9 +6,7 @@ import org.springframework.http.HttpStatus;
 public enum ClassifierError implements ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "No classifier '%s'"),
     FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "No behaviour-drift finding '%s'"),
-    // A ruling freezes the finding by construction (ux_finding_live drops it once triage_verdict is
-    // set), so a verb reaching here found zero rows: something else — another triage run, or a
-    // person's own press a moment earlier — ruled first, and this one is moot rather than wrong.
+    // ux_finding_live drops a ruled finding, so zero rows means something else ruled first: moot rather than wrong.
     FINDING_CLOSED(HttpStatus.CONFLICT, "Finding '%s' has already been ruled on"),
     INVALID_RESOLUTION(
             HttpStatus.UNPROCESSABLE_ENTITY,
@@ -17,8 +15,8 @@ public enum ClassifierError implements ErrorCode {
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no window/threshold tuning — only cost_drift and duration_drift do"),
     UNKNOWN_CALL_SITE(HttpStatus.UNPROCESSABLE_ENTITY, "This project has no call site '%s'"),
-    // Tool error buckets by tool across call sites, so a call-site scope would change what each bucket
-    // measures rather than only which traffic reaches it. Refused until that is designed, never ignored.
+    // Tool error buckets by tool across call sites, so a call-site scope would change what each bucket measures.
+    // Refused, never ignored.
     CALL_SITE_SCOPE_UNSUPPORTED(
             HttpStatus.UNPROCESSABLE_ENTITY, "Classifier '%s' runs on every call site and cannot be limited to some"),
     INVALID_CHART_DAYS(HttpStatus.UNPROCESSABLE_ENTITY, "A chart range is 7 or 28 days, not %s"),
@@ -32,35 +30,19 @@ public enum ClassifierError implements ErrorCode {
             "Classifier '%s' needs a TypeSafe or OpenRouter key. Add one under Settings, Providers, then enable it"),
     /** A reset while a worker holds the sweep job: that sweep would write its cursor back over the reset. */
     SWEEP_RUNNING(HttpStatus.CONFLICT, "Classifier '%s' is checking traces right now. Try the reset again in a minute"),
-    // NO_REPO_TO_RULE_AGAINST used to sit here: a 409 on `Run analysis` for a project with no git
-    // integration, back when the only Layer-2 lane rules against a committed spec. It is gone rather than
-    // deprecated because the state it named cannot occur — a repo-less project is now ruled on the
-    // evidence-only lane instead of refused (launch requirement B2), and a retired error code that can
-    // still be thrown is worse than one that cannot be.
-    // Named FINDING_HAS_NO_EXEMPLAR until the evidence roles were redesigned, and the rename is the
-    // whole point: `exemplar` is no longer universal, so a finding can carry hundreds of witnesses and
-    // members and still have had no exemplar to offer. What blocks an analysis is citing NO trace at
-    // all — nothing written, or everything aged out — and that is what this now says.
+    // What blocks an analysis is citing no trace at all (nothing written, or everything aged out); a repo-less project
+    // is ruled evidence-only rather than refused.
     FINDING_HAS_NO_EVIDENCE(HttpStatus.CONFLICT, "Finding '%s' cites no trace to anchor an analysis on"),
-    // Never reaches a controller: the triage worker is the only thrower, and it exists so that a run
-    // which did not happen leaves triage_verdict NULL and lets the job retry, rather than recording a
-    // ruling for a run nobody made — which would permanently disqualify the finding from ever being
-    // looked at again.
+    // Thrown only by the triage worker, so a run that did not happen leaves triage_verdict NULL and retries rather than
+    // permanently disqualifying the finding.
     TRIAGE_RUN_INCOMPLETE(HttpStatus.INTERNAL_SERVER_ERROR, "Triage of finding '%s' produced no ruling: %s"),
-    // The launcher, not the run. Separated from TRIAGE_RUN_INCOMPLETE because the two want opposite
-    // handling: a run that failed should spend an attempt and retry, while a launcher that is refusing
-    // everyone will refuse the next finding too — so this one trips the breaker, refunds the attempt,
-    // and stops the drain rather than burning every job's attempts against a door that is shut.
+    // Separate from TRIAGE_RUN_INCOMPLETE: a launcher refusing everyone trips the breaker and refunds the attempt
+    // instead of burning every job's attempts.
     TRIAGE_LAUNCHER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "The triage launcher is not answering: %s"),
 
     /**
-     * The launcher answered and REFUSED — 401/403 (the shared secret does not match) or 404 (its image
-     * predates the route). Split out of {@link #TRIAGE_LAUNCHER_UNAVAILABLE} because the two need
-     * opposite handling: an unreachable launcher is transient and worth retrying on a short breaker
-     * cycle, while a refusal is a deployment mistake that every future identical request will hit the
-     * same way. Folded together, a key mismatch released each job unspent at DEBUG on every tick — the
-     * job never dead-lettered, never spent an attempt, and never logged anything an operator would
-     * see, so a polling Case page waited on a run that could not start.
+     * 401/403/404: a deployment mistake every identical request will hit, unlike a transient
+     * {@link #TRIAGE_LAUNCHER_UNAVAILABLE}. Folded together, a key mismatch released jobs unspent at DEBUG forever.
      */
     TRIAGE_LAUNCHER_MISCONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "The triage launcher refused the run: %s");
 

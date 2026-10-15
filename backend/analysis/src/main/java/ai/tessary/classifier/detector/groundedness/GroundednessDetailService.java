@@ -27,20 +27,13 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
- * The finding page's groundedness block: the rate off the finding's payload, and the flagged answers it cites,
- * each with its question, the answer as it was scored, the sentences the model flagged in it and the documents
- * it was compared against.
- *
- * <p>The answers come from the finding's span-grain witness rows, not a fresh query, so the page lists exactly
- * what the finding cites, newest flag first, a page at a time: the block carries the first {@link #PAGE_SIZE},
- * and {@link #page} the rest. The flagged sentences are the detection's own {@code flagged_sentences}. The
- * question, answer and documents are rebuilt at request time through {@link GroundednessInputs}, the same read
- * the detector scored from, so the sentence offsets index into the same answer string the page shows.
+ * The finding page's groundedness block. Answers come from the finding's witness rows, so the page lists exactly what
+ * it cites. Question, answer and documents are rebuilt through {@link GroundednessInputs}, the detector's own read, so
+ * sentence offsets index into the same string.
  */
 @Service
 public class GroundednessDetailService {
 
-    /** Answers the block carries, and a page's default size. */
     public static final int PAGE_SIZE = 50;
 
     private final GroundednessRateRepository rates;
@@ -56,29 +49,19 @@ public class GroundednessDetailService {
         this.mapper = mapper;
     }
 
-    /** The block for a {@code groundedness_rate} finding, or null for any other finding. */
+    /** Null for any other finding. */
     public @Nullable GroundednessDetail detail(FindingRow finding) {
         if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return null;
         FlaggedAnswerPage first = page(finding, null, PAGE_SIZE, null);
         return GroundednessEvidence.detail(finding, first.rows(), first.nextCursor());
     }
 
-    /**
-     * One page of the flagged answers {@code finding} cites, newest flag first. With {@code cause} set, only the
-     * answers in the traces that RCA cause names.
-     *
-     * @param cursor the {@code nextCursor} of the page before, or null for the first
-     */
+    /** With {@code cause} set, only answers in the traces that RCA cause names. */
     public FlaggedAnswerPage page(FindingRow finding, @Nullable CauseRef cause, int limit, @Nullable String cursor) {
         return page(finding.projectId(), finding.subjectId(), finding.id(), cause, limit, cursor);
     }
 
-    /**
-     * {@link #page(FindingRow, CauseRef, int, String)} by the finding's ids, for a reader that holds the claim
-     * rather than the finding row: RCA, which never reads the triage columns a {@link FindingRow} carries.
-     *
-     * @param classifierId the finding's subject, the classifier that filed it
-     */
+    /** For RCA, which holds the claim, not the triage columns. */
     public FlaggedAnswerPage page(
             String projectId,
             String classifierId,
@@ -113,10 +96,7 @@ public class GroundednessDetailService {
         return new FlaggedAnswerPage(rows, cited.total(), next < cited.total() ? Integer.toString(next) : null);
     }
 
-    /**
-     * The flagged sentences of each answer in {@code refs}, as text with its score, in the order the detector wrote
-     * them. Every ref is a key; one with no detection row left maps to no sentences.
-     */
+    /** Every ref is a key; one with no detection row maps to no sentences. */
     public Map<SpanRef, List<FlaggedSentenceText>> flaggedSentences(FindingRow finding, Collection<SpanRef> refs) {
         if (refs.isEmpty()) return Map.of();
         Map<SpanRef, String> evidence = rates.detectionEvidence(finding.projectId(), finding.subjectId(), refs);
@@ -158,8 +138,7 @@ public class GroundednessDetailService {
     }
 
     /**
-     * One answer. It is stored while its span's output is: an answer the inputs no longer score (its call site's
-     * shape moved) is still shown, with the question and documents it can no longer be matched to left out.
+     * An answer the inputs no longer score (its call site's shape moved) is shown without its question and documents.
      */
     private FlaggedAnswerView view(
             CitedAnswer a, @Nullable SubstrateObservation span, GroundednessInputs.@Nullable Inputs in) {
@@ -206,7 +185,7 @@ public class GroundednessDetailService {
         }
     }
 
-    /** The cursor is the next row's offset; anything unreadable starts over. */
+    /** Anything unreadable starts over. */
     private static int decode(@Nullable String cursor) {
         if (cursor == null || cursor.isBlank()) return 0;
         try {

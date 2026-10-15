@@ -2,10 +2,9 @@
 package ai.tessary.classifier.frustration;
 
 /**
- * Cuts over-cap text to its first and last halves joined by {@value #ELLIPSIS}. Head and tail beat a
- * head-only cut because a user's complaint as often closes a message as opens it. Each cut moves
- * outward to the nearest whitespace, so no word is split; a single word longer than its half is cut
- * where it stands. The ellipsis is added on top of the cap, as the research formatter adds it.
+ * Cuts over-cap text to its first and last halves joined by {@value #ELLIPSIS}, since a complaint as often closes a
+ * message as opens it. Cuts snap outward to whitespace; one over-long word is cut where it stands. The ellipsis is
+ * added on top of the cap, as the research formatter does.
  */
 public final class HeadTailClip {
 
@@ -24,7 +23,6 @@ public final class HeadTailClip {
                 + text.substring(tailStart).strip();
     }
 
-    /** The head's end, moved back to the last whitespace when it falls inside a word. */
     private static int snapHeadEnd(String text, int end) {
         if (Character.isWhitespace(text.charAt(end)) || Character.isWhitespace(text.charAt(end - 1))) {
             return end;
@@ -35,7 +33,6 @@ public final class HeadTailClip {
         return Character.isLowSurrogate(text.charAt(end)) ? end - 1 : end;
     }
 
-    /** The tail's start, moved forward past the next whitespace when it falls inside a word. */
     private static int snapTailStart(String text, int start) {
         if (Character.isWhitespace(text.charAt(start)) || Character.isWhitespace(text.charAt(start - 1))) {
             return start;

@@ -18,12 +18,8 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * AES-256-GCM sealing for the session cookie. Mirrors {@link ai.tessary.crypto.SecretBox}
- * but with its own key ({@code TESSARY_AUTH_COOKIE_PASSWORD}) so a leaked ingestion-credential
- * key never compromises sessions and vice versa.
- *
- * <p>Output format: {@code base64url( IV(12B) || ciphertext+tag(16B) )}. Base64-url so
- * the value is safe in a cookie without further escaping.</p>
+ * AES-256-GCM for the session cookie, with its own key ({@code TESSARY_AUTH_COOKIE_PASSWORD}) so a leaked credential
+ * key never compromises sessions, and vice versa. Format: {@code base64url(IV(12B) || ciphertext+tag)}.
  */
 @Component
 public final class SessionCipher {
@@ -52,7 +48,6 @@ public final class SessionCipher {
         this.key = raw;
     }
 
-    /** Seal a sealed-session record into a cookie-safe string. */
     public String seal(SealedSession session) {
         byte[] k = requireKey();
         try {
@@ -70,7 +65,7 @@ public final class SessionCipher {
         }
     }
 
-    /** Unseal a cookie value. Returns null on any failure (tampered, wrong key, expired-tag). */
+    /** Null on any failure: tampered, wrong key or bad tag. */
     public @Nullable SealedSession unseal(@Nullable String cookieValue) {
         if (cookieValue == null || cookieValue.isBlank() || key == null) return null;
         try {

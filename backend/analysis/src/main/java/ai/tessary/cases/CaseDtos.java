@@ -16,15 +16,13 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/** Wire DTOs for the case surface — Triage and the case page. Snake_case on the wire. */
+/** Snake_case on the wire. */
 public final class CaseDtos {
 
     private CaseDtos() {}
 
-    /** One case, as both the Triage row and the case page's verdict header read it. */
     public record CaseView(
             String id,
-            /** The display id a human quotes: {@code C-118}. */
             String reference,
             String detector,
             @JsonProperty("subject_kind") String subjectKind,
@@ -34,11 +32,9 @@ public final class CaseDtos {
             String metric,
             String state,
             String title,
-            /** Why this crossed <i>its own</i> detector's bar, in that detector's terms. The ranked list
-             *  mixes detectors that do not share a threshold, so this is never normalized away. */
+            /** In the detector's own terms; detectors do not share a threshold, so this is never normalized. */
             String basis,
-            /** 0..1, for ordering the list. Comparable across detectors by construction and by nothing
-             *  else — clients must not render it as a number. */
+            /** 0..1 for ordering only; clients must not render it as a number. */
             double severity,
             @JsonProperty("onset_at") String onsetAt,
             @JsonProperty("current_value") @Nullable Double currentValue,
@@ -50,36 +46,27 @@ public final class CaseDtos {
             @Nullable String resolution,
             @JsonProperty("resolution_reason") @Nullable String resolutionReason,
             @JsonProperty("resolved_by") @Nullable String resolvedBy,
-            /** {@code fixed} | {@code false_alarm} on a resolved frustration or groundedness case; null on every
-             *  other case. */
+            /** Set only on a resolved frustration or groundedness case. */
             @Nullable String disposition,
-            /** How many findings this case holds (1b: a case reads over all of them; the newest stands
-             *  in for the case's own numbers until the multi-finding case page — issue #76 — ships). */
+            /**
+             * The newest finding stands in for the case's numbers until the multi-finding case page (issue #76) ships.
+             */
             @JsonProperty("finding_count") long findingCount,
             /**
-             * The newest of this case's findings, or null for an archived case that predates {@code
-             * finding.case_id}.
-             *
-             * <p>Carried on the list row, not only {@link CaseDetailView}: the classifiers queue reads
-             * this in reverse, resolving finding to case, and needs it without a fetch per open case.
+             * Null for an archived case that predates {@code finding.case_id}. On the list row because the classifiers
+             * queue resolves finding to case without a fetch per case.
              */
             @JsonProperty("latest_finding_id") @Nullable String latestFindingId,
-            /** When a person pressed <em>Run RCA</em> on this case (1c) — locked against a new finding
-             *  joining it — or null if nobody has. */
+            /** A pressed case is locked against new findings joining it. */
             @JsonProperty("locked_at") @Nullable String lockedAt,
-            /**
-             * The one-sentence summary of the finished RCA behind this case, or null where none has run,
-             * none finished, or the run wrote no summary and found no cause. Null is the common case, not a
-             * gap: most cases have never been analyzed.
-             */
+            /** Null is the common case: most cases have never been analyzed. */
             @Nullable String cause,
             /**
-             * That run's verdict, carried beside {@code cause} because the two can disagree: an
-             * {@code inconclusive} run still summarizes its leads.
+             * Carried beside {@code cause} because they can disagree: an {@code inconclusive} run still summarizes its
+             * leads.
              */
             @JsonProperty("rca_verdict") @Nullable String rcaVerdict) {
 
-        /** A case with no analysis behind it, or none this caller looked up. */
         public static CaseView of(CaseRow row) {
             return of(row, null);
         }
@@ -118,13 +105,8 @@ public final class CaseDtos {
     }
 
     /**
-     * Triage's whole read.
-     *
-     * @param cases the open cases, worst first. One list — no claimed/unclaimed bands, because nothing
-     *     in this product is claimed.
-     * @param recentlyResolved the last week's closures — Triage's one quiet history line.
-     * @param watching what the all-clear state says to prove the silence is real coverage rather than
-     *     nothing being watched.
+     * {@code cases} is one worst-first list: nothing in this product is claimed. {@code watching} proves the silence is
+     * coverage.
      */
     public record TriageView(
             List<CaseView> cases,
@@ -132,33 +114,17 @@ public final class CaseDtos {
             WatchingView watching) {}
 
     /**
-     * One keyset page of cases, filtered by state / detector / call site.
-     *
-     * <p>Flat, with no {@link WatchingView} block: coverage is a fact about the project, not a page
-     * of it, and repeating it on every page would invite a reader to treat page 3's copy as a fresh
-     * measurement.
-     *
-     * @param nextCursor pass back as {@code cursor} for the next page; null when this was the last
-     *     one. Opaque and stamped with the ordering it was minted under, so replaying it against a
-     *     different {@code state} restarts at page one instead of resuming off the wrong order.
+     * No {@link WatchingView}: coverage is a fact about the project, not a page. The cursor is stamped with its
+     * ordering, so replaying it under a different {@code state} restarts at page one.
      */
     public record CasesPage(
             List<CaseView> cases,
             @JsonProperty("next_cursor") @Nullable String nextCursor) {}
 
     /**
-     * The proof line behind "Nothing needs you": what is actually watching this project.
-     *
-     * @param classifiers enabled classifiers this org actually has; withheld built-ins are not
-     *     counted, since a classifier the flag layer is holding back is not watching anything.
-     * @param callSites call sites the classifiers are watching across.
-     * @param tracesLastDay traffic seen in the last 24h. Separates two silences a reader must not
-     *     confuse: nothing is wrong, versus nothing is arriving.
-     * @param tracesTotal every trace this project has ever kept, or null when the caller asked to
-     *     skip it (only the empty Triage screen shows it, via {@link
-     *     CaseService#watching(String, boolean)}). Null means "not counted," distinct from zero.
-     * @param openFindings live findings ({@code status IN ('open','blocked')}), the same set the
-     *     findings API's {@code ?status=open} returns. Null under the same rule as {@code tracesTotal}.
+     * The proof line behind "Nothing needs you". Withheld classifiers are not counted. {@code tracesLastDay} separates
+     * "nothing is wrong" from "nothing is arriving". {@code tracesTotal} and {@code openFindings} are null when not
+     * counted, which is distinct from zero.
      */
     public record WatchingView(
             long classifiers,
@@ -167,11 +133,9 @@ public final class CaseDtos {
             @JsonProperty("traces_total") @Nullable Long tracesTotal,
             @JsonProperty("open_findings") @Nullable Long openFindings) {}
 
-    /** One entry in the activity trail. */
     public record CaseEventView(
             String id,
             String kind,
-            /** The acting user's email, or null when the system acted. */
             @Nullable String actor,
             String summary,
             @JsonProperty("created_at") String createdAt) {
@@ -181,25 +145,16 @@ public final class CaseDtos {
         }
     }
 
-    /** One thing a ruling rests on: an evidence pointer, a repo path, or a check script the agent ran. */
     public record CitationView(String path, String reason) {}
 
     /**
-     * Who ruled this case's detection real, and on what: a person pressing "Real deviation," or a
-     * triage run finding the claim {@code positive}. Every field reads straight off the case's newest
-     * finding (via {@code finding.case_id}), so the case and the finding cannot disagree.
-     *
-     * @param verdict the triage verdict, always {@code positive} for a machine ruling that reached
-     *     a case, null when a human ruled
-     * @param action what the ruling did; {@code opened_case} here by construction
-     * @param byHuman a person pressed "Real deviation." The strongest ruling available and the
-     *     only one needing no machine, so it carries no citations by design.
+     * Every field reads off the case's newest finding, so case and finding cannot disagree. {@code byHuman} needs no
+     * machine and so carries no citations.
      */
     public record CaseRulingView(
             @JsonProperty("finding_id") String findingId,
             @JsonProperty("ruled_by") String ruledBy,
-            /** The whole claim as one sentence, composed server-side so a case, a Triage row and a
-             *  Slack message cannot phrase the same ruling three ways. */
+            /** Composed server-side so a case, a Triage row and a Slack message phrase it the same way. */
             @JsonProperty("ruled_by_sentence") String ruledBySentence,
             @Nullable String verdict,
             @Nullable String action,
@@ -209,19 +164,8 @@ public final class CaseDtos {
             @JsonProperty("by_human") boolean byHuman) {}
 
     /**
-     * One trace the classifier recorded, carrying the role it recorded it under. A case says a
-     * population moved; these are the references its finding pinned, so the claim can be checked
-     * rather than taken.
-     *
-     * <p>{@code role} and {@code rank} are the {@code finding_evidence} columns, passed through
-     * unchanged: a {@code baseline} trace belongs to the population the classifier compared
-     * against, an {@code exemplar} is what a Layer-2 escalation was pointed at, and a
-     * {@code member} or {@code witness} is another instance of the same thing.
-     *
-     * @param role one of the persisted evidence roles: {@code exemplar}, {@code member},
-     *     {@code baseline}, {@code witness}, {@code changepoint}.
-     * @param rank the classifier's own order within that role; null on a row written before ranks
-     *     existed.
+     * {@code role} and {@code rank} pass through from {@code finding_evidence}; {@code rank} is null on rows written
+     * before ranks existed.
      */
     public record CaseExemplarView(
             @JsonProperty("trace_id") String traceId,
@@ -234,76 +178,32 @@ public final class CaseDtos {
             @JsonProperty("started_at") @Nullable String startedAt) {}
 
     /**
-     * One finding a case holds, as the case page's "Findings" list reads it. A case gathers every
-     * window that triage ruled positive on its key, so this is the case's history; the rest of the page
-     * draws only the newest of them. No triage field: every finding here was ruled positive to join, and
-     * the MCP case read must not tell an RCA run how triage ruled.
-     *
-     * @param windowOpenedAt when the window this finding measured opened: the detector's own window
-     *     where it has one (a drift window), else the finding's onset.
-     * @param windowClosedAt when that window closed, else the finding's last sighting.
+     * No triage field: every finding here was ruled positive to join, and the MCP case read must not tell RCA how
+     * triage ruled.
      */
     public record CaseFindingView(
             String id,
-            /** The finding's sentence, as its own page names it ({@code FindingTitle}). */
             String title,
             @JsonProperty("window_opened_at") String windowOpenedAt,
             @JsonProperty("window_closed_at") String windowClosedAt,
             @JsonProperty("created_at") String createdAt) {}
 
     /**
-     * The case page's whole read.
-     *
-     * @param ruling who ruled the detection real, and on what; null for an archived case whose
-     *     detector opened without triage, or whose finding has since been deleted.
-     * @param exemplars the traces the finding pinned as evidence, each carrying its role.
-     * @param rcaReportId the most recent RCA on this case's subject, if one has run. A report
-     *     still running has an id here and nothing in {@code rca} yet, which is how a client
-     *     knows to poll.
-     * @param rca that report in full — verdict, causes, what was ruled out, and the
-     *     agent's write-up — inlined once finished, null while pending or when there is none.
-     *     Inlined rather than left as a bare id: the report is the answer to "why is this case
-     *     open," and pointing at it would cost a second round trip for the UI and a second gated
-     *     tool for an agent.
-     * @param rcaAvailable whether an RCA can be run at all, i.e. whether there is a finding
-     *     behind this case. False on archived cases from retired detectors, which have no finding
-     *     by construction. The server answers rather than the client comparing {@code detector}
-     *     against a hardcoded string, which is the coupling {@link CaseSource} exists to prevent.
-     * @param absorbAvailable whether "Legitimate — absorb" can be pressed: there is a finding
-     *     behind this case, its detector is one the org still has, and the case is live.
-     * @param detectorAvailable whether the classifier that opened this case is one the org still
-     *     has. False for a case left open when a capability went off; every action on it is
-     *     withheld, and the page says why rather than offering buttons that 404.
-     * @param metric the measured shift behind a {@code distribution_shift} finding, null for
-     *     every other cause kind. Typed and parsed the same way as
-     *     {@code BehaviorFindingDetailView} and {@code MetricFindingEvidence#detail}; only the
-     *     wire spelling differs, since this file is snake_case and that one is not.
-     * @param toolError the same for a {@code rate_shift} finding, inlined for the same reason as
-     *     {@code rca}. Both null is the normal state for a detector whose shift has no drawable
-     *     shape; render that as the fact it is, not as a missing chart.
-     * @param malformedOutput "How outputs broke" for a {@code malformed_rate} case: the rate in
-     *     {@code toolError}'s own shape, the declared schema annotated with per-field failure
-     *     counts, and the not-JSON / pre-rework buckets. Null for every other detector.
-     * @param secretLeak "When it leaked" for a {@code secret_leak} case: the rule, the leak count,
-     *     and the per-key and per-leak breakdowns. Null for every other detector.
-     * @param frustration the rate and the conversations it cites for a {@code frustration_rate} case, the
-     *     same block the finding page shows. Null for every other detector.
-     * @param groundedness the rate and the flagged answers it cites for a {@code groundedness_rate} case, the
-     *     same block the finding page shows. Null for every other detector.
+     * The case page's whole read. {@code rcaReportId} without {@code rca} means a run is still going and the client
+     * should poll. The availability flags are answered by the server so clients never compare detector strings. The
+     * cause-kind blocks are null for every other detector, and both drawable blocks null is a normal state, not a
+     * missing chart.
      */
     public record CaseDetailView(
             @JsonProperty("case") CaseView caseView,
             List<CaseEventView> events,
-            /** The newest finding this case holds — the one an RCA run is triggered on; the run reads every
-             *  finding in {@code findings}. Null only on an archived case from
-             *  a retired detector, or one that predates {@code finding.case_id}, either of which never
-             *  had one by construction. */
+            /**
+             * The one an RCA run is triggered on; the run reads every finding. Null only on archived cases that never
+             * had one.
+             */
             @JsonProperty("latest_finding_id") @Nullable String latestFindingId,
-            /** Every finding this case holds, oldest first. The case's window runs from the first one's
-             *  open to the newest one's close. */
             List<CaseFindingView> findings,
-            /** The finding {@code metric} and {@code tool_error} are drawn from: the case's worst window, the one
-             *  that moved furthest from its reference. Null when those blocks are absent. */
+            /** The case's worst window: the one that moved furthest from its reference. */
             @JsonProperty("worst_finding_id") @Nullable String worstFindingId,
             @Nullable CaseRulingView ruling,
             List<CaseExemplarView> exemplars,
@@ -315,19 +215,14 @@ public final class CaseDtos {
             @JsonProperty("secret_leak") @Nullable SecretLeakDetail secretLeak,
             @Nullable FrustrationDetail frustration,
             @Nullable GroundednessDetail groundedness,
-            /** The owning adapter's detail for the case's newest finding; see
-             *  {@link ai.tessary.classifier.finding.FindingAdapters#detail}. */
             @JsonProperty("classifier_detail") @Nullable ClassifierDetail classifierDetail,
             @JsonProperty("rca_available") boolean rcaAvailable,
             @JsonProperty("absorb_available") boolean absorbAvailable,
             @JsonProperty("detector_available") boolean detectorAvailable) {}
 
     /**
-     * Closing a case. The reason is required and is the point of the record.
-     *
-     * @param disposition only on a frustration or groundedness case: {@code fixed} (the call site re-learns its
-     *     normal rate from here) or {@code false_alarm} (the same, and the conversations or answers the case
-     *     cites stop counting as flagged). Refused on any other case.
+     * {@code disposition} only on a frustration or groundedness case: {@code false_alarm} also stops the cited
+     * conversations or answers counting as flagged.
      */
     public record ResolveCaseRequest(
             @Nullable @Size(max = 500) String reason,

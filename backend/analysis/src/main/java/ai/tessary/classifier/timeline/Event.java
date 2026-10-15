@@ -10,20 +10,13 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One event of a session timeline: a span, or a message inside a span.
- *
- * @param id unique in the session: a span event's {@code <trace_id>/<span_id>}; a message event's {@code
- *     <trace_id>/<span_id>#user:<n>} or {@code <trace_id>/<span_id>#reply:<n>}
- * @param kind the span's canonical kind ({@code mcp} folded into {@code tool}), or {@link #USER_MESSAGE} or {@link
- *     #ASSISTANT_REPLY}
- * @param position the 0-based index in the timeline
- * @param turn the trace id: the turn is the trace
- * @param at the ordering time: a span's end, a user message's carrying span's start, a reply's writer's end
- * @param spanId the span the event came from: the span itself, a user message's first carrier, a reply's writer
- * @param parentId a span event's producer parent span id; a message event's carrying span
- * @param ancestorKinds the event kinds from the root down to the parent
- * @param agentId the nearest enclosing {@code agent} span, never the span itself
- * @param bytes the UTF-8 size of the event's JSON form without {@code position} and {@code bytes}
+ * One timeline event: a span, or a message inside one. @param id {@code <trace_id>/<span_id>}, plus {@code #user:<n>}
+ * or {@code #reply:<n>} for a message @param kind the canonical span kind ({@code mcp} folded into {@code tool}), or
+ * {@link #USER_MESSAGE} or {@link #ASSISTANT_REPLY} @param turn the trace id: the turn is the trace @param at a span's
+ * end, a user message's carrier's start, a reply's writer's end @param spanId the span itself, a user message's first
+ * carrier, or a reply's writer @param parentId a span's producer parent, or a message's carrying span @param agentId
+ * the nearest enclosing {@code agent} span, never the span itself @param bytes UTF-8 size of the event's JSON without
+ * {@code position} and {@code bytes}
  */
 public record Event(
         String id,

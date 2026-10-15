@@ -19,119 +19,58 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A bucket's recent normal: the closed windows of the last few weeks, weighted so recent traffic
- * counts for more, with the days a confirmed regression ran through left out.
- *
- * <p>A single previous window is as noisy as any one window, carries whatever diurnal shape the
- * clock gave it, and forgets a step change after one comparison (the very next window's "previous"
- * becomes the new level). Averaging several weeks fixes all three: it's quieter, it spans full
- * diurnal and weekday cycles, and because a confirmed regression is kept out of it, a real step
- * change keeps firing until somebody rules on it rather than normalizing itself away.
- *
- * <p>The ring holds one slot per UTC day, an exact merge of every window that closed in it. That
- * keeps it bounded no matter how often the bucket closes windows, and gives exclusion a grain to
- * work on: a day part of whose traffic was a confirmed regression is not a day whose traffic was
- * normal.
- *
- * <p><b>Every day key, age and weight is on EVENT time</b> — the day of the window's own closing
- * sample, never the clock the sweep happened to run on. A day {@code a} days before the window
- * being judged contributes {@code 2^(-a/7)} per sample, a seven-day half-life. Retention stops at
- * {@link #RETAIN_DAYS}, three half-lives out, anchored on the newest day the ring holds (not on
- * wall-clock now) so that folding in an out-of-order import can never evict a day more recent than
- * the one just imported. Because the anchor moves only forward, replaying history in event order —
- * the normal ingest path — reads exactly as a wall-clock ring once did; only a backfill landing
- * days out of order, or an install importing history it has not yet caught up to, sees the
- * difference, and there {@link #resolve} judges each window against its own 21 event-days rather
- * than against whatever the ring happened to hold on the day it was replayed.
- *
- * <p>Weighting applies only to the measure sketch the detector reads. Workload and token blocks
- * are merged exactly over the same retained days: they're context for a human, never an input to
- * the decision.
+ * A bucket's recent normal: closed windows of the last weeks, one exactly-merged slot per UTC EVENT day, weighted
+ * {@code 2^(-age/7)}, with days a confirmed regression ran through left out so a real step change keeps firing until
+ * ruled on. Retention is anchored on the newest day held, never wall clock, so an out-of-order import cannot evict a
+ * newer day. Only the measure sketch is weighted; workload and token blocks are context.
  */
 public final class MetricControl {
 
-    /** The {@code kind} discriminator written into {@code metric_baseline.control_json}. Never renamed. */
+    /** Never renamed. */
     static final String KIND = "control";
 
     /**
-     * Half-life of a day's contribution, in days. Seven, so the control's memory spans whole weekday and
-     * diurnal cycles: at one day old a slot still counts 91%, at a week 50%, at a fortnight 25%.
-     *
-     * <p>Not a config dial. It decides how fast a legitimate new level is accepted, which is a claim
-     * about the product's posture rather than a per-project tuning knob; the dial that already
-     * exists for "how big a move counts" ({@code w1_floor}) is the one an operator should reach for.
+     * Not a config dial: it decides how fast a legitimate new level is accepted, a product posture. Operators tune
+     * {@code w1_floor}.
      */
     static final double HALF_LIFE_DAYS = 7.0;
 
-    /** How far back the ring keeps days. Three half-lives; past this a day is worth under an eighth. */
+    /** Three half-lives; past this a day is worth under an eighth. */
     static final int RETAIN_DAYS = 21;
 
-    /**
-     * One UTC day of closed windows, merged exactly.
-     *
-     * @param day ISO {@code yyyy-MM-dd}, UTC. The key, and the thing exclusion is decided on.
-     * @param sketchJson the day's merged measure sketch. Always present: a day with no sketch is not a
-     *     day the ring has any reason to hold.
-     * @param workloadJson the day's merged workload, or null when nothing reported one.
-     * @param tokensJson the day's merged token decomposition, or null: every duration day, and any cost
-     *     day whose traffic carried no usage.
-     */
+    /** {@code day} is the key exclusion decides on. A day without a sketch is never held. */
     public record Day(
             String day,
             String sketchJson,
             @Nullable String workloadJson,
             @Nullable String tokensJson) {}
 
-    /** Ascending by day, oldest first, at most {@link #RETAIN_DAYS} entries. */
     private final List<Day> days;
 
     private MetricControl(List<Day> days) {
         this.days = days;
     }
 
-    /** An empty control: what a bucket that has never closed a window has. */
     public static MetricControl empty() {
         return new MetricControl(List.of());
     }
 
     /**
-     * The newest day held, or null on an empty ring: the most recent complete summary of where
-     * this bucket sits.
-     *
-     * <p>This is what <em>Legitimate, absorb</em> pins, and what a page falls back to when nothing
-     * has been pinned yet. Deliberately not {@code current_sketch_json}, which is the window still
-     * being filled: pinning a part-filled window installs a reference below {@code min_sample} that
-     * the detector then silences with {@code BELOW_MIN_SAMPLE} until something else replaces it.
-     *
-     * <p>Not exclusion-filtered, and that's right for this use: a human pressing absorb is saying
-     * "this level is the new normal", the very level a confirmed finding was written about.
-     * Excluding it here would pin the level they are absorbing away from.
+     * What absorb pins. Not {@code current_sketch_json}, which is still filling. Not exclusion-filtered: absorb accepts
+     * exactly the level a confirmed finding was about.
      */
     public @Nullable Day newest() {
         return days.isEmpty() ? null : days.get(days.size() - 1);
     }
 
-    /** The UTC day a window closing at {@code at} belongs to. */
     public static String dayOf(Instant at) {
         return LocalDate.ofInstant(at, ZoneOffset.UTC).toString();
     }
 
     /**
-     * Fold a just-closed window into the control and drop whatever has aged out.
-     *
-     * <p>Returns a new instance rather than mutating: the sweep threads one control through a page that
-     * may close several windows, and a value here is what makes that thread obviously correct.
-     *
-     * <p>The fold is exact: windows landing in the same day are merged bin for bin, so a day
-     * assembled from twenty windows equals the same day assembled from one, the same property that
-     * makes {@link MetricSketch#merge} safe to call across page boundaries. Only the day-to-day weighting
-     * is approximate, and it is applied at read time in {@link #resolve} rather than baked in here, so a
-     * stored ring never has to be re-derived when the clock moves.
-     *
-     * @param day the window's EVENT day — {@link #dayOf} of its closing sample, never a clock reading.
-     *     Retention is anchored on the newest day the ring holds once this one is folded in, which is
-     *     always {@code max(day, every day already held)}: an import folding in an OLDER day can only add
-     *     to what retention keeps, never push the cutoff forward and evict a day more recent than itself.
+     * Returns a new instance, since one control is threaded through a page that may close several windows. The fold is
+     * exact; weighting happens at read time in {@link #resolve}. Retention anchors on {@code max(day, days held)}, so
+     * folding an older day can never evict a newer one.
      */
     public MetricControl fold(
             Grid grid, String day, MetricSketch measure, MetricWorkload workload, MetricTokens tokens) {
@@ -145,9 +84,7 @@ public final class MetricControl {
         MetricWorkload mergedWorkload = workload.copy();
         MetricTokens mergedTokens = tokens.copy();
         if (existing != null) {
-            // A slot on a dead grid (hist_bins edited under a live project) is discarded rather than
-            // merged, exactly as MetricWorkload.fromJson treats one: it can never line up with the samples
-            // arriving now, and the alternative to dropping it is an exception on every close.
+            // A dead-grid slot is discarded, as MetricWorkload.fromJson does; merging it would throw on every close.
             MetricSketch prior = readSketch(existing.sketchJson(), grid);
             if (prior != null) mergedMeasure.merge(prior);
             MetricWorkload priorWorkload = readWorkload(existing.workloadJson(), grid);
@@ -163,9 +100,7 @@ public final class MetricControl {
                         mergedWorkload.isEmpty() ? null : mergedWorkload.toJson(),
                         mergedTokens.isEmpty() ? null : mergedTokens.toJson()));
 
-        // The anchor is the newest day now held, INCLUDING the one just folded in — never wall-clock now.
-        // A backfill folding in a day from a month ago leaves the anchor exactly where it was and so
-        // evicts nothing; only a day that is itself the newest can ever move the cutoff forward.
+        // Never wall-clock now: a backfilled old day leaves the anchor alone.
         String anchor = day;
         for (String d : byDay.keySet()) {
             if (d.compareTo(anchor) > 0) anchor = d;
@@ -182,19 +117,9 @@ public final class MetricControl {
     }
 
     /**
-     * The reference to compare a window against, or null when nothing usable is left after exclusion.
-     *
-     * @param eventDay the EVENT day of the window being judged — {@link #dayOf} of its closing sample.
-     *     Every slot's age is measured back from this day, never from wall-clock now, so a replayed
-     *     backfill compares each window against its own 21 event-days rather than against today's. A day
-     *     AFTER {@code eventDay} is skipped (negative age), which is what keeps a replay from comparing a
-     *     window against traffic that, on the event clock, had not happened yet.
-     * @param excludedDays days a currently-confirmed regression ran through. Their traffic is a
-     *     deviation somebody has already ruled on, so folding it in would let the very thing under
-     *     investigation become the bar the next window is judged against, reintroducing the silent
-     *     normalization the pinned reference exists to prevent. Recomputed on every pass rather than
-     *     applied when the day was folded, because a ruling lands well after the window closed;
-     *     keeping the ring exact and the exclusion late is what makes a late verdict retroactive.
+     * Ages are measured back from {@code eventDay}, never wall clock, and days after it are skipped, so a replay never
+     * compares against traffic that had not happened yet. {@code excludedDays} is applied on every pass rather than at
+     * fold time, so a late verdict is retroactive.
      */
     public @Nullable Resolved resolve(Grid grid, String eventDay, Set<String> excludedDays) {
         Weighted measure = new Weighted(grid);
@@ -231,17 +156,8 @@ public final class MetricControl {
     }
 
     /**
-     * A resolved control: the weighted measure sketch the detector reads, and the exactly-merged context
-     * blocks a finding reports beside it.
-     *
-     * @param daysUsed how many day slots survived exclusion and retention: logged, so "the control went
-     *     quiet" is distinguishable from "the control excluded everything".
-     * @param daysExcluded how many were dropped as days a confirmed regression ran through. Reported on
-     *     the finding because it is the number that explains why a long-running regression keeps firing
-     *     rather than normalizing itself into its own reference.
-     * @param oldestDay the earliest day still contributing, so a reader can see the span the bar was
-     *     built over rather than assume the full retention window. Null only when nothing was used, which
-     *     {@link #resolve} returns null for anyway.
+     * {@code daysUsed} tells "went quiet" from "excluded everything"; {@code daysExcluded} explains why a long
+     * regression keeps firing.
      */
     public record Resolved(
             MetricReading measure,
@@ -252,10 +168,8 @@ public final class MetricControl {
             @Nullable String oldestDay) {}
 
     /**
-     * {@code 2^(-age/7)}, or 0 for a day outside retention or one that falls AFTER {@code eventDay} — the
-     * inclusive bound at {@link #RETAIN_DAYS} keeps a day exactly three half-lives old, and the same-day
-     * case ({@code age == 0}, the window's own closing day already folded in by an earlier close) weighs a
-     * full 1.0, neither special-cased.
+     * 0 outside retention or after {@code eventDay}. A day exactly {@link #RETAIN_DAYS} old still counts, and the same
+     * day weighs 1.0.
      */
     private static double weightOf(String day, String eventDay) {
         long age = ChronoUnit.DAYS.between(LocalDate.parse(day), LocalDate.parse(eventDay));
@@ -290,16 +204,10 @@ public final class MetricControl {
         }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Serialization
-    // ---------------------------------------------------------------------------------------------
-
-    /** Serialized form for {@code metric_baseline.control_json}. Round-trips through {@link #fromJson}. */
     public String toJson() {
         ObjectNode root = MetricHistogram.JSON.createObjectNode();
         root.put("kind", KIND);
-        // Written down rather than assumed on read: a ring persisted under one half-life and resolved
-        // under another is a silent change of meaning, and a reader that can see both can say so.
+        // Written down so a ring resolved under a different half-life is detectable.
         root.put("half_life_days", HALF_LIFE_DAYS);
         ArrayNode arr = root.putArray("days");
         for (Day d : days) {
@@ -313,9 +221,7 @@ public final class MetricControl {
     }
 
     /**
-     * Rehydrate a ring written by {@link #toJson()}. A malformed payload comes back empty rather than
-     * throwing: the control is a reference the next close rebuilds, and a bucket that cannot read its own
-     * ring should wait for a fresh one rather than take the whole sweep down with it.
+     * A malformed payload comes back empty: the next close rebuilds it, and one bucket must not take the sweep down.
      */
     public static MetricControl fromJson(@Nullable String json) {
         if (json == null || json.isBlank()) return empty();
@@ -341,17 +247,9 @@ public final class MetricControl {
         }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // The weighted view
-    // ---------------------------------------------------------------------------------------------
-
     /**
-     * A read-only {@link MetricReading} over fractionally-weighted bin mass: what the day slots resolve
-     * to, and the only sketch in this package whose bins are not integer counts.
-     *
-     * <p>Separate from {@link MetricHistogram} rather than a widening of it. Making the histogram's bins
-     * doubles would change the shape of every persisted sketch in the table to serve one reader, and the
-     * exactness of an integer merge is the property the rest of the design leans on hardest.
+     * The only sketch here with fractional bin mass. Separate from {@link MetricHistogram} because double bins would
+     * change every persisted sketch and lose integer-merge exactness.
      */
     static final class Weighted implements MetricReading {
 
@@ -359,10 +257,9 @@ public final class MetricControl {
         private final double[] bins;
         private double underflow;
 
-        /** Total weighted mass: {@code Σ nᵢ·dᵢ}. The denominator of every proportion below. */
         private double mass;
 
-        /** {@code Σ nᵢ·dᵢ²}, carried solely so {@link #count()} can report Kish's effective sample size. */
+        /** Carried only for Kish's effective sample size. */
         private double massSq;
 
         private double clampedSumLog;
@@ -372,7 +269,6 @@ public final class MetricControl {
             this.bins = new double[grid.bins()];
         }
 
-        /** Fold one day's exact sketch in at weight {@code w}. */
         void fold(MetricSketch other, double w) {
             MetricHistogram h = (MetricHistogram) other;
             h.foldScaledInto(bins, w);
@@ -383,13 +279,8 @@ public final class MetricControl {
         }
 
         /**
-         * {@inheritDoc}
-         *
-         * <p>Kish's effective sample size, not the raw total: a control assembled from a fresh day and
-         * three faded ones does not carry the sampling precision its raw sample count suggests, and
-         * this number is read by {@link MetricDriftDetector#effectiveFloor} to set the bar, so
-         * reporting the raw count would hand back a bar that is too low. {@code (Σw)² / Σw²} is the
-         * standard correction, and it degenerates to the plain count when every weight is equal.
+         * Kish's effective sample size {@code (Σw)² / Σw²}, not the raw total:
+         * {@link MetricDriftDetector#effectiveFloor} sets the bar from it, and faded days carry less precision.
          */
         @Override
         public long count() {

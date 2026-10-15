@@ -13,10 +13,8 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The user-visible strings and the evidence blob a tool-error finding carries. Design contract:
- * {@code devdocs/concepts/tool-error.md} §6 and §7. Modelled on {@code MetricFindingEvidence}, whose
- * conventions it keeps deliberately: round before serializing, omit an empty block rather than writing
- * one, and never let a number the UI reports be re-derived somewhere else.
+ * Keeps {@code MetricFindingEvidence}'s conventions: round before serializing, omit an empty block, and never let a
+ * reported number be re-derived elsewhere. Contract: {@code devdocs/concepts/tool-error.md} §6-7.
  */
 public final class ToolErrorEvidence {
 
@@ -24,48 +22,26 @@ public final class ToolErrorEvidence {
 
     static final ObjectMapper JSON = new ObjectMapper();
 
-    /** The persisted measure name. Never renamed; it is the first segment of every cause key. */
+    /** Never renamed; the first segment of every cause key. */
     public static final String MEASURE = "tool_error_rate";
 
-    /**
-     * Value of {@code counts_basis} on a blob whose {@code n_cur} and {@code failures.cur} span the run
-     * since onset. Absent on blobs written before the onset rework, where they spanned the tool's whole
-     * history since the reference was pinned.
-     */
+    /** Absent on blobs where the counts spanned the tool's whole history. */
     public static final String COUNTS_BASIS_ONSET = "onset";
 
-    /**
-     * {@code tool_error_rate:<bucket_key>:<direction>}.
-     *
-     * <p><b>Legible on purpose, though no longer a headline.</b> The Classifiers page used to render a
-     * cause key verbatim in mono as the finding's title; it now leads with the finding's title
-     * ({@code FindingTitle}) and keeps the key as detail. This stays readable anyway — it is what
-     * someone pastes into a query, and an opaque id would make that step guesswork.
-     *
-     * <p>No reference segment, unlike metric drift's. A CUSUM has one reference (tool-error.md §4.6), so a
-     * fourth segment could only ever hold one value and would be noise.
-     */
+    /** Legible because people paste it into queries. No reference segment: a CUSUM has one reference. */
     public static String causeKey(String bucketKey, Decision decision) {
         return MEASURE + ":" + bucketKey + ":" + decision.direction().wire();
     }
 
     /**
-     * Ordering weight in the cross-detector ranked list, 0..1. Never rendered as a number — the number a
-     * reader sees is {@link Decision#criticality()}, and this is its squash onto the shared scale
-     * {@link ai.tessary.cases.CaseDetection#severity()} requires.
-     *
-     * <p>Built from the accumulator rather than the effect size. Effect size answers how bad a tool is
-     * per call, which does not move as an outage runs on; the ranked list is a work queue, and what
-     * should rise in a work queue is the thing that has done and is doing the most damage. Criticality
-     * blends severity, duration and traffic, which is the right shape for that and the wrong shape for
-     * anything else.
+     * Built from the accumulator, not effect size: the ranked list is a work queue, and what should rise is what has
+     * done the most damage.
      */
     public static double severityOf(double criticality) {
         double c = Math.max(0.0, criticality);
         return Math.min(1.0, c / (c + 60.0));
     }
 
-    /** tool-error.md §7's blob. */
     public static String toJson(
             String bucketKey,
             Decision decision,
@@ -86,11 +62,8 @@ public final class ToolErrorEvidence {
         root.put("effect_size", round(decision.effectSize(), 4));
         root.put("delta_pp", round(decision.deltaPp(), 3));
 
-        // Stated, never inferred. Before the onset rework these same keys carried the counts since the
-        // reference was pinned — a tool's whole history — and absorbing a finding pins them as the new
-        // in-control rate. A reader that guessed wrong would pin a lifetime average as the normal for a
-        // tool that is on fire, or a twelve-call burst as the normal for a tool that is fine. ABSENCE of
-        // this key is the accurate statement that a blob predates the change; see ToolErrorEvidence.Read.
+        // Stated, never inferred: absorbing pins these counts, and guessing the basis wrong would pin a lifetime
+        // average or a tiny burst as the normal. Absence means the blob predates the change.
         root.put("counts_basis", COUNTS_BASIS_ONSET);
         ObjectNode rate = root.putObject("rate");
         rate.put("ref", round(decision.baselineRate(), 6));
@@ -100,10 +73,7 @@ public final class ToolErrorEvidence {
         ObjectNode failures = root.putObject("failures");
         failures.put("cur", decision.failuresSinceOnset());
 
-        // Ranked by what CHANGED, so the head of the list is the failure mode that moved rather than the
-        // one that is merely largest. Omitted entirely when empty rather than written as [], because an
-        // empty array on a finding an LLM triage agent reads is noise and its ABSENCE is the accurate
-        // statement — MetricFindingEvidence's convention, kept.
+        // Ranked by what changed. Omitted when empty, since an empty array is noise to a triage agent.
         if (!patterns.isEmpty()) {
             ArrayNode arr = root.putArray("patterns");
             for (Pattern p : patterns) {
@@ -113,13 +83,11 @@ public final class ToolErrorEvidence {
                 n.put("ref", p.ref());
                 n.put("cur", p.cur());
             }
-            // Stated rather than inferred: a truncated list must never read as the whole story.
+            // A truncated list must never read as the whole story.
             if (patternsTruncated) root.put("patterns_truncated", true);
         }
 
-        // Traces the failures actually happened in. A rate is a claim about a population, and this is what
-        // lets a reader — or Layer 2, which is handed this blob as its dossier — stop taking the claim on
-        // trust and go and read instances of it. Omitted when empty, on the same convention as `patterns`.
+        // Lets a reader, or Layer 2, read instances rather than take the rate on trust. Omitted when empty.
         if (!traceIds.isEmpty()) {
             ArrayNode arr = root.putArray("failing_traces");
             for (String traceId : traceIds) {
@@ -136,24 +104,10 @@ public final class ToolErrorEvidence {
         return root.toString();
     }
 
+    /** Null rather than zeroed, so a caller can say "numbers unavailable" instead of fabricating them. */
     /**
-     * What a case is built from, or null when the blob is unreadable.
-     *
-     * <p>Null rather than a zeroed record, exactly as {@code MetricFindingEvidence.read} does it: a
-     * caller can then say "numbers unavailable" instead of presenting fabricated ones as the finding's.
-     */
-    /**
-     * The parts of the blob a reader needs back out.
-     *
-     * <p>{@code nCur}/{@code failuresCur} are here because absorbing a finding pins them as the tool's
-     * accepted reference, and the evidence is the only place they are recorded.
-     *
-     * @param countsAreOnsetRun whether {@code nCur}/{@code failuresCur} span the run since onset. False
-     *     on a blob written before the onset rework, where they spanned the tool's whole history — and a
-     *     caller that pins from one of those installs a reference the human did not agree to, so
-     *     absorption refuses rather than guessing.
-     * @param criticality 0 on a blob that predates the metric, which sorts such a case to the bottom
-     *     rather than inventing a rank for it
+     * @param countsAreOnsetRun false on older blobs, where absorption refuses rather than pin a reference the human did
+     * not agree to @param criticality 0 on a blob that predates the metric
      */
     public record Read(
             String bucketKey,
@@ -188,17 +142,11 @@ public final class ToolErrorEvidence {
     }
 
     /**
-     * One failure signature, then and now. The ranked list of these is what decides a rate shift: a rise
-     * spread evenly across signatures that were always there is usually the traffic changing, while one
-     * signature going from rare to common is the tool breaking.
+     * One signature going from rare to common is the tool breaking; an even rise across old signatures is usually
+     * traffic.
      */
     public record PatternShift(String signature, String source, long ref, long cur) {}
 
-    /**
-     * The whole blob, for the surface that DRAWS a finding rather than headlines it — the counterpart of
-     * {@code MetricFindingEvidence#detail}. {@link Read} stays the headline reader; this carries the
-     * pattern breakdown, which is the one chart that answers "which failure took over".
-     */
     public record RateDetail(
             String bucketKey,
             double refRate,
@@ -213,18 +161,13 @@ public final class ToolErrorEvidence {
             @Nullable String onsetAt,
             @Nullable String windowOpenedAt,
             @Nullable String windowClosedAt,
-            /** {@code up} or {@code down}: the shift's own direction, never inferred from the rates. */
+            /** Never inferred from the rates. */
             String direction,
-            /** The CUSUM accumulator this shift was ruled on, and the decision interval it crossed. */
             double statistic,
             double threshold,
-            /** Cohen's h between the baseline and current rate: how large the shift is, independent of
-             *  sample size. */
             double effectSize,
-            /** The cross-detector ranked-list weight, 0..1 — see {@code ToolErrorEvidence#severityOf}. */
             double criticality) {}
 
-    /** Parse the blob for the detail surface, or null when it cannot be read. */
     public static @Nullable RateDetail detail(@Nullable String json) {
         if (json == null || json.isBlank()) return null;
         try {
@@ -270,13 +213,8 @@ public final class ToolErrorEvidence {
     }
 
     /**
-     * The traces the failures actually happened in, in the order written — exemplar first, then
-     * witnesses. Empty when the blob is unreadable or predates the field.
-     *
-     * <p>Read here rather than in the case slice for the reason this class exists: a persisted shape whose
-     * writer and reader live apart is a bug nothing type-checks, and {@code failing_traces} is written
-     * fifty lines above. Kept off {@link Read} because that record is what a case's HEADLINE is built
-     * from, and every caller of it would then carry a list it does not use.
+     * Read here because {@code failing_traces} is written in this class, and a persisted shape whose writer and reader
+     * live apart is a bug nothing type-checks.
      */
     public static List<String> failingTraces(@Nullable String json) {
         if (json == null || json.isBlank()) return List.of();
@@ -292,7 +230,6 @@ public final class ToolErrorEvidence {
         }
     }
 
-    /** {@code tool:search_docs} → {@code search_docs}. The symbol's kind prefix is noise in a sentence. */
     public static String shortName(String bucketKey) {
         int colon = bucketKey.indexOf(':');
         return colon >= 0 && colon + 1 < bucketKey.length() ? bucketKey.substring(colon + 1) : bucketKey;

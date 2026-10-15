@@ -81,11 +81,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-/**
- * The Classifiers page charts: which classifiers have a card for a call site or a tool, each card's points,
- * headline, baseline and case strip, and the selectors and menu that choose between them. Reads only; every series
- * comes from tables the detectors already keep.
- */
+/** The Classifiers page charts. Reads only; every series comes from tables the detectors already keep. */
 @Service
 public class ClassifierChartService {
 
@@ -100,7 +96,6 @@ public class ClassifierChartService {
             BuiltInDetector.Kind.MALFORMED_OUTPUT,
             BuiltInDetector.Kind.SECRET_LEAK);
 
-    /** The tool cards, in page order. */
     private static final List<String> TOOL_ORDER =
             List.of(BuiltInDetector.Kind.TOOL_ERROR, BuiltInDetector.Kind.DURATION_DRIFT);
 
@@ -120,19 +115,15 @@ public class ClassifierChartService {
     private static final Set<String> DRIFT_KINDS =
             Set.of(BuiltInDetector.Kind.DURATION_DRIFT, BuiltInDetector.Kind.COST_DRIFT);
 
-    /**
-     * How far back a rate classifier's replay reads, from its own anchor: the window a learning reference counts
-     * its progress over, as the detectors' {@code REPLAY_WINDOW}s are.
-     */
+    /** Matches the detectors' {@code REPLAY_WINDOW}s. */
     private static final Duration LEARNING_WINDOW = Duration.ofDays(28);
 
     /**
-     * How far before the range a session or trace is grouped from, so one that began before the range keeps its
-     * own first hour and every range reads the same trials.
+     * So a session or trace that began before the range keeps its own first hour and every range reads the same trials.
      */
     private static final Duration TRIAL_LOOKBACK = Duration.ofDays(28);
 
-    /** How far back a quiet tool card looks for the tool's names: the default trace retention. */
+    /** The default trace retention. */
     private static final Duration NAME_LOOKBACK = Duration.ofDays(90);
 
     private static final String TOOL_PREFIX = ToolErrorBuckets.KIND + ":";
@@ -220,9 +211,6 @@ public class ClassifierChartService {
         this.clock = clock;
     }
 
-    // ---- the range ----------------------------------------------------------------------------------
-
-    /** The UTC days a request covers, and the instant it is read at. */
     private record Range(int days, LocalDate today, LocalDate from, Instant now) {
 
         Instant fromAt() {
@@ -253,12 +241,7 @@ public class ClassifierChartService {
         return new Range(days, today, ChartSeries.fromDay(today, days), now);
     }
 
-    // ---- what one request knows about the project's classifiers -------------------------------------
-
-    /**
-     * The project's rows and the facts their on/off rules read, gathered once per request. Lazily, because a tool
-     * page reads none of the call-site facts.
-     */
+    /** Gathered once per request, lazily, because a tool page reads none of the call-site facts. */
     private final class Reads {
 
         final String id;
@@ -360,9 +343,6 @@ public class ClassifierChartService {
         }
     }
 
-    // ---- GET /chart-scopes --------------------------------------------------------------------------
-
-    /** Every call site and tool the selectors offer, and every classifier the Configure menu lists. */
     public ChartScopesView scopes(String projectId, int days) {
         Reads p = new Reads(projectId, range(days));
         Instant from = p.range.fromAt();
@@ -411,9 +391,8 @@ public class ClassifierChartService {
     }
 
     /**
-     * A call site reads "New, learning" when at least one rate or drift classifier is on for it and every one that
-     * is on is still learning. A waiting classifier (Malformed Output with no schema) judges nothing, so it does not
-     * count.
+     * "New, learning" when at least one rate or drift classifier is on and every one that is on is still learning. A
+     * waiting classifier judges nothing, so it does not count.
      */
     private boolean newAndLearning(Reads p, List<ClassifierRow> rows, String cs) {
         boolean any = false;
@@ -471,9 +450,7 @@ public class ClassifierChartService {
         return new ClassifierMenuItem(row.id(), row.classifierKey(), row.name(), status, reason, covers, all, count);
     }
 
-    // ---- GET /charts --------------------------------------------------------------------------------
-
-    /** The cards and chips of one call site or one tool. Exactly one of the two is set. */
+    /** Exactly one of {@code callSiteId} and {@code toolKey} is set. */
     public ChartsView charts(String projectId, @Nullable String callSiteId, @Nullable String toolKey, int days) {
         boolean bySite = callSiteId != null && !callSiteId.isBlank();
         boolean byTool = toolKey != null && !toolKey.isBlank();
@@ -548,8 +525,6 @@ public class ClassifierChartService {
                 ? toolErrorCard(p, row, key)
                 : toolDurationCard(p, row, key);
     }
-
-    // ---- rate cards ---------------------------------------------------------------------------------
 
     private Built scoredRateCard(Reads p, ClassifierRow row, String cs) {
         Instant started = Instant.now();
@@ -669,8 +644,6 @@ public class ClassifierChartService {
                 cases(p, scope));
     }
 
-    // ---- range cards --------------------------------------------------------------------------------
-
     private static String callSiteMeasure(ClassifierRow row) {
         return BuiltInDetector.Kind.COST_DRIFT.equals(row.detector()) ? Measure.COST : Measure.TURN_DURATION;
     }
@@ -736,9 +709,8 @@ public class ClassifierChartService {
             @Nullable ChartBaseline baseline, @Nullable LearningView learning) {}
 
     /**
-     * The bucket's reference while it is armed and has a sketch on the live grid. A bucket with no row, one still
-     * learning, and an armed one whose every sketch is on a dead grid are all learning: the detector re-pins the
-     * last on its next close.
+     * A bucket with no row, one still learning, and an armed one whose every sketch is on a dead grid all read as
+     * learning: the detector re-pins the last on its next close.
      */
     private DriftReference driftReference(Reads p, ClassifierRow row, String measure, String bucketKind, String key) {
         MetricDriftConfig config = MetricDriftConfig.of(mapper, row.configJson());
@@ -787,13 +759,10 @@ public class ClassifierChartService {
                 cases(p, scope));
     }
 
-    // ---- count cards --------------------------------------------------------------------------------
-
     /**
-     * Secret Leak and user classifiers, one point per fixed bucket. Each point's {@code count} is what the arming bar
-     * counts: the busiest facet on this call site for a faceted bar, the whole project for a whole-project one.
-     * {@code total} stays this call site's detections. {@code reached} reads the bar's own windows, counted at their
-     * own width, since distinct sessions do not add up across buckets.
+     * Each point's {@code count} is what the arming bar counts: the busiest facet for a faceted bar, the whole project
+     * otherwise. {@code reached} reads the bar's own windows at their own width, since distinct sessions do not add up
+     * across buckets.
      */
     private Built countCard(Reads p, ClassifierRow row, String cs) {
         Instant started = Instant.now();
@@ -836,8 +805,6 @@ public class ClassifierChartService {
         logRead(p, row, "call_site", own.size(), started);
         return new Built(card, before -> charts.countLastDay(row.detector(), p.id, row.id(), cs, before));
     }
-
-    // ---- cases --------------------------------------------------------------------------------------
 
     private CasesView cases(Reads p, CaseScope scope) {
         List<CaseSpan> spans = charts.caseSpans(p.id, scope, p.range.fromAt(), p.range.toExclusive());

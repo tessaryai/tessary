@@ -26,13 +26,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The org's capability surface: the resolved payload every session is assembled from, and the
- * overrides an operator sets to change it.
- *
- * <p>{@link #capabilities} is readable by any org member, since every member's app is assembled
- * from it. The overrides underneath it require {@link Permission#CAPABILITIES_MANAGE} (owner and
- * admin). The server-side {@code CapabilityService.require} on each gated endpoint remains the
- * authority; this is what the UI is built from, not what enforces it.
+ * The org's resolved capabilities and the overrides that change them. {@code CapabilityService.require} on each gated
+ * endpoint remains the authority; this is what the UI is built from.
  */
 @RestController
 public class CapabilityController {
@@ -44,11 +39,8 @@ public class CapabilityController {
     private final TenantPathResolver resolver;
 
     /**
-     * Optional on purpose. {@code DbFeatureFlags} caches an org's overrides for ten seconds, and a
-     * write should bite immediately rather than after that window, but a context that replaces
-     * {@code FeatureFlags} with a mock (as some {@code @SpringBootTest}s do) has no {@code
-     * DbFeatureFlags} bean to invalidate. An {@link ObjectProvider} lets this controller start either
-     * way.
+     * Optional because a context that mocks {@code FeatureFlags} has no {@code DbFeatureFlags} bean, whose ten-second
+     * cache a write must invalidate.
      */
     private final ObjectProvider<DbFeatureFlags> openFlags;
 
@@ -63,30 +55,23 @@ public class CapabilityController {
         this.openFlags = openFlags;
     }
 
-    /**
-     * The resolved state of every capability for this org, keyed by flag key: the one object the
-     * SPA assembles itself from. Every capability is present with an explicit boolean rather than
-     * only the enabled ones listed, so the client never has to decide what an absent key means.
-     */
+    /** Every capability present with an explicit boolean, so the client never interprets an absent key. */
     public record CapabilitiesView(Map<String, Boolean> capabilities) {}
 
-    /** One capability's override state: what it resolves to, what it would resolve to, and who decided. */
     public record OverrideView(
             String capability,
             boolean enabled,
             @JsonProperty("default_enabled") boolean defaultEnabled,
             @JsonProperty("has_override") boolean hasOverride) {}
 
-    /** Pin one capability on or off for this org. */
     public record SetOverrideRequest(boolean enabled) {}
 
-    /** The org's capability object. Readable by any org member. */
+    /** Readable by any org member. */
     @GetMapping("/api/orgs/{orgSlug}/capabilities")
     public ApiResponse<CapabilitiesView> capabilities(TenantContext ctx, @PathVariable String orgSlug) {
         var r = resolver.requireOrg(ctx, orgSlug);
         var resolved = capabilities.resolve(r.org().id());
-        // LinkedHashMap over Capability's declaration order: the payload reads in catalog order rather than
-        // hash order, which makes a diff between two orgs legible by eye.
+        // Catalog order, so a diff between two orgs is legible.
         Map<String, Boolean> out = new LinkedHashMap<>();
         for (Capability capability : Capability.all()) {
             out.put(capability.wire(), resolved.isEnabled(capability));
@@ -94,12 +79,7 @@ public class CapabilityController {
         return ApiResponse.ok(new CapabilitiesView(out));
     }
 
-    /**
-     * Every capability with its override state: the read behind the Features settings screen. Gated
-     * at {@link Permission#ORG_VIEW} rather than {@code CAPABILITIES_MANAGE}: seeing why a surface
-     * is missing is not a privileged act, and the row says nothing an admin could not tell a member
-     * out loud.
-     */
+    /** Gated at {@link Permission#ORG_VIEW}: seeing why a surface is missing is not privileged. */
     @GetMapping("/api/orgs/{orgSlug}/capabilities/overrides")
     public ApiResponse<List<OverrideView>> overrides(TenantContext ctx, @PathVariable String orgSlug) {
         var r = resolver.requireOrg(ctx, orgSlug);
@@ -118,7 +98,6 @@ public class CapabilityController {
         return ApiResponse.ok(out);
     }
 
-    /** Pin one capability on or off for this org. */
     @PutMapping("/api/orgs/{orgSlug}/capabilities/overrides/{key}")
     public ApiResponse<OverrideView> setOverride(
             TenantContext ctx,
@@ -134,7 +113,7 @@ public class CapabilityController {
         return ApiResponse.ok(one(r.org().id(), capability));
     }
 
-    /** Drop the org's override, reverting the capability to this build's default. */
+    /** Reverts to this build's default. */
     @DeleteMapping("/api/orgs/{orgSlug}/capabilities/overrides/{key}")
     public ApiResponse<OverrideView> clearOverride(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String key) {
@@ -147,7 +126,7 @@ public class CapabilityController {
         return ApiResponse.ok(one(r.org().id(), capability));
     }
 
-    /** Resolve a wire key, refusing an unknown one with a 422. */
+    /** 422 for an unknown key. */
     private Capability requireKnown(String key) {
         return Capability.fromWire(key).orElseThrow(() -> new TessaryException(CapabilityError.UNKNOWN, key));
     }

@@ -6,10 +6,6 @@ import { JsonView } from "@uiw/react-json-view";
 import { cn, useCopy } from "../../ui";
 import { jsonTheme } from "./jsonTheme";
 
-/* -------------------------------------------------------------------------- */
-/* Public surface                                                             */
-/* -------------------------------------------------------------------------- */
-
 export function PayloadViewer({
   payload,
   label,
@@ -63,13 +59,7 @@ function RenderParsed({ parsed }: { parsed: Parsed }) {
   return <Markdown>{parsed.text}</Markdown>;
 }
 
-/**
- * Render a raw payload string the same way {@link PayloadViewer}'s formatted mode
- * does (chat → conversation, json → tree, else markdown), but with no chrome:
- * no label, no segmented control, no scroll box. Shared by the trace inspector so
- * span input/output bodies render exactly like the payload panel. When `payload`
- * is empty it renders a quiet "(none)".
- */
+/** The formatted rendering without chrome, so span bodies render like the payload panel. */
 export function PayloadBody({ payload }: { payload: string | null }) {
   const parsed = useMemo(() => parsePayload(payload), [payload]);
   if (payload == null || payload === "") {
@@ -78,7 +68,6 @@ export function PayloadBody({ payload }: { payload: string | null }) {
   return <RenderParsed parsed={parsed} />;
 }
 
-/** Re-exported parsing so sibling trace components read payloads the same way. */
 export { parsePayload };
 export type { ChatMessage };
 
@@ -89,10 +78,6 @@ export function Markdown({ children }: { children: string }) {
     </div>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* Rendering pieces                                                           */
-/* -------------------------------------------------------------------------- */
 
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-label uppercase text-muted">{children}</div>;
@@ -140,36 +125,16 @@ function Conversation({ messages }: { messages: ChatMessage[] }) {
   );
 }
 
-/**
- * One conversation message. Its content array may carry images (OpenAI
- * `image_url`/`input_image`, Anthropic `image.source`); those are rendered as
- * inline <img> with the rest (text + structured JSON) still shown via JsonTree.
- * Image extraction runs per-message (not only at a top-level branch) because the
- * dominant OpenAI/Anthropic shape routes the whole array here through
- * `Conversation`, so a top-level-only fix would still show JSON for the common case.
- */
-/**
- * Resolves an externalized image ref (a {@code media_object} id) to a servable URL — the
- * {@code GET /api/orgs/{org}/projects/{proj}/media/{id}} endpoint. Provided by the trace surface, which
- * knows the org/project slugs; absent elsewhere, where an {@code image_ref} renders as a quiet chip
- * rather than a broken image.
- */
+/** Resolves a media_object id to a servable URL; absent outside the trace surface, where an image_ref renders as a chip. */
 export const MediaResolverContext = createContext<((mediaId: string) => string) | null>(null);
 
 function Message({ message }: { message: ChatMessage }) {
   const resolveMedia = useContext(MediaResolverContext);
   const media = useMemo(() => extractMedia(message.raw, resolveMedia), [message.raw, resolveMedia]);
-  // The decoded <img>/link below already shows the picture/document; rendering the multi-MB
-  // base64/data-URI a second time inside the JSON tree is pure noise (and weight).
-  // Elide recognised media payloads to a short placeholder for the tree only —
-  // the original `message.raw` is untouched, and the Raw toggle still shows it verbatim.
+  // The rendered media already shows the bytes, so the tree elides them; the Raw toggle still shows them.
   const treeValue = useMemo(() => redactMediaData(message.raw) as object, [message.raw]);
-  // A message that is nothing but media shows the media. The tree earns its
-  // place on mixed content, where it carries the text and structure around the
-  // media; on its own it is `{"type":"image_ref","data":"01M0…"}` stacked above
-  // the very thing it points at. Only when every media part resolved, though — a chip
-  // means the bytes are unreachable, and then the id in the tree is all the
-  // reader has left.
+  // A media-only message shows just the media, unless a part is a chip: then the id in the tree is all
+  // the reader has.
   const onlyMedia = useMemo(() => isAllMediaBlocks(message.raw), [message.raw]);
   const hideTree = onlyMedia && media.length > 0 && media.every((m) => m.kind === "img" || m.kind === "doc");
   return (
@@ -186,8 +151,6 @@ function Message({ message }: { message: ChatMessage }) {
   );
 }
 
-/** A resolved, render-safe image or document part, or an "unsupported" chip for a content
- *  block we recognise as media but won't render (bad scheme, disallowed MIME). */
 type MediaView =
   | { kind: "img"; src: string }
   | { kind: "doc"; src: string }
@@ -203,8 +166,7 @@ function MediaPart({ media }: { media: MediaView }) {
     );
   }
   if (media.kind === "doc") {
-    // Never an inline <embed>/<iframe> — a PDF can carry active content; let the browser handle it
-    // out-of-process in its own tab instead of this trace-view page's context.
+    // Never an inline <embed>/<iframe>: a PDF can carry active content, so it opens in its own tab.
     return (
       <a
         href={media.src}
@@ -251,10 +213,6 @@ function JsonTree({ value, collapsed }: { value: object; collapsed: number }) {
 }
 
 
-/* -------------------------------------------------------------------------- */
-/* Parsing                                                                    */
-/* -------------------------------------------------------------------------- */
-
 type ChatMessage = { role: string; raw: unknown };
 
 type Parsed =
@@ -287,7 +245,6 @@ function parsePayload(payload: string | null): Parsed {
     }
     return { kind: "json", value: root };
   }
-  // Text that opens with `{` and parses is an object: nothing else can be here.
   const obj = root as Obj;
   if ("role" in obj) return { kind: "chat", messages: [messageFromObj(obj)] };
   if ("type" in obj) return { kind: "chat", messages: [{ role: "", raw: obj }] };
@@ -298,30 +255,12 @@ function messageFromObj(m: Obj): ChatMessage {
   return { role: typeof m.role === "string" ? m.role : "", raw: m };
 }
 
-/* -------------------------------------------------------------------------- */
-/* Media extraction + XSS guard (image + document)                            */
-/* -------------------------------------------------------------------------- */
-//
-// Mirrors the backend ai.tessary.model.ContentExtractor content-block
-// shapes: OpenAI `image_url` / `input_image` / `output_image` / `input_file` / `file`, and Anthropic
-// `image` / `document` with `source.{base64,url}`. The platform's own first-class blocks
-// `{type:"image_url",url}` / `{type:"image_b64",data,mediaType}` and their document counterparts
-// (`document_url`, `document_b64`, `document_ref`) are also recognised. Keep this in sync with that
-// extractor when shapes change — this is a fourth, independently-kept-in-sync vocabulary alongside the
-// Java ContentBlock enum, the judge-boundary switch, and the Python/Java classifier-context switch (see
-// devdocs/reference/media-contract.md).
+// Mirrors the backend ContentExtractor's block shapes; keep in sync with it (devdocs/reference/media-contract.md).
 
-/** Base64 image MIME types we will render. image/svg+xml is DELIBERATELY excluded:
- *  SVG is an active document (can carry <script>) and a data: URL of it would
- *  execute in the img/object context for some sinks — never allow it. */
+/** image/svg+xml is excluded: SVG is an active document that can carry <script>. */
 const ALLOWED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-/**
- * Resolve a remote/data image URL to a render-safe src, or null to reject.
- * Accept ONLY `https://` (no http: mixed-content / SSRF-ish internal refs) and
- * `data:image/<allowed>;…` (reject data:text, data:application, data:image/svg+xml,
- * and relative/other schemes). Returns the original string when accepted.
- */
+/** Only `https://` and `data:image/<allowed>`; everything else is rejected. */
 function safeImageUrl(url: unknown): string | null {
   if (typeof url !== "string") return null;
   const u = url.trim();
@@ -334,10 +273,8 @@ function safeImageUrl(url: unknown): string | null {
   return null;
 }
 
-/** The one document type this run ships (PDF only — no audio/video). */
 const ALLOWED_DOCUMENT_MIME = new Set(["application/pdf"]);
 
-/** {@link safeImageUrl}'s document counterpart: `https://` or a `data:application/pdf;base64,…` URI. */
 function safeDocumentUrl(url: unknown): string | null {
   if (typeof url !== "string") return null;
   const u = url.trim();
@@ -350,25 +287,19 @@ function safeDocumentUrl(url: unknown): string | null {
   return null;
 }
 
-/** Build a data: URL from raw base64 + media type, gated by the MIME allowlist. */
-/** The base64 alphabet and nothing else — the cheap test for "is this actually bytes". */
 const BASE64_ONLY = /^[A-Za-z0-9+/=]+$/;
 
 function safeBase64Image(data: unknown, mediaType: unknown): string | null {
   if (typeof data !== "string" || data.length === 0) return null;
   const mime = typeof mediaType === "string" ? mediaType.toLowerCase() : "image/png";
   if (!ALLOWED_IMAGE_MIME.has(mime)) return null;
-  // A producer that strips image bytes leaves prose in their place — 7,930 spans
-  // here hold `[image image/jpeg 149908 chars base64 — typed copy …]`. Concatenated
-  // into a data: URI that is a broken <img>, and worse, one the caller cannot tell
-  // from a real one, so it counted as a resolved image and suppressed the JSON that
-  // was the only remaining record. Anything outside the alphabet is not bytes.
+  // A producer that strips image bytes leaves prose in their place, which would make a broken <img> that
+  // counts as resolved and hides the JSON. Anything outside the base64 alphabet is not bytes.
   const bytes = data.replace(/\s+/g, "");
   if (bytes.length === 0 || !BASE64_ONLY.test(bytes)) return null;
   return `data:${mime};base64,${bytes}`;
 }
 
-/** {@link safeBase64Image}'s document counterpart, gated by {@link ALLOWED_DOCUMENT_MIME}. */
 function safeBase64Document(data: unknown, mediaType: unknown): string | null {
   if (typeof data !== "string" || data.length === 0) return null;
   const mime = typeof mediaType === "string" ? mediaType.toLowerCase() : "application/pdf";
@@ -381,7 +312,6 @@ function safeBase64Document(data: unknown, mediaType: unknown): string | null {
 const UNSUPPORTED_CHIP: MediaView = { kind: "chip", label: "unsupported image" };
 const UNSUPPORTED_DOCUMENT_CHIP: MediaView = { kind: "chip", label: "unsupported document" };
 
-/** Every block type {@link extractMedia} recognises as an image. */
 const IMAGE_BLOCK_TYPES = new Set([
   "image_ref",
   "image_url",
@@ -391,20 +321,13 @@ const IMAGE_BLOCK_TYPES = new Set([
   "image",
 ]);
 
-/** Every block type {@link extractMedia} recognises as a document (PDF only — no audio/video).
- *  Includes the raw wire aliases (`document`, `input_file`, `file`) alongside the platform's own
- *  first-class `document_*` kinds, mirroring {@link IMAGE_BLOCK_TYPES}'s pattern. */
 const DOCUMENT_BLOCK_TYPES = new Set(["document_ref", "document_b64", "document_url", "document", "input_file", "file"]);
 
-/** The union {@link isAllMediaBlocks} checks against. */
 const MEDIA_BLOCK_TYPES = new Set([...IMAGE_BLOCK_TYPES, ...DOCUMENT_BLOCK_TYPES]);
 
 /**
- * True when a message carries media and nothing else — the case where the JSON
- * tree has nothing to say that the rendered image/document does not say better. Deliberately
- * strict: an unrecognised block, a stray text part, or a payload that is not a
- * block array at all all answer false, so the tree stays wherever it might still
- * be carrying information.
+ * Strict: an unrecognised block or stray text part answers false, so the tree stays wherever it may
+ * still carry information.
  */
 function isAllMediaBlocks(raw: unknown): boolean {
   const body = Array.isArray(raw) ? raw : isObj(raw) ? (raw.content ?? raw.parts) : null;
@@ -412,10 +335,6 @@ function isAllMediaBlocks(raw: unknown): boolean {
   return body.every((b) => isObj(b) && typeof b.type === "string" && MEDIA_BLOCK_TYPES.has(b.type));
 }
 
-/** Pull every renderable image/document (or unsupported-chip) out of a message's raw value.
- *  Walks the message `content` array (or a bare content-block array) and matches the
- *  same shapes ContentExtractor parses on the backend. Non-media parts are ignored
- *  here (JsonTree still renders them); only recognised media yields an entry. */
 function extractMedia(raw: unknown, resolveMedia?: ((mediaId: string) => string) | null): MediaView[] {
   const out: MediaView[] = [];
   const visit = (node: unknown) => {
@@ -428,16 +347,12 @@ function extractMedia(raw: unknown, resolveMedia?: ((mediaId: string) => string)
     const type = typeof part.type === "string" ? part.type : "";
 
     if (type === "image_ref") {
-      // Externalized image: {type:"image_ref", data:<mediaId>, mediaType}. Rendered by-ref via
-      // the media endpoint when the surface supplies a resolver; a quiet chip otherwise.
       const mediaId = typeof part.data === "string" ? part.data : "";
       if (mediaId && resolveMedia) out.push({ kind: "img", src: resolveMedia(mediaId) });
       else out.push({ kind: "chip", label: "stored image" });
       return;
     }
     if (type === "document_ref") {
-      // Externalized document. MediaController already serves arbitrary stored mediaType, so the
-      // same resolver endpoint works unchanged — no backend change needed for this to render.
       const mediaId = typeof part.data === "string" ? part.data : "";
       if (mediaId && resolveMedia) out.push({ kind: "doc", src: resolveMedia(mediaId) });
       else out.push({ kind: "chip", label: "stored document" });
@@ -505,7 +420,6 @@ function extractMedia(raw: unknown, resolveMedia?: ((mediaId: string) => string)
       }
       return;
     }
-    // A message wrapper: descend into its content array.
     if ("content" in part) visit(part.content);
   };
   visit(raw);
@@ -522,17 +436,13 @@ function pushDocumentUrl(out: MediaView[], url: unknown) {
   out.push(src ? { kind: "doc", src } : UNSUPPORTED_DOCUMENT_CHIP);
 }
 
-/** A short stand-in for an elided inline media payload, with its size so the tree
- *  still conveys roughly how big the blob was. */
 function mediaElision(len: number, kind: "image" | "document"): string {
   const kb = len / 1024;
   const size = kb >= 1 ? `${kb.toFixed(1)} KB` : `${len} chars`;
   return `<${kind} data elided, ${size}>`;
 }
 
-/** If `v` is an inline media payload the decoded <img>/link already shows — a raw base64
- *  blob (a dedicated `data` field) or a `data:` URI — return its short placeholder;
- *  otherwise null. Plain http(s) URLs are left intact (short, useful context). */
+/** Plain http(s) URLs are short, useful context and stay. */
 function elideUrl(v: unknown, kind: "image" | "document" = "image"): string | null {
   return typeof v === "string" && v.startsWith("data:") ? mediaElision(v.length, kind) : null;
 }
@@ -540,14 +450,7 @@ function elideData(v: unknown, kind: "image" | "document" = "image"): string | n
   return typeof v === "string" && v.length > 0 ? mediaElision(v.length, kind) : null;
 }
 
-/**
- * Deep-clone `raw`, replacing recognised inline media payloads (raw base64 in the
- * dedicated `data` fields, or `data:` URIs in url fields) with a short placeholder so
- * the JSON tree doesn't duplicate the megabytes the decoded <img>/link already renders.
- * Mirrors the shapes `extractMedia` matches — same OpenAI/Anthropic/platform image AND
- * document blocks — and is a no-op everywhere else (incl. plain http(s) URLs), so non-media
- * structure renders unchanged. Never mutates the input.
- */
+/** Mirrors `extractMedia`'s shapes and never mutates the input. */
 export function redactMediaData(raw: unknown): unknown {
   const visit = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(visit);
@@ -599,10 +502,7 @@ export function redactMediaData(raw: unknown): unknown {
       return data ? { ...part, data } : part;
     }
     if (type === "image_ref" || type === "document_ref") {
-      // `data` here is only a short media id (see ContentBlock.imageRef/documentRef), never a blob —
-      // nothing to elide there. `text` is the field that can carry a real payload: MediaExternalizer
-      // populates a document_ref's `text` with up to 200,000 chars of extracted PDF text at ingest, and
-      // without this case it fell through to the generic recursion and rendered inline unredacted.
+      // `data` here is a short media id, but `text` can hold up to 200,000 chars of extracted PDF text.
       const kind = type === "document_ref" ? "document" : "image";
       const text = elideData(part.text, kind);
       return text ? { ...part, text } : part;
@@ -621,8 +521,6 @@ export function redactMediaData(raw: unknown): unknown {
       }
       return part;
     }
-    // Recurse through wrappers (a message with a `content` array) and any other object,
-    // rebuilding only when a nested value actually changed.
     const next: Obj = {};
     let changed = false;
     for (const [k, val] of Object.entries(part)) {

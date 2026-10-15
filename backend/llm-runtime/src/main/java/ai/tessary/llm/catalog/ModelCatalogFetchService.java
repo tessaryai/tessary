@@ -64,12 +64,7 @@ public class ModelCatalogFetchService {
     /** Cache-key region for every provider whose model list is not credential-region-scoped. */
     private static final String SINGLE_REGION = "-";
 
-    /**
-     * How long an empty, failure-caused cache entry is trusted before the next read retries the fetch.
-     * Deliberately much shorter than {@link ModelCatalogProperties#refreshInterval()}: a healthy
-     * fetch earns the long TTL, but a fetch that just failed with nothing to fall back to should not
-     * leave a provider looking permanently empty for a quarter of an hour over one bad request.
-     */
+    /** Much shorter than the refresh interval, so one failed fetch does not leave a provider looking empty for long. */
     private static final Duration NEGATIVE_TTL = Duration.ofSeconds(30);
 
     private final ProviderCredentialRepository credentials;
@@ -88,7 +83,7 @@ public class ModelCatalogFetchService {
         this(credentials, secretBox, properties, defaultListers(mapper, properties.fetchTimeout()));
     }
 
-    /** Test seam — a fake {@link ProviderModelLister} per provider, no real HTTP/AWS calls. */
+    /** Test seam: a fake lister per provider, no real HTTP or AWS calls. */
     ModelCatalogFetchService(
             ProviderCredentialRepository credentials,
             SecretBox secretBox,
@@ -101,15 +96,8 @@ public class ModelCatalogFetchService {
     }
 
     private static Map<ModelProvider, ProviderModelLister> defaultListers(ObjectMapper mapper, Duration fetchTimeout) {
-        // Deliberately never closed: this HttpClient is shared across every OpenAI-compat/Anthropic/
-        // OpenRouter lister for the lifetime of the service (retained inside the Map this method
-        // returns), the same pattern every other long-lived HttpClient field in this codebase uses
-        // (WorkOsClient, GithubClient, ...). PMD's CloseResource check cannot trace the
-        // reference escaping into eight separate constructor calls in a fan-out like this one.
-        //
-        // connectTimeout stays a fixed 5s rather than tessary.model-catalog.fetch-timeout: that property
-        // bounds a single models-endpoint REQUEST (wired per-lister below via the request/apiCallTimeout
-        // builder), not the shared client's TCP handshake, which is a distinct, much smaller concern.
+        // Never closed: shared by every lister for the service's lifetime, which PMD's CloseResource cannot trace.
+        // connectTimeout is a fixed 5s; the fetch-timeout property bounds each request, not the TCP handshake.
         HttpClient http = // NOPMD - CloseResource: intentionally long-lived, see comment above
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         Map<ModelProvider, ProviderModelLister> m = new EnumMap<>(ModelProvider.class);
@@ -131,8 +119,7 @@ public class ModelCatalogFetchService {
     public List<ProviderModel> refreshingRead(String orgId, ModelProvider provider) {
         ProviderCredential cred =
                 credentials.findByOrgAndProvider(orgId, provider).orElse(null);
-        // Mandatory property (iv): no credential contributes nothing, not an error — same as an
-        // unconfigured provider is treated everywhere else (the disabled-option pattern).
+        // No credential contributes nothing, not an error.
         if (cred == null) return List.of();
         CacheKey key = new CacheKey(provider, regionFor(provider, cred));
         CacheEntry entry = cache.get(key);
@@ -161,8 +148,7 @@ public class ModelCatalogFetchService {
             log.warn("model listing failed for provider={} region={}: {}", provider, key.region(), e.getMessage());
             CacheEntry stale = cache.get(key);
             if (stale != null) {
-                // Mandatory property (iii): a vendor outage serves the last-known-good list rather than
-                // emptying this provider's options, however old that list has become.
+                // A vendor outage serves the last-known-good list, however old.
                 return stale.models();
             }
             cache.put(key, new CacheEntry(Instant.now(), List.of(), true));
@@ -176,10 +162,8 @@ public class ModelCatalogFetchService {
     }
 
     /**
-     * {@code (provider, region)} — mandatory property (i). Bedrock/mantle key on the credential's own
-     * AWS region (never an env var — {@code MANTLE_REGION} and friends are gone); CUSTOM
-     * keys on the credential's endpoint, since two orgs' custom endpoints are unrelated data sources;
-     * every other provider collapses to {@link #SINGLE_REGION}.
+     * Bedrock/mantle key on the credential's own AWS region; CUSTOM keys on its endpoint; everything else collapses to
+     * {@link #SINGLE_REGION}.
      */
     private static String regionFor(ModelProvider provider, ProviderCredential cred) {
         return switch (provider) {
@@ -195,8 +179,7 @@ public class ModelCatalogFetchService {
         };
     }
 
-    /** Decrypt {@code cred} into the shape {@link ProviderModelLister} needs — see {@link
-     *  ResolvedCredential}'s own javadoc for why this is not {@code AgenticCredentialResolver.Credential}. */
+    /** See {@link ResolvedCredential} for why this is not {@code AgenticCredentialResolver.Credential}. */
     private ResolvedCredential resolveCredential(ModelProvider provider, ProviderCredential cred) {
         boolean bedrock = provider == ModelProvider.BEDROCK || provider == ModelProvider.BEDROCK_MANTLE;
         if (bedrock) {
@@ -223,6 +206,6 @@ public class ModelCatalogFetchService {
 
     private record CacheKey(ModelProvider provider, String region) {}
 
-    /** @param negative true for a failure-caused empty entry — see {@link #NEGATIVE_TTL}. */
+    /** @param negative true for a failure-caused empty entry; see {@link #NEGATIVE_TTL} */
     private record CacheEntry(Instant fetchedAt, List<ProviderModel> models, boolean negative) {}
 }

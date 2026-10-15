@@ -2,16 +2,9 @@
 package ai.tessary.tenant;
 
 /**
- * Published in-process after a {@code project} row commits — the seam slices use to provision a
- * project's starting state without {@code tenant/} having to know they exist. A consumer registers
- * an {@code @TransactionalEventListener(phase = AFTER_COMMIT, fallbackExecution = true)} so it only
- * provisions projects that actually persisted.
- *
- * <p>Provisioning off this event must be <b>idempotent</b> and non-fatal: a consumer that throws
- * cannot roll the project back (the transaction has already committed), and the same project is
- * re-provisioned by whatever self-heal path its slice owns (e.g. {@code
- * ClassifierService#resyncBuiltIns} on the signal heartbeat) for projects that predate the event.
- *
- * @param projectId the newly created project.
+ * Published after a {@code project} row commits, so slices can provision a project without {@code tenant/} knowing
+ * them. Consumers listen AFTER_COMMIT with {@code fallbackExecution = true} and must be idempotent and non-fatal: they
+ * cannot roll the project back, and their slice's self-heal (e.g. {@code ClassifierService#resyncBuiltIns}) covers
+ * older projects.
  */
 public record ProjectCreatedEvent(String projectId) {}

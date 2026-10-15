@@ -4,18 +4,9 @@ package ai.tessary.cases;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One case ({@code eval_case}): a detection that crossed its detector's bar, in the one shape that
- * reaches a human. It is cause-neutral: {@link #detector} is the only field that says what noticed,
- * and every other field is written the same way regardless of source.
- *
- * <p>Identity is {@code (projectId, detector, subjectKind, subjectId, metric)}, the same subject key
- * {@code rca_report} carries, so an RCA run from a case snapshots the case's subject with no
- * translation. {@code ux_eval_case_live} enforces one non-resolved case per key.
- *
- * <p>{@link #basis} carries the detector's own account of why this crossed; detectors don't share a
- * bar. A CUSUM spell fires on sustained change against a frozen baseline, a classifier fires on a
- * threshold. Flattening those into one number would make the ranked list lie, so ordering uses
- * {@link #severity} and the honest explanation is {@code basis} plus the value triple.
+ * Cause-neutral: {@link #detector} is the only field that says what noticed. Identity is the same subject key
+ * {@code rca_report} carries; {@code ux_eval_case_live} enforces one non-resolved case per key. Detectors don't share a
+ * bar, so ordering uses {@link #severity} and {@code basis} carries each detector's own account.
  */
 public record CaseRow(
         String id,
@@ -26,16 +17,15 @@ public record CaseRow(
         String subjectLabel,
         @Nullable String callSiteId,
         String metric,
-        /** How many findings this case holds — zero for an archived pre-{@code case_id} row. */
+        /** Zero for an archived pre-{@code case_id} row. */
         long findingCount,
-        /** The newest of this case's findings ({@code finding.case_id}, newest {@code created_at}
-         *  first) — the one its header, its ruling and (until 1c's multi-finding follow-up) its RCA
-         *  lane all read. Null only for an archived case from before {@code finding.case_id} existed. */
+        /**
+         * The newest of this case's findings, which its header, ruling and RCA lane read. Null only for an archived
+         * case from before {@code finding.case_id}.
+         */
         @Nullable String latestFindingId,
         String state,
-        /** When a person pressed <em>Run RCA</em> on this case, or null if nobody has. A locked case
-         *  never gets a new finding joined to it — the cause's next positive opens a fresh case — but
-         *  stays open or resolved exactly as an unlocked one otherwise. */
+        /** A locked case never gets a new finding joined to it; the cause's next positive opens a fresh case. */
         @Nullable String lockedAt,
         String title,
         String basis,
@@ -50,61 +40,34 @@ public record CaseRow(
         @Nullable String resolution,
         @Nullable String resolutionReason,
         @Nullable String resolvedBy,
-        /** What a person said a resolved frustration or groundedness case was ({@link Disposition}); null otherwise. */
         @Nullable String disposition) {
 
-    /** The display id a human quotes: {@code C-118}. */
     public String reference() {
         return "C-" + seq;
     }
 
-    /** {@code detector} values: what noticed. New detectors add a constant here and a
-     *  {@link CaseSource} implementation; nothing else in the slice changes. */
+    /** New detectors add a constant here and a {@link CaseSource} implementation; nothing else in the slice changes. */
     public static final class Detector {
         private Detector() {}
 
-        /**
-         * A user classifier's detections over its configured threshold ({@code classifier/}). A
-         * per-span finding's case is named for the classifier that filed it.
-         */
         public static final String CLASSIFIER = "classifier";
 
-        /**
-         * A metric-drift finding that survived triage ({@code classifier/MetricDrift*}): one
-         * bucket's duration or cost distribution sitting measurably away from its own earlier one.
-         *
-         * <p>Metric-drift findings stream with no alert budget, so Triage only sees the subset a
-         * repo-grounded run called a deviation, plus what a human ruled one directly.
-         */
+        /** Findings stream with no alert budget, so only a triage-positive or human-ruled deviation reaches Triage. */
         public static final String METRIC_DRIFT = "metric_drift";
 
-        /**
-         * A tool's failure rate that survived triage. Same gate as {@link #METRIC_DRIFT}: the detector's
-         * findings stream unbudgeted, and only a triage ruling of {@code positive}, or a human pressing
-         * <em>Real deviation</em>, reaches Triage.
-         */
+        /** Same gate as {@link #METRIC_DRIFT}. */
         public static final String TOOL_ERROR = "tool_error";
 
         /**
-         * A secret-leak finding ruled positive, at arming and without triage when it is high
-         * confidence: a credential
-         * sitting in a stored output is a fact to rotate, not a claim to audit. See {@link
-         * ai.tessary.classifier.secretleak}.
+         * Ruled positive at arming when high confidence: a credential in stored output is a fact to rotate, not a claim
+         * to audit.
          */
         public static final String SECRET_LEAK = "secret_leak";
 
-        /**
-         * A call site's declared-schema failure rate that survived triage. Same gate as
-         * {@link #TOOL_ERROR}: the detector's findings stream unbudgeted, and only a triage ruling of
-         * {@code positive}, or a human pressing <em>Real deviation</em>, reaches Triage.
-         */
+        /** Same gate as {@link #METRIC_DRIFT}. */
         public static final String MALFORMED_OUTPUT = "malformed_output";
 
-        /**
-         * A call site whose share of conversations frustrated with the agent rose above the rate it learned.
-         * No triage gate: each spell's finding is ruled positive when it is filed, and opens or joins this case
-         * in the same transaction. See {@link RateCaseSource}.
-         */
+        /** No triage gate: each spell's finding is ruled positive when filed. */
         public static final String FRUSTRATION = "frustration";
 
         /**
@@ -115,45 +78,29 @@ public record CaseRow(
         public static final String GROUNDEDNESS = "groundedness";
     }
 
-    /** {@code subject_kind} values: what the case is about. */
     public static final class SubjectKind {
         private SubjectKind() {}
 
         public static final String CLASSIFIER = "classifier";
 
         /**
-         * One (bucket x measure) window state, {@code metric_baseline}. Its own kind rather than
-         * {@link #CLASSIFIER} because a metric-drift case is about the population being measured,
-         * not the switch that noticed; that population keeps its identity across deploys, re-pins,
-         * and the windows that close over it.
+         * Its own kind: a metric-drift case is about the measured population, which keeps its identity across deploys
+         * and re-pins.
          */
         public static final String METRIC_BASELINE = "metric_baseline";
 
-        /**
-         * One tool, keyed by its {@code ActionSymbol}. The subject of a tool-error case is
-         * deliberately the tool rather than the finding: a rise and a later fall are two causes to
-         * explain but one thing to page about, so both collapse onto one live case.
-         */
+        /** The tool, not the finding: a rise and a later fall are two causes but one thing to page about. */
         public static final String TOOL = "tool";
 
-        /**
-         * A call site whose outputs are failing their declared schema — {@code malformed_rate}'s
-         * subject. The call site rather than the classifier, for the {@link #TOOL} reason: the schema
-         * a call site is failing belongs to it, and a second call site failing its own schema is a
-         * second thing to fix, not the same one recurring.
-         */
+        /** The call site, not the classifier: a second call site failing its own schema is a second thing to fix. */
         public static final String CALL_SITE = "call_site";
 
         /**
-         * One secret-detection rule at one call site — {@code armed_window}'s secret-leak subject, the
-         * facet {@code ClassifierArming} keys a leak finding on. A leaked AWS key from one call site
-         * and a leaked GitHub token from another are two credentials to rotate, so the pattern-and-place
-         * pair is the subject, not the classifier that happened to notice either.
+         * Pattern and place: leaked keys of different kinds at different call sites are separate credentials to rotate.
          */
         public static final String SECRET_PATTERN = "secret_pattern";
     }
 
-    /** {@code state} values. */
     public static final class State {
         private State() {}
 
@@ -161,35 +108,25 @@ public record CaseRow(
         public static final String RESOLVED = "resolved";
     }
 
-    /** {@code resolution} values: who closed it. */
     public static final class Resolution {
         private Resolution() {}
 
-        /** A human closed it, with an optional one-line reason. */
         public static final String HUMAN = "human";
 
         /**
-         * A human ruled the shift legitimate and the detector's reference was moved to include it,
-         * so the level it fired on is the new baseline.
-         *
-         * <p>Distinct from {@link #HUMAN}: a case closed as {@code human} leaves the detector's bar
-         * exactly where it was, so an unchanged population opens another case tomorrow;
-         * {@code absorbed} says the bar moved, and it will not.
+         * Unlike {@link #HUMAN}, which leaves the bar where it was, {@code absorbed} says the reference moved, so the
+         * same population will not reopen a case.
          */
         public static final String ABSORBED = "absorbed";
     }
 
     /**
-     * {@code disposition} values: what a person said a resolved frustration or groundedness case turned out to
-     * be, either {@code fixed} (the agent was changed; the rate after the resolve is the normal to learn) or
-     * {@link #FALSE_ALARM}. Both restart the call site's CUSUM and re-learn its normal rate from the traffic
-     * after the resolve; {@link #FALSE_ALARM} also clears the flag on every conversation, or every answer, the
-     * case cites.
+     * Both values restart the call site's CUSUM and re-learn from traffic after the resolve; {@link #FALSE_ALARM} also
+     * clears the flags the case cites.
      */
     public static final class Disposition {
         private Disposition() {}
 
-        /** The cited conversations or answers were not what was flagged: they stop counting as failures. */
         public static final String FALSE_ALARM = "false_alarm";
     }
 

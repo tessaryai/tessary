@@ -4,19 +4,8 @@ package ai.tessary.alert;
 import java.util.Locale;
 
 /**
- * The transports a fired alert can be delivered to. Each value has exactly one
- * {@link ai.tessary.alert.channel.AlertChannel} SPI bean, resolved by {@link ChannelFactory};
- * adding a channel is just adding its impl class. Mirrors {@code git/GitProvider}'s
- * {@code fromWire}/{@code wire} contract.
- *
- * <ul>
- *   <li>{@link #SLACK} — a Slack <em>incoming webhook</em> (outbound POST to a user-configured Slack
- *       webhook URL).
- *   <li>{@link #WEBHOOK} — a generic signed outbound POST with a stable, versioned payload schema.
- *   <li>{@link #SENTRY} — creates a Sentry issue/event via the Store API (DSN-derived).
- *   <li>{@link #LINEAR} — creates a Linear issue via the GraphQL API.
- *   <li>{@link #PAGERDUTY} — triggers a PagerDuty incident via the Events API v2.
- * </ul>
+ * Alert transports, each with exactly one {@link ai.tessary.alert.channel.AlertChannel} bean resolved by
+ * {@link ChannelFactory}. Same {@code fromWire}/{@code wire} contract as {@code git/GitProvider}.
  */
 public enum AlertChannelKind {
     SLACK,

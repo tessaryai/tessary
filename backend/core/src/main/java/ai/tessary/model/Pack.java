@@ -8,24 +8,9 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One engaged pack from a synthesis run. Mirrors pipeline.yaml's
- * {@code packs[]} block introduced in evals plugin v0.3.
- *
- * <p>Packs are high-level concern bundles (security / quality / reliability /
- * brand) that contribute failure modes at synthesis time. The orchestrator
- * runs each pack's interview against the user (skipping questions already
- * answered by code analysis) and records the resolved Q&A here.
- *
- * <p>{@code tierHint} is informational metadata only — the consuming product
- * gates commercial enablement on it; the platform itself never enforces.
- *
- * <p>{@code interviewAnswers} is a free-form map of question id → answer
- * record (answer / source / evidence). Held as untyped objects because each
- * pack's interview is bespoke.
- *
- * <p>{@code contentDigest} is the SHA-256 prefix over the pack's manifest +
- * interview prompt + failure-synthesis prompt; lets re-runs detect when a
- * pack itself changed.
+ * One engaged pack from a synthesis run (pipeline.yaml {@code packs[]}, evals plugin v0.3). {@code tierHint} is
+ * informational; the platform never enforces it. {@code interviewAnswers} is untyped because each pack's interview is
+ * bespoke. {@code contentDigest} lets re-runs detect a changed pack.
  */
 public record Pack(
         String id,

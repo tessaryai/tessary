@@ -7,10 +7,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Which {@code IngestSpool} buffers accepted batches: {@code memory} (the default: bounded by
- * bytes, a restart loses what is queued) or {@code kafka} (a Kafka-API broker, opt-in: accepted means
- * persisted). {@code max-lag-ms} is the age of the oldest unprocessed batch past which
- * the {@code /actuator/health/ingest} group (and the top-level status) reports DOWN; {@code 0} disables the check.
+ * {@code memory} (default; lost on restart) or {@code kafka} (accepted means persisted). {@code max-lag-ms} is the
+ * oldest batch age past which {@code /actuator/health/ingest} reports DOWN; {@code 0} disables.
  */
 @ConfigurationProperties(prefix = "tessary.ingest.spool")
 public record IngestSpoolProperties(
@@ -28,17 +26,12 @@ public record IngestSpoolProperties(
             @DefaultValue("tessary-ingest") String groupId,
             @DefaultValue("8") int partitions,
 
-            /** Drainer threads, each with its own consumer in the group; the broker spreads the partitions across them. */
+            /** Each with its own consumer in the group. */
             @DefaultValue("4") int consumers,
 
             /**
-             * Copies the broker keeps of every accepted batch, applied when the spool creates its topics.
-             *
-             * <p>1 suits the single-node Redpanda the {@code kafka} compose profile bundles, and is the only
-             * value that broker can satisfy. Point {@code bootstrap-servers} at a multi-broker cluster and
-             * this is what decides whether the mode's promise — accepted means persisted — survives losing a
-             * broker: at 1, {@code acks=all} is one machine's disk, and that machine's failure loses batches
-             * the edge already answered 200 to. 3 is the usual choice there.
+             * 1 suits the bundled single-node Redpanda. On a multi-broker cluster, 1 means losing a broker loses
+             * batches already answered 200; 3 is usual.
              */
             @DefaultValue("1") short replicationFactor,
             @DefaultValue("8388608") long maxMessageBytes,
@@ -52,14 +45,8 @@ public record IngestSpoolProperties(
         }
 
         /**
-         * How many replicas must hold a batch before the broker acknowledges it, derived rather than
-         * configured so the pair cannot be set to a combination that silently weakens the other.
-         *
-         * <p>2 whenever there is more than one replica: with {@code acks=all} that is what makes an
-         * acknowledged publish mean two disks. Leaving it at 1 under replication would let the leader
-         * acknowledge alone whenever the followers lag, which is the single-copy window this key exists
-         * to close. At {@code replicationFactor=1} it can only be 1 — there is no second replica to wait
-         * for, and asking for one would refuse every publish.
+         * Derived so the pair cannot silently weaken each other: 2 whenever replicated, so an acknowledged publish
+         * means two disks; 1 at a replication factor of 1.
          */
         public short minInSyncReplicas() {
             return replicationFactor > 1 ? (short) 2 : (short) 1;

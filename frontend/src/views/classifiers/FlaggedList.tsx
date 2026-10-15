@@ -1,32 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The rows a finding cites, and one of them at a time as it happened.
- *
- * <h2>The list, then the traces</h2>
- * The left column is the evidence: each flagged row with its score, newest flag first. Selecting one draws
- * the traces the row names, oldest first, from the real traces, through the session view's own conversation
- * components, so tool calls, markdown and folded history read exactly as they do there. The row's emphasis
- * says which part of those traces was judged and which parts were read with it; the judged one is drawn in
- * the error tint and the pane scrolls to it.
- *
- * <h2>Why not the scored request</h2>
- * What a classifier was sent is a clipped, text-only copy with no tool calls, and retention clears it.
- * The traces are what the user saw. The list's preview line is the only place the scored copy shows,
- * because it is one line and has no other source.
- *
- * <h2>A page at a time</h2>
- * A finding can cite thousands of rows. The first page can come with the finding; scrolling to the end of
- * the list reads the next through the caller's loader. A filter (one RCA cause's rows) reads its own pages
- * from the start. Only the selected row's traces are fetched, keyed like the trace page's own read so a trace
- * opened from here is already cached there.
- *
- * <h2>Switching filters</h2>
- * Every filter's first page is read ahead when the list mounts, so a switch usually draws from cache. When one
- * is still in flight, the last list stays up for a moment, and only a slow read swaps it for the skeleton, which
- * then stays long enough not to blink. Either way the frame holds its height and the page does not move.
- *
- * The copy that names the rows comes from the caller, so one list serves every classifier that cites traces.
- */
+// The pane draws the real traces, not the scored request: that copy is clipped, text-only and cleared
+// by retention. Only the selected row's traces are fetched, keyed like the trace page's read.
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -43,10 +17,8 @@ import { spanOrder, type Span } from "../traces/detail-data";
 import { useListPaging } from "./useListPaging";
 import { useSkeletonFlag } from "./useSkeletonFlag";
 
-/** Space left under the flagged message when the pane scrolls to it, in px. */
 const FLAGGED_BOTTOM_GAP = 24;
 
-/** The list and the session side by side, at a fixed height so the page never moves as they load. */
 const FRAME = "grid rounded-card border border-border overflow-hidden bg-surface";
 const FRAME_STYLE = { gridTemplateColumns: "320px minmax(0, 1fr)", height: 720 };
 
@@ -58,39 +30,29 @@ const DAY_TIME: Intl.DateTimeFormatOptions = {
   hour12: false,
 };
 
-/** One RCA cause's share of the rows: the report that found it and its 0-based position there. */
 export type RowFilter = { rcaReport: string; index: number };
 
-/**
- * A mark on one of a row's traces. `spanId` names the span a `step` entry is on; a `question` or `reply`
- * entry is on the trace's root span, so its `spanId` may be null.
- */
+/** A `question` or `reply` entry is on the trace's root span, so its `spanId` may be null. */
 export type FlaggedEmphasis = Emphasis & { traceId: string; spanId: string | null };
 
-/** One flagged row: the trace it was flagged on, the traces drawn for it, and what to mark on them. */
 export type FlaggedRow = {
-  /** Shown when the preview is gone, and in the pane's head. */
   id: string;
   traceId: string;
   score: number | null;
   flaggedAt: string | null;
   cleared: boolean;
   sessionId: string | null;
-  /** The traces drawn in the pane, oldest first; empty means the flagged trace alone. */
   contextTraceIds: string[];
-  /** The row's one-line text in the list. */
   preview: string | null;
   emphasis: FlaggedEmphasis[];
 };
 
 export type FlaggedPage = { rows: FlaggedRow[]; nextCursor: string | null; total: number };
 
-/** Reads one page of rows: the whole list, or one filter's, from `cursor` (null for the first page). */
 export type FlaggedLoader = (filter: RowFilter | undefined, cursor: string | null) => Promise<FlaggedPage>;
 
 const filterKeyOf = (filter: RowFilter | undefined) => (filter ? `${filter.rcaReport}:${filter.index}` : "all");
 
-/** A row's key in the list: its id alone can repeat across the traces a classifier flagged. */
 const rowKey = (row: FlaggedRow) => `${row.id} ${row.traceId}`;
 
 function rowsQuery(base: string, listKey: string, loadPage: FlaggedLoader, filter: RowFilter | undefined) {
@@ -117,28 +79,17 @@ export function FlaggedList({
   dim = true,
   contextNote,
 }: {
-  /** The page the finding came with, when it carries one: its first rows and where the next page starts. */
   first?: FlaggedPage;
-  /** Reads a page of rows; called for every page past `first`, and for a filter's pages from the start. */
   loadPage: FlaggedLoader;
-  /** Names this list in the cache, apart from every other list: the finding id. */
   listKey: string;
-  /** Narrows the list to one cause; read through the loader, since its rows may be past the first page. */
   filter?: RowFilter;
-  /** The other filters the reader can switch to, whose first pages are read ahead. */
   readAhead?: RowFilter[];
   basePath: string;
-  /** The list's accessible name. */
   listLabel: string;
-  /** What one row is and what many are, for the counts, the paging button and the loading states. */
   unit: [one: string, many: string];
-  /** Shown in place of the frame when the list has no rows. */
   emptyText: string;
-  /** Shown in the pane when the selected row's flagged trace is no longer stored. */
   missingText: string;
-  /** Whether the pane dims the parts of a marked trace that carry no mark. */
   dim?: boolean;
-  /** A line under each dimmed part, saying why it is dimmed. */
   contextNote?: string;
 }) {
   const { api } = useTenant();
@@ -165,7 +116,6 @@ export function FlaggedList({
   const pickedKey = picked?.filterKey === filterKey ? picked.key : null;
   const selected = shown.find((r) => rowKey(r) === pickedKey) ?? shown[0];
 
-  // Read the next page when the end of the list scrolls into view.
   const { isFetchingNextPage, fetchNextPage } = pages;
   const { list, end, hasNextPage } = useListPaging(filterKey, pages);
 
@@ -243,7 +193,6 @@ export function FlaggedList({
   );
 }
 
-/** The frame the rows will fill, drawn while a cause's first page loads. */
 function RowsSkeleton({ label }: { label: string }) {
   return (
     <div className={FRAME} style={FRAME_STYLE} role="status" aria-label={label}>
@@ -279,7 +228,6 @@ function RowsSkeleton({ label }: { label: string }) {
   );
 }
 
-/** The row's emphasis keyed by span, with a question or reply entry placed on its trace's root span. */
 function emphasisBySpan(row: FlaggedRow, spansByTrace: Map<string, Span[]>): EmphasisBySpan {
   const out: EmphasisBySpan = new Map();
   for (const { traceId, spanId, ...entry } of row.emphasis) {
@@ -292,7 +240,6 @@ function emphasisBySpan(row: FlaggedRow, spansByTrace: Map<string, Span[]>): Emp
   return out;
 }
 
-/** One flagged row: the traces before the flagged one and the flagged one, as the traces hold them. */
 function Traces({
   row,
   basePath,
@@ -324,11 +271,8 @@ function Traces({
   const spansByTrace = new Map<string, Span[]>(loaded.map((d) => [d.trace.id, d.spans]));
   const before = ids.length - 1;
 
-  // The flagged message is usually the last user turn, below the turns that led to it. Once the traces
-  // are drawn, scroll this pane (never the page) so it is the last thing in view, with the turns before
-  // it filling the pane above. Long messages fold themselves after they render, and on a first page load
-  // fonts and the rest of the page are still settling, so the pane re-aligns whenever its content
-  // resizes, until the reader touches it: a scroll, a key, a tap or a click hands the pane to them.
+  // Scroll this pane (never the page) so the flagged message is last in view, and keep re-aligning as
+  // messages fold and fonts settle until the reader touches the pane.
   const pane = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -375,8 +319,7 @@ function Traces({
           )}
         </span>
       </div>
-      {/* No scroll anchoring: the browser's own adjustment moves the pane as messages fold, and would
-          undo the alignment above. */}
+      {/* No scroll anchoring: the browser's adjustment would undo the alignment above. */}
       <div ref={pane} className="flex-1 overflow-y-auto py-4.5 px-5" style={{ overflowAnchor: "none" }}>
         <div ref={content}>
         <p className="mt-0 mb-3.5 text-small text-muted">
@@ -406,7 +349,6 @@ function Traces({
   );
 }
 
-/** A filter over a session list, one chip per group plus "All". */
 export function ConversationFilter({
   options,
   value,
@@ -416,7 +358,6 @@ export function ConversationFilter({
   options: { key: string; label: string }[];
   value: string;
   onChange: (key: string) => void;
-  /** What the group filters, for a screen reader: sessions here, answers on a groundedness case. */
   label?: string;
 }) {
   return (

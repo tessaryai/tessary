@@ -42,7 +42,7 @@ public class GithubTokenService implements GitTokenService {
 
     private static final String LABEL = "github";
     private static final long REFRESH_MARGIN_SECONDS = 60;
-    // GitHub list endpoints cap at 100/page; cap pages so a runaway cursor can't loop forever.
+    // GitHub caps lists at 100 per page; cap pages so a runaway cursor can't loop.
     private static final int MAX_PAGES = 50;
 
     private final GithubAppProperties props;
@@ -51,11 +51,9 @@ public class GithubTokenService implements GitTokenService {
     private final HttpClient http;
     private final String webOrigin;
     private final String apiOrigin;
-    // Keyed by integration id (NOT installation id): a cache hit must not require decrypting the
-    // sealed credentials to compute the key — that AES-GCM open ran on every API call before.
+    // Keyed by integration id, so a cache hit never needs to decrypt the sealed credentials.
     private final ConcurrentMap<String, CachedToken> cache = new ConcurrentHashMap<>();
-    // Per-integration mint lock: collapse concurrent cache-miss mints (e.g. a startup burst) into
-    // one GitHub token request instead of a thundering herd.
+    // Collapses concurrent cache-miss mints into one GitHub request.
     private final ConcurrentMap<String, Object> mintLocks = new ConcurrentHashMap<>();
 
     private record CachedToken(String token, Instant expiresAt) {}
@@ -71,10 +69,6 @@ public class GithubTokenService implements GitTokenService {
                 "https://" + GithubAppProperties.DEFAULT_API_HOST);
     }
 
-    /**
-     * The transport and the two fixed github.com origins as seams, so a test can answer the OAuth
-     * exchange and {@code /user/installations} without DNS or a network.
-     */
     GithubTokenService(
             GithubAppProperties props,
             SecretBox secretBox,
@@ -97,33 +91,23 @@ public class GithubTokenService implements GitTokenService {
 
     @Override
     public String authHeader(GitIntegrationRow integ) {
-        // Cache check stays FIRST, ahead of the PAT lookup: a cache hit must not require decrypting
-        // the sealed credentials (see the cache field's own comment above) and a PAT integration
-        // never populates this cache (below), so an App-mode cache hit costs nothing extra here —
-        // it still returns before any AES-GCM open.
+        // Cache check first, so an App-mode hit returns before any AES-GCM open.
         String key = integ.id();
         CachedToken cached = cache.get(key);
         if (isFresh(cached)) {
             return "Bearer " + cached.token();
         }
-        // PAT fallback comes BEFORE the App-configured gate: a PAT-mode integration has no App to
-        // be configured, and gating on isConfigured() up front would reject it even when the sealed
-        // credentials carry a perfectly usable token. That gate used to be the first line
-        // unconditionally, which is exactly the bug PAT mode exists to fix.
+        // PAT fallback before the App-configured gate, which would reject a PAT integration.
         Optional<String> pat = patToken(integ);
         if (pat.isPresent()) {
-            // Deliberately no cache entry: a PAT has no expiry to refresh against, so the only way
-            // to honor revocation promptly is to decrypt on every call rather than serve a
-            // cached-forever token that would keep authenticating after the self-hoster revokes it.
+            // No cache entry: a PAT has no expiry, so decrypting per call is the only way to honor revocation promptly.
             return "Bearer " + pat.get();
         }
         if (!props.isConfigured()) {
             throw new TessaryException(GitError.MISSING_APP_CONFIG, LABEL);
         }
-        // Miss/expired: serialize mints for this integration so a burst doesn't fire N token requests.
-        // The token-mint HTTP call runs INSIDE this monitor on purpose — that's what collapses a
-        // thundering herd into a single mint. On JDK 25 (JEP 491) a virtual thread blocking inside a
-        // synchronized block does not pin its carrier, so holding the HTTP call here is Loom-safe.
+        // The mint runs inside the monitor on purpose to collapse a thundering herd. On JDK 25 (JEP 491) a virtual
+        // thread blocking in synchronized does not pin its carrier.
         Object lock = mintLocks.computeIfAbsent(key, k -> new Object());
         synchronized (lock) {
             CachedToken recheck = cache.get(key);
@@ -155,7 +139,6 @@ public class GithubTokenService implements GitTokenService {
         return idNode.asLong();
     }
 
-    /** The opened credentials blob as JSON; a blob that does not parse is the same missing installation. */
     private JsonNode parseCredentials(String json) {
         try {
             return mapper.readTree(json);
@@ -178,8 +161,7 @@ public class GithubTokenService implements GitTokenService {
         try {
             json = secretBox.open(integ.credentialsEnc());
         } catch (RuntimeException e) {
-            // A sealed blob that fails to open here is the same integrity failure installationId()
-            // surfaces below, just reached from the PAT-first path — not "no PAT", so it still throws.
+            // A blob that fails to open is an integrity failure, not "no PAT", so it still throws.
             throw new TessaryException(GitError.INSTALLATION_NOT_FOUND, e, "(sealed)");
         }
         JsonNode tokenNode = parseCredentials(json).get("token");
@@ -191,14 +173,9 @@ public class GithubTokenService implements GitTokenService {
         return Optional.of(tokenNode.asText());
     }
 
-    /** One installed repo the App grants access to (used by the post-install callback). */
     public record InstalledRepo(String owner, String name, String defaultBranch) {}
 
-    /**
-     * Mint a raw installation token from a bare installation id (no integration row yet) —
-     * for the post-install callback, before the project is bound. Throws if the App isn't
-     * configured or the mint is rejected.
-     */
+    /** For the post-install callback, before the project is bound. */
     public String mintInstallationToken(long installationId, String host) {
         if (!props.isConfigured()) {
             throw new TessaryException(GitError.MISSING_APP_CONFIG, LABEL);
@@ -206,10 +183,6 @@ public class GithubTokenService implements GitTokenService {
         return mintInstallationToken(normHost(host), installationId).token();
     }
 
-    /**
-     * List the repositories an installation grants access to ({@code GET
-     * /installation/repositories}). Used by the callback to resolve owner/name post-install.
-     */
     public java.util.List<InstalledRepo> listInstallationRepos(long installationId, String host) {
         String token = mintInstallationToken(installationId, host);
         String h = normHost(host);
@@ -224,11 +197,7 @@ public class GithubTokenService implements GitTokenService {
         return out;
     }
 
-    /**
-     * Exchange the OAuth {@code code} GitHub returns from "authorize user during installation" for
-     * the installer's USER access token. Proves who completed the install (used to verify they
-     * actually administer the installation). github.com only.
-     */
+    /** Proves who completed the install. github.com only. */
     public String exchangeUserCode(String code) {
         if (!props.hasOAuth()) {
             throw new TessaryException(GitError.INSTALL_NOT_VERIFIED);
@@ -251,7 +220,7 @@ public class GithubTokenService implements GitTokenService {
             JsonNode node = mapper.readTree(res.body());
             String token = node.path("access_token").asText(null);
             if (token == null || token.isBlank()) {
-                // GitHub returns 200 with {"error":...} on a bad/expired code.
+                // GitHub returns 200 with {"error":...} on a bad or expired code.
                 throw new TessaryException(GitError.INSTALL_NOT_VERIFIED);
             }
             return token;
@@ -261,7 +230,6 @@ public class GithubTokenService implements GitTokenService {
         }
     }
 
-    /** The installation ids the holder of {@code userToken} can administer ({@code GET /user/installations}). */
     public Set<Long> listUserInstallations(String userToken) {
         Set<Long> ids = new HashSet<>();
         for (JsonNode n : fetchAllPages(apiOrigin + "/user/installations?per_page=100", userToken, "installations")) {
@@ -271,12 +239,7 @@ public class GithubTokenService implements GitTokenService {
         return Set.copyOf(ids);
     }
 
-    /**
-     * Fetch every page of a GitHub list endpoint, following the {@code Link} rel="next" cursor, and
-     * flatten the named array field from each page. Without this an installation granting &gt;100 repos
-     * (or a user administering &gt;100 installations) is silently truncated to the first page — which
-     * would hide repos from the connect picker and could reject a legitimately-administered install.
-     */
+    /** Without paging, more than 100 repos or installations would be silently truncated. */
     private java.util.List<JsonNode> fetchAllPages(String firstUrl, String bearer, String arrayField) {
         java.util.List<JsonNode> out = new java.util.ArrayList<>();
         String next = firstUrl;
@@ -307,15 +270,13 @@ public class GithubTokenService implements GitTokenService {
             }
             next = nextLink(res.headers().firstValue("Link").orElse(null));
         }
-        // A still-present cursor at the cap means we silently truncated (>MAX_PAGES*100 items) — make a
-        // user with >5000 repos/installations diagnosable. Categorical only (field name + cap), no URL.
+        // A cursor still present at the cap means silent truncation; log it, categorical only.
         if (next != null) {
             log.warn("github pagination capped field={} maxPages={}", arrayField, MAX_PAGES);
         }
         return out;
     }
 
-    /** Extract the rel="next" URL from a GitHub {@code Link} response header, or null when absent. */
     static String nextLink(String linkHeader) {
         if (linkHeader == null || linkHeader.isBlank()) return null;
         // e.g. <https://api.github.com/...&page=2>; rel="next", <...&page=9>; rel="last"
@@ -323,8 +284,7 @@ public class GithubTokenService implements GitTokenService {
             String seg = part.trim();
             int lt = seg.indexOf('<');
             int gt = seg.indexOf('>', lt + 1);
-            // Match the full "; rel="next"" param per RFC 5988 so a server emitting rel="next-page"
-            // doesn't false-match on the bare substring.
+            // Match the full "; rel="next"" param (RFC 5988) so rel="next-page" doesn't false-match.
             if (lt >= 0 && gt > lt && seg.substring(gt + 1).contains("; rel=\"next\"")) {
                 return seg.substring(lt + 1, gt);
             }
@@ -404,11 +364,8 @@ public class GithubTokenService implements GitTokenService {
     }
 
     /**
-     * Parse an RSA private key from PEM. GitHub App keys download in PKCS#1
-     * ({@code -----BEGIN RSA PRIVATE KEY-----}); we also accept PKCS#8
-     * ({@code -----BEGIN PRIVATE KEY-----}). A PKCS#1 body is wrapped into a
-     * PKCS#8 {@code PrivateKeyInfo} first, so a single {@link KeyFactory} path
-     * handles both — no third-party crypto provider needed.
+     * GitHub App keys download as PKCS#1; PKCS#1 is wrapped into PKCS#8 so one {@link KeyFactory} path handles both
+     * without a third-party provider.
      */
     static PrivateKey parsePrivateKey(String pem) throws GeneralSecurityException {
         boolean pkcs1 = pem.contains("BEGIN RSA PRIVATE KEY");
@@ -422,10 +379,6 @@ public class GithubTokenService implements GitTokenService {
         return KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der));
     }
 
-    /**
-     * Wrap a PKCS#1 {@code RSAPrivateKey} DER inside a PKCS#8 {@code PrivateKeyInfo}:
-     * {@code SEQUENCE { version 0, AlgorithmIdentifier(rsaEncryption, NULL), OCTET STRING(pkcs1) }}.
-     */
     private static byte[] pkcs1ToPkcs8(byte[] pkcs1) {
         byte[] version = {0x02, 0x01, 0x00};
         // AlgorithmIdentifier: SEQUENCE { OID 1.2.840.113549.1.1.1 (rsaEncryption), NULL }.
@@ -450,7 +403,6 @@ public class GithubTokenService implements GitTokenService {
         return derTlv((byte) 0x30, concat(version, algId, privateKey)); // SEQUENCE
     }
 
-    /** Emit a DER tag-length-value, using definite long-form length when needed. */
     private static byte[] derTlv(byte tag, byte[] content) {
         byte[] len = derLength(content.length);
         byte[] out = new byte[1 + len.length + content.length];
@@ -460,7 +412,6 @@ public class GithubTokenService implements GitTokenService {
         return out;
     }
 
-    /** DER definite length: short form below 128, else long form (0x80|n then big-endian bytes). */
     private static byte[] derLength(int len) {
         if (len < 0x80) return new byte[] {(byte) len};
         int n = 0;

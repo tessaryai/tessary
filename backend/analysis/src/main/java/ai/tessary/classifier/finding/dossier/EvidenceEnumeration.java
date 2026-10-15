@@ -8,14 +8,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Cross-cutting rather than classifier-specific: shared by every assembler
- * in this package, deciding whether the finding's evidence table is small enough to enumerate whole or
- * large enough that only a DECLARED selection is shown.
- *
- * <p>The read is bounded to {@link ClassifierDossierAssembler#SMALL_EVIDENCE_SET_CAP}+1 rows either way
- * ({@link FindingEvidenceRepository#claimFirst} over-fetches by one, so the extra row's existence answers "is this the
- * whole population" without a second query). The declared selection IS that bounded read, labelled differently
- * depending on whether it turned out to be everything.
+ * Shared by every assembler: enumerate a finding's evidence whole when small, else show a declared selection.
+ * {@link FindingEvidenceRepository#claimFirst} over-fetches by one past
+ * {@link ClassifierDossierAssembler#SMALL_EVIDENCE_SET_CAP}, so one query answers whether it is the whole population.
  */
 final class EvidenceEnumeration {
 

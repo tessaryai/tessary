@@ -17,9 +17,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Persistence for {@link RcaReportRow}. Reads join the report's {@code job} row and surface the
- * queue's live status as the report's — the single source for "is it still running", covering the
- * exhaustion-sweep case where only the job is flipped to {@code failed} (see {@link RcaReportRow}).
+ * Reads surface the {@code job} row's status as the report's, since an exhaustion sweep flips only the job (see
+ * {@link RcaReportRow}).
  */
 @Repository
 public class RcaReportRepository {
@@ -40,10 +39,10 @@ public class RcaReportRepository {
         this.mapper = mapper;
     }
 
-    /** Insert the pending report shell for a job, no-op when a concurrent trigger already inserted it
-     *  ({@code ux_rca_report_job}) — the report side of {@link RcaJobRepository#createOrGet}'s coalesce.
-     *  {@code engine} is stamped here, at trigger time, so the polling UI can describe the running
-     *  lane ("cloning your repo…") before the analysis completes. */
+    /**
+     * No-op when a concurrent trigger already inserted it. {@code engine} is stamped at trigger time so the UI can
+     * describe the running lane.
+     */
     public void insertPendingIfAbsent(
             String projectId,
             String jobId,
@@ -99,7 +98,7 @@ public class RcaReportRepository {
                 .optional();
     }
 
-    /** Which finding a report is about — null for a report from before findings were the subject. */
+    /** Null for a report from before findings were the subject. */
     public Optional<String> findingIdOf(String projectId, String jobId) {
         return jdbc.sql("SELECT finding_id FROM rca_report WHERE project_id = :pid AND job_id = :jobId")
                 .param("pid", projectId)
@@ -108,7 +107,6 @@ public class RcaReportRepository {
                 .optional();
     }
 
-    /** The most recent reports on one finding, newest first — the case page's "has anyone looked?" read. */
     public List<RcaReportRow> listByFinding(String projectId, String findingId, int limit) {
         return jdbc.sql("SELECT " + COLS + " " + FROM
                         + " WHERE r.project_id = :pid AND r.finding_id = :fid ORDER BY r.created_at DESC LIMIT :limit")
@@ -119,27 +117,12 @@ public class RcaReportRepository {
                 .list();
     }
 
-    /** What a finished RCA gives a case row: its verdict and its one-sentence summary. */
     public record CaseLead(
             @Nullable String verdict, @Nullable String summary) {}
 
     /**
-     * What a finished RCA concluded about each of {@code caseIds} — its verdict and summary — as the
-     * Triage queue reads it. ONE query for a whole page, served by
-     * {@code ix_rca_report_finding} through the {@code finding} join, rather than a report fetch per
-     * row: Triage lists every live case, and a per-row read would put an RCA lookup behind the app's
-     * first screen.
-     *
-     * <p>Keyed on the CASE (1b: a case reads over all of its findings, so a lookup keyed on any one
-     * finding id can't be looked up by the case alone) via {@code DISTINCT ON (f.case_id)} rather than
-     * {@code r.finding_id}. RCA locks a case the moment it is pressed, so in practice at most one finding
-     * of a case is ever analysed (1c) — but the join still routes through {@code finding.case_id} rather
-     * than assume that.
-     *
-     * <p>Only a {@code done} run counts, and {@code done} is the JOB's status for the reason the rest of
-     * this file joins {@code job}: an exhaustion sweep flips the job and not the report. A failed or
-     * running analysis has concluded nothing, and a row captioned from one would state a cause nobody
-     * established.
+     * One query per page via {@code ix_rca_report_finding}, keyed on the case through {@code finding.case_id}. Only a
+     * {@code done} JOB counts: a failed or running analysis has concluded nothing.
      */
     public Map<String, CaseLead> leadsByCase(String projectId, Collection<String> caseIds) {
         if (caseIds.isEmpty()) return Map.of();
@@ -170,7 +153,7 @@ public class RcaReportRepository {
                 .optional();
     }
 
-    /** Stamp the analysis outcome — the one write a report ever receives after its shell insert. */
+    /** The one write a report receives after its shell insert. */
     public void complete(
             String jobId,
             String status,
@@ -199,8 +182,7 @@ public class RcaReportRepository {
                 .update();
     }
 
-    /** {@code getBoolean} reads SQL NULL as false, which is the one answer this column must not
-     *  invent: a report written before the column existed does not know whether it had a repo. */
+    /** {@code getBoolean} reads NULL as false, which this column must not invent. */
     private static @Nullable Boolean readNullableBoolean(ResultSet rs, String column) throws SQLException {
         boolean value = rs.getBoolean(column);
         return rs.wasNull() ? null : value;

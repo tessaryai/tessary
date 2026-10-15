@@ -2,15 +2,8 @@
 package ai.tessary.alert;
 
 /**
- * A project's binding to one delivery channel for fired alerts. Many channels per project,
- * each fanned out to by {@link ai.tessary.alert.channel.AlertDeliveryListener} when an
- * {@link AlertFiredEvent} commits.
- *
- * <p>{@code configEnc} holds SecretBox-sealed (AES-256-GCM, {@code tessary.secret-key}) channel config
- * JSON — the target URL plus any credential (webhook signing secret, Sentry DSN, Linear API key + team
- * id, PagerDuty routing key). It is NEVER returned over the API (see {@code AlertChannelDtos.ChannelView});
- * only a {@code credentialsSet} indicator is surfaced. The shape of the sealed JSON is owned by each
- * {@code AlertChannel} impl.
+ * A project's binding to one alert delivery channel. {@code configEnc} is SecretBox-sealed config JSON (target and
+ * credentials), never returned over the API; each {@code AlertChannel} owns its shape.
  */
 public record AlertChannelRow(
         String id,

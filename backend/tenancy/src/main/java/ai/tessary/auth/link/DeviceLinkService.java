@@ -23,16 +23,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * Device-authorization (RFC 8628 style) link flow. The plugin starts a link,
- * shows the user a short {@code user_code} + verification URL, and polls with
- * the secret {@code device_code}. A signed-in browser confirms the code against
- * a project; the next poll mints a project-scoped API key and returns it once.
- *
- * <p>Security: the secret {@code device_code} is high-entropy, bcrypt-hashed,
- * and never displayed — it is the only credential that can be polled into a
- * token. The short {@code user_code} is only usable inside the authenticated
- * browser confirm, so a shoulder-surfed user_code grants nothing. The API key
- * is minted lazily at claim time, so a plaintext token never persists.
+ * RFC 8628-style device link. The secret {@code device_code} is high-entropy, bcrypt-hashed and never displayed; the
+ * short {@code user_code} works only inside an authenticated browser confirm. The key is minted lazily at claim, so a
+ * plaintext token never persists.
  */
 @Service
 public class DeviceLinkService {
@@ -43,7 +36,7 @@ public class DeviceLinkService {
     static final int POLL_INTERVAL_SECONDS = 3;
     private static final int DEVICE_CODE_BYTES = 24;
     private static final String DEVICE_PREFIX = "link_";
-    // literal "link_" + 8 random chars; full code has more entropy after that.
+    // "link_" plus 8 random chars; the full code has more entropy after that.
     private static final int PREFIX_LEN = DEVICE_PREFIX.length() + 8;
     private static final int BCRYPT_COST = 10;
     private static final char[] USER_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789".toCharArray();
@@ -53,7 +46,6 @@ public class DeviceLinkService {
     private final ProjectRepository projects;
     private final OrganizationRepository orgs;
     private final SecureRandom rng = new SecureRandom();
-    /** What link expiry and the poll throttle are measured against: the system clock outside tests. */
     private final Clock clock;
 
     @Autowired
@@ -83,7 +75,7 @@ public class DeviceLinkService {
     /** Status the browser confirm screen reads. */
     public record View(String userCode, @Nullable String clientLabel, String status, String expiresAt) {}
 
-    /** Result of a poll. {@code token}/slugs are only set when status == "ready". */
+    /** {@code token} and slugs are set only when status is "ready". */
     public record PollOutcome(
             String status,
             @Nullable String token,
@@ -132,18 +124,17 @@ public class DeviceLinkService {
         throw new TessaryException(CommonError.INTERNAL);
     }
 
-    /** Browser-side: metadata for the confirm screen. Empty when unknown/expired. */
+    /** Empty when unknown or expired. */
     public Optional<View> view(String userCode) {
         return links.findByUserCode(userCode)
                 .map(l -> new View(l.userCode(), l.clientLabel(), effectiveStatus(l), l.expiresAt()));
     }
 
-    /** Browser-side: bind a confirmed link to a project the user belongs to (membership checked by caller). */
+    /** Membership is checked by the caller. */
     public boolean confirm(String userCode, String orgId, String projectId, String userId) {
         DeviceLink l = links.findByUserCode(userCode).orElse(null);
         if (l == null || isExpired(l)) return false;
-        // Conditional UPDATE (pending → confirmed) — the row check is atomic, so two
-        // concurrent confirms can't both win.
+        // Atomic pending to confirmed, so two concurrent confirms can't both win.
         return links.markConfirmed(l.id(), orgId, projectId, userId) == 1;
     }
 
@@ -178,9 +169,7 @@ public class DeviceLinkService {
 
         if (DeviceLink.PENDING.equals(l.status())) return PollOutcome.of("authorization_pending");
 
-        // Confirmed: claim atomically first so a concurrent poll can't also mint.
-        // Only the poll whose UPDATE flips confirmed → claimed proceeds to issue a
-        // token; the loser sees the row already claimed.
+        // Only the poll whose UPDATE flips confirmed to claimed mints a token.
         if (links.beginClaim(l.id()) != 1) {
             return PollOutcome.of("already_claimed");
         }
@@ -190,7 +179,6 @@ public class DeviceLinkService {
             links.markStatus(l.id(), DeviceLink.EXPIRED);
             return PollOutcome.of("expired");
         }
-        // Lazy-mint the token now (plaintext never persists) and attach it to the claimed row.
         ApiKeyService.Issued issued = mcpTokens.issue(l.projectId(), l.userId(), "Claude Code link " + l.userCode());
         links.setToken(l.id(), issued.token().id());
         return new PollOutcome("ready", issued.plaintext(), org.slug(), project.slug());

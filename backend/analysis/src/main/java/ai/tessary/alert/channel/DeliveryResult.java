@@ -4,11 +4,9 @@ package ai.tessary.alert.channel;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The outcome of one {@link AlertChannel#deliver} call. Best-effort delivery never throws on
- * a transport error; it returns a result the {@code AlertDeliveryListener} records in the
- * delivery-attempt log. {@code httpStatus} is the upstream HTTP status when there was a response (null
- * for a pre-flight or network failure). On failure {@code error} carries a short, secret-free reason —
- * never the upstream response body (which could echo SSRF-probed internal content).
+ * One {@link AlertChannel#deliver} outcome; delivery never throws on a transport error. {@code httpStatus} is null
+ * without a response. {@code error} is short and secret-free, never the upstream body, which could echo SSRF-probed
+ * content.
  */
 public record DeliveryResult(
         boolean ok, @Nullable Integer httpStatus, @Nullable String error) {

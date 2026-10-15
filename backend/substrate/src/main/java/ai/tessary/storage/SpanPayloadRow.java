@@ -4,17 +4,9 @@ package ai.tessary.storage;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A v2 {@code span_payload} row — the raw payload, 1:1 with {@link SpanRow} (substrate-model.md §4).
- *
- * <p>Off-row because it is most of the bytes and the least of the reads: it is read when a single span is
- * opened, and no list surface touches it. That is also why it ages out ahead of {@code span} — a span whose
- * payload has been purged stays fully functional on every list and rollup surface.
- *
- * @param providedUsage the producer's raw usage object, kept as a receipt and NEVER read for arithmetic.
- *     When an unmodelled token bucket starts mattering, it gets promoted to a real column on {@code span}
- *     and backfilled from here.
- * @param redactions the credentials redaction removed from this payload, as a JSON array of {@code
- *     RedactionStamp}; null when it removed none
+ * A v2 {@code span_payload} row, 1:1 with {@link SpanRow}. Off-row because it is most of the bytes and least of the
+ * reads, which is also why it ages out ahead of {@code span}. @param providedUsage the producer's raw usage, kept as a
+ * receipt and never read for arithmetic @param redactions JSON array of {@code RedactionStamp}; null when none
  */
 public record SpanPayloadRow(
         String projectId,
@@ -27,7 +19,6 @@ public record SpanPayloadRow(
         String eventTs,
         @Nullable String redactions) {
 
-    /** A payload redaction removed nothing from. */
     public SpanPayloadRow(
             String projectId,
             String traceId,

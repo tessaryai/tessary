@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
-/** A product-wide rule with evidence + confidence. `applies_to` is a string or a list. */
+/** {@code applies_to} is a string or a list. */
 public record ImplicitInvariant(
         String name,
         String description,

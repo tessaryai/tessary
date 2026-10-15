@@ -20,13 +20,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Hosts the MCP Streamable HTTP transport at {@code POST /mcp}.
- *
- * <p>Auth is handled upstream by {@code AuthFilter}: it verifies the Bearer
- * token against {@code api_key}, populates {@link TenantContext} with the
- * bound project, and rejects unauthorised requests before we get here. This
- * controller just dispatches JSON-RPC envelopes; every tool reads
- * {@code ctx.projectId()} to scope its work.</p>
+ * MCP Streamable HTTP at {@code POST /mcp}. {@code AuthFilter} verifies the bearer token and binds the project
+ * upstream; tools scope by {@code ctx.projectId()}.
  */
 @RestController
 public class McpController {
@@ -48,13 +43,10 @@ public class McpController {
     public ResponseEntity<String> handle(HttpServletRequest req, @RequestBody(required = false) String rawBody) {
         TenantContext ctx = (TenantContext) req.getAttribute(TenantContext.ATTRIBUTE);
         if (ctx == null || !ctx.isAuthenticated()) {
-            // AuthFilter normally short-circuits earlier; this is the fallback for
-            // configurations that disable auth (dev). In disabled mode there's no
-            // project context, so /mcp has nothing to bind — return 404.
+            // Reached only when auth is disabled (dev), where there is no project to bind.
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
-        // Least-privilege key family: only an mcp key may drive tool access; a write- or
-        // query-scoped key presented here is rejected before any tool runs.
+        // Only an mcp key may drive tools.
         if (!ctx.keyPermits(ai.tessary.tenant.KeyScope.ADMIN)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(jsonOrEmpty(JsonRpc.Response.err(

@@ -9,23 +9,17 @@ import java.net.URI;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Where a decision call goes and on whose key: the gateway, the model id in that gateway's spelling,
- * the endpoint, and the org's decrypted key. The key lives in process only for the call; this
- * record's {@link #toString} never prints it.
- */
+/** Where a decision call goes and on whose key. {@link #toString} never prints the key. */
 public record DecisionTarget(ModelProvider provider, String modelId, URI endpoint, String apiKey) {
 
-    /** TypeSafe's own path under its base URL. */
     static final String TYPESAFE_PATH = "/v1/systemone";
 
-    /** OpenRouter's decision path, which sits beside its {@code /v1} chat API rather than under it. */
+    /** Beside OpenRouter's {@code /v1} chat API, not under it. */
     static final String OPENROUTER_PATH = "/alpha/decisions";
 
     /**
-     * The decision endpoint for {@code provider}, from a credential's base URL override or the
-     * platform default. A trailing {@code /v1} is dropped first: the Providers form shows the chat
-     * base URL for OpenRouter, and neither decision path lives under it.
+     * A trailing {@code /v1} is dropped first: the Providers form shows the chat base URL, and neither decision path
+     * lives under it.
      */
     public static URI endpointFor(ModelProvider provider, @Nullable String baseUrlOverride) {
         String path =

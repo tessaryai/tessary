@@ -8,21 +8,12 @@ import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a qualifying finding into a case for every classifier the dedicated sources
- * ({@link MetricDriftSource}, {@link ToolErrorCaseSource}, {@link SecretLeakCaseSource}, {@link RateCaseSource})
- * don't own:
- * any per-span classifier an org authors and arms itself. Before decision 1 such a classifier's only
- * route to a case was a human's <em>Real deviation</em> on a finding {@code ClassifierArming} filed.
- *
- * <p>Unlike the dedicated sources this source carries no evidence blob of its own shape to read numbers back
- * from — its findings span whatever the classifier itself measured (N detections in a window) — so the case
- * it shapes states the fact plainly rather than a fitted before/after pair. {@link #gateSentence} still
- * records which authority ruled, matching every other source's own account of itself.
+ * Shapes a case for any classifier the dedicated sources don't own, such as an org-authored per-span classifier. It
+ * has no evidence blob of its own shape, so the case states the fact plainly rather than a before/after pair.
  */
 @Component
 public class GenericFindingCaseSource implements CaseSource {
 
-    /** The classifiers the dedicated sources already own; this source claims everything else. */
     private static final Set<String> DEDICATED = Set.of(
             BuiltInDetector.Kind.DURATION_DRIFT,
             BuiltInDetector.Kind.COST_DRIFT,
@@ -32,8 +23,6 @@ public class GenericFindingCaseSource implements CaseSource {
             BuiltInDetector.Kind.FRUSTRATION,
             BuiltInDetector.Kind.GROUNDEDNESS);
 
-    /** Severity for a cause this source cannot grade a magnitude for. Mid-list deliberately, same
-     *  reasoning as the other sources' own unreadable-evidence fallback. */
     private static final double UNKNOWN_SEVERITY = 0.5;
 
     @Override
@@ -62,16 +51,13 @@ public class GenericFindingCaseSource implements CaseSource {
                 null);
     }
 
-    /** Why this crossed its own bar, in this detector's own terms, prefixed by which authority ruled —
-     *  the finding's own {@link FindingRow#basis()} when the detector wrote one, a generic account
-     *  otherwise. */
     private static String basis(FindingRow finding) {
         String gate = gateSentence(finding);
         String detail = finding.basis();
         return detail == null || detail.isBlank() ? gate : gate + " " + detail;
     }
 
-    /** Who confirmed this and on what authority — see the sibling sources' identically-named helper. */
+    /** Ordering only, as with every other source. */
     private static String gateSentence(FindingRow finding) {
         if (finding.humanVerdictAt() != null) {
             return "A human ruled this a real deviation.";

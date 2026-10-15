@@ -59,9 +59,8 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       )}
       style={{
         transitionDuration: "var(--duration-micro)",
-        // %236E6E6E is --primitive-grey-600, the ramp's decorative-icon step. It has to be a
-        // literal: a data: URI is its own document and cannot read a custom property from ours.
-        // Keep it in sync with tokens.css by hand — it is the one color in src/ that can't.
+        // --primitive-grey-600 as a literal: a data: URI cannot read our custom properties. Keep in sync with
+        // tokens.css by hand.
         backgroundImage:
           "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%236E6E6E' d='M2.5 4.5L6 8l3.5-3.5z'/></svg>\")",
         backgroundPosition: "right 0.5rem center",

@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * One presentation of a tool call, shared by all three trace views.
- *
- * A tool call is not dialogue — nobody is speaking — so it does not get a chat
- * bubble. In Conversation it is a pill carrying the tool's name and nothing
- * else: arguments are frequently large, and a batch of five calls has to read
- * as one line, so the payloads wait behind the chevron. Tree and Timeline hang
- * the same panes off their span rows, so "what did this tool actually return"
- * is one click from wherever the reader is.
- */
+// A tool call is not dialogue, so it is a pill with its payloads behind the chevron, in every view.
 import { useState } from "react";
 import { cn } from "../../ui";
 import { PayloadBody } from "../components/PayloadViewer";
@@ -18,7 +9,6 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 
 export type ToolStep = {
-  /** Span id when this came from an `execute_tool` span; a synthetic key otherwise. */
   key: string;
   name: string;
   args: string | null;
@@ -26,16 +16,7 @@ export type ToolStep = {
   failed: boolean;
 };
 
-/**
- * The tool's own payload, dug out of the message envelope it arrives in.
- *
- * A span's raw output is not the tool's answer but a message carrying it —
- * `[{"role":"tool","parts":[{"type":"tool_result","content":"…"}]}]` — so the
- * Result pane printed three levels of transport around the one string the
- * reader wanted, and {@link resultFailed} looked for `error` at a depth where
- * it could never be. Unwrapping is conservative: anything that is not a single
- * message wrapping a single tool block is returned untouched.
- */
+/** Conservative: anything that is not one message wrapping one tool block is returned untouched. */
 function unwrapToolPayload(raw: string | null): string | null {
   if (raw == null || raw === "") return raw;
   let parsed: unknown;
@@ -57,12 +38,7 @@ function unwrapToolPayload(raw: string | null): string | null {
   return typeof payload === "string" ? payload : JSON.stringify(payload);
 }
 
-/**
- * A tool can fail three ways and the span only records one of them: the
- * transport error. A handler that catches its own problem and answers
- * `{"error": "member_not_on_policy"}` returns HTTP-fine, so the span stays `ok`
- * while the agent was, in fact, told no. Read the payload as well.
- */
+/** A handler that answers `{"error": ...}` leaves the span `ok`, so read the payload too. */
 function resultFailed(result: string | null): boolean {
   if (!result) return false;
   try {
@@ -73,11 +49,6 @@ function resultFailed(result: string | null): boolean {
   }
 }
 
-/**
- * A tool call built from the model's own request, for when the execution was
- * never instrumented as a span. The result, if it came back, is recovered from
- * the `tool_result` the next llm call was handed.
- */
 export function toolStepFrom(fields: {
   key: string;
   name: string;
@@ -93,18 +64,11 @@ export function toolStepFrom(fields: {
   };
 }
 
-/** The OTel GenAI id linking an execution back to the model's request for it. */
 export const TOOL_CALL_ID = "gen_ai.tool.call.id";
 
 /**
- * A span's record of executing a tool, or null if it is not one.
- *
- * The test is `gen_ai.tool.call.id`, not the kind. A tool the agent reaches for
- * may be recorded under any operation the producer thinks fits — this project
- * emits its document search as `retrieval`, with an empty `tool_calls` array and
- * the name and arguments only in the GenAI attributes. Keying on `kind === "tool"`
- * silently dropped those: the calls showed no latency, nested under nothing, and
- * looked to me like an instrumentation gap when they were fully instrumented.
+ * Keyed on `gen_ai.tool.call.id`, not kind: producers record tool use under other operations
+ * (e.g. `retrieval`).
  */
 export function toolStepOf(o: Span): ToolStep | null {
   const callId = o.attributes?.[TOOL_CALL_ID];
@@ -114,9 +78,7 @@ export function toolStepOf(o: Span): ToolStep | null {
   const attrName = o.attributes?.["gen_ai.tool.name"];
   const name =
     call?.name ?? (typeof attrName === "string" ? attrName : null) ?? o.name ?? o.kind ?? "tool";
-  // Unwrap the resolved value, not just the span fallback: the producer wraps
-  // the envelope around `tool_calls[].result` too, so unwrapping only `o.output`
-  // left the Result pane exactly as it was.
+  // The producer wraps `tool_calls[].result` in the same envelope.
   const result = unwrapToolPayload(call?.result ?? o.output);
   return {
     key: o.id,
@@ -127,7 +89,6 @@ export function toolStepOf(o: Span): ToolStep | null {
   };
 }
 
-/** The payloads, revealed on demand. Shared by all three views. */
 export function ToolDetails({ step }: { step: ToolStep }) {
   return (
     <div
@@ -172,15 +133,7 @@ export function Chevron({ open }: { open: boolean }) {
   );
 }
 
-/**
- * A batch of tool calls the agent issued together.
- *
- * Each call is a pill sized to its own signature rather than a full-width row,
- * so calls made in parallel sit on one line and read as one step, while calls
- * made in sequence stack. Latency and token counts are not on the pill: they
- * belong to the span, and Tree and Timeline are where spans are read. What the
- * pill has to carry is what was asked and whether it worked.
- */
+/** Parallel calls sit on one line; latency and tokens belong to the span views. */
 export function ToolCallBatch({ steps }: { steps: ToolStep[] }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const open = steps.find((s) => s.key === openKey) ?? null;
@@ -212,8 +165,6 @@ function ToolPill({ step, open, onToggle }: { step: ToolStep; open: boolean; onT
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      // The tint is the whole signal visually; the word stays here so a screen
-      // reader and anyone who cannot separate the hue still gets it.
       aria-label={step.failed ? `${step.name}, failed` : step.name}
       title={step.failed ? `${step.name}, failed` : step.name}
       className={cn(

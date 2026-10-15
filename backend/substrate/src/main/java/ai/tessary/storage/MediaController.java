@@ -15,15 +15,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Serves externalized media bytes by id — the read side of the {@link MediaStore}
- * seam that the frontend trace viewer renders images from ({@code <img src=".../media/{id}">}) and
- * that the judge boundary re-hydrates refs through. Media rides with traces, part of the FREE
- * observability layer, so it is gated by org membership only ({@code requireProject}), not an
- * entitlement. Returns raw bytes with the stored content type; content-addressed ids are immutable,
- * so responses are long-cacheable (private). 404 when the ref is unknown.
- *
- * <p>{@code media_object} is populated by the ingest-side media externalization, which writes
- * {@code ContentBlock.imageRef} instead of inline base64.
+ * Serves media bytes by id for the trace viewer. Part of the free observability layer, so gated by org membership only.
+ * Content-addressed ids are immutable, so responses are privately long-cacheable.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/media")
@@ -52,7 +45,7 @@ public class MediaController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    /** Parse the stored media type, falling back to octet-stream on a malformed value. */
+    /** Falls back to octet-stream on a malformed value. */
     private static MediaType safeType(String t) {
         try {
             return MediaType.parseMediaType(t);

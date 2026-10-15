@@ -10,7 +10,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** Persistence for {@link CaseEventRow} — the case's activity trail, append-only. */
+/** Append-only. */
 @Repository
 public class CaseEventRepository {
 
@@ -22,7 +22,7 @@ public class CaseEventRepository {
         this.jdbc = jdbc;
     }
 
-    /** One case's trail, oldest first — it reads as a story, so it is told in order. */
+    /** Oldest first. */
     public List<CaseEventRow> listByCase(String projectId, String caseId) {
         return jdbc.sql("SELECT " + COLS + " FROM eval_case_event WHERE project_id = :pid AND case_id = :caseId "
                         + "ORDER BY created_at, id")

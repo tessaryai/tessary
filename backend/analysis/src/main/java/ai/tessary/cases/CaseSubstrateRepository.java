@@ -15,22 +15,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Feature-owned cross-read of the trace substrate for the case surface — the before/after exemplars on a
- * case page, and the coverage counts Triage's all-clear state cites. The
- * {@code jdbc_client_only_in_repositories} ArchUnit rule allows it.
- *
- * <p><b>Hydration only: this repository no longer chooses which traces a case shows.</b> It used to
- * SAMPLE them — a detector's window is a population summarized into a sketch, the ids that made it up
- * were not stored, so the page went back to the substrate and pulled fair members of the same scope over
- * the same hours. That meant a second implementation of the detector's own scope living in the case
- * surface, and an illustration the page then had to disclaim. Both are gone: the classifier records what
- * it saw as {@code finding_evidence} at the moment it saw it, and this turns those ids into rows a
- * reader can tell apart. Nothing here decides anything.
- *
- * <p>Time is read on {@code trace.started_at} — EVENT time, the same clock the metric-drift sweep cuts
- * windows on. The old three-way COALESCE existed because {@code trace} carried an ingest clock that a
- * backfill compressed into minutes; {@code trace} has no ingest clock at all and {@code started_at}
- * is NOT NULL, so the fallback chain has been designed away rather than defended.
+ * Hydrates the trace ids classifiers recorded as {@code finding_evidence}, and counts coverage for Triage's all-clear
+ * state. Nothing here chooses which traces a case shows. Time is {@code trace.started_at}, event time.
  */
 @Repository
 public class CaseSubstrateRepository {
@@ -56,12 +42,8 @@ public class CaseSubstrateRepository {
             @Nullable String startedAt) {}
 
     /**
-     * Hydrate trace ids the detector already recorded, in the order given — a finding's exemplar first,
-     * then its witnesses, which is the order a reader wants and not the order a database returns.
-     *
-     * <p>An id with no row is dropped rather than rendered as a dead link: retention can age a trace out
-     * from under a finding that outlived it, and offering a click that 404s is worse than one fewer
-     * example.
+     * In the order given (exemplar, then witnesses). An id with no row is dropped: retention may have aged it out, and
+     * a link that 404s is worse than one fewer example.
      */
     public List<Exemplar> byIds(String projectId, List<String> traceIds) {
         if (traceIds.isEmpty()) return List.of();
@@ -82,9 +64,7 @@ public class CaseSubstrateRepository {
     }
 
     /**
-     * Traces seen since {@code since} — the count that separates the two silences a reader must never
-     * confuse. "Nothing needs you" over a thousand traces is coverage; over zero it is a broken exporter,
-     * and the all-clear state would otherwise congratulate someone on it (launch requirement E5).
+     * Separates coverage from a broken exporter: "nothing needs you" over zero traces must not read as an all-clear.
      */
     public long countTracesSince(String projectId, String since) {
         return jdbc.sql("""
@@ -98,18 +78,8 @@ public class CaseSubstrateRepository {
     }
 
     /**
-     * Every trace this project has ever kept — the number the empty Triage screen prints beside its
-     * headline, so that no headline can deny traffic the reader is looking at.
-     *
-     * <p>Unbounded on purpose, where {@code spansReceived} and its neighbours cap at a thousand. What
-     * makes an all-time count expensive is not the rows but the predicate: {@code ix_trace_project_started}
-     * carries no {@code is_deleted}, so Postgres had to visit the heap for every candidate row to decide
-     * whether it counted. {@code ix_trace_project_live} (migration 0021) is a partial index whose
-     * definition is exactly this WHERE clause, which makes this an index-only scan and the cap
-     * unnecessary. Keep the two in step: widen the predicate here and the index stops covering it,
-     * silently, with only the latency to show for it.
-     *
-     * <p>Only called when the answer will be rendered — see {@link CaseService#watching(String, boolean)}.
+     * Unbounded on purpose: {@code ix_trace_project_live} (migration 0021) is a partial index matching exactly this
+     * WHERE clause, making it index-only. Widen the predicate and the index silently stops covering it.
      */
     public long countTraces(String projectId) {
         return jdbc.sql("""
@@ -118,11 +88,8 @@ public class CaseSubstrateRepository {
     }
 
     /**
-     * Distinct call sites the traffic since {@code since} resolved to. Counted from spans rather
-     * than from the pipeline, because a launch partner has no pipeline: call sites arrive tagged on spans
-     * and exist whether or not anyone ever committed a {@code .tessary} bundle. {@code __unattributed__}
-     * is not a call site and is excluded — see {@code MetricDriftSweep} on why that pile is a mixture
-     * rather than a population.
+     * Counted from spans rather than the pipeline, since call sites can arrive tagged on spans without a bundle.
+     * {@code __unattributed__} is excluded.
      */
     public long countCallSitesSince(String projectId, String since) {
         return jdbc.sql("""

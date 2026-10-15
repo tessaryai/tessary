@@ -260,16 +260,6 @@
                 <artifactId>spotbugs-maven-plugin</artifactId>
             </plugin>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-pmd-plugin</artifactId>
-            </plugin>
-            <!-- Coverage baseline: bare-activates jacoco-maven-plugin
-                 from the aggregator's pluginManagement (prepare-agent + report), same
-                 no-configuration pattern as every other plugin above. No coverage gate.
-                 The aggregate report is the one to read for a module's real number: a per-module
-                 report only credits that module's own tests, so code exercised by the
-                 @SpringBootTest suite here shows as uncovered in the module that owns it. -->
-            <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <executions>

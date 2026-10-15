@@ -7,10 +7,7 @@ import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/**
- * Append-only store for {@link AuditLog} rows. Insert + read only; there is no update
- * or delete path — the trail is immutable. Reads are available by project (the API-key audit surface).
- */
+/** Append-only; there is no update or delete path. */
 @Repository
 public class AuditLogRepository {
 

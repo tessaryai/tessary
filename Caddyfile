@@ -1,17 +1,5 @@
-# Dev reverse proxy. Used by:
-#   - task caddy (local; env vars unset → localhost defaults)
-#   - docker-compose.dev.yml (container; env vars set to service names)
-#
-# Caddy listens on :8000 and routes
-#   /api/*       → backend (REST API)
-#   /auth/*      → backend (WorkOS login/callback/logout/me)
-#   /mcp         → backend (MCP Streamable HTTP transport)
-#   /v1/traces   → backend (OTLP/HTTP trace receiver; bearer-authenticated)
-#   /v1/query/*  → backend (read API; bearer-authenticated)
-#   /v1/usage/*  → backend (metering read; bearer-authenticated)
-#   /actuator/health → backend (top-level status only, for uptime monitors; groups stay staff-only)
-#   else         → frontend (Vite dev server, HMR over websockets)
-#
+# Dev reverse proxy for `task caddy` (localhost defaults) and docker-compose.dev.yml (service names).
+# Backend paths go to the backend; everything else goes to the Vite dev server.
 # Validate: caddy validate --config Caddyfile
 {
 	admin off

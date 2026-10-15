@@ -45,90 +45,36 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The v2 substrate write path: one drained ingest batch onto {@code session → trace → span (+
- * span_payload)}, per substrate-model.md §6.
- *
- * <h2>The only substrate writer</h2>
- *
- * <p>This is the sole writer of {@code tool_call} and {@code retrieved_doc} extraction (see
- * {@link SpanSideTables}, keyed on the producer's own pair rather than a minted observation id) and the
- * call-site materialization that lets call sites emerge from plain-OTLP traffic. No other writer mints
- * these rows; two writers touching the same rows is how duplicate data nobody can tell apart happens.
- *
- * <h2>The order, and why it is the order (§6.1)</h2>
- *
- * <ol>
- *   <li>Validate. Rows that cannot be written at all are dropped HERE, before the transaction, with a
- *       counter and one aggregated log line, never inside it. §6.1 forbids per-row catches in the batch
- *       transaction, because a catch there leaves the transaction marked rollback-only anyway and turns a
- *       clean failure into a partial write nobody can reason about.
- *   <li>Get-or-create sessions, then traces, identity fields only, as the first statements of the
- *       transaction below (see {@code commitBatch} for why they moved inside it). Both are
- *       {@code ON CONFLICT DO NOTHING}, so a redelivery is a no-op and every FK is satisfiable regardless
- *       of arrival order. Timing and rollup columns are never written here, they belong to §7 alone.
- *   <li><b>One transaction</b>: the batch-coalesced trace min/max + re-arm, the fill of a trace name, user,
- *       session or thread an earlier batch left null, the session activity fold, then the span upserts and their payload
- *       rows under the same {@code event_ts} guard. A trace whose session was just filled has it copied onto
- *       its session-less spans in the same transaction.
- * </ol>
- *
- * <h2>The atomicity invariant</h2>
- *
- * <p><b>A span's row write and the trace update that reflects it commit together.</b> The settle protocol
- * (§7.4) is correct only under that invariant: a span row that became visible without its trace re-arm
- * would be silently excluded from a settling rollup, and the trace would report a total that is missing it
- * with {@code is_settled = true} claiming otherwise. It is a transaction boundary rather than a comment,
- * and it has its own test.
- *
- * <h2>Deadlock freedom</h2>
- *
- * <p>Everything this batch locks, it locks in sorted key order, trace rows, then session rows, then spans
- * by {@code (trace_id, id)}, so two concurrent batches over overlapping sets always contend in the same
- * direction: one waits, neither cycles. Sorting alone is not sufficient here, and the transaction's
- * statement order is the other half of the guarantee; {@link #commitBatch} says why.
+ * The only substrate writer: one drained ingest batch onto session, trace and span (substrate-model.md §6), including
+ * {@code tool_call}/{@code retrieved_doc} extraction and call-site materialization. Invalid rows are dropped before the
+ * transaction, never caught inside it. A span's row and the trace update reflecting it commit in ONE transaction, or a
+ * settling rollup could miss the span. Locks are taken in sorted key order; {@link #commitBatch} explains the statement
+ * order.
  */
 @Component
 public class SpanBatchWriter {
 
     private static final Logger log = LoggerFactory.getLogger(SpanBatchWriter.class);
 
-    /** Producer ids longer than this are not identifiers, they are a bug or an attack. */
+    /** Producer ids longer than this are a bug or an attack. */
     private static final int MAX_ID_CHARS = 512;
 
-    /**
-     * Poison-row backstop for payload size. Not a truncation policy, telemetry is bound by count, never
-     * clipped, but a single absurd row must not be able to fail a whole batch, and the capped FTS
-     * expression on {@code span_payload} is the other half of that guard.
-     */
+    /** A poison-row backstop, not truncation: one absurd row must not fail a whole batch. */
     private static final int MAX_PAYLOAD_CHARS = 8_000_000;
 
-    /** Preview width. The list surfaces read these and nothing else, so they are cut once, at write. */
+    /** The list surfaces read only these, so they are cut once, at write. */
     private static final int PREVIEW_CHARS = 200;
 
-    /** Payload size past which {@link #inputPreview} takes the head cut rather than parsing. */
     private static final int MAX_PREVIEW_PARSE_CHARS = 1_000_000;
 
-    /** The role whose last turn the input preview is taken from, see {@link #inputPreview}. */
     private static final String USER_ROLE = "user";
 
     private static final Set<String> USER_ROLES = Set.of(USER_ROLE);
 
     /**
-     * The message-carrier attribute keys a typed {@code span_payload.input} / {@code output} column can
-     * hold byte-for-byte, so keeping them in the attribute bag as well is pure duplication.
-     *
-     * <p>Serialising them into the attribute bag as well stored every prompt and completion TWICE: 1.5 GB
-     * of a 1.9 GB {@code span_payload} was byte-for-byte duplicate, and the two message keys alone were
-     * 95% of all attribute bytes. Nothing listed here overlaps {@code gen_ai.usage.*} /
-     * {@code llm.token_count.*} / {@code llm.cost.*}, the pricing receipt's keys are never stripped,
-     * nor {@code error.type} / {@code exception.type}, which the tool-error definition reads out of this
-     * column.
-     *
-     * <p>The bare {@code input} / {@code output} names are here because agent-kind spans in practice carry
-     * their content under them rather than under any semconv key, and the four-key set left 5,095 payloads
-     * in one corpus holding a verbatim second copy, ~17 MB. Adding them is safe for the same reason the
-     * rest of this set is: the strip below requires byte-for-byte value identity with the promoted column,
-     * so a key that merely shares a name and not a value is never touched.
+     * Message-carrier keys a typed {@code span_payload.input}/{@code output} column can hold byte-for-byte; keeping
+     * both stored every prompt twice (1.5 GB of a 1.9 GB {@code span_payload}). Pricing-receipt and error-type keys are
+     * never listed. The strip requires value identity, so a key sharing only a name is never touched.
      */
     private static final Set<String> PROMOTED_INPUT_KEYS =
             Set.of(GenAiAttributes.INPUT_MESSAGES, GenAiAttributes.OI_INPUT_MESSAGES, "input");
@@ -185,48 +131,36 @@ public class SpanBatchWriter {
         this.txn = new TransactionTemplate(transactionManager);
     }
 
-    /** Spans this process has written or re-written. */
     public long writtenSpans() {
         return writtenSpans.get();
     }
 
-    /** Spans dropped by validation because no row could represent them (see {@link #validate}). */
     public long droppedSpans() {
         return droppedSpans.get();
     }
 
-    /**
-     * Tool-call arguments that arrived non-blank and were not JSON, so the typed column took null.
-     * Relayed from {@code SpanSideTables}, which is package-private, so the reporter can read it without
-     * widening that class's visibility for one gauge.
-     */
+    /** Relayed so the reporter need not widen package-private {@code SpanSideTables}. */
     public long unparseableToolArgs() {
         return sideTables.unparseableToolArgs();
     }
 
-    /** Tool-call results that arrived non-blank and were not JSON. */
     public long unparseableToolResults() {
         return sideTables.unparseableToolResults();
     }
 
     /**
-     * Write one already-redacted batch. Throws on a backend failure, in which case the caller may replay
-     * the whole batch safely: every write here is idempotent, keyed on the producer's own ids.
-     *
-     * @return the number of spans written.
+     * Every write is idempotent on the producer's own ids, so the caller may replay the whole batch after a failure.
      */
     public int write(String projectId, List<RawEntry> entries) {
         if (entries.isEmpty()) return 0;
 
-        // Known call-site ids, loaded once per batch and mutated in place as new ones are seen. A resolved
-        // id the project does not have is materialized as a minimal call_site row, so plain-OTLP telemetry
-        // carrying an explicit tessary.call_site.id (no plugin-published pipeline) is not orphaned, call
-        // sites emerge from traffic.
+        // Mutated as new ids are seen: an unknown id gets a minimal call_site row, so call sites emerge from plain-OTLP
+        // traffic.
         Set<String> knownCallSites = callSites.callSiteIds(projectId);
         List<Prepared> prepared = validate(projectId, entries, knownCallSites);
         if (prepared.isEmpty()) return 0;
 
-        // Sorted by the span key, so concurrent batches take span row locks in one direction only.
+        // Sorted so concurrent batches take span row locks in one direction only.
         prepared.sort(Comparator.comparing((Prepared p) -> p.span().traceId())
                 .thenComparing(p -> p.span().id()));
 
@@ -239,32 +173,17 @@ public class SpanBatchWriter {
     }
 
     /**
-     * The one transaction (§6.1). Nothing in here catches: a failure must take the whole batch down
-     * together, spans and trace re-arm alike, so the caller replays a state that was never half-visible.
+     * Nothing in here catches: a failure takes spans and trace re-arm down together, so a replay never sees a
+     * half-visible state.
      */
     private void commitBatch(
             String projectId,
             List<Prepared> prepared,
             Map<String, TraceFold> byTrace,
             Map<String, SessionFold> bySession) {
-        // IDENTITY ROWS FIRST, AND INSIDE THIS TRANSACTION.
-        //
-        // These two used to run before the transaction opened, on their own autocommit. That is how a
-        // rolled-back batch left a trace row with no spans: the identity row committed by itself, and the
-        // spans it was folded from, the only reason it exists, did not. The shell is unreachable by any
-        // repair. It can never gain a span, so it can never settle, and the §7.4 reaper re-arms it every
-        // grace period for the life of the database. §6.1's atomicity invariant is what forbids this, and
-        // it reads on the rollup update alone only because identity was never the half that moved.
-        //
-        // Sorted, for the same reason the spans are. Two batches creating traces A and B in opposite orders
-        // each block on the other's uncommitted insert until it commits. Outside a transaction that was a
-        // momentary wait; inside one, holding locks either side of it, it is a deadlock.
-        //
-        // Safe ahead of the timer update below because getOrCreateAll is ON CONFLICT DO NOTHING, which takes
-        // no lock on a row that already exists, so it cannot start the KEY SHARE the FOR UPDATE would then
-        // have to upgrade. DO UPDATE here would reintroduce exactly the deadlock that comment describes. A trace
-        // handle this batch knows and the creating batch did not (the root ships last, §6.4) is filled by
-        // fillCorrelation instead, under the timer update's FOR UPDATE.
+        // Identity rows go first and INSIDE this transaction: committed alone, a rolled-back batch left a span-less
+        // trace the reaper re-arms forever. Sorted, or opposite-order inserts deadlock. Safe ahead of the timer update
+        // only because ON CONFLICT DO NOTHING takes no lock on an existing row; DO UPDATE would deadlock.
         List<Map.Entry<String, SessionFold>> newSessions = new ArrayList<>(bySession.entrySet());
         newSessions.sort(Map.Entry.comparingByKey());
         List<SessionRow> sessionRows = new ArrayList<>(newSessions.size());
@@ -301,19 +220,8 @@ public class SpanBatchWriter {
 
         Map<String, String> rolledUpThrough = traces.rolledUpThrough(projectId, byTrace.keySet());
 
-        // THE TRACE TIMERS GO NEXT, AND THE ORDER IS LOAD-BEARING.
-        //
-        // fk_span_trace makes every span insert take a KEY SHARE lock on its trace row. Two concurrent
-        // batches over the same traces can both hold that, it is a shared mode, and then both ask for the
-        // FOR UPDATE the timer update opens with, which conflicts with it. That is a lock UPGRADE on a row
-        // each transaction already holds, and no amount of sorted key ordering can make it safe: A waits for
-        // B's KEY SHARE on the first trace while B waits for A's, and Postgres kills one of them. Taking the
-        // exclusive lock before any span touches the row means each batch upgrades nothing, it already
-        // holds the strongest lock it will need, and the sorted order then does its job of serializing the
-        // two batches instead of crossing them.
-        //
-        // Ordering inside the transaction is otherwise free: §6.1 requires only that the span rows and the
-        // trace re-arm become visible together, which the single commit is what guarantees.
+        // The trace timers' FOR UPDATE must come before any span insert: fk_span_trace takes KEY SHARE on the trace
+        // row, and two batches each upgrading from it deadlock however keys are sorted.
         List<TraceV2Repository.TimerUpdate> timers = new ArrayList<>(byTrace.size());
         byTrace.forEach((traceId, fold) -> {
             Instant endedAt = fold.endedAt();
@@ -332,9 +240,7 @@ public class SpanBatchWriter {
                 sessionId, fold.startedAt().toString(), fold.lastActivityAt().toString())));
         sessions.touchAll(projectId, touches);
 
-        // One statement per table, not one per span: each table is a single JDBC batch, in the same
-        // order the per-span loop wrote them, so the locks are taken in the same sorted order and the
-        // FK from payload to span, and from media_ref to payload, is satisfied table by table.
+        // One JDBC batch per table, in the per-span order, so locks stay sorted and FKs are satisfied table by table.
         List<SpanRow> spanRows = new ArrayList<>(prepared.size());
         List<SpanPayloadRow> payloadRows = new ArrayList<>(prepared.size());
         List<MediaRefRepository.SpanMedia> media = new ArrayList<>();
@@ -343,19 +249,13 @@ public class SpanBatchWriter {
         for (Prepared p : prepared) {
             spanRows.add(p.span());
             payloadRows.add(p.payload());
-            // Every image this span's payload was rewritten to reference, made visible to the database.
-            // The reference itself is a string inside that JSON, so without these rows the bytes are
-            // unreachable by any FK and uncollectable by retention. After the payload upsert, not
-            // before: the FK is to the payload row, and it is what makes media age out with the text that
-            // names it. Deleting the payload takes them with it, the cascade is the whole design.
+            // The media reference is a string inside the payload JSON, so these rows are what make the bytes reachable
+            // and let them cascade out with the payload. Written after the payload upsert, which they reference.
             if (!p.mediaIds().isEmpty()) {
                 media.add(new MediaRefRepository.SpanMedia(
                         p.span().traceId(), p.span().id(), p.mediaIds()));
             }
-            // The side tables ride the same transaction as the span they were read off. They are keyed on
-            // the same producer pair and derived from the same already-validated attributes, so there is no
-            // failure mode here that the span write does not already have, and a tool call visible without
-            // its span would be a row the trace-scoped detail read cannot place.
+            // Same transaction as the span, or a tool call could be visible without its span.
             SpanSideTables.Extracted extracted = p.sideTables();
             ToolCallRow toolCall = extracted.toolCall();
             if (toolCall != null) {
@@ -365,7 +265,7 @@ public class SpanBatchWriter {
             recordLateness(p, rolledUpThrough.get(p.span().traceId()));
         }
         spans.upsertAll(spanRows);
-        // After the upsert, so this batch's own session-less spans are covered as well as earlier ones.
+        // After the upsert, so this batch's own session-less spans are covered too.
         if (!filled.isEmpty()) {
             Instant adoptStarted = Instant.now();
             int adopted = spans.adoptTraceSession(projectId, filled);
@@ -385,11 +285,7 @@ public class SpanBatchWriter {
         retrievedDocs.insertAll(docRows);
     }
 
-    /**
-     * How far behind its trace's last rollup this span arrived (§7.6). A trace that has never rolled up has
-     * nothing to be late relative to and contributes no sample, otherwise the histogram's first bucket
-     * would just be a count of first-arrivals.
-     */
+    /** A trace that never rolled up contributes no sample; first arrivals are not late. */
     private void recordLateness(Prepared p, @Nullable String rolledUpThrough) {
         if (rolledUpThrough == null) return;
         Instant through = parseOrNull(rolledUpThrough);
@@ -397,18 +293,10 @@ public class SpanBatchWriter {
         lateness.record(Duration.between(through, p.eventTs()).toMillis());
     }
 
-    // ----- validation ------------------------------------------------------------------------------
-
     /**
-     * Turn the batch into writable rows, dropping the ones no row could represent.
-     *
-     * <p>Four things make a span unwritable, and each is structural rather than a judgement call: no
-     * producer span id or trace id (identity IS the producer's, so there is no row to key), no parseable
-     * start time ({@code started_at} is NOT NULL and every timing column derives from it), an id past
-     * {@link #MAX_ID_CHARS}, or a payload past {@link #MAX_PAYLOAD_CHARS}.
-     *
-     * <p>Dropped rows are counted and logged once per batch, categorically. They are NOT retried: a replay
-     * would fail validation identically, so a retry is work with a known answer.
+     * Drop spans no row could represent: no producer span or trace id, no parseable start, an id past
+     * {@link #MAX_ID_CHARS}, or a payload past {@link #MAX_PAYLOAD_CHARS}. Counted and logged once per batch, never
+     * retried, since a replay would fail identically.
      */
     private List<Prepared> validate(String projectId, List<RawEntry> entries, Set<String> knownCallSites) {
         List<Prepared> out = new ArrayList<>(entries.size());
@@ -474,8 +362,6 @@ public class SpanBatchWriter {
         return payload != null && payload.length() > MAX_PAYLOAD_CHARS;
     }
 
-    // ----- row building ----------------------------------------------------------------------------
-
     private Prepared prepare(
             String projectId,
             RawEntry raw,
@@ -491,9 +377,7 @@ public class SpanBatchWriter {
         Instant eventTs = parseOrNull(raw.eventTs());
         if (eventTs == null) eventTs = endedAt == null ? startedAt : endedAt;
 
-        // kind is NOT NULL in v2 while the normalized kind is an open enum that legitimately answers
-        // "unknown". `step` is that vocabulary's own word for it, so the column stays honest without
-        // inventing a value only this writer knows.
+        // kind is NOT NULL, and `step` is the normalized vocabulary's own word for unknown.
         String kind = raw.operationKind() == null ? KindNormalizer.STEP : raw.operationKind();
         String level = trimmedAttr(raw, "level");
         boolean isError = level != null && "ERROR".equalsIgnoreCase(level);
@@ -509,8 +393,8 @@ public class SpanBatchWriter {
                 traceId,
                 spanId,
                 raw.parentId(),
-                // path is the platform's, never an arrival's: the fixpoint resolver owns it, and the
-                // upsert's SET list excludes it so a redelivery cannot send a resolved span back to work.
+                // The fixpoint resolver owns path; the upsert's SET list excludes it so a redelivery cannot reset a
+                // resolved span.
                 null,
                 sessionId,
                 trimmedAttr(raw, "user.id"),
@@ -519,14 +403,11 @@ public class SpanBatchWriter {
                 null,
                 kind,
                 raw.name(),
-                // The start of an application-level unit: a producer-declared root, or a sub-agent
-                // boundary, which §9 wants queryable without inventing an entity for it.
+                // A producer-declared root or a sub-agent boundary.
                 raw.parentId() == null || KindNormalizer.AGENT.equals(kind),
                 isError ? "error" : null,
                 level,
-                // The class in error_type, the prose in error_message: a facet key that took the status
-                // message whole was routinely kilobytes of agent markdown, and no two failures of the
-                // same kind ever grouped.
+                // The class in error_type, the prose in error_message: whole status messages never grouped.
                 isError ? SpanErrors.errorClass(errorTypeAttr, statusMessage) : null,
                 isError ? SpanErrors.cappedMessage(statusMessage) : null,
                 startedAt.toString(),
@@ -548,8 +429,8 @@ public class SpanBatchWriter {
                 priced.priceBookVersion(),
                 inputPreview(input),
                 preview(output),
-                // A span that already carries its session has nothing to backfill; one that does not sits
-                // in the backfiller's queue until its trace answers, or until the trace settles session-less.
+                // A span without a session waits in the backfiller's queue until its trace answers or settles
+                // session-less.
                 sessionId == null ? SpanRow.ResolverState.PENDING : SpanRow.ResolverState.DONE,
                 SpanRow.ResolverState.PENDING,
                 eventTs.toString(),
@@ -582,11 +463,7 @@ public class SpanBatchWriter {
                 trimmedAttr(raw, GenAiAttributes.CONVERSATION_ID));
     }
 
-    /**
-     * Resolve a span's call site and, for an id this project has not seen, materialize a minimal
-     * {@code call_site} row so the span is not orphaned. Idempotent: {@code knownCallSites} gates the
-     * write, so an id the plugin already published or an earlier span already created is a no-op.
-     */
+    /** Idempotent: {@code knownCallSites} gates the write. */
     private @Nullable String resolveCallSite(String projectId, RawEntry raw, Set<String> knownCallSites) {
         String id = CallSiteResolver.resolve(raw.metadata());
         if (id != null && knownCallSites.add(id)) {
@@ -595,7 +472,6 @@ public class SpanBatchWriter {
         return id;
     }
 
-    /** Row-creation wall clock. Read once per row rather than once per batch; both are defensible. */
     private static String now() {
         return Instant.now().toString();
     }
@@ -635,21 +511,10 @@ public class SpanBatchWriter {
     }
 
     /**
-     * The attribute bag, minus a message carrier the typed column already holds byte-for-byte.
-     *
-     * <p><b>The test is value identity, not "the column is populated".</b> Those are different questions
-     * and only the first one is safe to act on. {@code gen_ai.input.messages} rides into the column
-     * verbatim, so dropping the key loses nothing. The other encodings are LOSSY on the way in:
-     * {@code OtlpSpanMapper.reconstructIndexedMessages} reads only {@code role} and {@code content} out of
-     * the Traceloop {@code gen_ai.prompt.N.*} family and leaves that family's {@code tool_calls.*} /
-     * {@code finish_reason} siblings behind, and {@code OpenInferenceNormalizer} folds tool calls into
-     * text on the output side ONLY, drops every non-text {@code message.contents} part, and does not read
-     * the indexed {@code llm.input_messages.N.*} form at all. Stripping by prefix on a populated column
-     * therefore deleted the last copy of a tool call or an image reference, permanently, since the
-     * payload is rewritten at write time and never on read. A carrier whose bytes are not in the column
-     * stays in the bag.
+     * The attribute bag minus a message carrier whose exact bytes the typed column holds. The test is value identity,
+     * not "the column is populated": several encodings are LOSSY on the way into the column (tool calls, non-text
+     * parts), and stripping by prefix deleted the last copy of them for good.
      */
-    /** What redaction removed from this entry, for {@code span_payload.redactions}. */
     private @Nullable String redactionsJson(RawEntry raw) {
         List<RedactionStamp> stamps = raw.redactions();
         if (stamps == null || stamps.isEmpty()) return null;
@@ -668,18 +533,13 @@ public class SpanBatchWriter {
     }
 
     /**
-     * Whether the typed column was filled from this attribute value and nothing was lost doing it. Read
-     * against {@link RawEntry#input()} rather than the externalized string the row stores, because media
-     * externalization replaces inline bytes with a {@code MediaStore} handle, the content survives, so
-     * the attribute copy is still redundant.
+     * Compared against {@link RawEntry#input()}, not the stored string, because media externalization replaces inline
+     * bytes with a handle while the content survives.
      */
     private static boolean promotedVerbatim(@Nullable Object attributeValue, @Nullable String promoted) {
         return attributeValue instanceof String s && s.equals(promoted);
     }
 
-    // ----- per-batch folds -------------------------------------------------------------------------
-
-    /** One trace's contribution from this batch: the min/max §7.1 folds in, everything else identity. */
     private record TraceFold(
             Instant startedAt,
             @Nullable Instant endedAt,
@@ -749,14 +609,9 @@ public class SpanBatchWriter {
         return bySession;
     }
 
-    // ----- helpers ---------------------------------------------------------------------------------
-
     /**
-     * A prepared pair plus what the per-trace and per-session folds need, so nothing is parsed twice and
-     * the fold never has to reach back into the raw attribute bag.
-     *
-     * @param threadId the provider's conversation id, which is a column on {@code trace} rather than a
-     *     second tree level, sessions never nest (§2).
+     * Carries what the folds need so nothing is parsed twice. {@code threadId} is a column on {@code trace}, not a tree
+     * level: sessions never nest.
      */
     private record Prepared(
             SpanRow span,
@@ -808,10 +663,6 @@ public class SpanBatchWriter {
         return a != null ? a : b;
     }
 
-    /**
-     * The media ids of one span's input and output, deduplicated: the same image in both halves is one
-     * {@code media_ref} row, and the payload references it once per side either way.
-     */
     private static List<String> mergedIds(List<String> input, List<String> output) {
         if (output.isEmpty()) return input;
         if (input.isEmpty()) return output;

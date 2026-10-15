@@ -4,21 +4,10 @@ package ai.tessary.storage;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A v2 {@code session} row — one continuous interaction with one user, identity only.
- *
- * <p>The id is the producer's session string, verbatim, and the key is {@code (projectId, id)}: there is
- * no platform-minted surrogate anywhere in the v2 substrate. Sessions never nest — sub-grouping inside a
- * session (a provider's conversation or thread id) is {@code trace.threadId}, a column, not a second tree
- * level.
- *
- * <p><b>No rollup columns, deliberately.</b> A trace goes quiet in seconds; a session can be resumed days
- * later, so no gap of inactivity reliably means "finished" and a session rollup could never legitimately
- * settle. Session totals are summed at read time from the session's already-materialized trace rollups.
- * {@code lastActivityAt} is the one incrementally maintained value, and it is a {@code max} — idempotent
- * under replay, which is what makes updating it in place safe at all.
- *
- * <p>Timestamps ride as ISO-8601 {@code String}s, bound with explicit {@code ::timestamptz} casts and read
- * back through {@link Timestamps}, matching the rest of the substrate.
+ * A v2 {@code session} row, keyed by {@code (projectId, id)} where id is the producer's session string. Sessions never
+ * nest; sub-grouping is {@code trace.threadId}. No rollup columns: a session can resume days later and never settles,
+ * so totals are summed from trace rollups at read time. {@code lastActivityAt} is a {@code max}, idempotent under
+ * replay.
  */
 public record SessionRow(
         String projectId,

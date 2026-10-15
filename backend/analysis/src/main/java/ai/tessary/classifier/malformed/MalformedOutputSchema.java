@@ -9,23 +9,18 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Flattens a call site's declared {@code output_schema} into the field tree "How outputs broke"
- * renders: one row per named field, in schema order, indented by nesting depth. An array's items are
- * folded into the array's own row rather than given a row of their own — {@code items[].sku} nests
- * under {@code items[]}, not under an anonymous "items" container — matching how {@link
- * ai.tessary.classifier.detector.MalformedOutputDetector} collapses a violating instance's array
- * indexes to the same {@code []} spelling, so a row's path is exactly the key a failure count is
- * filed under.
+ * Flattens a call site's {@code output_schema} into the "How outputs broke" field tree. Array items fold into the
+ * array's row ({@code items[].sku} under {@code items[]}), matching how
+ * {@link ai.tessary.classifier.detector.MalformedOutputDetector} collapses indexes, so a row's path is exactly a
+ * failure count's key.
  */
 final class MalformedOutputSchema {
 
     private MalformedOutputSchema() {}
 
     /**
-     * @param path the field's collapsed path ({@code items[].sku}), the correlation key into a failure
-     *     count map and the {@code field} query parameter of the failing-outputs endpoint
-     * @param name the label a tree renders ({@code items[]} for an array field, otherwise the property
-     *     name)
+     * @param path the collapsed path, key into a failure count map and the failing-outputs endpoint's {@code field}
+     * parameter @param name {@code items[]} for an array field, otherwise the property name
      */
     record Field(String path, String name, String type, boolean required, int depth, long failing) {}
 

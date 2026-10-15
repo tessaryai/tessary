@@ -7,7 +7,6 @@ import { cn } from "./cn";
 
 export type Crumb = { label: ReactNode; to?: string };
 
-/** A trail of at least one crumb: `PageHeader` renders none for an empty one. */
 export function Breadcrumb({ trail }: { trail: Crumb[] }) {
   return (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-small text-muted">
@@ -33,19 +32,8 @@ export function Breadcrumb({ trail }: { trail: Crumb[] }) {
 }
 
 /**
- * The page header — exactly two sanctioned forms, no per-page variants
- * (DESIGN-DIRECTION §6 / sheets/shell.md):
- *
- * **Form A — index** (Triage, Traces, Classifiers, Vitals, Settings):
- * `kicker` = the nav-group name in mono caps, `title` =
- * the noun in sentence case at 28px sans, one dim `subtitle` line, `actions`
- * right-aligned (max one primary + one secondary, size "sm").
- *
- * **Form B — detail** (case, trace): `breadcrumb` above (parent surface
- * → current identifier, IDs truncate the tail never the head); `title` is the
- * identifier, in the 28px sans sentence title.
- *
- * `eyebrow` is the legacy alias for `kicker` kept for older surfaces.
+ * Two sanctioned forms only. Index: `kicker` (nav group), `title`, one `subtitle`, at most two `actions`.
+ * Detail: `breadcrumb` above and the identifier as `title`. `eyebrow` is a legacy alias for `kicker`.
  */
 export function PageHeader({
   kicker,
@@ -110,9 +98,7 @@ export function Section({
 }: {
   title?: ReactNode;
   subtitle?: ReactNode;
-  /** How many items the section holds, drawn as a pill beside the title. */
   count?: number;
-  /** Controls for this section only, right-aligned on the title row. */
   actions?: ReactNode;
   children: ReactNode;
 }) {

@@ -18,25 +18,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The leased sweep queue for classifiers on the unified {@code job} table: every
- * classifier job is a {@code job} row with {@code kind='classifier'}, its {@code classifier_id} carried in
- * the {@code payload} jsonb, and its natural key in {@code dedupe_key = classifier_id} (backed by the
- * partial unique {@code ux_job_classifier} — one row per classifier across all statuses). The claim /
- * reclaim / dead-letter machinery is the shared
- * kind-scoped {@link LeasedJobSql}; the {@link ClassifierWorker} + enqueue callers work against
- * the {@link ClassifierJobRow} shape, this repo sourcing {@code classifier_id} from the payload in
- * SQL.
- *
- * <p>Grain difference vs. embedding's finite jobs: a classifier job is a <em>resumable sweep</em> — its
- * {@code cursor_at}/{@code cursor_id} high-water mark (kept first-class) advances after each sweep, and a
- * job is re-marked pending on the next heartbeat to continue from where it left off (it re-pends rather
- * than terminating).
+ * A classifier job is a resumable sweep, not a finite job: its {@code cursor_at}/{@code cursor_id} keyset high-water
+ * mark advances after each sweep and the job re-pends on the next heartbeat. {@code classifier_id} lives in the
+ * payload; {@code ux_job_classifier} keeps one row per classifier.
  */
 @Repository
 public class ClassifierJobRepository {
 
-    // classifier_id is sourced from the payload jsonb; the rest are the shared job columns (cursor_at/cursor_id
-    // stay first-class for the keyset sweep).
     private static final String COLS = "id, project_id, payload->>'classifier_id' AS classifier_id, status, cursor_at, "
             + "cursor_id, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at, page_retries";
 
@@ -47,18 +35,9 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Ensure a pending job exists for this classifier. Idempotent: an existing job below the dead-letter
-     * state is flipped back to pending (so a fully-swept classifier re-sweeps newly-ingested spans on the
-     * next heartbeat); absent, one is inserted. {@code ux_job_classifier} (one row per {@code
-     * dedupe_key = classifier_id}) backstops the race.
-     *
-     * <p>A {@code dead} job (past the attempt cap — fast-failed via {@link #markFailed}, or hung/crashed
-     * until its lease-expiry budget ran out via {@link #failExhausted}) is deliberately
-     * <b>not</b> resurrected on every call: {@link ClassifierService#enqueueEnabled} calls this
-     * unconditionally on every heartbeat, so reviving it immediately would just re-enter the same
-     * fast-fail loop the cap exists to stop. It's revived instead once {@code deadLetterCooldownSeconds}
-     * has elapsed since it was dead-lettered — bounding the retry-while-down rate while still recovering
-     * automatically (no operator action) once the backend is healthy again.
+     * A {@code dead} job is not revived on every call: {@link ClassifierService#enqueueEnabled} calls this on every
+     * heartbeat, so immediate revival would re-enter the fast-fail loop the cap exists to stop. It is revived once
+     * {@code deadLetterCooldownSeconds} has elapsed.
      */
     public void enqueue(String projectId, String classifierId, long deadLetterCooldownSeconds) {
         if (markPending(projectId, classifierId, deadLetterCooldownSeconds) > 0) return;
@@ -79,9 +58,7 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Flip an existing non-terminal job back to pending without disturbing its cursor or attempts. A
-     * {@code dead} job only qualifies once its {@code updated_at} (the moment it was dead-lettered) is
-     * older than {@code deadLetterCooldownSeconds}.
+     * A {@code dead} job only qualifies once its {@code updated_at} is older than {@code deadLetterCooldownSeconds}.
      */
     private int markPending(String projectId, String classifierId, long deadLetterCooldownSeconds) {
         String deadFloor = Instant.now()
@@ -98,11 +75,7 @@ public class ClassifierJobRepository {
                 .update();
     }
 
-    /**
-     * Claim up to {@code batch} due jobs via {@code FOR UPDATE SKIP LOCKED} (kind-scoped). Reclaims jobs
-     * whose lease expired (a worker died mid-sweep) while attempts are under the cap; a poison job is left
-     * for {@link #failExhausted}.
-     */
+    /** A poison job whose lease expired is left for {@link #failExhausted}. */
     public List<ClassifierJobRow> claimBatch(String leaseOwner, int batch, long leaseSeconds, int maxAttempts) {
         String now = Instant.now().toString();
         String expires = Instant.now().plus(Duration.ofSeconds(leaseSeconds)).toString();
@@ -117,7 +90,6 @@ public class ClassifierJobRepository {
                 .list();
     }
 
-    /** Every sweep job for a project, one row per classifier that has ever been enqueued — the health read. */
     public List<ClassifierJobRow> listByProject(String projectId) {
         return jdbc.sql("SELECT " + COLS + " FROM job WHERE kind = :kind AND project_id = :pid")
                 .param("kind", JobRow.Kind.CLASSIFIER)
@@ -127,11 +99,8 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Dead-letter jobs whose lease expired with attempts at/over the cap (hung/crashed mid-sweep).
-     * Terminal status is {@code dead}, not the shared default {@code failed}: like the fast-fail leg in
-     * {@link #markFailed}, a sweep that exhausted its budget by repeatedly hanging must not be revived by
-     * the very next heartbeat's {@link #enqueue} re-pend (that's a retry loop with no backoff) — it waits
-     * out the same dead-letter cooldown floor in {@link #markPending} instead.
+     * Terminal status is {@code dead}, not {@code failed}, so a sweep that keeps hanging waits out the dead-letter
+     * cooldown instead of being re-pended by the next heartbeat.
      */
     public int failExhausted(int maxAttempts) {
         return jdbc.sql(LeasedJobSql.failExhaustedOfKind("job", "hung or crashed mid-sweep", ClassifierJobRow.DEAD))
@@ -142,11 +111,8 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Advance the keyset sweep cursor {@code (cursor_at, cursor_id)} and mark the job done (terminal until
-     * the next enqueue re-pends it). A {@code null} cursor (empty batch, or a removed/disabled classifier)
-     * leaves the high-water mark untouched. Both components advance together so the keyset predicate stays
-     * consistent. {@code attempts} resets to 0 on a genuine success so {@link #markFailed}'s cap always
-     * measures <em>consecutive</em> failures since the last healthy sweep, not a lifetime total.
+     * A null cursor leaves the high-water mark untouched. {@code attempts} resets to 0 so the cap measures consecutive
+     * failures, not a lifetime total.
      */
     public void markSwept(String id, @Nullable String cursorAt, @Nullable String cursorId) {
         jdbc.sql("""
@@ -165,9 +131,8 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Finish the job without moving its cursor and count one more hold of the page past it: the page's
-     * provider calls mostly failed, so the next tick sends it again. A healthy sweep's attempt budget is
-     * untouched, since a provider outage is not the sweep failing; {@link #markSwept} resets the count.
+     * The page's provider calls mostly failed, so the next tick sends it again. A provider outage is not the sweep
+     * failing, so the attempt budget is untouched.
      */
     public void holdPage(String id) {
         jdbc.sql("""
@@ -178,14 +143,8 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Record one page of progress mid-sweep and renew the lease, without releasing the job.
-     *
-     * <p>A sweep that drains several pages inside one claim calls this between pages, so a worker that dies
-     * partway resumes from the last page it finished rather than from where the claim began, and a drain
-     * that runs past its original lease is not reclaimed by another worker while it is still running.
-     *
-     * <p>Guarded on {@code lease_owner}: false means this worker no longer holds the job, and the caller
-     * stops rather than keep moving a cursor someone else now owns.
+     * Renews the lease so a long drain is not reclaimed mid-run. False means this worker no longer holds the job, and
+     * the caller must stop.
      */
     public boolean advanceCursor(String id, String leaseOwner, String cursorAt, String cursorId, long leaseSeconds) {
         Instant now = Instant.now();
@@ -205,15 +164,8 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Hand a claimed job back without spending the attempt its claim took: the encoder-backed sweep
-     * found the model down, which is the model asleep or stopped rather than the sweep failing, so
-     * {@link #markFailed}'s cap must not count it. The cursor stays where the last page landed.
-     *
-     * <p>The job finishes {@code done} rather than {@code pending}, as {@link #holdPage} does: a
-     * pending job would be claimed again by the same tick's claim loop and handed straight back, over
-     * and over. {@link ClassifierService#enqueueEnabled} re-pends it once the model answers.
-     *
-     * <p>Guarded on {@code lease_owner}: a worker that no longer holds the job changes nothing.
+     * The model is down, which is not the sweep failing, so no attempt is spent. Finishes {@code done}, not
+     * {@code pending}: a pending job would be claimed again by the same tick and handed straight back.
      */
     public void releaseWithoutAttempt(String id, String leaseOwner) {
         jdbc.sql("""
@@ -228,11 +180,8 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Record that this sweep reached the head of the stream at {@code at}, as {@code caught_up_at} in
-     * the job's {@code payload}. Merged into the payload, so {@code classifier_id} stays. In production
-     * mode an encoder-backed classifier is not enqueued again until the sleep after this has passed,
-     * and the groundedness status reads it as the last run. Guarded on {@code lease_owner}, like every
-     * write a sweep makes to its own job.
+     * Merged into the payload so {@code classifier_id} stays. In production an encoder-backed classifier is not
+     * enqueued again until the sleep after this has passed.
      */
     public void recordCaughtUp(String id, String leaseOwner, Instant at) {
         jdbc.sql("""
@@ -246,7 +195,6 @@ public class ClassifierJobRepository {
                 .update();
     }
 
-    /** The {@code caught_up_at} {@link #recordCaughtUp} last wrote for this classifier's job, if any. */
     public Optional<Instant> caughtUpAt(String projectId, String classifierId) {
         return jdbc.sql("""
             SELECT payload->>'caught_up_at' FROM job
@@ -257,7 +205,6 @@ public class ClassifierJobRepository {
                 .map(Instant::parse);
     }
 
-    /** This classifier's sweep job, if it has ever been enqueued. */
     public Optional<ClassifierJobRow> findByClassifier(String projectId, String classifierId) {
         return jdbc.sql("SELECT " + COLS + " FROM job WHERE kind = :kind AND project_id = :pid AND dedupe_key = :sid")
                 .param("kind", JobRow.Kind.CLASSIFIER)
@@ -268,26 +215,9 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Drop the keyset high-water mark back to the beginning and re-pend, so the classifier's next sweep
-     * re-reads its project's whole observation history. The one operation {@link #markSwept} cannot
-     * express: it advances the cursor through {@code COALESCE(:cursorAt, cursor_at)}, which by
-     * construction can only move it forward.
-     *
-     * <p>Called when a call-site fact a detector gates on arrives or changes ({@link
-     * ClassifierService#rewindForCallSiteFact}) — history swept while the fact was missing was scored
-     * {@code none()} and is now genuinely scoreable. Safe to re-run: {@code ClassifierWorker}'s verdict
-     * write is idempotent on {@code (classifier_key, subject)}, so a re-sweep over already-scored
-     * observations writes no duplicate detection and escalates no duplicate grader run.
-     *
-     * <p>Two statuses are excluded, for opposite reasons. A {@code claimed} job is mid-sweep and would
-     * {@code markSwept} its own cursor straight back over the rewind — the caller logs the skip so the
-     * lost rewind is visible rather than silent. A {@code dead} job must not be revived here at all:
-     * {@link #enqueue} deliberately refuses to resurrect one until {@code deadLetterCooldownSeconds}
-     * has elapsed, and flipping it to {@code pending} would walk straight through that floor and
-     * re-enter the fast-fail loop the cap exists to stop.
-     *
-     * @return the number of jobs rewound — 0 when the classifier has no job row yet (which needs no
-     *     rewind: its first sweep already starts from a null cursor), or when the job was skipped.
+     * The one operation {@link #markSwept} cannot express, since its {@code COALESCE(:cursorAt, cursor_at)} only moves
+     * forward. A {@code claimed} job is skipped because it would markSwept straight back over the rewind; a
+     * {@code dead} job is skipped so this cannot bypass the dead-letter cooldown.
      */
     public int rewindCursor(String projectId, String classifierId) {
         return jdbc.sql("""
@@ -301,27 +231,15 @@ public class ClassifierJobRepository {
                 .update();
     }
 
-    /** What {@link #restart} did to the classifier's sweep job. */
     public enum Restart {
-        /** The cursor is back at the start and the job is due. */
         RESTARTED,
-        /** No job row yet: the first sweep starts from the beginning anyway. */
         NO_JOB,
-        /** A worker holds the job, so nothing changed. */
         SWEEP_RUNNING
     }
 
     /**
-     * A person's reset: the cursor goes back to the start, and the job is due now with a clean failure
-     * record and no {@code caught_up_at}, as if it had never run.
-     *
-     * <p>Unlike {@link #rewindCursor} this revives a {@code dead} job: the dead-letter floor stops the
-     * heartbeat from looping on a failing sweep, and a person who confirmed a reset twice is asking for
-     * exactly one more try.
-     *
-     * <p>Call it inside the transaction that clears the classifier's output. The row stays locked until
-     * that transaction commits, and {@link #claimBatch} skips locked rows, so no sweep can start between
-     * this check and the deletes that follow it.
+     * Unlike {@link #rewindCursor} this revives a {@code dead} job. Call it inside the transaction that clears the
+     * classifier's output: the row stays locked, and {@link #claimBatch} skips locked rows.
      */
     public Restart restart(String projectId, String classifierId) {
         Optional<String> status = jdbc.sql("""
@@ -350,14 +268,8 @@ public class ClassifierJobRepository {
     }
 
     /**
-     * Mark a sweep failure. Below {@code maxAttempts}, the job stays {@code failed} — retryable, resurrected
-     * by the next {@link #enqueue} call like any other terminal state. At or over the cap, it moves to the
-     * terminal {@code dead} state instead, which {@link #markPending} won't resurrect on the routine
-     * heartbeat re-pend (only after its cooldown floor), so a job that keeps fast-failing stops burning a
-     * claim/fail cycle every heartbeat.
-     *
-     * @return {@code true} iff this call is the one that crossed the cap (dead-lettered it) — the caller
-     *     logs that transition at ERROR exactly once; a below-cap failure stays WARN.
+     * At the cap the job moves to {@code dead}, which the heartbeat re-pend won't revive until its cooldown. Returns
+     * true only for the call that crossed the cap.
      */
     public boolean markFailed(String id, @Nullable String error, int maxAttempts) {
         String status = jdbc.sql(LeasedJobSql.markFailedById("job", ClassifierJobRow.DEAD))

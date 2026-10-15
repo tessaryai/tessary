@@ -13,27 +13,16 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Persistence for {@link CaseRow}. Every write is keyed on the case's identity tuple rather than its
- * id, because the reconciler knows a detection's subject long before it knows whether a case for it
- * already exists.
- *
- * <p><b>Timestamps are ISO-8601 {@code text}, compared and ordered lexicographically</b> — the
- * convention the rca / signal / job slices already use, kept here so the whole platform reads one way.
- * Known and accepted limitation: {@code Instant.toString()} omits a zero seconds field and varies its
- * fraction digits, so {@code …T12:00Z} sorts after {@code …T12:00:01Z}. It needs a timestamp landing on
- * an exact second or an exact millisecond to bite, and it would misplace one row in one window rather
- * than lose it. Seen, measured, left — changing it here alone would fork the convention for one slice.
+ * Writes are keyed on the case's identity tuple rather than its id. Timestamps are ISO-8601 text compared
+ * lexicographically, the platform convention; {@code Instant.toString()} omitting zero seconds can misplace (never
+ * lose) a row at an exact-second boundary, accepted rather than forking the convention.
  */
 @Repository
 public class CaseRepository {
 
     /**
-     * {@code eval_case} carries no forward pointer to a finding any more — {@code finding.case_id} is
-     * the reverse of that, set once a finding's positive ruling opens or joins a case (migration
-     * {@code 0011}). {@code finding_count} and {@code latest_finding_id} are correlated subqueries
-     * reading it back: how many findings this case holds, and the newest of them — what {@code
-     * CaseRow}'s header, ruling and RCA lane all read (1b: cases read over all their findings; the
-     * newest stands in for the case until the multi-finding case page ships).
+     * {@code finding_count} and {@code latest_finding_id} read the reverse pointer {@code finding.case_id}; the newest
+     * finding stands in for the case.
      */
     private static final String COLS = "id, seq, detector, subject_kind, subject_id, "
             + "subject_label, call_site_id, metric, "
@@ -47,7 +36,6 @@ public class CaseRepository {
     private static final String LIVE_ORDER = "ORDER BY severity DESC, opened_at DESC";
 
     private final JdbcClient jdbc;
-    /** Links a case to the finding that opened, refreshed or reopened it — see {@link #link}. */
     private final FindingRepository findings;
 
     public CaseRepository(JdbcClient jdbc, FindingRepository findings) {
@@ -55,78 +43,37 @@ public class CaseRepository {
         this.findings = findings;
     }
 
-    /** Every case on this install, open or resolved, in any project: the telemetry heartbeat's
-     *  {@code counts.cases} (devdocs/reference/telemetry-contract.md §1). */
     public long countAll() {
         return jdbc.sql("SELECT COUNT(*) FROM eval_case").query(Long.class).single();
     }
 
-    // ---- paging vocabulary -------------------------------------------------------------------
-
     /**
-     * How a page of cases is ranked — and therefore what its keyset key means.
-     *
-     * <p>Two orders rather than one because a live case and a closed one are read for different reasons. A
-     * live list answers "what needs me", which is worst-first; a resolved list answers "what happened
-     * lately", which is newest-closed-first. Ranking closures by severity would put a serious thing closed
-     * in March above a mild thing closed this morning, which is the opposite of what a history is for.
+     * A live list is worst-first; a resolved list is newest-closed-first, since ranking closures by severity would put
+     * March's serious close above this morning's mild one.
      */
     public enum PageOrder {
-        /** Worst first: {@code severity DESC, opened_at DESC, id DESC}. */
         LIVE_RANK,
-        /** Newest closure first: {@code resolved_at DESC, id DESC}. */
         RESOLVED_RECENT
     }
 
     /**
-     * The order a {@code state} selection is ranked in. One function, called by both the repository and the
-     * cursor codec, because a cursor that encodes one order and a query that runs another resume from a point
-     * that is not on the ordering — the failure mode watch-out 2 of the MCP v2 plan exists to prevent.
-     *
-     * <p>Only a resolved-only page gets the resolved order. An open page and an unfiltered page both keep the
-     * live ranking: {@code severity} and {@code opened_at} are {@code NOT NULL} on every row, so worst-first
-     * is total over any selection, while {@code resolved_at} is null on everything that is still open.
+     * One function for both the repository and the cursor codec, so a cursor never resumes on a different order than
+     * the query runs. Only resolved-only pages take the resolved order: {@code resolved_at} is null on open rows.
      */
     public static PageOrder orderFor(@Nullable String state) {
         return CaseRow.State.RESOLVED.equals(state) ? PageOrder.RESOLVED_RECENT : PageOrder.LIVE_RANK;
     }
 
     /**
-     * Where a page resumes: the last row of the previous page, in the columns its order ranks by.
-     *
-     * @param severity the live order's first key. Null for {@link PageOrder#RESOLVED_RECENT}, which does not
-     *     rank by severity at all; a {@link PageOrder#LIVE_RANK} key arriving without one cannot be resumed
-     *     from, and rejecting that is the cursor codec's job — the repository reads what it is handed.
-     * @param at {@code opened_at} under the live order, {@code resolved_at} under the resolved one
-     * @param id the total tiebreaker. Every column above it can repeat (two cases can open in the same
-     *     millisecond at the same severity), and a keyset with a non-unique tail either skips rows or loops.
+     * @param severity null under RESOLVED_RECENT; the cursor codec rejects a LIVE_RANK key without one @param id the
+     * total tiebreaker: a keyset with a non-unique tail skips rows or loops
      */
     public record PageKey(@Nullable Double severity, String at, String id) {}
 
-    // ---- reads -------------------------------------------------------------------------------
-
     /**
-     * One filtered, keyset-paged page of the project's cases — the MCP {@code list_cases} read.
-     *
-     * <p><b>Ordering runs strictly DESC on every key, including the id tiebreaker, so the keyset is a single
-     * row-constructor comparison</b> ({@code (severity, opened_at, id) < (:sev, :at, :id)}) rather than the
-     * three-way OR ladder a mixed-direction sort would need. Postgres evaluates that against the index the
-     * ordering already uses; the same trick pages spans in {@code SpanKey}. Mixing an ASC tiebreaker into a
-     * DESC sort would cost the row constructor and buy nothing a reader would notice.
-     *
-     * <p><b>No index was added for this and none is missing for the live path.</b>
-     * {@code ix_eval_case_live_rank} is {@code (project_id, severity DESC, opened_at DESC) WHERE state <>
-     * 'resolved'} — this page's live keyset, already in the shape it needs, and {@code state = 'open'} implies
-     * that partial predicate so it applies with only a heap recheck for the state value. A {@code detector}
-     * or {@code call_site_id} filter rechecks rather than seeks, which is what {@link #listLiveByDetector}
-     * has always done. The resolved order is the one that sorts ({@code ix_eval_case_resolved} buries
-     * {@code resolved_at} behind four equality columns), and it is deliberately left sorting: the resolved
-     * set is small per project and bounded by the history window, so an index for it waits on EXPLAIN
-     * against real data rather than on a guess.
-     *
-     * @param state {@code open} | {@code resolved}, or null for every state
-     * @param limit rows to return. Callers over-fetch by one to detect a next page.
-     * @param before the previous page's last row, or null to start at the top
+     * Strictly DESC on every key including the id, so the keyset is one row-constructor comparison served by
+     * {@code ix_eval_case_live_rank}. The resolved order deliberately still sorts: the set is small per project, so an
+     * index waits on EXPLAIN against real data. @param limit callers over-fetch by one to detect a next page
      */
     public List<CaseRow> page(
             String projectId,
@@ -171,7 +118,6 @@ public class CaseRepository {
         return stmt.query((rs, n) -> map(rs)).list();
     }
 
-    /** The project's open cases, worst first. Triage's whole read. */
     public List<CaseRow> listLive(String projectId) {
         return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND state <> 'resolved' "
                         + LIVE_ORDER)
@@ -180,7 +126,6 @@ public class CaseRepository {
                 .list();
     }
 
-    /** Cases resolved on or after {@code since}, newest first — Triage's one quiet history line. */
     public List<CaseRow> listResolvedSince(String projectId, Instant since) {
         return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND state = 'resolved' "
                         + "AND resolved_at >= :since ORDER BY resolved_at DESC")
@@ -198,7 +143,6 @@ public class CaseRepository {
                 .optional();
     }
 
-    /** Lookup by the display number a human quotes ({@code C-118} → {@code 118}). */
     public Optional<CaseRow> findBySeq(String projectId, long seq) {
         return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND seq = :seq")
                 .param("pid", projectId)
@@ -208,10 +152,8 @@ public class CaseRepository {
     }
 
     /**
-     * The live, UNLOCKED case on a subject key, if one exists — what a new finding on this key would
-     * join. A locked case (1c: RCA has been pressed on it) never matches: it stays exactly as it is,
-     * and the cause's next positive opens a fresh case rather than joining one an agent may already be
-     * reading.
+     * A locked case (RCA pressed) never matches, so the next positive opens a fresh case rather than joining one an
+     * agent may be reading.
      */
     public Optional<CaseRow> findLive(String projectId, CaseKey key) {
         return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND detector = :detector "
@@ -226,20 +168,10 @@ public class CaseRepository {
                 .optional();
     }
 
-    // ---- writes ------------------------------------------------------------------------------
-
     /**
-     * Open a fresh case for {@code detection}, allocating the next per-project display number.
-     * Returns empty when a concurrent opener already claimed this key ({@code ux_eval_case_live}) —
-     * the caller then reads the winner and treats the detection as a join, so two rulings landing on
-     * the same cause key at once can never double-page for one degradation.
-     *
-     * <p>The conflict target is explicit, and must stay that way. A bare {@code ON CONFLICT DO NOTHING}
-     * also swallows a {@code ux_eval_case_seq} collision, which is not a benign "someone already has
-     * this case" but a dropped detection — indistinguishable from the caller, and silent. Named this
-     * way, a seq collision raises instead of swallowing the row; each ruling opens or joins at most one
-     * case, so unlike the retired periodic reconciler there is no batch of opens to serialize behind an
-     * advisory lock, and this class no longer needs one.
+     * Empty when a concurrent opener claimed {@code ux_eval_case_live}; the caller joins the winner. The conflict
+     * target must stay explicit: a bare {@code ON CONFLICT DO NOTHING} would also swallow a {@code ux_eval_case_seq}
+     * collision, silently dropping a detection.
      */
     public Optional<CaseRow> open(String projectId, CaseDetection detection, Instant now) {
         String id = Ids.ulid();
@@ -279,11 +211,7 @@ public class CaseRepository {
         return findById(projectId, id);
     }
 
-    /**
-     * Refresh a live case from the detection that is still firing. The title, basis and numbers track
-     * the detection so a case never shows a stale "fell 12 pts" after the fall reached 40; the onset
-     * does not move, because the spell is the same spell.
-     */
+    /** The title and numbers track the detection; the onset does not move, because the spell is the same spell. */
     public void refresh(String projectId, String id, CaseDetection detection, Instant now) {
         jdbc.sql("""
                 UPDATE eval_case SET title = :title, basis = :basis, severity = :severity,
@@ -306,10 +234,7 @@ public class CaseRepository {
         link(projectId, detection, id, now);
     }
 
-    /**
-     * Lock a case at the moment a person presses <em>Run RCA</em> on it (1c). A no-op past the first
-     * call: re-pressing coalesces onto the same report and must not re-stamp the lock time.
-     */
+    /** A no-op past the first call: re-pressing must not re-stamp the lock time. */
     public void lock(String projectId, String id, Instant now) {
         jdbc.sql("""
                 UPDATE eval_case SET locked_at = :now, updated_at = :now
@@ -321,19 +246,14 @@ public class CaseRepository {
                 .update();
     }
 
-    /**
-     * Link the finding behind {@code detection} to this case, so {@link #COLS}'s reverse lookup can
-     * find it. A no-op past the first call for a given finding: {@code attachToCase}'s {@code case_id
-     * IS NULL} guard means the first case to claim a finding keeps it, so a refresh of an
-     * already-linked finding costs one no-op update rather than stealing it from elsewhere.
-     */
+    /** The {@code case_id IS NULL} guard means the first case to claim a finding keeps it. */
     private void link(String projectId, CaseDetection detection, String caseId, Instant now) {
         findings.attachToCase(projectId, detection.findingId(), caseId, now.toString());
     }
 
     /**
-     * Close a case. {@code reason} is required for a human close and null for an auto-resolve; the
-     * {@code ck_eval_case_resolution_reason} constraint is the backstop.
+     * {@code reason} is required for a human close and null for an auto-resolve; {@code ck_eval_case_resolution_reason}
+     * is the backstop.
      */
     public void resolve(
             String projectId,
@@ -345,10 +265,6 @@ public class CaseRepository {
         resolve(projectId, id, resolution, reason, actor, null, now);
     }
 
-    /**
-     * Close a case, recording the {@code disposition} a person chose for it ({@link CaseRow.Disposition}), or null
-     * where the case takes none.
-     */
     public void resolve(
             String projectId,
             String id,
@@ -372,8 +288,6 @@ public class CaseRepository {
                 .param("now", now.toString())
                 .update();
     }
-
-    // ---- mapping -----------------------------------------------------------------------------
 
     private static CaseRow map(ResultSet rs) throws SQLException {
         return new CaseRow(

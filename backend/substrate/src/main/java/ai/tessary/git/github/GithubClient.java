@@ -28,7 +28,7 @@ public class GithubClient implements GitProviderClient {
 
     private static final Logger log = LoggerFactory.getLogger(GithubClient.class);
     private static final String LABEL = "github";
-    /** The provider's own spelling, for messages a person reads rather than log lines. */
+    /** For messages a person reads. */
     private static final String LABEL_TITLE = "GitHub";
 
     private final GithubTokenService tokenService;
@@ -43,7 +43,7 @@ public class GithubClient implements GitProviderClient {
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build());
     }
 
-    /** The transport as a seam, so a test can answer GitHub without a network. */
+    /** Test seam for the transport. */
     GithubClient(GithubTokenService tokenService, ObjectMapper mapper, HttpClient http) {
         this.tokenService = tokenService;
         this.mapper = mapper;
@@ -56,11 +56,9 @@ public class GithubClient implements GitProviderClient {
     }
 
     /**
-     * {@code GET /repos/{owner}/{repo}} with the integration's own credentials. The status mapping is
-     * the point of the method: GitHub returns 404 (not 403) for a private repo a fine-grained token
-     * has not been granted, so a 404 cannot be reported as "no such repository" without frequently
-     * being wrong. 401 is unambiguous, 403 is an explicit refusal (SSO or an org policy), and every
-     * other non-2xx stays a plain provider failure rather than being read as a verdict about access.
+     * GitHub returns 404, not 403, for a private repo a fine-grained token was not granted, so 404 cannot mean "no such
+     * repository". 401 is unambiguous, 403 is an explicit refusal (SSO or org policy), and any other non-2xx is a plain
+     * provider failure.
      */
     @Override
     public RepoAccess verifyAccess(GitIntegrationRow integ) {
@@ -75,10 +73,7 @@ public class GithubClient implements GitProviderClient {
         return new RepoAccess(branch.isBlank() ? "main" : branch);
     }
 
-    /**
-     * The status-to-error mapping for {@link #verifyAccess}. Null means the status is not a refusal
-     * and the body should be parsed.
-     */
+    /** Null means not a refusal: parse the body. */
     static @Nullable TessaryException verifyRefusal(int status, String slug) {
         return switch (status) {
             case 401 -> new TessaryException(GitError.CREDENTIALS_REJECTED, LABEL_TITLE);
@@ -113,7 +108,7 @@ public class GithubClient implements GitProviderClient {
         return validateAndParse(exchange(req));
     }
 
-    /** Execute the request, mapping only transport failures to an exception (status is the caller's call). */
+    /** Maps only transport failures; status is the caller's call. */
     private HttpResponse<String> exchange(HttpRequest req) {
         UrlGuard.requirePublicHttp(req.uri().toString());
         try {
@@ -125,7 +120,6 @@ public class GithubClient implements GitProviderClient {
         }
     }
 
-    /** Require 2xx, then parse the JSON body. */
     private JsonNode validateAndParse(HttpResponse<String> res) {
         int status = res.statusCode();
         if (status / 100 != 2) {

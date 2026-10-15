@@ -12,15 +12,8 @@ import { EncoderDebug } from "./sections/EncoderDebug";
 import { MetricDriftDebug } from "./sections/MetricDriftDebug";
 
 /**
- * Everything the platform already computes for this classifier that the page above doesn't render:
- * sweep cursor/lease detail plus family-specific fitted state. Collapsed by default: the query only
- * runs once opened (`enabled: open`), so opening a configure page costs nothing extra, and this
- * whole subtree is a separate lazy chunk (see its `React.lazy` import site in `ClassifierConfigurePage.tsx`)
- * so its code isn't fetched until then either.
- *
- * Not part of the product surface: deleting this directory and its one mount point in
- * `ClassifierConfigurePage.tsx` removes the feature cleanly, with no flag, no entitlement, and no route to
- * unregister.
+ * Not product surface: the query runs only once opened and the subtree is its own lazy chunk. Deleting
+ * this directory and its one mount removes the feature cleanly.
  */
 export default function DebugSection({ classifier }: { classifier: Classifier }) {
   const { api } = useTenant();
@@ -55,7 +48,6 @@ export default function DebugSection({ classifier }: { classifier: Classifier })
   );
 }
 
-/** Dispatches on the same execution tiers the backend catalog itself dispatches on. */
 function FamilySection({ debug }: { debug: ClassifierDebug }) {
   switch (debug.family) {
     case "metric_drift":
@@ -69,7 +61,6 @@ function FamilySection({ debug }: { debug: ClassifierDebug }) {
   }
 }
 
-/** Full JSON, always available: covers any field a family section above doesn't render yet. */
 function RawFallback({ debug }: { debug: ClassifierDebug }) {
   return <PayloadViewer label="Raw" maxHeight={280} payload={JSON.stringify(debug, null, 2)} />;
 }

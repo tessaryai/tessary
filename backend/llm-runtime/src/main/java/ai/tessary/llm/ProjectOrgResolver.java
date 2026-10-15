@@ -9,21 +9,15 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * {@code projectId → orgId}, cached — credentials moved to {@code (org_id, provider)}, so
- * every credential-dependent resolve needs the project's org). A project's org membership changes
- * essentially never, so a Postgres round trip on every judge/agentic call would put a query in
- * front of grading for no benefit. There is no eviction because a project cannot change orgs; a
- * deleted project's stale entry is harmless — nothing looks it up again.
- *
- * <p>Shared by {@link AgenticCredentialResolver} and {@link ProjectModelSettings} so there is one
- * copy of the cache rather than two that drift or double the query load.
+ * Cached {@code projectId → orgId}, since credentials are keyed by org and every judge call would otherwise query for
+ * it. No eviction: a project cannot change orgs, and a deleted project's entry is never looked up again. Shared by
+ * {@link AgenticCredentialResolver} and {@link ProjectModelSettings} so there is one cache.
  */
 @Component
 public class ProjectOrgResolver {
 
     private final ProjectRepository projects;
 
-    /** See the class javadoc for why this is a cache with no eviction. */
     private final ConcurrentMap<String, String> orgIdByProject = new ConcurrentHashMap<>();
 
     public ProjectOrgResolver(ProjectRepository projects) {
@@ -31,10 +25,7 @@ public class ProjectOrgResolver {
     }
 
     /**
-     * {@code projectId → orgId}, via the cache above. Null when the project itself cannot be found —
-     * a caller with a stale/deleted project id degrades to "no credential" (via the null-safe
-     * {@code orgId == null ? null : repo.findByOrgAndProvider(...)} callers use) rather than throwing
-     * here, since a missing project is a different failure than a missing credential.
+     * Null when the project cannot be found, so a stale project id degrades to "no credential" rather than throwing.
      */
     public @Nullable String orgIdFor(String projectId) {
         return orgIdByProject.computeIfAbsent(

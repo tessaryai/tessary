@@ -18,69 +18,27 @@ import {
 import { Button, cn, Modal, PageBody, PageHeader, Select, Skeleton, useToast } from "../../ui";
 
 /**
- * Settings, Models: which model each job runs on.
- *
- * Sibling of Providers, and deliberately distinct from it: Providers is "which keys this org has
- * stored", this is "which model each of our jobs spends them on". Every model here bills the org,
- * except a provider the deployment supplies (PLATFORM), which the server lists only when it offers
- * one and always last in each job's order.
- *
- * That is also why the order between the two pages is the product: a key is what makes any model
- * reachable, so this page has nothing to offer until Providers has something in it. With no key it
- * says so and picks nothing. With one key each job takes the first provider in its own order that
- * the key satisfies, and that provider's default model, and keeps taking it, so adding a
- * higher-priority provider later moves every job nobody has pinned by hand.
- *
- * The page holds no knowledge of its own about lanes or models. Sections, the copy under each
- * heading, which controls a section shows, each lane's options and their order all arrive in the
- * payload, because every one of them is a product decision the server also has to enforce on write:
- * a copy of any of them here would be a second answer that drifts and cannot be validated.
- *
- * The one split worth understanding while reading this file is the section split: an "Agent in a VM"
- * lane hands a model id to an agent inside a sandbox that composes its own requests, so its row is a
- * provider and a model and nothing else. A "Decision models" lane asks a hosted decision model one
- * question per turn, and each provider serves exactly one, so its row is a provider select and
- * nothing else (`model_selectable` is false for that group).
+ * Which model each job runs on. Every section, its copy, each lane's options and their order come
+ * from the server, which also enforces them on write; a copy here would drift. With no provider key
+ * nothing is selected; Automatic takes the first provider in a lane's order the org's keys satisfy.
  */
 
 /**
- * Value of the placeholder a lane selects when the org has no provider key at all. A sentinel rather
- * than the empty string, because the empty string is the "Automatic" option and a native select
- * resolves a duplicated value to whichever option comes first. Never sent: the option carrying it is
- * disabled, and the change handlers refuse it anyway.
+ * Not the empty string, which is the "Automatic" option: a native select resolves a duplicated value to
+ * the first option. Never sent.
  */
 const NO_PROVIDER = "__no_provider__";
 
-/**
- * Control widths, as one constant each, because the whole point is that they line up down a section.
- * Wide enough for the longest option text ("Custom (OpenAI-compatible)", "GPT-5.6 Luna (OpenAI)",
- * "GPT-5.6 · higher cost") with room for a longer name later: a native select truncates silently, so
- * a too-narrow one hides exactly the thing being chosen.
- */
+/** A native select truncates silently, so it must fit the longest option text. */
 const PROVIDER_W = "sm:w-[196px]";
 const MODEL_W = "sm:w-[272px]";
 
-/**
- * What a row and the footnote actually read off a model, regardless of which of the two source
- * types it came from. A {@link BedrockModelDescriptor} satisfies this structurally as-is; a
- * {@link CatalogEntry} (GEMINI/GLM/GROK/CUSTOM) is mapped into it below, see `models` in
- * {@link Models}.
- *
- * `provider` is what {@link LaneRow} checks against `configured_providers` to decide whether an
- * option is reachable at all. A {@link BedrockModelDescriptor} carries no `provider` field of its
- * own, only `endpoint` (`"RUNTIME" | "MANTLE"`), so it is derived below in {@link Models}'s `models`
- * memo.
- */
+/** A Bedrock descriptor carries only `endpoint`, so its `provider` is derived in `models` below. */
 type ModelOption = Pick<BedrockModelDescriptor, "model_key" | "display_name"> & {
   provider: ModelProvider;
 };
 
-/**
- * A {@link CatalogEntry}'s wire key, as {@code ModelCatalog#key} on the server encodes it and
- * {@code ProjectModelSettings}'s {@code model_key} union decodes it:
- * {@code "<PROVIDER>:<model_name>"}. Kept as one function so the client and server never spell the
- * encoding two different ways.
- */
+/** `"<PROVIDER>:<model_name>"`, as the server's ModelCatalog#key encodes it. */
 function catalogModelKey(entry: CatalogEntry): string {
   return `${entry.provider}:${entry.model_name}`;
 }
@@ -96,7 +54,6 @@ export function Models() {
   const save = useMutation({
     mutationFn: ({ lane, model }: { lane: ModelLane; model: string }) =>
       api.setLaneModel(lane, { model_key: model }),
-    // The PUT returns the whole refreshed view, so seed the cache with it rather than refetching.
     onSuccess: (data) => {
       qc.setQueryData(key, data);
       toast.success("Model updated");
@@ -106,9 +63,7 @@ export function Models() {
 
   const reset = useMutation({
     mutationFn: (lane: ModelLane) => api.resetLaneModel(lane),
-    // Going back to automatic reads as "chose a model" like any other option, because it is one: the
-    // lane immediately runs whatever the priority order resolves to. Seed the cache from the response
-    // for the same reason the save does: the model it lands on may not be the one it just left.
+    // Seed from the response: the model it lands on may not be the one it just left.
     onSuccess: (data) => {
       qc.setQueryData(key, data);
       toast.success("Model updated");
@@ -122,14 +77,9 @@ export function Models() {
     return m;
   }, [q.data]);
 
-  // The settings page's model list is the union BedrockModelProfile ∪ ModelCatalog: a
-  // GEMINI/GLM/GROK/CUSTOM entry mapped into the same shape a Bedrock one already renders as, keyed
-  // the way an AGENT_VM lane's own `model_keys` names it (see catalogModelKey).
   const models: ModelOption[] = useMemo(() => {
     const bedrock = (q.data?.models ?? []).map((m) => ({
       ...m,
-      // MANTLE serves the GPT-5.6 line over bedrock-mantle; every other endpoint value is Bedrock
-      // Converse proper. See ModelOption's own javadoc for why this is derived rather than sent.
       provider: (m.endpoint === "MANTLE" ? "BEDROCK_MANTLE" : "BEDROCK") as ModelProvider,
     }));
     const catalog = (q.data?.catalog_models ?? []).map((c) => ({
@@ -140,19 +90,12 @@ export function Models() {
     return [...bedrock, ...catalog];
   }, [q.data]);
   const rates = q.data?.rates ?? [];
-  // The providers this org can run on: every one it holds a credential for, plus a deployment-supplied
-  // PLATFORM when the server offers it. A model whose provider is absent is not offered at
-  // all: an option nobody can pick is noise, and naming the key it would need turns a settings page
-  // into a shopping list: one that is wrong as often as not, since the same model is reachable
-  // through more than one provider.
+  // A model whose provider the org cannot run is not offered at all.
   const configuredProviders = useMemo(
     () => new Set<ModelProvider>(q.data?.configured_providers ?? []),
     [q.data],
   );
 
-  // Sections in the server's order, each holding its own lanes in the server's order. A group with no
-  // lanes is dropped rather than drawn as an empty heading: it cannot happen today, but a heading
-  // over nothing is a worse failure than a missing section.
   const sections = useMemo(() => {
     const lanes = q.data?.lanes ?? [];
     return (q.data?.groups ?? [])
@@ -217,11 +160,7 @@ export function Models() {
   );
 }
 
-/**
- * The state this page has to say out loud rather than paper over: no provider key, so no model can
- * run, so nothing below is selected. It is a notice above the lanes rather than a replacement for
- * them, because seeing which jobs are waiting on a key is the reason to go and add one.
- */
+/** A notice above the lanes, not a replacement: seeing which jobs wait on a key is why to add one. */
 function NoProviderNotice() {
   return (
     <div className="mb-8 rounded-card border border-border bg-raised p-4">
@@ -241,11 +180,8 @@ function NoProviderNotice() {
 }
 
 /**
- * The things about this page that a control cannot say for itself.
- *
- * The region sentence is prose because the payload carries no region: it is a fact about where the
- * two Bedrock endpoints are deployed, and it is the one thing on this page a reader cannot undo
- * later, since trace content that left the region has left it.
+ * The region is prose because the payload carries none, and trace content that left the region cannot
+ * be recalled.
  */
 function Footnote() {
   return (
@@ -263,18 +199,8 @@ function Footnote() {
 }
 
 /**
- * One job's row: a provider, and a model on it.
- *
- * <p>Provider first, model second, because that is the order the choice actually has: a key is the
- * thing an org either holds or does not, and which model to run is a question inside it. The provider
- * select offers Automatic plus every provider this org has a key for; the model select offers that
- * provider's own models for this lane. Both lists, and their order, come from the server (see
- * `LanePriority`), and this component never re-sorts them, because the order is the rule that decides
- * what Automatic picks.
- *
- * <p>Two decisions are the server's and only rendered here: which models a lane may use (a small
- * model can drive a sandbox agent and still not be something we run over a whole repository), and
- * which one wins when nobody has chosen.
+ * Provider first, model second. Both lists and their order come from the server and are never
+ * re-sorted here: the order decides what Automatic picks.
  */
 function LaneRow({
   lane,
@@ -291,49 +217,37 @@ function LaneRow({
   group: ModelLaneGroupView;
   models: ModelOption[];
   rates: ModelRateView[];
-  /** Providers the org can run on: gates which options exist at all. */
   configuredProviders: Set<ModelProvider>;
   setting: ProjectModelSetting | undefined;
   busy: boolean;
   onChange: (model: string) => void;
   onReset: () => void;
 }) {
-  // The selects show what the lane runs, which is not always what the project stored. `automatic`
-  // says which of the two it is: the project's own row, or the priority order resolved against the
-  // org's keys. Automatic is the empty value on the provider select, so the two never collide.
+  // `automatic` says whether the selects show the project's own row or the resolved priority order.
   const effectiveKey = lane.effective_model_key ?? null;
 
-  // Only the providers this org can actually run. Never re-ordered: the server's order is the rule
-  // that decides what Automatic resolves to, so showing a different one would describe a different
-  // fallback than the one in force.
+  // Never re-ordered: the server's order is the fallback rule in force.
   const providers: LaneProviderOption[] = lane.provider_options.filter((o) =>
     configuredProviders.has(o.provider),
   );
-  // Which provider the running model belongs to. Read off the option lists rather than off the key's
-  // own prefix, because a Bedrock key carries no provider in its name at all.
+  // Read off the option lists: a Bedrock key carries no provider in its name.
   const effectiveProvider =
     providers.find((o) => o.model_keys.includes(effectiveKey ?? ""))?.provider ?? null;
   const selectedProvider = lane.automatic ? "" : (effectiveProvider ?? "");
   const modelsForProvider = providers.find((o) => o.provider === effectiveProvider)?.model_keys ?? [];
 
-  // A stored choice the org can no longer run: its provider's key was removed, or the model left
-  // this lane's offer list. The lane falls back to automatic rather than breaking, and says so:
-  // silently ignoring a choice someone made is how a settings page starts lying about itself.
+  // A stored choice the org can no longer run falls back to automatic and says so.
   const strandedName =
     lane.automatic && setting
       ? (models.find((m) => m.model_key === setting.model_key)?.display_name ?? setting.model_key)
       : null;
 
-  // Triage only, and only above its own provider's default rate — not a fixed threshold, since the
-  // book moves and providers price differently. Neither an unpriced candidate nor an unpriced default
-  // warns, since there is then nothing to compare. `pending` holds the model the two-step dialog is
-  // confirming; the selects stay bound to what the lane runs throughout, so a cancel at either step
-  // needs no explicit revert.
+  // Triage only, and only above its provider's default rate; unpriced models never warn. The selects
+  // stay bound to what the lane runs, so a cancel needs no revert.
   const [pending, setPending] = useState<{ key: string; step: 1 | 2 } | null>(null);
 
   const rateFor = (modelKey: string) => rates.find((r) => r.model_key === modelKey);
 
-  /** The provider option that offers `modelKey` on this lane, so its `default_model_key` can be read. */
   const providerOfferingModel = (modelKey: string) =>
     lane.provider_options.find((o) => o.model_keys.includes(modelKey));
 
@@ -354,7 +268,6 @@ function LaneRow({
     );
   };
 
-  // The model select offers no empty value, and its "No model" placeholder only shows while it is disabled.
   const handleModel = (nextKey: string) => {
     const next = models.find((m) => m.model_key === nextKey);
     if (next && !configuredProviders.has(next.provider)) return;
@@ -365,9 +278,7 @@ function LaneRow({
     onChange(nextKey);
   };
 
-  // Choosing a provider pins that provider's own default model. Choosing Automatic drops the pin
-  // entirely, which is a delete rather than a write: there is no default row to put back.
-  // The "No provider" placeholder only shows while the select is disabled, so it is never chosen.
+  // Automatic drops the pin, a delete rather than a write.
   const handleProvider = (nextProvider: string) => {
     if (!nextProvider) {
       onReset();
@@ -388,12 +299,8 @@ function LaneRow({
     : "";
   const pendingDefaultRate = pendingDefaultOption ? rateFor(pendingDefaultOption.default_model_key) : undefined;
 
-  // Two different states, and each needs its own sentence. "No provider configured" is true only
-  // when the org holds no key at all; when it holds keys that this lane cannot run, saying the same
-  // thing tells someone looking straight at their own configured providers that they have none.
-  // Every provider currently reaches every lane (see LanePriority's coverage rule), so the second
-  // state is unreachable today, but the distinction stays ready for whenever a future provider
-  // doesn't.
+  // "No provider configured" only when the org holds no key; keys this lane cannot run need another
+  // sentence.
   const noProvider = providers.length === 0;
   const noKeysAtAll = configuredProviders.size === 0;
 
@@ -413,8 +320,6 @@ function LaneRow({
             value={noProvider ? NO_PROVIDER : selectedProvider}
             onChange={(e) => handleProvider(e.target.value)}
           >
-            {/* Nothing this org holds a key for can run this lane. Disabled: it is a thing to be, not
-                a thing to choose, and the way out of it is Providers. */}
             {noProvider && (
               <option value={NO_PROVIDER} disabled>
                 {noKeysAtAll ? "No provider configured" : "No key runs this job"}
@@ -463,10 +368,7 @@ function LaneRow({
         )}
       </div>
 
-      {/* The price-gated warning, two confirmations deep. Step 1 states the trade in plain terms;
-          step 2 makes the click cost something rather than doubling as an accidental double-click
-          on step 1's own button: a second, differently-worded dialog reads as a real pause rather
-          than the same confirm answered twice. */}
+      {/* Step 2 is a differently worded dialog so an accidental double-click cannot confirm both. */}
       <Modal
         open={pending?.step === 1}
         onClose={() => setPending(null)}
@@ -505,7 +407,6 @@ function LaneRow({
               variant="primary"
               loading={busy}
               onClick={() => {
-                // This dialog is open only while a change is pending.
                 onChange(pending!.key);
                 setPending(null);
               }}
@@ -531,7 +432,6 @@ const RATE_FORMAT = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-/** A priced model's rate as a phrase, naming only the sides the price book carries. */
 function describeRate(rate: ModelRateView): string {
   const { input_rate_per_million: input, output_rate_per_million: output } = rate;
   return [

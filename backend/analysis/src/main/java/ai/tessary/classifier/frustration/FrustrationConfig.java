@@ -11,20 +11,10 @@ import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Frustration classifier's operating point: the flag threshold its scorer uses, and the dials of the rate
- * test that watches frustrated conversations per call site. Its own record with its own key names, clamped on
- * construction, because the rate test counts conversations where tool_error counts tool calls: the same number
- * means a different amount of traffic. {@link #engine()} is the {@link ToolErrorConfig} the shared engine runs
- * on. The arithmetic and the table behind these defaults are in {@code devdocs/concepts/deviation-math.md} §2.
- *
- * @param threshold probability of {@code unhappy_with_assistant} above which a turn is flagged
- * @param arlTarget conversations a healthy call site should run between false alarms
- * @param minDecisionInterval the lower clamp on the derived alarm threshold {@code h}
- * @param shiftMultiple the multiple of the learned rate the test is tuned to catch quickly
- * @param shiftFloor the smallest absolute rise in the frustrated-conversation rate worth arming for
- * @param minBaselineConversations conversations the learned reference must hold before anything is judged
- * @param freezeBaselineConversations conversations the reference keeps learning up to, judging all the while;
- *     never below {@code minBaselineConversations}, and equal to it when the blob does not name one
+ * The Frustration classifier's operating point, clamped on construction. Its own keys because the rate test counts
+ * conversations where tool_error counts tool calls; defaults are derived in {@code devdocs/concepts/deviation-math.md}
+ * §2. @param freezeBaselineConversations never below {@code minBaselineConversations}, and equal to it when the blob
+ * does not name one
  */
 public record FrustrationConfig(
         double threshold,
@@ -36,39 +26,32 @@ public record FrustrationConfig(
         int freezeBaselineConversations) {
 
     /**
-     * EXPERIMENT(frustration-tuning): conversations a healthy call site runs between false alarms. A starting
-     * value: tool_error's 250,000 tool calls converted at 25 to 50 spans a conversation, taking the
-     * conservative end. At 200 conversations a day that is one false case per call site every seven weeks.
+     * EXPERIMENT(frustration-tuning): tool_error's 250,000 calls at 25-50 spans a conversation, conservative end; one
+     * false case per call site every seven weeks at 200 conversations a day.
      */
     public static final long DEFAULT_ARL_TARGET = 10_000L;
 
     /**
-     * EXPERIMENT(frustration-tuning): the floor on {@code h}. A starting value. With tool_error's 6 every call
-     * site below a 13% base rate would run several times stricter than the budget; the fit crosses 4 near 2%,
-     * so this floor binds only below that.
+     * EXPERIMENT(frustration-tuning): floor on {@code h}; the fit crosses 4 near a 2% base rate, so it binds only below
+     * that.
      */
     public static final double DEFAULT_MIN_DECISION_INTERVAL = 4.0;
 
     /** EXPERIMENT(frustration-tuning): a doubling, as tool_error. */
     public static final double DEFAULT_SHIFT_MULTIPLE = 2.0;
 
-    /**
-     * EXPERIMENT(frustration-tuning): two conversations in a hundred, which is also the scorer's own noise
-     * floor per calm conversation. A smaller floor would arm a clean call site for a rise nobody can tell
-     * from the scorer's false flags.
-     */
+    /** EXPERIMENT(frustration-tuning): also the scorer's own noise floor per calm conversation. */
     public static final double DEFAULT_SHIFT_FLOOR = 0.02;
 
     /**
-     * EXPERIMENT(frustration-tuning): conversations the reference holds before a call site is judged. At a 5%
-     * rate that pins the reference as tightly, relatively, as tool_error's 500 calls pin a 1% tool.
+     * EXPERIMENT(frustration-tuning): at a 5% rate this pins the reference as tightly as tool_error's 500 calls pin a
+     * 1% tool.
      */
     public static final int DEFAULT_MIN_BASELINE_CONVERSATIONS = 100;
 
     /**
-     * No default of its own: a blob without {@code freeze_baseline_conversations} freezes the reference the
-     * moment judging starts, as every frustration row did before the key existed, so those rows keep their state
-     * epoch and are not rebuilt. The catalog seeds new rows with {@code 1000}, Groundedness's freeze.
+     * A blob without {@code freeze_baseline_conversations} freezes at judging start, as rows did before the key
+     * existed, so they keep their state epoch.
      */
     private static final int UNSET_FREEZE = 0;
 
@@ -105,10 +88,7 @@ public record FrustrationConfig(
                 UNSET_FREEZE);
     }
 
-    /**
-     * Parse a classifier's blob, falling back to the default for any key it does not carry and to every
-     * default for a blob that does not parse, as {@link ToolErrorConfig#of} does.
-     */
+    /** Falls back to the default per missing key, and to all defaults for an unparseable blob. */
     public static FrustrationConfig of(ObjectMapper mapper, @Nullable String configJson) {
         if (configJson == null || configJson.isBlank()) return defaults();
         try {
@@ -126,10 +106,7 @@ public record FrustrationConfig(
         }
     }
 
-    /**
-     * The shared engine's config. The keys this classifier does not set stay at the engine's defaults; none of
-     * them affects the up arm, which is the only one filed.
-     */
+    /** Unset keys stay at the engine's defaults; none affects the up arm, the only one filed. */
     public ToolErrorConfig engine() {
         return new ToolErrorConfig(
                 arlTarget,
@@ -147,11 +124,7 @@ public record FrustrationConfig(
         return JevFrustrationQuestion.scorerVersion(threshold);
     }
 
-    /**
-     * The schema version handed to {@link ToolErrorTrend#sweep(java.util.List, ToolErrorConfig, java.util.Map,
-     * java.util.Map, String)}: the engine's own, plus what the engine's epoch does not already carry. A flag
-     * under one scorer and under another are different events, and a different floor is a different threshold.
-     */
+    /** The engine's schema version plus the scorer and floor, which the engine's epoch does not carry. */
     public String schemaVersion() {
         return String.join(
                 "|",
@@ -161,7 +134,6 @@ public record FrustrationConfig(
                 scorerVersion());
     }
 
-    /** The epoch a {@code frustration_state} row built under this config carries. */
     public String stateEpoch() {
         return CarriedState.epochOf(engine(), schemaVersion());
     }

@@ -5,19 +5,16 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * Whether a capability is on for an org that states no override of its own. This build's answer is
- * {@link #open()}, and {@link CapabilitySeamConfig} registers it only when no other build supplies
- * one, so another build changes a default by shipping a bean rather than writing a row or reading an
- * environment variable. An org's override still wins over whatever this answers.
+ * Whether a capability is on for an org with no override. {@link CapabilitySeamConfig} registers {@link #open()} only
+ * when no other build supplies a bean. An org's override still wins.
  */
 public interface CapabilityDefaults {
 
     boolean defaultFor(Capability capability);
 
     /**
-     * On, except automatic Layer-2 triage and alerts. Automatic triage drives LLM escalation with no
-     * ceiling, so running it unattended is an opt-in an operator takes knowingly. Alerts are not
-     * shipping in this build, so their settings page stays hidden and nothing is delivered.
+     * On, except automatic Layer-2 triage, which drives LLM escalation with no ceiling and so is a knowing opt-in, and
+     * alerts, which are not shipping in this build.
      */
     static CapabilityDefaults open() {
         Set<Capability> offByDefault = EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS);

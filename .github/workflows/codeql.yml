@@ -1,17 +1,7 @@
 name: CodeQL
 
-# CodeQL code scanning, weekly and on demand. The repository is public, so code scanning needs no
-# GitHub Advanced Security purchase and its Actions minutes are free.
-#
-# LANGUAGES: java-kotlin covers backend/ (Java 25, no Kotlin sources), javascript-typescript
-# covers frontend/ and sandbox-runner/ — verified as the current combined
-# CodeQL language ids 2026-09-01 against
-# github/codeql-action's init action schema. `build-mode: none` for both: javascript-typescript
-# is interpreted (always `none`). java-kotlin's `none` mode is documented as skipping any Kotlin
-# source with a warning rather than failing — this reactor has none, so it covers backend/'s Java
-# fully; if Kotlin ever entered the reactor this row would need `autobuild` instead. ON THE FIRST
-# SCHEDULED RUN: verify the analyze step's "files analyzed" count is non-trivial, not just a green
-# checkmark — a wrong build-mode can silently analyze nothing.
+# Weekly and on demand. Free here because the repository is public. java-kotlin's `build-mode: none`
+# skips Kotlin sources; the reactor has none.
 
 on:
   schedule:
@@ -25,6 +15,8 @@ permissions:
 jobs:
   codeql:
     name: CodeQL analyze (${{ matrix.language }})
+    # The private paid copy syncs this file but has no free code scanning.
+    if: github.repository == 'tessaryai/tessary'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

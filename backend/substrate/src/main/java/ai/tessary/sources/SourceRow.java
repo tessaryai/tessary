@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.sources;
 
-/** Internal row record for the ingestion_source table. credentials_enc is sealed. */
+/** {@code credentials_enc} is sealed. */
 public record SourceRow(
         String id,
         String projectId,

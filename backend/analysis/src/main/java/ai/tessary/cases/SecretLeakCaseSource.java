@@ -13,24 +13,9 @@ import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a secret leak ruled positive into a case. A leaked credential is a fact to rotate, not a claim
- * for Layer 2 to audit, so a high-confidence one skips triage: {@code ClassifierArming} writes the positive
- * ruling itself and calls {@link CaseOpener} in the same transaction.
- *
- * <p><b>Confidence decides who rules.</b> {@code ClassifierArming} files a finding for every facet (one
- * rule at one call site) that crosses its window threshold. One recorded {@code high} on the finding, the
- * same word the finding page's subtitle shows, is ruled positive at arming; a low-confidence one stays
- * unruled and reaches a case only through triage or a person.
- *
- * <p><b>A leak never recovers on its own.</b> A credential that stopped appearing in output is still
- * exposed until someone rotates it, so nothing here ever closes the case on silence — it stays open
- * until a person resolves it, which closes the finding with it (see {@code CaseService#resolve}). A
- * later leak of the same facet is a fresh finding once this one is ruled or closed, and joins or reopens
- * from there exactly like any other cause.
- *
- * <p>One case per (rule, call site) facet, matching the finding's own scope: a leaked AWS key from one
- * call site and a leaked GitHub token from another are two credentials to rotate, so they never share a
- * case.
+ * A leaked credential is a fact to rotate, so a high-confidence leak skips triage: {@code ClassifierArming} rules it
+ * positive and calls {@link CaseOpener} in the same transaction; low confidence goes through triage or a person. A leak
+ * never recovers on its own, so the case stays open until a person resolves it. One case per (rule, call site) facet.
  */
 @Component
 public class SecretLeakCaseSource implements CaseSource {
@@ -50,8 +35,7 @@ public class SecretLeakCaseSource implements CaseSource {
     public CaseDetection shape(FindingRow finding) {
         SecretLeakDetail read = detail.detail(finding);
         if (read == null) {
-            // CaseOpener only calls this once the finding is already ruled positive; an unreadable
-            // detail read here is the finding's own detection table, not this decision, failing.
+            // CaseOpener only calls this for a positive ruling, so a failed read here is the detection table failing.
             throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id());
         }
         return toDetection(finding, read);
@@ -70,9 +54,8 @@ public class SecretLeakCaseSource implements CaseSource {
                 finding.id(),
                 FindingTitle.of(finding),
                 basis(read),
-                // Severity-1 by construction: a high-confidence credential leak is a security incident
-                // happening now, not a shift to characterize, and it outranks every other detector's
-                // ranked-list ordering by design.
+                // Severity 1 by construction: a high-confidence leak is an incident now and outranks every other
+                // detector.
                 1.0,
                 CaseSource.onset(finding),
                 (double) read.leakCount(),

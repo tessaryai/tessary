@@ -14,20 +14,15 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The one question the Frustration classifier asks the decision model about a user turn, and the
- * threshold it fires at.
- *
- * <p>A three-way choice over the current message: unhappy with the assistant, unhappy about something
- * else, or neither. Only the first fires. The instruction is the shortest wording that held its recall
- * against the full one on both research sets, so it stays short; every edit here changes
- * {@link #scorerVersion} and so starts a new set of assessment rows.
+ * The question the Frustration classifier asks about a user turn: unhappy with the assistant, about something else, or
+ * neither; only the first fires. The shortest wording that held recall; every edit changes {@link #scorerVersion} and
+ * starts new assessment rows.
  */
 public final class JevFrustrationQuestion {
 
-    /** The question's name in the request and the answer. */
     public static final String NAME = "user_stance";
 
-    /** The option whose probability is the score. */
+    /** Its probability is the score. */
     public static final String UNHAPPY_WITH_ASSISTANT = "unhappy_with_assistant";
 
     public static final String UNHAPPY_OTHER_CAUSE = "unhappy_other_cause";
@@ -38,8 +33,8 @@ public final class JevFrustrationQuestion {
     public static final double DEFAULT_THRESHOLD = 0.40;
 
     /**
-     * What a conversation is keyed on. Rows scored when a thread id was the key read prior turns from other
-     * sessions and stopped a user's later sessions after one flag, so the session key starts new rows.
+     * Keyed on session: a thread-id key read prior turns from other sessions and silenced a user's later sessions after
+     * one flag.
      */
     private static final String CONVERSATION_KEY = "conversation=session_id";
 
@@ -63,15 +58,11 @@ public final class JevFrustrationQuestion {
         return c;
     }
 
-    /** The questions sent with every turn. */
     public static Map<String, DecisionRequest.Question> questions() {
         return Map.of(NAME, DecisionRequest.Question.choice(INSTRUCTION, CRITERIA));
     }
 
-    /**
-     * The flag threshold from a classifier's {@code config_json} ({@code threshold}), or
-     * {@link #DEFAULT_THRESHOLD} when it is absent, unreadable, or outside {@code (0, 1)}.
-     */
+    /** {@link #DEFAULT_THRESHOLD} when absent, unreadable, or outside {@code (0, 1)}. */
     public static double threshold(@Nullable String configJson) {
         if (configJson == null || configJson.isBlank()) return DEFAULT_THRESHOLD;
         try {
@@ -84,10 +75,8 @@ public final class JevFrustrationQuestion {
     }
 
     /**
-     * What produced an assessment: a hash of the question as sent (its name, instruction and criteria),
-     * the threshold, and the conversation key, since a flag under one of them and under another are
-     * different events. The model version is deliberately not in it, so a provider moving {@code
-     * jev-latest} does not restart every call site.
+     * A hash of the question as sent, the threshold and the conversation key. The model version is excluded so a
+     * provider moving {@code jev-latest} does not restart every call site.
      */
     public static String scorerVersion(double threshold) {
         String material =

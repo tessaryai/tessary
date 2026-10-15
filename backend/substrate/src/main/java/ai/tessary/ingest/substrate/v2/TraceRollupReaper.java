@@ -13,32 +13,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Crash recovery for the rollup protocol (substrate-model.md §7.4), and the only thing watching whether
- * the queue is draining at all.
- *
- * <h2>The fingerprint</h2>
- *
- * <p>{@link TraceRollupWorker}'s claim clears {@code rollup_due_at} and commits before the write that
- * follows it. A worker that dies in between therefore leaves a state nothing legitimate produces:
- * {@code is_settled = false} — so spans have arrived since the last rollup — with {@code rollup_due_at}
- * null, so nobody is going to look at it, and no recent {@code rolled_up_at} to say someone just did.
- * Such a trace would sit forever showing counters from before the spans that un-settled it, honestly
- * marked stale and never becoming fresh. This sweep re-arms it.
- *
- * <p><b>The sweep is deliberately blunt.</b> It cannot tell a dead worker's trace from one being written
- * right now, and it does not try: re-arming a healthy in-flight claim costs exactly one redundant
- * recompute, because every rollup is a replacement rather than a delta. Recovery that cannot corrupt is
- * worth far more than recovery that is precise, and the alternative — a lease with an expiry — would put
- * the settle protocol's state in two places that can disagree.
- *
- * <h2>The staleness alarm</h2>
- *
- * <p>A rollup queue that stops draining is invisible from every read surface: the traces list keeps
- * serving the numbers the last successful rollup wrote, with no gap and no error, simply older than it
- * claims. So the sweep also samples the queue and logs ERROR when the oldest due deadline has fallen
- * further behind than {@code rollup-stale-after-ms}. Log-only, like the grading-spend cursor alarm it is
- * modelled on: the healthy response to a stuck queue is a human, and there is no automatic action here
- * that would not risk making an infrastructure hiccup worse.
+ * Crash recovery for the rollup protocol: re-arms traces with {@code is_settled = false}, null {@code rollup_due_at}
+ * and no recent {@code rolled_up_at}, which only a worker dying mid-claim produces. Deliberately blunt, since a
+ * redundant recompute is harmless. Also logs ERROR when the oldest due deadline exceeds {@code rollup-stale-after-ms},
+ * since a stuck queue is invisible from every read surface.
  */
 @Component
 @ConditionalOnProperty(
@@ -60,13 +38,7 @@ public class TraceRollupReaper {
         this.props = props;
     }
 
-    /**
-     * One sweep's outcome.
-     *
-     * @param rearmed traces recovered from a rollup that never completed.
-     * @param queueDepth traces armed at the moment of the sweep, due or not.
-     * @param overdueMs how far past its deadline the oldest due trace has fallen, or 0 if none is due.
-     */
+    /** @param queueDepth traces armed at the moment of the sweep, due or not @param overdueMs 0 if none is due */
     public record Sweep(int rearmed, int queueDepth, long overdueMs) {}
 
     @Scheduled(
@@ -76,8 +48,7 @@ public class TraceRollupReaper {
         try {
             sweepOnce();
         } catch (RuntimeException e) {
-            // A failed sweep means crash recovery stopped happening, which looks exactly like nothing being
-            // wrong — the same shape as the grading-spend cursor going quiet, and ERROR for the same reason.
+            // A failed sweep looks exactly like nothing being wrong, hence ERROR.
             log.error(
                     Markers.OPS,
                     "trace rollup reaper sweep failed error={}",
@@ -86,10 +57,7 @@ public class TraceRollupReaper {
         }
     }
 
-    /**
-     * Run one sweep synchronously and report what it did. Public so a test can drive recovery without
-     * waiting a minute for a scheduler, and without the sweep racing the assertions it is being checked by.
-     */
+    /** Public so a test can drive recovery without racing a scheduler. */
     public Sweep sweepOnce() {
         int rearmed = traces.reap(props.rollupReapGraceSeconds());
         RollupQueue queue = traces.queueStats();

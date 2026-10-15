@@ -6,7 +6,6 @@ import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, Input, LoadingRow, useToast } from "../../ui";
 import { invalidateClassifierReads } from "./classifierReads";
 
-/** The two detectors {@code MetricDriftConfig} actually governs: the classifiers this form applies to. */
 export const METRIC_DRIFT_DETECTORS: ReadonlySet<string> = new Set(["cost_drift", "duration_drift"]);
 
 type FormState = {
@@ -17,16 +16,8 @@ type FormState = {
 };
 
 /**
- * The operating point editor for cost_drift / duration_drift: the five fields `MetricDriftConfig`
- * clamps server-side. Editing here doesn't rewind any history: it only changes when the classifier's
- * NEXT window closes and how big a shift has to be to count, so the effect of a change is visible
- * after that window closes, not immediately.
- *
- * The dial is the MOVE, not a false-alarm rate. The two are interchangeable arithmetic but not
- * interchangeable promises: "tell me about 15% moves" is something you can hold in your head and
- * predict, and a rate is not. What the chosen move costs in false alarms on this project's own traffic
- * is shown beside it, read-only, so the consequence is visible where the choice is made rather than
- * surfacing as noise a week later.
+ * The five fields `MetricDriftConfig` clamps server-side. A change applies from the next window close.
+ * The dial is the move, not a false-alarm rate; the implied rate is shown beside it, read-only.
  */
 export function TuningSection({ classifier }: { classifier: Classifier }) {
   const { api } = useTenant();
@@ -41,8 +32,7 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
   const [form, setForm] = useState<FormState | null>(null);
   const [triedBlank, setTriedBlank] = useState(false);
 
-  // Seed the form once from the fetched value; a later refetch (e.g. after save) doesn't clobber
-  // whatever the user is mid-typing.
+  // Seed once, so a refetch after save does not clobber what the user is typing.
   useEffect(() => {
     if (tuningQ.data && form === null) setForm(fromTuning(tuningQ.data));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -58,7 +48,6 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
       api.setClassifierTuning(classifier.id, body),
     onSuccess: (result) => {
       qc.setQueryData(["classifier-tuning", api.base, classifier.id], result);
-      // Min samples is what a drift chart's learning meter counts up to.
       invalidateClassifierReads(qc, api.base);
       setForm(fromTuning(result));
       toast.success("Tuning saved", "It applies from the next window this classifier closes.");
@@ -73,8 +62,7 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    // A number input reports anything it cannot parse as "", and Number("") is 0: a cleared field would
-    // save as 0 and be clamped to the floor. Blank is no value, so nothing saves until every field has one.
+    // A cleared number input reports "", and Number("") is 0, so nothing saves until every field has a value.
     if (blank.length > 0) {
       setTriedBlank(true);
       return;
@@ -140,11 +128,7 @@ function fromTuning(t: { window_target_count: number; window_max_hours: number; 
   };
 }
 
-/**
- * What the chosen move costs in false alarms on this project's traffic. Read-only, and null until some
- * bucket has enough traffic to say. A made-up number here would be worse than no number, because it is
- * the only thing telling someone what their setting actually does.
- */
+/** Null until some bucket has enough traffic: a made-up number would be worse than none. */
 function ImpliedRate({ rate }: { rate: number | null }) {
   return (
     <p className="text-subtle m-0 text-label">

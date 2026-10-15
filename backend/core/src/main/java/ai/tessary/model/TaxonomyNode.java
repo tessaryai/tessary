@@ -6,11 +6,8 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One taxonomy node. The skill emits two shapes:
- *  - flat (as documented): every node has its own row, parent linkage via {@code parent_id}.
- *  - nested: a parent carries its children directly under {@code subcategories}.
- * Both deserialize. Renderers should look at {@code subcategories} first; if
- * empty, fall back to flat parent_id lookup.
+ * The skill emits nodes flat (linked by {@code parent_id}) or nested (under {@code subcategories}); both deserialize.
+ * Renderers should check {@code subcategories} first.
  */
 public record TaxonomyNode(
         String id,

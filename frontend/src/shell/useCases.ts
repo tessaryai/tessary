@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The Triage nav badge's data source — the ONLY nav count in the app.
- *
- * Reads `GET {projectBase}/cases` and counts what is open.
- *
- * Resilient by design: while loading or on error the badge simply doesn't render
- * (count 0) — the shell never blocks on the cases endpoint.
- */
+// The Triage nav badge's count. While loading or on error it reads 0: the shell never blocks on it.
 import { useQuery } from "@tanstack/react-query";
 import { useProjectApi } from "../tenant/TenantContext";
 

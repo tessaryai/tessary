@@ -14,23 +14,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * The ingest heartbeat: one structured line a minute carrying what the write path did since the last one.
- *
- * <p><b>Why a line rather than a meter.</b> {@link SubstrateWriter} has kept these counters since it was
- * written and nothing has ever read them — they are process-local {@code AtomicLong}s with getters used by
- * one integration test. Micrometer would be the natural home, but {@code micrometer-core} arrives with
- * {@code spring-boot-starter-actuator}, which only the {@code app} module declares, and pulling it down to
- * {@code substrate} to instrument one class inverts a module boundary for a graph. Loki already receives
- * every structured field as a queryable key-value pair — that is how segment H's
- * {@code llm.spend.daily} answers a cross-org question with nothing built — so the dashboard is a LogQL
- * query and this is the thing it queries.
- *
- * <p><b>Deltas, not totals.</b> Counters that only ever rise make "is it shedding <em>now</em>" a
- * subtraction the reader has to do in their head at 3am. The line carries the interval's own numbers and
- * the queue depth at the instant it was taken, so a panel is a plot of the field.
- *
- * <p>Silent when nothing moved: a project that ingests nothing overnight should not produce 480 identical
- * lines, and "no line" is unambiguous because the depth fields are only interesting when there is traffic.
+ * One structured line a minute of write-path deltas, queried in Loki; Micrometer would require pulling actuator into
+ * {@code substrate}. Silent when nothing moved.
  */
 @Component
 public class IngestThroughputReporter {
@@ -73,9 +58,7 @@ public class IngestThroughputReporter {
 
     @Scheduled(fixedDelayString = "${tessary.ingest.substrate.report-ms:60000}", initialDelayString = "60000")
     public void report() {
-        // BEFORE the quiet-interval early return below, and that ordering is the whole point: a dead
-        // drainer produces exactly the silence that return is looking for, so a supervisor placed after it
-        // would run precisely never in the one case it exists for.
+        // Before the quiet-interval return: a dead drainer produces exactly that silence.
         writer.ensureDrainerAlive();
 
         long enqueued = writer.enqueuedBatches();
@@ -124,8 +107,7 @@ public class IngestThroughputReporter {
         lastRollupFailed = rollupFailed;
         lastRollupRearmed = rollupRearmed;
 
-        // Drained unconditionally, so a quiet interval cannot leave a stale tail to be counted twice into
-        // the next line that does get emitted.
+        // Drained unconditionally so a quiet interval cannot carry a stale tail into the next line.
         long[] latenessBuckets = lateness.drain();
 
         if (dEnqueued == 0
@@ -149,30 +131,22 @@ public class IngestThroughputReporter {
                 .field("spool_mode", spoolStats.mode())
                 .field("spool_oldest_age_ms", spoolStats.oldestAgeMs())
                 .field("spool_dead_lettered", spoolStats.deadLettered())
-                // The byte budget is the only admission bound; queue_depth above is a count for shape.
-                // Reading depth alone is what made the last incident look survivable right up to the OOM:
-                // 256 of 512 batches sounds like half the headroom left, and the bytes behind them were
-                // already most of the heap.
+                // The byte budget is the only admission bound; depth alone looked survivable right up to the OOM.
                 .field("queue_bytes", spoolStats.bytes())
                 .field("queue_max_bytes", spoolStats.maxBytes())
                 .field("refused_batches", dRefused)
                 .field("oversize_batches", dOversize)
-                // Steady state is alive=true, restarts=0. Anything else means the one thread that writes
-                // spans to Postgres died — the failure that stopped ingest for good while the container
-                // went on reporting healthy and accepting pushes.
+                // Steady state is alive=true, restarts=0; anything else means the span writer thread died while the
+                // container reported healthy.
                 .field("drainer_alive", writer.drainerAlive())
                 .field("drainers_alive", writer.drainersAlive())
                 .field("drainers", writer.drainerCount())
                 .field("drainer_restarts", writer.drainerRestarts())
-                // Content that arrived non-blank and was not JSON, so its typed column took null. Producer
-                // noise is a small steady number; a step change is this platform corrupting its own
-                // payloads, which is what a text-level redactor did to 48.9% of MCP tool calls.
+                // Producer noise is small and steady; a step change means this platform is corrupting its own payloads.
                 .field("unparseable_tool_args", dUnparseableArgs)
                 .field("unparseable_tool_results", dUnparseableResults)
-                // The rollup queue (spec §7.2–§7.4). `rollup_claimed` minus `rollup_settled` is spans
-                // landing mid-rollup — the same finding the lateness buckets below report from the span's
-                // side. `rollup_rearmed` is steady-state zero: anything else is a worker that died mid-claim.
-                // The two gauges are as of the last reaper sweep, not this instant.
+                // `rollup_claimed` minus `rollup_settled` is spans landing mid-rollup; `rollup_rearmed` is steady-state
+                // zero. The gauges are as of the last reaper sweep.
                 .field("rollup_claimed", dRollupClaimed)
                 .field("rollup_recomputed", dRollupRecomputed)
                 .field("rollup_settled", dRollupSettled)
@@ -180,9 +154,7 @@ public class IngestThroughputReporter {
                 .field("rollup_rearmed", dRollupRearmed)
                 .field("rollup_queue_depth", rollup.queueDepth())
                 .field("rollup_overdue_ms", rollup.overdueMs());
-        // Span lateness (spec §7.6): how far behind its trace's last rollup each span arrived. The tail is
-        // what sets the §7.4 rollup windows, and the negative bucket is a producer whose clock stepped
-        // backward — the one §6.2 failure that is otherwise entirely invisible.
+        // The negative bucket is a producer whose clock stepped backward, otherwise invisible.
         String[] latenessFields = SpanLateness.fields();
         for (int i = 0; i < latenessFields.length; i++) {
             line = line.field(latenessFields[i], latenessBuckets[i]);

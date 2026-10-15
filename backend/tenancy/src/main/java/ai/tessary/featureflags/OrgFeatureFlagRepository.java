@@ -10,17 +10,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * CRUD for {@code org_feature_flag}, the per-org capability overrides. Mirrors the
- * JdbcClient + static-mapper shape of {@code OrgQuotaOverrideRepository}.
- *
- * <p>Rows are sparse: an org with no row for a capability has no opinion about it, and the
- * resolution layer above ({@code CapabilityService}) supplies the default. Nothing here ever
- * writes a row to mean "leave it at the default"; {@link #delete} is how an operator gets back
- * there.
- *
- * <p>{@link #findByOrg} loads the whole org at once rather than reading per key, since resolving
- * a capability payload asks about all of them and a per-key read would turn one HTTP request into
- * many round trips. {@code DbFeatureFlags} caches what this returns.
+ * CRUD for {@code org_feature_flag}. Rows are sparse: no row means no opinion, and {@code CapabilityService} supplies
+ * the default; {@link #delete}, never a written value, returns to it. {@link #findByOrg} loads the whole org at once,
+ * cached by {@code DbFeatureFlags}.
  */
 @Repository
 public class OrgFeatureFlagRepository {
@@ -31,7 +23,6 @@ public class OrgFeatureFlagRepository {
         this.jdbc = jdbc;
     }
 
-    /** Every override an org holds, as {@code flagKey → enabled}. The single load the resolution path uses. */
     public Map<String, Boolean> findByOrg(String orgId) {
         return jdbc
                 .sql("SELECT flag_key, enabled FROM org_feature_flag WHERE org_id = :oid")
@@ -42,7 +33,7 @@ public class OrgFeatureFlagRepository {
                 .collect(Collectors.toMap(Row::flagKey, Row::enabled));
     }
 
-    /** Insert or update (by {@code (org_id, flag_key)}) one override, preserving {@code created_at} on update. */
+    /** Preserves {@code created_at} on update. */
     public void upsert(String orgId, String flagKey, boolean enabled) {
         String now = Instant.now().toString();
         jdbc.sql("""
@@ -59,11 +50,8 @@ public class OrgFeatureFlagRepository {
     }
 
     /**
-     * Drop an org's opinion about one capability, which reverts it to the default. Deliberately
-     * distinct from writing {@code false}: "I have not decided" and "I have decided against" resolve the same
-     * way for a capability that defaults off, and differently for one that defaults on.
-     *
-     * @return true if a row was deleted.
+     * Distinct from writing {@code false}: "undecided" and "decided against" differ for a capability that defaults on.
+     * @return true if a row was deleted
      */
     public boolean delete(String orgId, String flagKey) {
         return jdbc.sql("DELETE FROM org_feature_flag WHERE org_id = :oid AND flag_key = :fkey")
@@ -77,6 +65,5 @@ public class OrgFeatureFlagRepository {
         return new Row(rs.getString("flag_key"), rs.getBoolean("enabled"));
     }
 
-    /** One override: the {@code Capability.wire()} key and the value the org pinned it to. */
     public record Row(String flagKey, boolean enabled) {}
 }

@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The Classifiers page's prompt to turn Frustration on. It ships off, and the configure page where its toggle
- * lives is one level too deep for most people to find it, so the landing page asks once.
- *
- * Shown only while Frustration is off. "Not now" hides it in this browser for this project; nothing is
- * written to the server, so each teammate still sees it once. Enable opens the same modal as the
- * configure page's toggle, which takes the key when the org has none.
- */
+// "Not now" is stored in this browser only, so each teammate still sees the banner once.
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MessageCircleWarning } from "lucide-react";
@@ -34,7 +27,6 @@ export function FrustrationBanner({ classifier }: { classifier: Classifier }) {
     queryFn: orgApi.listProviderCredentials,
   });
 
-  /** The first lane provider the org already holds a key for, named as the lane names it. */
   const storedLabel = useMemo(() => {
     const configured = new Set<ModelProvider>();
     for (const c of credentialsQ.data?.credentials ?? []) if (c.has_api_key) configured.add(c.provider);
@@ -49,7 +41,6 @@ export function FrustrationBanner({ classifier }: { classifier: Classifier }) {
     try {
       localStorage.setItem(storageKey, "1");
     } catch {
-      // Storage unavailable (private mode, quota): the banner just comes back on the next load.
     }
   };
 

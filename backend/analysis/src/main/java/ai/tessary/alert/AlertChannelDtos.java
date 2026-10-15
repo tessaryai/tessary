@@ -5,21 +5,14 @@ import jakarta.validation.constraints.NotBlank;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
-/** HTTP-shaped DTOs for the alert-channels CRUD API. */
 public final class AlertChannelDtos {
 
     private AlertChannelDtos() {}
 
     /**
-     * Create or replace a channel. {@code config} is the kind-specific target + credentials (e.g.
-     * {@code {"url": "…"}} for webhook/slack, {@code {"routing_key": "…"}} for pagerduty) — it is sealed
-     * with SecretBox and NEVER returned. On update, an absent/empty {@code config} keeps the stored
-     * secret.
-     *
-     * <p>A {@code Map} rather than a {@code JsonNode}: the HTTP message converter is Jackson 3
-     * ({@code tools.jackson}) while the injected {@code ObjectMapper} the rest of this codebase writes
-     * against is Jackson 2, so a {@code com.fasterxml} {@code JsonNode} on a request body is a type the
-     * converter cannot construct — every create/update 500'd on it.
+     * {@code config} is sealed with SecretBox and never returned; an absent or empty one on update keeps the stored
+     * secret. A {@code Map}, not {@code JsonNode}: the HTTP converter is Jackson 3, and a Jackson 2 {@code JsonNode}
+     * body cannot be constructed.
      */
     public record UpsertChannelRequest(
             @NotBlank String kind,
@@ -27,11 +20,7 @@ public final class AlertChannelDtos {
             @Nullable Boolean enabled,
             @Nullable Map<String, Object> config) {}
 
-    /**
-     * The safe view of a channel: never includes the sealed config/credentials, only a
-     * {@code credentialsSet} indicator — mirrors {@code git/GitIntegrationDtos.GitIntegrationView}'s
-     * credential omission.
-     */
+    /** Never includes the sealed config, only {@code credentialsSet}. */
     public record ChannelView(
             String id,
             String kind,
@@ -48,7 +37,7 @@ public final class AlertChannelDtos {
 
     public record DeleteResponse(boolean deleted) {}
 
-    /** A delivery-attempt log entry, so operators can see why a channel isn't receiving alerts. */
+    /** So operators can see why a channel isn't receiving alerts. */
     public record DeliveryAttemptView(
             String id,
             String alertEventId,

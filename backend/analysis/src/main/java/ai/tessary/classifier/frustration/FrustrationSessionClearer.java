@@ -16,21 +16,14 @@ import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
- * What a {@code false_alarm} resolve does to the sessions a frustration case cites: their flags are cleared.
- *
- * <p>Every session-grain witness row on every finding the case holds names a conversation that, on the finding's
- * call site, the replay counted as frustrated, and the witnesses are all of them, not a sample. The {@code member} rows beside them are every
- * session scored, most of them calm, so they are not read here. Clearing a witness's detection rows ({@code cleared_at}) makes the next replay count it calm, and lets the
- * sweep send its later turns again, since suppression reads only uncleared rows. Turns scored before the clear are
- * not re-scored, and {@code frustration_assessment} is never touched: a cleared session is still a trial, it
- * just stops being a failure. Only the finding's call site is cleared: the same conversation's flags on other call
- * sites are other sessions. There is no per-session verb; a reader who resolves a case with several spells
- * clears the sessions of all of them.
+ * A {@code false_alarm} resolve clears the flags of every session a frustration case cites. The witness rows are every
+ * frustrated session on the finding's call site, not a sample. Clearing makes the next replay count them calm and lets
+ * the sweep send later turns again; earlier turns are not rescored and {@code frustration_assessment} is never touched.
+ * Only the finding's call site is cleared.
  */
 @Component
 public class FrustrationSessionClearer {
 
-    /** Sessions cleared per statement. */
     static final int CLEAR_CHUNK = 1_000;
 
     private final FindingRepository findings;
@@ -46,11 +39,7 @@ public class FrustrationSessionClearer {
         this.detections = detections;
     }
 
-    /**
-     * Clear the flag on every frustrated session cited by a frustration finding of case {@code caseId}.
-     *
-     * @return how many distinct sessions the case cites, cleared now or already
-     */
+    /** @return how many distinct sessions the case cites, cleared now or already */
     public int clear(String projectId, String caseId, String now) {
         Map<String, Scope> scopeByFinding = new LinkedHashMap<>();
         for (FindingRow f : findings.listByCase(projectId, caseId)) {
@@ -61,7 +50,7 @@ public class FrustrationSessionClearer {
         }
         if (scopeByFinding.isEmpty()) return 0;
 
-        // Walk findings in the case's order, not the returned map's, so the cleared list is deterministic.
+        // In the case's order, so the cleared list is deterministic.
         Map<String, List<FindingEvidenceRow>> rowsByFinding =
                 evidence.listByFindings(projectId, new ArrayList<>(scopeByFinding.keySet()));
         Map<Scope, Set<String>> sessionsByScope = new LinkedHashMap<>();
@@ -77,7 +66,7 @@ public class FrustrationSessionClearer {
         int sessions = 0;
         for (Map.Entry<Scope, Set<String>> e : sessionsByScope.entrySet()) {
             List<String> cited = List.copyOf(e.getValue());
-            // In chunks: an uncapped witness set can outgrow what one statement's bind list holds.
+            // Chunked: an uncapped witness set can outgrow one statement's bind list.
             for (int from = 0; from < cited.size(); from += CLEAR_CHUNK) {
                 detections.clearSessions(
                         BuiltInDetector.Kind.FRUSTRATION,
@@ -92,6 +81,5 @@ public class FrustrationSessionClearer {
         return sessions;
     }
 
-    /** The classifier and call site a finding's sessions belong to. */
     private record Scope(String classifierId, String callSiteId) {}
 }

@@ -11,12 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Fail-fast startup validator: scans the registered error enums and refuses
- * to boot if two codes collide. Within-domain duplicates are already
- * impossible (enum constants can't share a name); this catches the rarer
- * case of two enum classes resolving to the same domain prefix.
- *
- * <p>To register a new error enum, add it to {@link #REGISTERED}.
+ * Refuses to boot if two registered error enums resolve to the same domain. Register new enums in {@link #REGISTERED}.
  */
 @Component
 public class ErrorCatalog {
@@ -48,7 +43,7 @@ public class ErrorCatalog {
         this(REGISTERED);
     }
 
-    /** A catalog over {@code registered} in place of {@link #REGISTERED}, for a test to build a collision. */
+    /** For a test to build a collision. */
     ErrorCatalog(List<Class<? extends ErrorCode>> registered) {
         this.registered = registered;
     }

@@ -11,9 +11,8 @@ public enum GitError implements ErrorCode {
     PROVIDER_CALL_FAILED(HttpStatus.BAD_GATEWAY, "%s API call failed: %s"),
     MISSING_APP_CONFIG(HttpStatus.FAILED_DEPENDENCY, "Git provider %s is not configured on this server"),
     /**
-     * The deployment has no {@code TESSARY_SECRET_KEY}, so no credential can be sealed at rest.
-     * Distinct from {@link #MISSING_APP_CONFIG}: a personal access token needs no App, and telling
-     * someone to configure an App is the one instruction that cannot fix this.
+     * No credential can be sealed without {@code TESSARY_SECRET_KEY}. Distinct from {@link #MISSING_APP_CONFIG}:
+     * configuring an App cannot fix this.
      */
     SECRET_KEY_MISSING(
             HttpStatus.FAILED_DEPENDENCY,
@@ -21,11 +20,7 @@ public enum GitError implements ErrorCode {
                     + " Set TESSARY_SECRET_KEY on the deployment and restart it"),
     CREDENTIALS_REJECTED(
             HttpStatus.BAD_REQUEST, "%s rejected these credentials. Check the token has not expired or been revoked"),
-    /**
-     * GitHub answers 404 both for a repo that does not exist and for a private one the credential
-     * cannot see, and does not say which. The message has to carry both readings rather than assert
-     * the wrong one.
-     */
+    /** GitHub's 404 means either absent or invisible, so the message carries both readings. */
     REPO_UNREACHABLE(
             HttpStatus.BAD_REQUEST,
             "No repository at %s that these credentials can read. Check the owner and repository name,"

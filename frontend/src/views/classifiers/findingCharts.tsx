@@ -1,39 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The figures a finding is made of.
- *
- * <h2>Why these are bespoke rather than a charting library's</h2>
- * A time-series chart draws a series over time, and a finding has no time series:
- * its evidence is TWO WINDOWS (the reference and the one that just closed) with a handful of paired
- * readings between them. The only honest picture of that is a before/after comparison, so these draw
- * one, rather than interpolating two points into a line that would imply a trajectory nobody measured.
- *
- * <h2>The comparison is the argument</h2>
- * A metric-drift finding claims the agent changed rather than the traffic. It supports that by showing
- * what users asked for holding still while what the agent produced moved. Rendering the measure's pair
- * beside the workload's pairs, on the same "% change" scale, IS that argument, which is why the change
- * column is the thing aligned and emphasised rather than the raw values.
- */
+// A finding's evidence is two windows, not a time series, so these draw before/after rather than a line
+// implying a trajectory nobody measured. The aligned "% change" column carries the argument.
 import type { components } from "../../api/generated/schema";
 import { cn } from "../../ui";
 
 type Pair = components["schemas"]["Pair"];
 type PatternShift = components["schemas"]["PatternShift"];
 
-/**
- * The column track for a paired-reading row: reading, before, after, change. Every track is fluid
- * because these blocks render two to a row inside a grid, where fixed value columns overflowed.
- */
+/** Fluid tracks: these render two to a row, where fixed value columns overflowed. */
 const PAIR_COLS = "minmax(0, 1.6fr) minmax(48px, 0.8fr) minmax(48px, 0.8fr) minmax(46px, 0.7fr)";
 
 /**
- * What happened to a paired reading. A percent change is only one of the answers, and the others are
- * the interesting ones on this surface.
- *
- * <p>"Appeared" is the case that matters most: cache-read and cache-write tokens go from absent to
- * present exactly when someone introduces caching, and a reading that went from nothing to something is
- * a much stronger statement than any percentage. Collapsing it into "not measured", which is what a
- * bare divide-by-zero guard does, hides the single clearest signal the block carries.
+ * "Appeared" matters most: cache tokens go from absent to present when someone introduces caching, a
+ * stronger signal than any percentage, and a divide-by-zero guard would hide it.
  */
 export type Change =
   | { kind: "pct"; value: number }
@@ -64,10 +43,6 @@ function changeLabel(change: Change): string {
   }
 }
 
-/**
- * A number at the precision a reader can hold. Costs run to four decimals and durations to five digits,
- * and neither is worth printing in full on a comparison whose point is the size of the gap.
- */
 export function compact(n: number | null | undefined): string {
   if (n == null) return "–";
   const abs = Math.abs(n);
@@ -77,30 +52,16 @@ export function compact(n: number | null | undefined): string {
   return n.toPrecision(2);
 }
 
-/** `tok_input_p50` → `input p50`. The block already says these are tokens. */
 export function prettyKey(key: string): string {
   return key.replace(/^tok_/, "").replace(/_/g, " ");
 }
 
-/**
- * Which way the emphasised row went.
- *
- * <p>A distribution shift knows which way it went, so its driving row is drawn in the same red or
- * green the chart above it uses — one colour vocabulary per page.
- */
 export type EmphasisTone = "negative" | "positive";
 
 function emphasisTextClass(tone?: EmphasisTone): string {
   return tone === "positive" ? "text-success" : "text-error";
 }
 
-/**
- * A block of paired readings: the measure's own quantiles, the workload, or the token decomposition.
- *
- * <p>Every row prints then, now and the percent change. There used to be a diverging bar beside that
- * percentage, scaled across the block; it was drawing the number that already sat next to it, in a
- * column narrow enough that the drawing carried less than the digits did.
- */
 export function PairBlock({
   title,
   caption,
@@ -111,9 +72,7 @@ export function PairBlock({
   title: string;
   caption?: string;
   pairs: Pair[];
-  /** The row that carries the finding; everything else neutral. */
   emphasiseKey?: string;
-  /** Which way that row went, when the caller knows. See {@link EmphasisTone}. */
   emphasiseTone?: EmphasisTone;
 }) {
   const rows = pairs.filter((p) => p.then != null || p.now != null);
@@ -172,19 +131,8 @@ export function PairBlock({
 }
 
 /**
- * The failure signatures seen in the flagged window.
- *
- * <p><b>No before-and-after, because there was never one to show.</b> This used to render each
- * signature as `ref → cur` with two bars, and the `ref` side was `0` on every signature of every
- * tool-error finding ever produced — not because the failure was new, but because the number is
- * built by ranking against `new ToolErrorRate()`, an empty reference passed in by construction. The
- * detector's reference is a FITTED RATE (502 calls, 27 failures) with no per-signature breakdown
- * retained, so there is nothing to rank against and nothing to put in that column.
- *
- * <p>`0 → 3` therefore read as "a brand-new failure appeared" on a finding whose failures may well
- * have been the same signature all along at a higher rate — the exact opposite reading. So the
- * direction is stated once, from the rate that IS measured, and the signatures are listed as what
- * they are: what the failures in this window look like.
+ * No before-and-after: the detector's reference is a fitted rate with no per-signature breakdown, so a
+ * `ref` column would read 0 on every signature and claim each failure is new.
  */
 export function PatternBlock({
   patterns,

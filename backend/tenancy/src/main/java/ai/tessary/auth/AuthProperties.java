@@ -5,72 +5,38 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Provider-agnostic auth/session configuration: the deployment's answer to "is this instance
- * allowed to serve unauthenticated requests?", plus the session-cookie and post-auth-redirect
- * settings every provider adapter shares.
- *
- * <p>The {@code disabled} flag is documented first because it's the load-bearing one, see below.
- * The remaining fields ({@code cookieName}, {@code cookieMaxAgeSeconds}, {@code cookieSecure},
- * {@code cookiePassword}, {@code frontendUrl}) are not WorkOS-specific: they govern how
- * {@link SessionCipher} seals the cookie and where {@link AuthController}/
- * {@link ai.tessary.auth.link.DeviceLinkController} redirect the browser, regardless of which
- * {@link AuthProvider} is configured.
- *
- * <p>{@code TESSARY_AUTH_DISABLED} ({@code tessary.auth.disabled}), default false. It exists
- * because {@link AuthFilter} needs to tell two states apart that used to look identical: an
- * operator who deliberately runs an open instance, and an operator whose identity provider is
- * simply not configured yet.
- *
- * <p>This is a separate property rather than an inferred absence: a missing credential should
- * never silently open every {@code /api/**} and {@code /mcp} path just because "unconfigured" is
- * the normal state of a self-hosted instance. Absent configuration fails closed; opening the
- * instance takes a deliberate act that this property records.
- *
- * <p>Disabling auth is a real and supported thing to do, it is how the dev stack and the
- * integration suite run, so it is a documented setting rather than a hidden one. It is
- * authoritative on its own, regardless of which {@link AuthProvider} is active (see
- * {@link AuthFilter#shouldNotFilter}'s own comment for why "a configured provider always wins over
- * the flag" could not survive {@link PasswordAuthProvider} always being available).
+ * Provider-agnostic auth and session-cookie settings. Absent identity configuration fails closed;
+ * {@code tessary.auth.disabled} is the deliberate act that opens an instance, authoritative regardless of provider (see
+ * {@link AuthFilter#shouldNotFilter}).
  */
 @Component
 @ConfigurationProperties(prefix = "tessary.auth")
 public class AuthProperties {
 
     /**
-     * When true, every request is served unauthenticated, on its own, regardless of which
-     * {@link AuthProvider} is configured (see the class javadoc above). Default false, so an
-     * instance refuses requests instead of opening them.
-     *
-     * <p>Negative polarity, deliberately: a property named {@code enabled} would have to default to
-     * true to be safe, and a property whose default is true is invisible in a config diff. Naming
-     * the dangerous state is what makes it greppable: {@code TESSARY_AUTH_DISABLED=true} reads as
-     * alarming wherever it appears, which is the intent.
+     * Serve every request unauthenticated. Negative polarity on purpose: {@code TESSARY_AUTH_DISABLED=true} reads as
+     * alarming in any config diff, and the safe default is false.
      */
     private boolean disabled;
 
     /**
-     * Cookie name used to carry the sealed session. Distinct from ux-explorer's
-     * {@code wos-session} so the two apps don't fight over a single cookie even
-     * if deployed on the same parent domain. SSO across the two still works via
-     * WorkOS AuthKit (each app does its own /auth/callback).
+     * Distinct from ux-explorer's {@code wos-session} so the two apps don't fight over a cookie on a shared parent
+     * domain.
      */
     private String cookieName = "tessary-session";
 
     /**
-     * Cookie Max-Age in seconds; default 7 days (down from the original 30).
-     * AuthFilter refreshes via the configured provider on every request whose access token has
-     * expired, so the cookie's persistence only governs how long after a
-     * period of inactivity a user stays signed in. A shorter window caps the
-     * blast radius of a stolen cookie since logout is purely client-side and
-     * there is no server-side session revocation list.
+     * Seven days. Logout is client-side with no revocation list, so a shorter window caps a stolen cookie's blast
+     * radius.
      */
     private long cookieMaxAgeSeconds = 60L * 60 * 24 * 7;
 
     /** Whether to set the {@code Secure} cookie flag. Disable for local http dev. */
     private boolean cookieSecure = false;
 
-    /** Base64 32-byte AES key ({@code TESSARY_AUTH_COOKIE_PASSWORD}) {@link SessionCipher} seals the
-     *  session cookie with, so a leaked ingestion-credential key never compromises sessions and vice versa. */
+    /**
+     * Base64 32-byte AES key {@link SessionCipher} seals the cookie with, separate from the ingestion-credential key.
+     */
     private String cookiePassword = "";
 
     /** Where to send users after login/logout, and the base URL device-link confirmations point at. */
