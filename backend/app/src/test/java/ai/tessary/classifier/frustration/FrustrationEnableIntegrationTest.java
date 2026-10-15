@@ -82,8 +82,7 @@ record FrustrationEnableIntegrationTest(
 
     /** The column's check constraint lists the reasons it accepts; a reason missing there fails the sweep's write. */
     @ParameterizedTest
-    @ValueSource(
-            strings = {ClassifierPause.NO_PROVIDER, ClassifierPause.NO_CREDIT})
+    @ValueSource(strings = {ClassifierPause.NO_PROVIDER, ClassifierPause.NO_CREDIT})
     void aPauseIsStoredAndNamedByReadinessOnAnEnabledFrustration(String reason) {
         TenantFixture.Setup t = tenant("fr-pause-" + reason.replace('_', '-'));
         String pid = t.project().id();
