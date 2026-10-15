@@ -44,6 +44,17 @@ record TenantPathResolverTest(TenantPathResolver resolver, TenantService tenants
     }
 
     @Test
+    void requireProject_projectInOtherOrg_404() {
+        var alice = TenantFixture.bootstrap(tenants, "pr-cross-alice");
+        var bob = TenantFixture.bootstrap(tenants, "pr-cross-bob");
+        // Alice's project slug under Bob's own org: the slug must be looked up within Bob's org only.
+        ResponseStatusException ex = assertThrows(
+                ResponseStatusException.class,
+                () -> resolver.requireProject(sessionFor(bob.user()), bob.org().slug(), alice.project().slug()));
+        assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
+    }
+
+    @Test
     void mcpToken_boundProject_allowsExactlyOwnOrgAndProject() {
         var fix = TenantFixture.bootstrap(tenants, "pr-mcp-ok");
         TenantContext ctx = mcpTokenFor(fix.org(), fix.project(), fix.user());
