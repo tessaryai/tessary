@@ -13,3 +13,7 @@ tessary:
   ingest:
     substrate:
       rollup-reap-interval-ms: 86400000
+# The Kafka client logs every rebootstrap at INFO.
+logging:
+  level:
+    org.apache.kafka: WARN
