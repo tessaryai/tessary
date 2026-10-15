@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Wire types. Single source of truth: the generated OpenAPI schema map
-// (`./generated/schema.d.ts`, `components["schemas"]`). Most types below are thin
-// re-exports/aliases of a generated schema; only pure string-literal unions (inlined
-// by the generator, not named schemas), generic client wrappers, SSE event payloads,
-// and a few generator-collision workarounds remain hand-authored.
+// Wire types: aliases of the generated OpenAPI schema except string-literal unions, client
+// wrappers, SSE payloads and generator-collision workarounds.
 import type { components } from "./generated/schema";
 
 type S = components["schemas"];
@@ -22,13 +19,7 @@ export type ErrorBody = S["ErrorBody"];
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
-  /**
-   * The server's message on its own, without the code prefix that `Error.message` carries.
-   *
-   * `message` stays `"<code>: <message>"` because that is what a log line and a stack trace want.
-   * A UI that renders the code beside the message needs the bare half, and reaching for `message`
-   * there prints the code twice: which is exactly what `ErrorNote` did until this existed.
-   */
+  /** The server's message without the code prefix `message` carries, for UIs that render the code apart. */
   readonly detail: string;
   constructor(status: number, body: ErrorBody) {
     super(`${body.code}: ${body.message}`);
@@ -38,22 +29,15 @@ export class ApiError extends Error {
   }
 }
 
-// ---- Ingestion + bulk grading ----
+// ---- Ingestion ----
 export type SubstrateStatus = S["SubstrateStatusView"];
-/**
- * Where a project sits on the ladder from "listening" to "first case": the single read the whole
- * onboarding surface is built from (launch G3/G4). `stage` is the furthest rung reached, so it never
- * walks backwards; every other field is the evidence behind whichever rung that is.
- */
+/** `stage` is the furthest rung reached, so it never walks backwards. */
 export type OnboardingProgress = S["OnboardingView"];
 export type OnboardingStage = OnboardingProgress["stage"];
 export type Classifier = S["ClassifierView"];
 export type ClassifierEvent = S["ClassifierEventView"];
 export type ClassifierHealth = S["ClassifierHealthView"];
-/**
- * The Groundedness row's status: whether the model is scoring, and if not, whether it ever was. `state`
- * is computed on the server; a disabled row is `off` whatever the model does.
- */
+/** `state` is computed on the server; a disabled row is `off` whatever the model does. */
 export type GroundednessStatus = Omit<S["GroundednessStatusView"], "state" | "mode"> & {
   state: "off" | "on" | "not_scoring" | "not_set_up";
   mode: GroundednessMode;
@@ -82,9 +66,8 @@ export type ClassifierCharts = Omit<S["ChartsView"], "scope" | "cards" | "chips"
   chips: ChartChip[];
 };
 /**
- * One chart. Rates are fractions 0..1, durations milliseconds, cost USD. `points[]` is oldest first; fields that do
- * not apply to the card's kind are null. A count card's `count` is what the arming bar counts (it can exceed `total`
- * for a user classifier), and its headline sums `total`.
+ * Rates are fractions 0..1, durations ms, cost USD; `points[]` oldest first. A count card's `count`
+ * can exceed `total` for a user classifier, and its headline sums `total`.
  */
 export type ChartCard = Omit<S["ChartCard"], "kind" | "unit" | "arming"> & {
   kind: "rate" | "range" | "count";
@@ -93,10 +76,8 @@ export type ChartCard = Omit<S["ChartCard"], "kind" | "unit" | "arming"> & {
 };
 export type ChartArming = Omit<S["ArmingView"], "confidence"> & { confidence: "high" | "any" };
 /**
- * One point of a card, from `start_at` to `end_at` (exclusive, UTC). A rate or range point is merged from hours with
- * data until it holds about 500 items or spans a day; a count point is a fixed bucket, zero included. `open` marks the
- * last point while it still fills. `reached` says whether the arming window holding the point reached the threshold,
- * and is null when the card has no arming bar.
+ * A rate or range point merges hours until about 500 items or a day; a count point is a fixed bucket,
+ * zero included. `open` marks the last point while it fills.
  */
 export type ChartPoint = S["ChartPoint"];
 /** One finding that opened a case, drawn as a bar in the card's Cases strip. `end_at` is null while the case is open. */
@@ -135,15 +116,12 @@ export type ModelProvider =
   | "OPENROUTER"
   | "MOONSHOT"
   | "BEDROCK"
-  // Four OpenAI-compat providers, all speaking the same Chat Completions wire as
-  // OpenRouter/Moonshot against their own base URL (see PlatformCatalog.java).
   | "GEMINI"
   | "GLM"
   | "GROK"
   | "CUSTOM"
   // AWS's second Bedrock endpoint: OpenAI-wire, and the only place the GPT-5.6 line lives.
   | "BEDROCK_MANTLE"
-  // Decision models only (TypeSafe's Jev), never a chat or agent model.
   | "TYPESAFE"
   // Supplied by the deployment, with no key of the org's own; listed only when offered.
   | "PLATFORM";
@@ -152,29 +130,14 @@ export type PlatformDescriptor = S["PlatformDescriptor"];
 export type CatalogEntry = S["CatalogEntry"];
 export type ProviderCatalogResponse = S["CatalogView"];
 
-// Compile-time-only check (never referenced at runtime): ModelProvider above and the generated
-// PlatformDescriptor["id"]/CatalogEntry["provider"] unions must name exactly the same members as
-// the backend ModelProvider enum (this file's header already documents ModelProvider as a
-// hand-maintained exception to the generated-schema pattern, precisely because nothing else
-// enforces the two staying in sync) instead of silently undercounting what /catalog actually
-// returns. See PlatformDescriptor's own generated `id` type.
-//
-// A member added to one side and not the other fails `tsc`, but only because of the two `const`
-// assignments below, not because of this type alias by itself. A `type X = AssertProviderUnionsMatch<
-// A, B>` that resolves to `never` and is merely exported raises no diagnostic on its own: tsc only
-// evaluates a conditional type where it is actually consumed, and an exported-but-unreferenced
-// alias (the shape `noUnusedLocals` requires to avoid a separate unused-symbol error) is never
-// consumed by anything. The `const` below forces evaluation: assigning `true` to a type that
-// resolves to `never` on a mismatch is a real, unavoidable TS2322 right on this line.
+// Compile-time check that ModelProvider and the generated unions name the same members. tsc only
+// evaluates a conditional type where it is consumed, so the `const` assignments below force it.
 export type AssertProviderUnionsMatch<A extends string, B extends string> = [A] extends [B]
   ? [B] extends [A]
     ? true
     : never
   : never;
-// Exported (never re-imported anywhere) rather than a bare unreferenced local: `noUnusedLocals` is
-// on in this project's tsconfig, and only exported symbols are exempt from that diagnostic. Neither
-// is ever read: the assignment itself is the entire check, and CatalogEntry gets its own const
-// because it is a distinct generated union from PlatformDescriptor["id"], not merely a repeat of it.
+// Exported because `noUnusedLocals` exempts only exports.
 export const modelProviderMatchesPlatformCatalog: AssertProviderUnionsMatch<
   ModelProvider,
   PlatformDescriptor["id"]
@@ -187,26 +150,15 @@ export type ProviderCredentialListResponse = S["CredentialListView"];
 export type UpsertProviderCredentialRequest = S["UpsertRequest"];
 
 // ---- Per-lane platform model settings (Settings → Models) ----
-// Which of the platform's own Bedrock models each lane runs on, and at which service tier. Distinct
-// from the provider credentials above: those are keys for models the customer brings and pays for.
 export type ModelLane = S["LaneView"]["id"];
 export type ModelLaneView = S["LaneView"];
-// One provider's standing on one lane: its label, the models this lane offers on it, and the one
-// automatic selection takes. The page asks for a provider first and a model second, because a key is
-// what an org has or does not have: so this is the shape the two dropdowns read.
 export type LaneProviderOption = S["ProviderOptionView"];
-// One section of the Models page. The lanes split by how the platform reaches the model: a model id
-// handed to an agent in a sandbox, or one typed question to a decision model. That split decides the
-// heading, the copy under it and whether there is a model to pick at all, so the server sends them.
 export type ModelLaneGroupView = S["GroupView"];
-// One platform Bedrock model: its display name, whether it can drive an agent, and which endpoint
-// serves it.
 export type BedrockModelDescriptor = S["ModelDescriptor"];
 export type ProjectModelSetting = S["ProjectModelSetting"];
 export type ModelSettingsResponse = S["ModelSettingsView"];
 export type SetLaneModelRequest = S["SetLaneModelRequest"];
-// One model's live per-MTok rate, read from the price book at request time: never hardcode a
-// model's rate in the client, the book can move. Either field null means unpriced, not free.
+// Never hardcode a model's rate in the client. Either field null means unpriced, not free.
 export type ModelRateView = S["ModelRateView"];
 
 // ---- RCA: root-cause analysis of one finding ----
@@ -228,11 +180,7 @@ export type RedactionRuleListView = S["RuleListView"];
 /** Settings → Features: one capability, what it resolves to, this build's default, and whether the org pinned it. */
 export type CapabilityOverrideView = S["OverrideView"];
 
-/**
- * Kept hand-authored: the generated `UpsertRuleRequest` is the alert-rule upsert
- * (basis/threshold/window_seconds), which collides by name with this redaction-rule
- * upsert in the OpenAPI generator. See report (candidate backend schema-name collision).
- */
+/** Hand-written: the generated `UpsertRuleRequest` is the alert-rule upsert, a name collision. */
 export interface UpsertRedactionRuleRequest {
   name: string;
   pattern: string;
@@ -252,14 +200,8 @@ export type SearchHit = S["SearchHit"];
 export type SearchResults = S["GlobalSearchView"];
 
 // ---- Findings ----
-// The generated schema types these discriminators as bare `string` (springdoc has no enum to read
-// from: they are String constants on the Java rows), so each is narrowed to its closed set here.
+// springdoc types these discriminators as bare `string`, so each is narrowed here.
 
-/**
- * The cause kinds the findings surface carries: metric drift's `distribution_shift`, tool error's
- * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate` and groundedness's
- * `groundedness_rate`.
- */
 export type BehaviorCauseKind =
   | "distribution_shift"
   | "rate_shift"
@@ -272,55 +214,31 @@ export type BehaviorFindingStatus = "open" | "closed";
 /** The two acted-on outcomes. The third outcome is doing nothing, which posts nothing. */
 export type BehaviorResolutionAction = "expected" | "not_expected";
 
-/** The findings page. */
 export type BehaviorFindings = Omit<S["BehaviorFindingsView"], "findings"> & {
   findings: BehaviorFinding[];
 };
 
 /**
- * What triage concluded about a finding's claim: never about its impact.
- *
- * - `positive`: the claim is true, sufficiently sampled and properly evidenced. Opens a case.
- * - `negative`: the measurement is wrong, so there is nothing to explain. Closes the finding.
- *
- * A run that could not settle the question, or never reached the evidence, records no verdict at
- * all — recurrence is the recovery for a wrong close, not a third outcome to rule.
- *
- * A cost or duration drop rules `positive` like any other true claim. "Improvement" is a judgement about
- * intent, and triage has no evidence with which to make one.
+ * What triage concluded about the claim, never its impact. `positive` opens a case, `negative` closes
+ * the finding. A run that could not settle it records no verdict; recurrence recovers a wrong close.
  */
 export type TriageVerdict = "positive" | "negative";
 
-/**
- * What the ruling did. Fixed by the verdict (`sound → opened_case`, everything else → `closed`) and
- * sent anyway, because it is what the reader is being told; deriving it here would be a second copy
- * of a mapping the server owns.
- */
+/** Sent by the server, which owns the verdict-to-action mapping. */
 export type TriageAction = "opened_case" | "closed";
 
 /**
- * Where a finding is in the triage lane. `pending` is un-scheduled, not un-ruled.
- *
- * `failed` is read from the triage job, not the finding: a run that gave up records no verdict and
- * nothing clears the escalation timestamp, so on the finding alone it is identical to one still
- * running: which is why a dead triage used to render as "Triaging" indefinitely.
+ * `pending` is un-scheduled, not un-ruled. `failed` comes from the triage job: a run that gave up
+ * leaves the finding identical to one still running.
  */
 export type TriageStatus = "pending" | "in_flight" | "done" | "failed";
 
-/**
- * What pressing Run analysis on a finding produced: the queued job, the lane that will rule on it,
- * and whether the cause had already been handed to Layer 2 (a second press lands on the existing job
- * rather than buying a second one).
- */
+/** A second press lands on the existing job. */
 export type BehaviorAnalysis = S["BehaviorAnalysisView"];
 
 /**
- * One finding with its evidence parsed: what the finding's own page draws.
- *
- * `metric` is set for a distribution shift and `toolError` for a rate shift; both are null for a
- * behaviour-drift cause, which carries no measured shift, and for any row whose blob is unreadable. A
- * caller renders the finding either way: the headline and the verdict never depended on the evidence
- * parsing, and a page that vanished because one column was malformed would be the worse failure.
+ * `metric`/`toolError` are null for a behaviour-drift cause or an unreadable blob; the page renders
+ * either way.
  */
 export type BehaviorFindingDetail = Omit<S["BehaviorFindingDetailView"], "finding"> & {
   finding: BehaviorFinding;
@@ -329,10 +247,6 @@ export type BehaviorFindingDetail = Omit<S["BehaviorFindingDetailView"], "findin
 export type EvidenceSpan = S["EvidenceSpanView"];
 export type EvidenceSpanPage = S["FindingEvidenceSpanPage"];
 
-/**
- * A `malformed_rate` finding's "How outputs broke": the rate, the declared schema annotated with a
- * failure count per field, and the two buckets no declared field owns (`notJson`, `other`).
- */
 export type MalformedOutputDetail = S["MalformedDetail"];
 export type MalformedOutputSchemaField = S["SchemaFieldView"];
 
@@ -363,13 +277,8 @@ export type FlaggedAnswerPage = S["FlaggedAnswerPage"];
 export type ClassifierDetail = S["ClassifierDetail"];
 
 /**
- * One finding, with the triage fields narrowed to the vocabulary the server writes.
- *
- * `triageVerdict` / `triageAction` are null until a run has recorded a ruling, and a run that never
- * settled the question or never reached the evidence leaves them null rather than writing a verdict
- * for a run that established nothing: that is what makes "closing on negative" safe to automate, and
- * it is why `triageStatus` is a separate field: a null verdict alone cannot tell a finding nobody has
- * looked at from one whose infra blipped.
+ * `triageVerdict`/`triageAction` stay null until a ruling, and a run that established nothing leaves
+ * them null, which is why `triageStatus` exists.
  */
 export type BehaviorFinding = Omit<
   S["BehaviorFindingView"],
@@ -383,27 +292,18 @@ export type BehaviorFinding = Omit<
   triageStatus: TriageStatus;
 };
 
-/**
- * One thing a ruling rests on: an evidence pointer, an id the agent fetched, or a check script it
- * wrote. `stdout` is set only for a citation that IS a check script — exactly what running it
- * printed.
- */
+/** `stdout` is set only for a check-script citation: what running it printed. */
 export type TriageCitation = S["Citation"];
 
 // ---- Vitals (cost / turn latency, per call site) ----
-/**
- * The three deterministic statistical filters. Read-only aggregates over ingested substrate: no
- * detections are written and nothing escalates, which is what keeps them out of Layer 2.
- */
+/** Read-only aggregates: nothing is detected or escalated, which keeps them out of Layer 2. */
 export type Vitals = S["Vitals"];
 export type VitalsGroup = S["Group"];
 
-// ---- Cases (eval_case): the one object a detection reaches a human through ----
+// ---- Cases ----
 /**
- * Cause-neutral by design: `detector` is the only field that says what noticed, and every
- * detector's cases carry the same shape. `basis` is why this crossed that detector's bar, in its
- * own terms: the ranked list mixes detectors that do not share a threshold, so it is never
- * normalized away. `severity` orders the list and must never be rendered as a number.
+ * Cause-neutral: `detector` alone says what noticed. `basis` is in the detector's own terms and is
+ * never normalized. `severity` orders the list and is never rendered as a number.
  */
 export type Case = S["CaseView"];
 export type CaseDetail = S["CaseDetailView"];

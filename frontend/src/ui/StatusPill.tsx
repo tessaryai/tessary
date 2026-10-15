@@ -6,13 +6,8 @@ export type Status = "pending" | "running" | "passed" | "failed" | "skipped";
 type Visual = { dot: string; text: string; bgVar?: string };
 
 /*
- * A status never wears --color-accent. The accent is the interactive treatment (a thing you
- * click); a pill is a verdict about data. The three status hues carry the verdicts — red failed,
- * green passed, blue running/info — and every other state falls back to the grey ramp's reading
- * steps (muted, subtle, fg-secondary), never to the accent.
- *
- * `running` is blue but deliberately UNFILLED: the palette allows blue as a status only as a dot,
- * because a filled blue element in this system is always a control.
+ * A status never wears the accent, which marks controls. `running` is blue but unfilled: a filled blue
+ * element is always a control.
  */
 const STYLE: Record<Status, Visual> = {
   pending:  { dot: "bg-muted",    text: "text-muted" },

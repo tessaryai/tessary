@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * ShellChrome — the persistent frame around every project surface: the sidebar, the main
- * content well, and the command palette (⌘K). Providers are layered here (not at the app
- * root) because they are project-scoped.
- */
+// Providers are layered here rather than at the app root because they are project-scoped.
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -21,10 +17,7 @@ export function ShellChrome({
   isSample = false,
 }: {
   children: ReactNode;
-  /** Renders the persistent "Sample data" banner above the content column
-   *  (never the sidebar) on every screen inside the sample project. Computed by the caller
-   *  (App.tsx's ProjectShell) rather than here, since it already runs the `listProjects` read this
-   *  needs and there is no reason for ShellChrome to issue a second one. */
+  /** Computed by the caller, which already runs the `listProjects` read. */
   isSample?: boolean;
 }) {
   return (
@@ -37,8 +30,6 @@ export function ShellChrome({
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             {isSample && <SampleBanner />}
             <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-y-auto outline-none">
-              {/* Above the content well, not inside a surface: a platform-wide grading stop applies to
-                  every surface, so it must not scroll away with one view's content. */}
               {children}
             </main>
           </div>
@@ -49,12 +40,7 @@ export function ShellChrome({
   );
 }
 
-/**
- * The sample project's persistent banner (design-spec.md, `SampleProject.dc.html`): spans the
- * content column only, never the sidebar, and never scrolls away since it sits above `<main>`
- * rather than inside it. One primary action -- no delete button here, project deletion already
- * works generically via Settings' existing project-delete surface.
- */
+/** Spans the content column only and sits above `<main>`, so it never scrolls away. */
 function SampleBanner() {
   const { orgSlug } = useTenant();
   const nav = useNavigate();
@@ -73,11 +59,6 @@ function SampleBanner() {
   );
 }
 
-/**
- * Keyboard skip-link (WCAG 2.4.1). Visually hidden until focused — the first
- * Tab stop on every page — letting keyboard and screen-reader users jump past the
- * sidebar straight to the main content well.
- */
 function SkipLink() {
   return (
     <a
@@ -88,7 +69,6 @@ function SkipLink() {
   );
 }
 
-/** Records visits to top-level surfaces so the palette's "Recent" group reflects real usage. */
 function RecentRouteTracker() {
   const { orgSlug, projectSlug } = useTenant();
   const location = useLocation();

@@ -1,20 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The command palette's command model and its (client-side) sources.
- *
- * A `Command` is anything the palette can list: a jump-to-surface, a context action
- * (switch project/env, open the agent), or a recent item. The palette derives ALL commands
- * from one place here so the IA in nav.tsx stays the single source of truth.
- *
- * Static commands (nav/settings/actions/recents) are built CLIENT-SIDE by `buildCommands`.
- * Server-backed full-text search over CONTENT (issues/traces) comes in through a
- * deliberate async seam: `searchHitToCommand` maps a backend `SearchHit` into a `Command` in the
- * "Results" group, and the palette merges those into the same list it renders — the static command
- * sources and the filter below are untouched.
- *
- * The palette offers nothing the org cannot reach (segment F4). The caller passes the CAPABILITY-
- * FILTERED IA in `ctx.nav` / `ctx.settings` rather than reading nav.tsx directly.
- */
+// The palette's commands, all derived from the capability-filtered IA the caller passes in
+// `ctx.nav` / `ctx.settings`, never from nav.tsx directly.
 import type { ReactNode } from "react";
 import type { SearchHit, SearchHitType } from "../api/types";
 import { SETTINGS_ICON } from "./nav";
@@ -28,44 +14,26 @@ export type Command = {
   label: string;
   group: CommandGroup;
   icon?: ReactNode;
-  /** Result subtitle. */
   hint?: string;
-  /** Extra terms to match on. */
   keywords?: string[];
-  /** Right-aligned dim old-name alias (one release only), e.g. `was "Pipeline"`. */
   alias?: string;
-  /** Reserved/coming-soon commands are listed but not actionable. */
   disabled?: boolean;
-  /** What running the command does. Omitted for disabled commands. */
   run?: () => void;
-  /**
-   * Present only on server "Results" commands — the raw search hit metadata the palette
-   * needs to render the elevated result row (hit-type icon + color, type badge, matched-term
-   * highlighting, and the "TypeLabel · snippet" hint with the id in mono). Static commands
-   * (nav/settings/actions/recents) leave this undefined and render the classic row.
-   */
+  /** Server "Results" commands only. */
   result?: {
     type: SearchHitType;
     typeLabel: string;
-    /** Raw entity id, rendered in mono in the hint line. */
     rawId: string;
     snippet: string | null;
   };
 };
 
-/** Inputs the palette has at open time, used to build the live command list. */
 export type CommandContext = {
-  /** Navigate (react-router) to a tenant-scoped path. */
   navigate: (path: string) => void;
-  /** Absolute project base, e.g. `/orgs/acme/projects/web/`. */
   projectBase: string;
-  /** The live surfaces this org HAS — already capability-filtered by `useNavigation`. */
   nav: NavItem[];
-  /** The settings sections this org HAS — same filtering. */
   settings: SettingsSection[];
-  /** Roadmap slots ("Coming soon"). Never gated. */
   reserved: NavItem[];
-  /** Whether a project-relative path is still reachable — see `useNavigation().isPathReachable`. */
   isPathReachable: (path: string) => boolean;
   recents: RecentEntry[];
   openProjectSwitcher: () => void;
@@ -75,16 +43,11 @@ function navIcon(Icon: NavItem["icon"]): ReactNode {
   return <Icon size={15} aria-hidden="true" />;
 }
 
-/**
- * Build the full client-side command list, newest-relevant first within each group.
- * Groups are ordered Recent → Navigation → Settings → Actions → Coming soon by the
- * palette's renderer, not here.
- */
+/** Group order is the renderer's, not this list's. */
 export function buildCommands(ctx: CommandContext): Command[] {
   const cmds: Command[] = [];
 
-  // Recent — local-only navigation aid. Recents are localStorage, so they outlive a flag going off:
-  // a "Graders" entry from before the flip would otherwise be offered and bounce straight to Triage.
+  // Recents are localStorage and outlive a capability going off, so unreachable ones are dropped.
   for (const r of ctx.recents.filter((r) => ctx.isPathReachable(r.path))) {
     cmds.push({
       id: `recent:${r.path}`,
@@ -95,8 +58,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
     });
   }
 
-  // Navigation — every live surface the org has (sidebar parity, including the capability filter).
-  // ≤2 clicks: one keystroke + Enter.
   for (const n of ctx.nav) {
     cmds.push({
       id: `nav:${n.id}`,
@@ -110,7 +71,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
     });
   }
 
-  // Settings sub-sections — second-level IA, made reachable in one palette hit.
   for (const s of ctx.settings) {
     cmds.push({
       id: `settings:${s.id}`,
@@ -122,7 +82,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
     });
   }
 
-  // Actions — context switches. These save clicks vs. the sidebar dropdowns.
   cmds.push(
     {
       id: "action:switch-project",
@@ -133,7 +92,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
     },
   );
 
-  // Coming soon — roadmap surfaces, discoverable but not navigable (no dead-end clicks).
   for (const r of ctx.reserved) {
     cmds.push({
       id: `soon:${r.id}`,
@@ -149,21 +107,11 @@ export function buildCommands(ctx: CommandContext): Command[] {
   return cmds;
 }
 
-/**
- * Per-hit-type display label + the detail route (relative to the project base) a result navigates to.
- * This is the SINGLE home for the entity→route mapping (the backend emits only the `type` discriminant),
- * so adding a searchable entity is a one-line change here, never a cross-file switch that can rot when the
- * IA shifts. Routes mirror App.tsx. The backend index covers trace ids only.
- */
+/** The one home for the entity-to-route mapping; routes mirror App.tsx. */
 const HIT_ROUTING: Record<SearchHitType, { typeLabel: string; path: (id: string) => string }> = {
   trace: { typeLabel: "Trace", path: (id) => `traces/${id}` },
 };
 
-/**
- * Map one server search hit to a palette `Command`. The hint line carries the entity type (and snippet
- * when present) so a user can tell what kind of entity a hit is at a glance. `navigate` + `projectBase`
- * are the same inputs `buildCommands` uses, so a result jumps to the right tenant-scoped detail route.
- */
 export function searchHitToCommand(
   hit: SearchHit,
   navigate: (path: string) => void,
@@ -189,11 +137,6 @@ export function searchHitToCommand(
 
 const GROUP_ORDER: CommandGroup[] = ["Results", "Recent", "Navigation", "Settings", "Actions", "Coming soon"];
 
-/**
- * Filter by a query (case-insensitive substring over label + hint + keywords) and group,
- * preserving GROUP_ORDER. An empty query returns everything. Linear over a small static
- * list (~25 commands) — no memoization or virtualization needed.
- */
 export function filterCommands(cmds: Command[], query: string): { group: CommandGroup; items: Command[] }[] {
   const q = query.trim().toLowerCase();
   const matched = q

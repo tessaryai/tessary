@@ -6,11 +6,6 @@ export interface Segment<T extends string> {
   label: string;
 }
 
-/**
- * A pill group for a small, mutually exclusive set of options — chart windows, bucket grains, view
- * modes. Use it over a `<Select>` when the options are few enough to read at a glance and the reader
- * benefits from seeing the alternatives without opening anything.
- */
 export function SegmentedControl<T extends string>({
   value,
   onChange,

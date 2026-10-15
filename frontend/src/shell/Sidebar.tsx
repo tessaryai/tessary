@@ -1,17 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The global navigation sidebar.
- *
- * Fixed 240px, dark only. Top → bottom: brand row (the Space Grotesk wordmark) · Search (⌘K,
- * same index as the palette) · Triage with the app's only nav badge (open cases, red) · the
- * Monitor / Calibrate groups · project switcher + Settings · account row (no theme toggle, dark
- * only).
- *
- * The IA is derived from nav.tsx (single source of truth), filtered by the org's capability
- * object through useNavigation: a surface the org doesn't have is absent, and a group emptied by
- * that filtering disappears with its heading. A partner therefore sees Triage + Monitor and no
- * Calibrate band at all, rather than three padlocked rows advertising something unbuyable.
- */
+// The IA comes from nav.tsx filtered by the org's capabilities: a surface the org lacks is absent,
+// and a group emptied that way disappears with its heading.
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -85,7 +74,6 @@ export function Sidebar() {
   );
 }
 
-/** The always-visible edge handle that flips `collapsed`, anchored to the sidebar's own border, not squeezed into the 64px icon column. */
 function CollapseHandle({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
   return (
     <button
@@ -116,9 +104,7 @@ function BrandRow({ collapsed }: { collapsed: boolean }) {
       >
         <img src="/tessary-logo.png" alt="Tessary" className="size-7 shrink-0 rounded-control" />
         {!collapsed && (
-          // The wordmark is the one place in the app that is not token-driven: Space Grotesk 700
-          // and a literal #FFFFFF are a fixed brand spec, deliberately outside the type scale and
-          // the grey ramp. Do not "fix" these to tokens.
+          // A fixed brand spec outside the type scale and grey ramp. Do not "fix" these to tokens.
           <span
             className="shrink-0"
             style={{
@@ -172,8 +158,6 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
     registerProjectSwitcher(() => setOpen(true));
   }, [registerProjectSwitcher, setOpen]);
 
-  // The org list for the switcher's display name comes off GET /auth/me (already fetched by
-  // AuthProvider) instead of a second query.
   const { user } = useAuth();
   const orgs = user?.orgs ?? [];
   const projects = useQuery({
@@ -234,8 +218,7 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
       </button>
 
       {open && (
-        // Flyout opens to the side, into the page (flush at the sidebar's edge so the
-        // pointer can cross into it without leaving the hover area and dismissing it).
+        // Flush at the sidebar's edge so the pointer can cross into it without dismissing it.
         <div
           className="absolute left-full bottom-0 w-60 max-h-[70vh] overflow-y-auto rounded-card bg-overlay border border-border-strong py-1 z-50"
           style={{ boxShadow: "var(--shadow-md)" }}
@@ -296,10 +279,6 @@ function SwitcherAction({ label, onClick }: { label: string; onClick: () => void
   );
 }
 
-/**
- * One sidebar row. There is no locked variant: `useNavigation` has already dropped every surface the
- * org cannot reach, so anything rendered here is navigable.
- */
 function NavLinkRow({
   item,
   claimedElsewhere = [],
@@ -307,9 +286,8 @@ function NavLinkRow({
   collapsed,
 }: {
   item: NavItem;
-  /** Other rows' `match` routes: a path under this row's route that another row claims lights that row instead. */
+  /** A path under this row's route that another row claims lights that row instead. */
   claimedElsewhere?: string[];
-  /** Triage only: the open-case count. The app's only nav count. */
   badge?: number;
   collapsed?: boolean;
 }) {
@@ -360,7 +338,6 @@ function NavLinkRow({
 }
 
 function AccountRow({ collapsed }: { collapsed: boolean }) {
-  // Rendered only inside ProtectedRoute, which does not mount its children without a user.
   const user = useAuth().user!;
   const { open, setOpen, ref } = useDropdown();
 
@@ -391,8 +368,7 @@ function AccountRow({ collapsed }: { collapsed: boolean }) {
         )}
       </button>
       {open && (
-        // Fixed width, anchored at the left edge: `right-2` would pin it to the
-        // trigger's own width, which breaks once that trigger is a 64px icon column.
+        // `right-2` would pin it to the trigger's width, which breaks in the 64px icon column.
         <div
           className="absolute bottom-full left-2 w-48 mb-1 rounded-card bg-overlay border border-border-strong py-1 z-50"
           style={{ boxShadow: "var(--shadow-md)" }}

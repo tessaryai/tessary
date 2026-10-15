@@ -2,17 +2,10 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 
-/**
- * Theming — DARK ONLY (2026-07 redesign; reaffirms the May 2026 decision).
- *
- * The light theme is parked entirely, not half-shipped: both toggles (sidebar,
- * Settings → Appearance) are removed and this provider hard-sets dark. If light
- * ever earns a full pass, add state and a context here and re-grow the toggles.
- */
+/** Dark only: the light theme is parked, not half-shipped. */
 const STORAGE_KEY = "tsy-theme";
 const DARK_BG = "#121212"; // = --color-bg (tokens.css)
 
-/** Hard-sets dark on <html> and clears any persisted light choice. */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const d = document.documentElement;
@@ -22,7 +15,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
-      // ignore persistence failures (private mode, disabled storage)
     }
   }, []);
 

@@ -1,26 +1,14 @@
-/*
- * Tessary base stylesheet. Every design token (color, type, radius, shadow,
- * motion, layout) lives in ../tokens.css — this file imports it, then adds
- * base-layer rules, keyframes, and scoped component CSS that isn't a token.
- *
- * Dark only (see src/ui/ThemeContext.tsx). The accent is achromatic (grey-50):
- * buttons, selection and active nav come off the grey ramp. Blue is reserved
- * for navigational links and the focus ring, and for the info/warning status.
- */
+/* Tokens live in ../tokens.css. Dark only; the accent is achromatic, and blue is reserved for links,
+ * the focus ring and info/warning status. */
 
 @import "tailwindcss";
 @import "../tokens.css";
 
-/* --- Motion (not a color/type/layout token, so it stays here) --- */
 @theme {
   --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* =============================================================================
- * BASE LAYER — dark page background, Geist as default, mono everywhere we
- * write code-y things. Text selection uses the grey accent, matching every
- * other selected state in the app; the focus ring is the one blue affordance.
- * ============================================================================= */
+/* ===== BASE LAYER ===== */
 
 @layer base {
   :root {
@@ -72,7 +60,6 @@
     border-radius: var(--radius-control);
   }
 
-  /* Tame autofill so it doesn't paint Chrome's stock blue into our dark inputs. */
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus,
@@ -83,10 +70,7 @@
   }
 }
 
-/* =============================================================================
- * REDUCED MOTION — collapse all durations globally so individual components
- * don't have to think about it.
- * ============================================================================= */
+/* ===== REDUCED MOTION: collapse all durations globally ===== */
 
 @media (prefers-reduced-motion: reduce) {
   :root {
@@ -104,26 +88,19 @@
   }
 }
 
-/* =============================================================================
- * MOTION PRIMITIVES — short, restrained, no bounce; all collapse under
- * prefers-reduced-motion (handled globally above).
- * ============================================================================= */
+/* ===== MOTION PRIMITIVES ===== */
 
 @keyframes tess-ag-ping {
   0% { transform: scale(0.72); opacity: 0.5; }
   75%, 100% { transform: scale(2); opacity: 0; }
 }
 
-/* tsyRail: the one right-rail slide-in (ui/Rail.tsx). */
 @keyframes tsyRail {
   from { transform: translateX(14px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
 
-/* =============================================================================
- * MARKDOWN — scoped prose styling for rendered trace text and grader rationales
- * (PayloadViewer / Markdown). Token-driven, dark-only, no typography plugin.
- * ============================================================================= */
+/* ===== MARKDOWN: scoped prose for PayloadViewer / Markdown, no typography plugin ===== */
 
 .payload-md {
   color: var(--color-fg);
@@ -194,20 +171,12 @@
 }
 .payload-md th { background-color: var(--color-surface); font-weight: 600; }
 
-/* A chat bubble sets its own reading size; markdown inside it inherits rather
- * than dropping to the payload panel's smaller `--text-small`. */
 .chat-bubble .payload-md {
   font-size: inherit;
   line-height: inherit;
 }
 
-/* Nothing inside a bubble scrolls sideways.
- *
- * A payload panel is a viewport onto one blob and can afford `overflow-x: auto`.
- * A transcript cannot: the bubble is already width-capped, so a long line put a
- * scrollbar under every other message and turned reading the conversation into
- * a hunt. Code wraps instead, on any character — these are shell commands and
- * paths, which have no spaces to break at. */
+/* A width-capped transcript cannot scroll sideways, so code wraps on any character. */
 .chat-bubble .payload-md pre {
   overflow-x: visible;
   white-space: pre-wrap;
@@ -223,13 +192,7 @@
   overflow-wrap: anywhere;
 }
 
-/* =============================================================================
- * JSON TREE — truncation ellipsis for string values (PayloadViewer / JsonTree).
- * The viewer (@uiw/react-json-view) shortens long strings and toggles them on
- * click, but its default ellipsis blended into the value text. We suppress it
- * (stringEllipsis="") and render a visible accent ellipsis on the collapsed
- * value — the library already wires the click handler + pointer cursor here.
- * ============================================================================= */
+/* ===== JSON TREE: the library's own string ellipsis is suppressed (stringEllipsis="") for a visible one ===== */
 
 .payload-json .w-rjv-value-short::after {
   content: "…";
