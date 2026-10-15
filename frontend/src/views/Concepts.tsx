@@ -21,7 +21,7 @@ export function Concepts() {
     <PageBody size="narrow">
       <PageHeader
         breadcrumb={[
-          { label: projectSlug, to: `/orgs/${orgSlug}/projects/${projectSlug}/overview` },
+          { label: projectSlug, to: `/orgs/${orgSlug}/projects/${projectSlug}/triage` },
           { label: "Concepts" },
         ]}
         eyebrow="Reference"

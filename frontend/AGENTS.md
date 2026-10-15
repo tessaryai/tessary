@@ -60,8 +60,8 @@ Two consequences worth knowing before you reach for a workaround:
   frontend flag client and no plan logic.
 - `views/` — surfaces, mostly one directory per IA surface (`triage/`, `traces/`,
   `classifiers/`, `vitals/`, `Settings/`). `graders/`, `review/`, `datasets/`,
-  `runs/`, `synth/` and `reposync/` were deleted along with the whole Calibrate nav group; their routes are
-  `<Navigate>` redirects to `../triage` at the bottom of `App.tsx`. `views/traceLinker.ts` builds
+  `runs/`, `synth/` and `reposync/` were deleted along with the whole Calibrate nav group; their old
+  paths fall through to the project catch-all at the bottom of `App.tsx`, which lands on Triage. `views/traceLinker.ts` builds
   trace, span and classifier hrefs; `views/classifiers/useListPaging.ts` (infinite scroll across filter switches)
   and `useSkeletonFlag.ts` (delayed, held list skeleton) serve the classifier lists. Surface-specific shared widgets go in `views/components/`
   (`PayloadViewer`, `ConnectRepositoryDialog`, `SourceConnect`, …). Generic primitives belong in
@@ -118,9 +118,9 @@ image-detection shapes mirror the backend `ContentExtractor` — keep them in sy
    helper, and a plain `<Route path="segment" element={<X/>} />` inside `ProjectShell`'s
    nested `<Routes>`. Wrap gated surfaces in `<CapabilityGate capability=…>` — that is the only
    route wrapper — and set the same `capability` on the nav item so the sidebar and palette agree.
-3. Moved/renamed an old path? Leave a `<Navigate … replace />` redirect with the others at
-   the bottom of `ProjectShell` — that block is the live migration map, and bookmarks and
-   Slack deep links depend on it.
+3. Moved/renamed an old path? The project catch-all at the bottom of `ProjectShell` sends any
+   unmatched path to Triage, and the settings catch-all sends one to Sources. Add a
+   `<Navigate … replace />` above them only when an old link has to land on the new page instead.
 4. Settings sub-pages: add an item to the right group in `SETTINGS_GROUPS` in `nav.tsx` **and**
    a child `<Route>` under `settings` in App.tsx.
 
