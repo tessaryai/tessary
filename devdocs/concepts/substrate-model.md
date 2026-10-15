@@ -830,6 +830,10 @@ CREATE INDEX ix_span_unresolved_path   ON span (project_id, trace_id)
                                           WHERE path IS NULL AND path_state = 'pending';
 CREATE INDEX ix_span_orphan_parent     ON span (project_id, trace_id, parent_span_id)
                                           WHERE path_state = 'orphan';           -- §6.4 reclaim probe
+CREATE INDEX ix_span_root              ON span (project_id, trace_id, started_at, id)
+                                          INCLUDE (ended_at)
+                                          WHERE parent_span_id IS NULL
+                                            AND is_deleted IS NOT TRUE;         -- 0045, a trace's turn
 CREATE INDEX ix_span_uncorrelated      ON span (project_id, trace_id)
                                           WHERE session_id IS NULL
                                             AND correlation_state = 'pending';
@@ -837,9 +841,9 @@ CREATE INDEX ix_span_name_trgm         ON span USING gin (name gin_trgm_ops);
 CREATE INDEX ix_span_llm_usage         ON span (project_id, started_at)
                                           INCLUDE (call_site_id, provided_model_name, trace_id,
                                                    total_tokens, total_cost, cost_source)
-                                          WHERE kind = 'llm' AND NOT is_deleted;  -- 0041, vitals spend
+                                          WHERE kind = 'llm' AND NOT is_deleted;  -- 0042, vitals spend
 CREATE INDEX ix_span_untagged          ON span (project_id)
-                                          WHERE call_site_id IS NULL;  -- 0043, substrate status
+                                          WHERE call_site_id IS NULL;  -- 0044, substrate status
 
 -- span_payload (btree_gin puts the project beside the words; 0035 replaced ix_span_payload_fts, the same
 -- words without the project)
@@ -848,7 +852,7 @@ CREATE INDEX ix_span_payload_project_fts ON span_payload USING gin (project_id, 
                                           left(coalesce(output,''),100000)));  -- traces search, Global Search
 
 -- trace: the primary list surface, plus the rollup queue
-CREATE INDEX ix_trace_project_started_id ON trace (project_id, started_at DESC, id DESC);  -- 0042
+CREATE INDEX ix_trace_project_started_id ON trace (project_id, started_at DESC, id DESC);  -- 0043
 CREATE INDEX ix_trace_session          ON trace (project_id, session_id, started_at)
                                           WHERE session_id IS NOT NULL;
 CREATE INDEX ix_trace_session_ended    ON trace (project_id, session_id, ended_at DESC,

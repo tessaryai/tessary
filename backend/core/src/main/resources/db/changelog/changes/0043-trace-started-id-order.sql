@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0042-trace-project-started-id runInTransaction:false
+--changeset evals:0043-trace-project-started-id runInTransaction:false
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'ix_trace_project_started_id' AND NOT i.indisvalid
 -- The traces list reads newest first, ORDER BY started_at DESC, id DESC, and stops at a page. ix_trace_project_started
@@ -13,7 +13,7 @@
 CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_trace_project_started_id ON trace (project_id, started_at DESC, id DESC);
 --rollback DROP INDEX CONCURRENTLY IF EXISTS ix_trace_project_started_id;
 
---changeset evals:0042-drop-trace-project-started runInTransaction:false
+--changeset evals:0043-drop-trace-project-started runInTransaction:false
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:1 SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'ix_trace_project_started_id' AND i.indisvalid
 -- ix_trace_project_started_id serves every read ix_trace_project_started served, since it starts with the same two

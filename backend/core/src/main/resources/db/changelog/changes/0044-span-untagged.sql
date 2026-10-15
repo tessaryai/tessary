@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0043-span-untagged runInTransaction:false
+--changeset evals:0044-span-untagged runInTransaction:false
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'ix_span_untagged' AND NOT i.indisvalid
 -- The substrate status, read on every app start, counts a project's spans with no call site up to 1,000

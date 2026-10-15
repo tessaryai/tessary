@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0041-span-llm-usage runInTransaction:false
+--changeset evals:0042-span-llm-usage runInTransaction:false
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'ix_span_llm_usage' AND NOT i.indisvalid
 -- Vitals sums the llm spans of a window (VitalsRepository.usageIn) on every Triage and Vitals visit. Through
