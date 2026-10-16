@@ -7,9 +7,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.storage.TraceV2Row;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
@@ -24,6 +21,9 @@ import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -39,8 +39,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 @Import(StubDecisionClientConfig.class)
 record ClassifierTurnGrainIntegrationTest(
         SubstrateV2Fixtures fx,
-        TraceV2Repository traces,
-        SpanRepository spans,
         ClassifierWorker worker,
         ClassifierService service,
         ClassifierRepository signals,
@@ -95,8 +93,8 @@ record ClassifierTurnGrainIntegrationTest(
 
         // A sub-agent trace on the reply call site: excluded only by parent_trace_id.
         String subTraceId = SubstrateV2Fixtures.traceId();
-        seedSubAgentTrace(pid, subTraceId, turnTraceId, sessionId, now);
         seedSpan(pid, subTraceId, sessionId, null, REPLY, "agent", "sub", now);
+        fx.detachUnder(pid, subTraceId, turnTraceId);
 
         List<ClassifierEventView> events = sweepUntilDetected(pid);
 
@@ -110,20 +108,26 @@ record ClassifierTurnGrainIntegrationTest(
                 "the reply's first call, not the router, the memory pass or the reply's later call");
     }
 
-    /** With no list, Frustration runs on every call site, like every other classifier, so nothing has to be picked. */
-    @Test
-    void withNoListATurnIsScored() {
-        String pid = bootstrapGranted("turn-grain-every", null);
+    /**
+     * A bare {@code llm} root with no agent wrapper is the user-facing turn and must still be scored, on its picked call
+     * site or, with no list, on every call site like every other classifier.
+     */
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = REPLY)
+    void aBareLlmRootIsScoredOnItsPickedCallSiteOrWithNoList(@Nullable String picked) {
+        String pid = bootstrapGranted(
+                picked == null ? "turn-grain-every" : "turn-grain-bare", picked == null ? null : List.of(picked));
         Instant now = Instant.now();
 
         String sessionId = SubstrateV2Fixtures.sessionId();
         ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
-        SpanRef turn = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, REPLY, "llm", "chat", now);
+        SpanRef only = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, REPLY, "llm", "chat", now);
 
         List<ClassifierEventView> events = sweepUntilDetected(pid);
 
-        assertEquals(1, events.size());
-        assertEquals(turn.traceId(), events.get(0).subjectId());
+        assertEquals(1, events.size(), "a bare llm root is a user-facing turn and must still be scored");
+        assertEquals(only.traceId(), events.get(0).subjectId());
     }
 
     @Test
@@ -158,22 +162,6 @@ record ClassifierTurnGrainIntegrationTest(
                 "the surviving detection is the FIRST turn that earned it, not the last one seen");
     }
 
-    @Test
-    void aBareLlmRootWithNoAgentWrapperIsStillScored() {
-        String pid = bootstrapGranted("turn-grain-bare");
-        Instant now = Instant.now();
-
-        // No agent wrapper: the llm call is the trace's root span and the user-facing turn.
-        String sessionId = SubstrateV2Fixtures.sessionId();
-        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
-        SpanRef only = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, REPLY, "llm", "chat", now);
-
-        List<ClassifierEventView> events = sweepUntilDetected(pid);
-
-        assertEquals(1, events.size(), "a bare llm root is a user-facing turn and must still be scored");
-        assertEquals(only.traceId(), events.get(0).subjectId());
-    }
-
     /** A frustrated user turn in the stored role-tagged gen_ai envelope. */
     private SpanRef seedSpan(
             String pid,
@@ -197,49 +185,6 @@ record ClassifierTurnGrainIntegrationTest(
                         ClassifierObservations.userInput(FRUSTRATED),
                         ClassifierObservations.assistantOutput("I've already told you that isn't supported."))
                 .writeRef();
-    }
-
-    /**
-     * A trace nested under {@code parentTraceId}, the sub-agent shape, built whole since {@code TraceV2Row.of} cannot
-     * express it.
-     */
-    private void seedSubAgentTrace(String pid, String id, String parentTraceId, String sessionId, Instant at) {
-        fx.session(pid, sessionId, at);
-        traces.getOrCreateAll(List.of(new TraceV2Row(
-                pid,
-                id,
-                sessionId,
-                parentTraceId,
-                null,
-                null,
-                null,
-                null,
-                null,
-                at.toString(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                false,
-                false,
-                at.toString(),
-                false)));
     }
 
     /** The span the classifier flagged in {@code traceId}. */

@@ -310,6 +310,7 @@ public final class SubstrateV2Fixtures {
     public static final class SpanRowCopy {
 
         private final SpanRow row;
+        private @Nullable String name;
         private @Nullable String parentSpanId;
         private boolean isLogicalRoot;
         private @Nullable String callSiteId;
@@ -328,6 +329,7 @@ public final class SubstrateV2Fixtures {
 
         private SpanRowCopy(SpanRow row) {
             this.row = row;
+            this.name = row.name();
             this.parentSpanId = row.parentSpanId();
             this.isLogicalRoot = row.isLogicalRoot();
             this.callSiteId = row.callSiteId();
@@ -343,6 +345,11 @@ public final class SubstrateV2Fixtures {
             this.costSource = row.costSource();
             this.inputPreview = row.inputPreview();
             this.outputPreview = row.outputPreview();
+        }
+
+        public SpanRowCopy name(String name) {
+            this.name = name;
+            return this;
         }
 
         public SpanRowCopy parent(String parentSpanId) {
@@ -400,7 +407,7 @@ public final class SubstrateV2Fixtures {
                     callSiteId,
                     row.traceName(),
                     row.kind(),
-                    row.name(),
+                    name,
                     isLogicalRoot,
                     row.status(),
                     row.level(),
