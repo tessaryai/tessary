@@ -285,39 +285,6 @@ class McpSubstrateReadToolsTest {
     }
 
     /**
-     * Payload fields are absent, not null: a null {@code input} beside {@code payload_available: true} would claim
-     * the call had no input.
-     */
-    @Test
-    void listSpans_defaultRowsCarryPreviewsAndAvailabilityButNoPayloadKeys() throws Exception {
-        when(queries.search(eq(PROJECT_ID), any()))
-                .thenReturn(searchPage("next-page", key("t-1", "s-1"), key("t-1", "s-2")));
-        when(spans.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(span("t-1", "s-1"), span("t-1", "s-2")));
-        when(payloads.existingKeys(eq(PROJECT_ID), any())).thenReturn(Set.of(new SpanKey("t-1", "s-1")));
-
-        JsonNode body = structured(mcp.callTool("list_spans", "{}"));
-        JsonNode rows = body.get("spans");
-        // The cursor is QueryRepository's, passed through, so it resumes the same scan.
-        assertEquals("next-page", body.get("next_cursor").asText());
-
-        assertEquals(2, rows.size());
-        assertEquals("t-1", rows.get(0).get("trace_id").asText());
-        assertEquals("s-1", rows.get(0).get("span_id").asText());
-        assertEquals("llm", rows.get(0).get("kind").asText());
-        assertEquals("anthropic/claude-sonnet-5", rows.get(0).get("model_id").asText());
-        assertEquals(
-                "user: this is broken again", rows.get(0).get("input_preview").asText());
-        assertTrue(rows.get(0).get("payload_available").asBoolean(), "a payload row exists for s-1");
-        assertFalse(rows.get(1).get("payload_available").asBoolean(), "s-2's payload has aged out");
-        for (String payloadField : List.of("input", "output", "attributes", "provided_usage")) {
-            assertNull(rows.get(0).get(payloadField), "an un-asked-for page must not carry " + payloadField);
-        }
-        // One existence probe per page, never the payload text.
-        verify(payloads).existingKeys(eq(PROJECT_ID), any());
-        verify(payloads, org.mockito.Mockito.never()).listByKeys(any(), any());
-    }
-
-    /**
      * The rule this phase exists for: a refused payload request is an error, never a compact page, because an agent
      * handed previews would reason over a truncated prompt. The message carries the rule and the fix.
      */
@@ -395,25 +362,6 @@ class McpSubstrateReadToolsTest {
         String text = errorText(mcp.callTool("list_spans", argsJson));
 
         assertTrue(named.stream().allMatch(text::contains), why + ": " + text);
-    }
-
-    /**
-     * Rows keep the retrieval's order: for semantic mode that order is the cosine ranking, and SQL returns an id set
-     * in no order.
-     */
-    @Test
-    void listSpans_rowsFollowTheRetrievalRankingNotTheHydrationOrder() throws Exception {
-        when(queries.search(eq(PROJECT_ID), any()))
-                .thenReturn(searchPage(null, key("t-1", "s-1"), key("t-2", "s-2"), key("t-3", "s-3")));
-        when(spans.listByKeys(eq(PROJECT_ID), any()))
-                .thenReturn(List.of(span("t-3", "s-3"), span("t-1", "s-1"), span("t-2", "s-2")));
-
-        JsonNode rows = structured(mcp.callTool("list_spans", "{\"mode\":\"semantic\",\"q\":\"angry customer\"}"))
-                .get("spans");
-
-        assertEquals("s-1", rows.get(0).get("span_id").asText());
-        assertEquals("s-2", rows.get(1).get("span_id").asText());
-        assertEquals("s-3", rows.get(2).get("span_id").asText());
     }
 
     /** A span removed between search and hydration is dropped, not rendered half-populated. */

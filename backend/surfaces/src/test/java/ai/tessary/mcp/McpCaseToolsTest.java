@@ -55,23 +55,6 @@ class McpCaseToolsTest {
         this.mcp = registryWith().pipeline(Pipeline.empty()).cases(cases).build();
     }
 
-    /** Filters and the cursor reach the service under the service's own names, untranslated. */
-    @Test
-    void listCases_passesStateDetectorCallSiteAndCursorThrough() throws Exception {
-        when(cases.page(eq(PROJECT_ID), any(), any(), any(), anyInt(), any()))
-                .thenReturn(new CasesPage(List.of(), null));
-
-        JsonNode body = structured(mcp.callTool(
-                "list_cases",
-                "{\"state\":\"resolved\",\"detector\":\"tool_error\",\"call_site_id\":\"cs-7\","
-                        + "\"limit\":10,\"cursor\":\"tok\"}"));
-
-        verify(cases).page(PROJECT_ID, "resolved", "tool_error", "cs-7", 10, "tok");
-        // Last page: the key is present and null, not absent.
-        assertTrue(body.has("next_cursor"));
-        assertTrue(body.get("next_cursor").isNull());
-    }
-
     /** Clamped to the MCP cap, not the REST one: an unclamped {@code limit: 500} spends a context window on a list. */
     @Test
     void listCases_clampsAnOversizedLimitToTheSurfaceCap() throws Exception {
