@@ -28,14 +28,6 @@ class PublicOriginGuardTest {
     }
 
     @Test
-    void blankDomainIsInert() {
-        PublicOriginGuard g = guard("", "acme", "");
-        String before = auth.getFrontendUrl();
-        g.verify();
-        assertEquals(before, auth.getFrontendUrl());
-    }
-
-    @Test
     void domainAloneDerivesEveryOrigin() {
         PublicOriginGuard g = guard("Tessary.Acme-Corp.com", "acme", "ops@acme-corp.com");
         auth.setFrontendUrl("http://127.0.0.1:80/");

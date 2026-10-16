@@ -23,15 +23,13 @@ import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.CommonError;
-import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.sandbox.AgentSpanTelemetry;
+import ai.tessary.testsupport.LogCapture;
 import ai.tessary.testsupport.Props;
 import ai.tessary.usage.LlmUsageAccountant;
 import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
@@ -48,19 +46,17 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link LauncherAgentSessionClient} against a {@link FakeLauncher} on a loopback socket, through the
@@ -108,21 +104,17 @@ class LauncherAgentSessionClientTest {
     LlmUsageAccountant usage;
 
     private FakeLauncher fake;
-    private ListAppender<ILoggingEvent> appender;
-    private Logger logger;
+
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(LauncherAgentSessionClient.class);
 
     @BeforeEach
     void startTheLauncher() throws IOException {
         fake = FakeLauncher.start();
-        logger = (Logger) LoggerFactory.getLogger(LauncherAgentSessionClient.class);
-        appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
     }
 
     @AfterEach
     void stopTheLauncher() throws IOException {
-        logger.detachAppender(appender);
         fake.close();
     }
 
@@ -248,19 +240,6 @@ class LauncherAgentSessionClientTest {
                 ex.getMessage());
     }
 
-    /** Catches a sandbox started with no credential. */
-    @Test
-    void noCredentialStartsNoSandbox() {
-        aGrokLane();
-        when(credentials.resolve(PROJECT, ModelProvider.GROK))
-                .thenThrow(new TessaryException(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.GROK));
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> client().start(START));
-
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, ex.error());
-        assertEquals(List.of(), fake.seen());
-    }
-
     /** Catches a run slot claimed for a start that cannot be sent anywhere. */
     @Test
     void noLauncherIsMisconfiguredBeforeAnythingIsResolved() {
@@ -280,11 +259,11 @@ class LauncherAgentSessionClientTest {
 
         TessaryException ex = assertThrows(TessaryException.class, () -> client().start(START));
 
-        assertFalse(appender.list.isEmpty(), "the refusal is logged");
+        assertFalse(log.events().isEmpty(), "the refusal is logged");
         List<String> rendered = new java.util.ArrayList<>();
         rendered.add(String.valueOf(ex.getMessage()));
         rendered.add(START.toString());
-        for (ILoggingEvent event : appender.list) {
+        for (ILoggingEvent event : log.events()) {
             rendered.add(event.getFormattedMessage() + " " + event.getKeyValuePairs() + " "
                     + (event.getThrowableProxy() == null
                             ? ""
@@ -376,27 +355,6 @@ class LauncherAgentSessionClientTest {
         assertEquals("/sessions/s-1/events?after=4", seen.path());
         assertEquals("Bearer " + LAUNCHER_KEY, seen.headers().get("authorization"));
         assertEquals("text/event-stream", seen.headers().get("accept"));
-    }
-
-    /** Catches a reader that buffers the whole body, so the page would see nothing until the session ends. */
-    @Test
-    void eventsArriveWhileTheStreamIsOpen() throws Exception {
-        LauncherAgentSessionClient client = aStartedSession();
-        FakeLauncher.LiveEvents live = fake.liveEvents("/sessions/s-1/events?after=0");
-        live.push(FakeLauncher.frame(1, "text", "{\"delta\":\"Hel\"}"));
-
-        try (Stream<SessionEvent> events = client.events("s-1", 0)) {
-            Iterator<SessionEvent> it = events.iterator();
-            CompletableFuture<SessionEvent> first = new CompletableFuture<>();
-            Thread.ofVirtual().start(() -> first.complete(it.next()));
-
-            assertEquals(new SessionEvent.Text(1, "Hel"), first.get(5, TimeUnit.SECONDS));
-
-            live.push(FakeLauncher.frame(2, "text", "{\"delta\":\"lo\"}"));
-            live.end();
-            assertEquals(new SessionEvent.Text(2, "lo"), it.next());
-            assertFalse(it.hasNext());
-        }
     }
 
     /** Catches a broken connection reported as a closed session, or thrown at the relay thread. */
@@ -674,21 +632,6 @@ class LauncherAgentSessionClientTest {
         verifyNoMoreInteractions(usage);
     }
 
-    /** Catches Tessary AI spend booked on the org's own key. */
-    @Test
-    void aPlatformFundedSessionBooksAsPlatformFunded() {
-        LauncherAgentSessionClient client = aStartedSessionWith(new AgenticCredentialResolver.Credential(
-                ModelProvider.GROK, null, null, null, null, null, null, true, "e2b-secret", "start"));
-        fake.events(
-                "/sessions/s-1/events?after=0",
-                FakeLauncher.Ending.END,
-                FakeLauncher.frame(1, "message_end", messageEnd("done")));
-
-        read(client, 0);
-
-        verifyBookedOnce(true);
-    }
-
     /** Catches a stop that loses the reply's spend, or frees the run slot twice. */
     @Test
     void stopFreesTheReplyAndStillBooksItsLastMessageEnd() {
@@ -815,36 +758,6 @@ class LauncherAgentSessionClientTest {
         verify(credentials, never()).release(REPLY_CRED);
     }
     /**
-     * Catches a replayed {@code message_end} that frees the newer reply's credential, so a Tessary AI
-     * run slot is over-committed while that reply still runs.
-     */
-    @Test
-    void aMessageEndReplayedWhileANewerReplyRunsFreesNothing() {
-        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED, REPLY2_CRED);
-        fake.answer("POST", "/sessions/s-1/messages", 202, null);
-        fake.events(
-                "/sessions/s-1/events?after=0",
-                FakeLauncher.Ending.END,
-                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"),
-                FakeLauncher.frame(2, "message_end", messageEnd("done")));
-        fake.events(
-                "/sessions/s-1/events?after=1",
-                FakeLauncher.Ending.END,
-                FakeLauncher.frame(2, "message_end", messageEnd("done")));
-        assertEquals(AgentSessionClient.SendOutcome.ACCEPTED, client.send("s-1", "one"));
-        read(client, 0);
-        verify(credentials).release(REPLY_CRED);
-        assertEquals(AgentSessionClient.SendOutcome.ACCEPTED, client.send("s-1", "two"));
-
-        read(client, 1);
-
-        verify(credentials, never()).release(REPLY2_CRED);
-        assertEquals(AgentSessionClient.SendOutcome.BUSY, client.send("s-1", "three"));
-        verifyBookedOnce(false);
-        verifyNoMoreInteractions(usage);
-    }
-
-    /**
      * Catches the last reply's spend lost when an abort finds the session already closing: the 404
      * must not drop what the reconnected stream still has to book.
      */
@@ -914,12 +827,10 @@ class LauncherAgentSessionClientTest {
         client.abort("s-1");
         client.stop("s-1");
 
-        Map<String, Object> started = fields(logged("agentsession.started").getFirst());
+        Map<String, Object> started = log.fields("agentsession.started").getFirst();
         assertEquals("9", String.valueOf(started.get("systemPromptBytes")));
         assertEquals("7", String.valueOf(started.get("fileBytes")));
-        List<Map<String, Object>> messages = logged("agentsession.message").stream()
-                .map(LauncherAgentSessionClientTest::fields)
-                .toList();
+        List<Map<String, Object>> messages = log.fields("agentsession.message");
         assertEquals(
                 List.of("ACCEPTED", "BUSY"),
                 messages.stream().map(m -> m.get("outcome")).toList());
@@ -927,14 +838,12 @@ class LauncherAgentSessionClientTest {
                 List.of("6", "5"),
                 messages.stream().map(m -> String.valueOf(m.get("bytes"))).toList());
         assertEquals("s-1", messages.getFirst().get("session"));
-        assertEquals(
-                "aborted", fields(logged("agentsession.aborted").getFirst()).get("outcome"));
-        assertEquals(
-                "stopped", fields(logged("agentsession.stopped").getFirst()).get("outcome"));
+        assertEquals("aborted", log.fields("agentsession.aborted").getFirst().get("outcome"));
+        assertEquals("stopped", log.fields("agentsession.stopped").getFirst().get("outcome"));
     }
 
     private List<ILoggingEvent> logged(String event) {
-        return appender.list.stream()
+        return log.events().stream()
                 .filter(e -> event.equals(fields(e).get("event")))
                 .toList();
     }

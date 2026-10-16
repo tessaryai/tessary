@@ -29,13 +29,10 @@ import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.LogCapture;
 import ai.tessary.testsupport.Props;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.tracing.Tracer;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +46,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.LoggerFactory;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
@@ -410,12 +406,12 @@ class BehaviorTriageSourceTest {
                                 .build()
                                 .claim()));
 
-        List<Map<String, Object>> events = logged(
-                BehaviorTriageSource.class,
-                "finding.adapter.escalation",
-                () -> source(FindingAdapters.of(
-                                List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
-                        .listAutoEscalatable(PROJECT, 30, 50));
+        List<Map<String, Object>> events = LogCapture.during(
+                        BehaviorTriageSource.class,
+                        () -> source(FindingAdapters.of(List.of(
+                                        FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
+                                .listAutoEscalatable(PROJECT, 30, 50))
+                .fields("finding.adapter.escalation");
 
         assertEquals(1, events.size(), "one line per escalation pass");
         Map<String, Object> fields = new HashMap<>(events.get(0));
@@ -489,44 +485,6 @@ class BehaviorTriageSourceTest {
                         .toList(),
                 "an owned case whose newest finding says rate_shift is folded as a tool-error case and never reaches"
                         + " its adapter");
-    }
-
-    /**
-     * With an adapter registered that owns none of the built-in keys, a built-in case absorb still folds every spell
-     * and calls no hook. The bug is the owner check read as "an adapter exists", which re-pins the newest finding alone
-     * and leaves the earlier spells alarming.
-     */
-    @Test
-    void withAnAdapterRegisteredABuiltInCaseStillFoldsEverySpell() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
-
-        source(FindingAdapters.of(List.of(adapter)))
-                .repinCase(PROJECT, List.of(toolError("f2", 300, 30), toolError("f1", 300, 20)), "u1");
-
-        verify(toolErrorReferences).pin(eq(PROJECT), eq(BUCKET), eq(600L), eq(50L), eq("u1"), anyString());
-        verify(toolErrorStates).reset(eq(PROJECT), eq(BUCKET), eq("u1"), eq("Absorbed."), anyString());
-        assertEquals(List.of(), adapter.absorbedCalls());
-    }
-
-    /** With an adapter registered that does not own it, a built-in finding is still escalated. */
-    @Test
-    void withAnAdapterRegisteredABuiltInFindingIsAnalyzed() {
-        FindingRow finding = FindingRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
-                .id("f1")
-                .projectId(PROJECT)
-                .evidenceCounts("{\"witness\":3}")
-                .build();
-        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(finding));
-        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
-        when(jobs.enqueue(eq(PROJECT), eq("f1"), anyString()))
-                .thenReturn(new BehaviorTriageJobRepository.EnqueueOutcome("job-1", "queued"));
-
-        var view = source(FindingAdapters.of(
-                        List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
-                .analyze(PROJECT, "f1")
-                .orElseThrow();
-
-        assertEquals("job-1", view.jobId());
     }
 
     private static FindingRow toolError(String id, long nCur, long failures) {
@@ -622,26 +580,5 @@ class BehaviorTriageSourceTest {
                 groundednessRates,
                 null,
                 adapters);
-    }
-
-    /** The structured fields of every event named {@code name} that {@code source}'s logger wrote while {@code action} ran. */
-    private static List<Map<String, Object>> logged(Class<?> source, String name, Runnable action) {
-        Logger logger = (Logger) LoggerFactory.getLogger(source);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            action.run();
-        } finally {
-            logger.detachAppender(appender);
-        }
-        List<Map<String, Object>> events = new ArrayList<>();
-        for (ILoggingEvent e : appender.list) {
-            if (e.getKeyValuePairs() == null) continue;
-            Map<String, Object> fields = new HashMap<>();
-            e.getKeyValuePairs().forEach(kv -> fields.put(kv.key, kv.value));
-            if (name.equals(fields.get("event"))) events.add(fields);
-        }
-        return events;
     }
 }

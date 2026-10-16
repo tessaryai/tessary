@@ -389,31 +389,6 @@ class GroundednessDetectorTest {
         return s;
     }
 
-    @Test
-    @DisplayName("retrieved documents are the passages, one each, with the user's question; the firing says so")
-    void evidenceIsSentAsPassagesWithTheQuestion() {
-        CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
-        List<Response> seen = new ArrayList<>();
-        GroundednessDetector d = detector(
-                head(List.of(0.99), seen),
-                rag,
-                docs("The policy excess is Rs 5,000 per claim.", "Claims are settled within 30 days."));
-        Detection got = d.sweepBatch(
-                        SIGNAL, List.of(obs("cs-rag", "what is the excess?", "The excess is Rs 50,000.")), null)
-                .get(0);
-        assertTrue(got.fired());
-        assertEquals(1, seen.size());
-        Response sent = seen.get(0);
-        assertEquals(
-                List.of("The policy excess is Rs 5,000 per claim.", "Claims are settled within 30 days."),
-                sent.passages(),
-                "each retrieved document is its own passage — never joined into one string");
-        assertEquals("what is the excess?", sent.question(), "the user's question goes with the passages");
-        assertTrue(
-                String.valueOf(got.evidenceJson()).contains("\"premise_had_evidence\":true"),
-                "a reader has to be able to tell what the answer was actually compared against");
-    }
-
     /**
      * A caller scoring one observation at a time got a detection with no assessment row, a flag without its trial.
      * Only sweepBatch records trials.

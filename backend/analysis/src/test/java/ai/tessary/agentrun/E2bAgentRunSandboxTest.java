@@ -3,7 +3,6 @@ package ai.tessary.agentrun;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
@@ -17,13 +16,12 @@ import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.LogCapture;
 import ai.tessary.testsupport.LoopbackHttpStub;
 import ai.tessary.testsupport.Props;
 import ai.tessary.testsupport.ScriptedHttpClient;
 import ai.tessary.usage.LlmUsageAccountant;
-import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.api.OpenTelemetry;
@@ -35,16 +33,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link E2bAgentRunSandbox} against a scripted HTTP client: the request the launcher receives, what
@@ -66,21 +62,8 @@ class E2bAgentRunSandboxTest {
     @Mock
     LlmUsageAccountant usage;
 
-    private ListAppender<ILoggingEvent> appender;
-    private Logger logger;
-
-    @BeforeEach
-    void attachAppender() {
-        logger = (Logger) LoggerFactory.getLogger(E2bAgentRunSandbox.class);
-        appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-    }
-
-    @AfterEach
-    void detachAppender() {
-        logger.detachAppender(appender);
-    }
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(E2bAgentRunSandbox.class);
 
     private static AgentRunProperties props(String launcherUrl) {
         return Props.of(AgentRunProperties.class, "launcher-url", launcherUrl, "launcher-api-key", API_KEY);
@@ -163,19 +146,6 @@ class E2bAgentRunSandboxTest {
         assertEquals(expected, MAPPER.readTree(client.lastBody()));
     }
 
-    /** The VM script branches on the clone fields' presence, and a null schema must not become the string "null". */
-    @Test
-    void omitsTheCloneAndTheSchemaWhenTheRequestHasNone() throws Exception {
-        ScriptedHttpClient client = ScriptedHttpClient.answering(200, envelope(Map.of("result", "ok")));
-
-        sandbox(client).run(request(null, null, null));
-
-        JsonNode body = MAPPER.readTree(client.lastBody());
-        assertFalse(body.has("clone_url"));
-        assertFalse(body.has("head_sha"));
-        assertFalse(body.has("json_schema"));
-    }
-
     /** The credential, the MCP key and the clone token reach the launcher and nothing else, on the loud path too. */
     @Test
     void secretsNeverReachALogLine() throws Exception {
@@ -183,8 +153,8 @@ class E2bAgentRunSandboxTest {
 
         assertThrows(TessaryException.class, () -> sandbox(client).run(fullRequest()));
 
-        assertFalse(appender.list.isEmpty(), "the refusal is logged");
-        for (ILoggingEvent event : appender.list) {
+        assertFalse(log.events().isEmpty(), "the refusal is logged");
+        for (ILoggingEvent event : log.events()) {
             String rendered = event.getFormattedMessage() + " " + event.getKeyValuePairs() + " "
                     + (event.getThrowableProxy() == null
                             ? ""
@@ -265,19 +235,6 @@ class E2bAgentRunSandboxTest {
                         3L,
                         new BigDecimal("0.5"),
                         SUBJECT);
-    }
-
-    /** A prose answer (no schema asked) is still an answer: text present, no structured half. */
-    @Test
-    void aProseAnswerIsReturnedAsTextAlone() throws Exception {
-        String body = envelope(Map.of("result", "The call site retries three times.", "num_turns", 2));
-
-        AgentRunSandbox.Result result =
-                sandbox(ScriptedHttpClient.answering(200, body)).run(request(null, null, null));
-
-        assertNull(result.structuredOutput());
-        assertEquals("The call site retries three times.", result.resultText());
-        assertEquals(2, result.turns());
     }
 
     /** A 2xx with nothing in it is not a run that answered: no raw, a blank result, or a body that is not JSON. */

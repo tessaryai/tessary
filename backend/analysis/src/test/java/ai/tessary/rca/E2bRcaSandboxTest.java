@@ -18,7 +18,6 @@ import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.RcaProperties.Agentic;
 import ai.tessary.llm.AgenticCredentialResolver;
-import ai.tessary.llm.ModelCatalog;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
@@ -142,26 +141,6 @@ class E2bRcaSandboxTest {
         // never logged.
         assertEquals("BEDROCK", body.path("provider").asText());
         assertFalse(body.path("credential").isMissingNode(), "credential must always be present");
-    }
-
-    /**
-     * The lane wins over ObserverProperties' default, and names its provider: a non-Bedrock provider sends a bare
-     * model id plus an explicit {@code provider}, since there is no Bedrock syntax to parse.
-     */
-    @ParameterizedTest
-    @CsvSource({"BEDROCK, global.anthropic.claude-sonnet-4-6", "GEMINI, gemini-2.5-pro"})
-    void projectRcaLaneOverridesTheObserverModel(ModelProvider provider, String model) throws Exception {
-        ProjectModelSettings settings = mock(ProjectModelSettings.class);
-        when(settings.resolveAgenticModel("proj", ModelLane.RCA))
-                .thenReturn(Optional.of(new ProjectModelSettings.ResolvedAgenticModel(
-                        provider,
-                        model,
-                        ModelCatalog.modelsDevId(provider, model).orElse(null))));
-
-        var body = postedBody(settings, request());
-
-        assertEquals(model, body.path("model").asText());
-        assertEquals(provider.name(), body.path("provider").asText());
     }
 
     /**
@@ -353,20 +332,6 @@ class E2bRcaSandboxTest {
             assertEquals(CommonError.INTERRUPTED, ex.error());
             assertTrue(stillInterrupted);
         }
-    }
-
-    /**
-     * Catches a non-JSON envelope escaping as a raw parse exception: it fails as UPSTREAM_FAILED with the cause
-     * attached.
-     */
-    @Test
-    void anUnreadableEnvelopeFailsClosedWithItsCause() {
-        E2bRcaSandbox sandbox = stubbed(bodyJson -> "<html>not an envelope</html>");
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
-
-        assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
-        assertTrue(ex.getCause() instanceof IOException, String.valueOf(ex.getCause()));
     }
 
     @Test

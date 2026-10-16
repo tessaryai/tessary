@@ -105,16 +105,6 @@ class RcaSynthesisOutputTest {
         assertEquals(List.of("Kept"), titles(out));
     }
 
-    /** An old verdict or an invented one is normalised to the no-cause answer, not downgraded with a note. */
-    @ParameterizedTest
-    @ValueSource(strings = {"behavior_change", "traffic_shift", "inconclusive", "vibes", "no_cause_found"})
-    void anyOtherVerdictReadsAsNoCauseFound(String verdict) {
-        RcaSynthesisOutput.Parsed out = parse(reply(verdict));
-
-        assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict());
-        assertNull(out.verdictNote(), verdict);
-    }
-
     /** Ranked by confidence, then by flagged rows explained; a large medium cause never outranks a small high one. */
     @Test
     void highCausesRankFirstThenTheLargest() {

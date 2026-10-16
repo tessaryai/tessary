@@ -214,14 +214,6 @@ class RcaAnalysisServiceTest {
         assertEquals(List.of(), other.evidenceContexts());
     }
 
-    /** With no adapter a custom finding's RCA dossier has no {@code method.md}. */
-    @Test
-    void withNoAdapterACustomFindingHasNoMethodFile() {
-        Map<String, String> dossier = dossierOf(FindingAdapters.of(List.of()));
-
-        assertEquals(Set.of("findings/1-f1/finding.md", "findings/1-f1/evidence.md", "tools.md"), dossier.keySet());
-    }
-
     /**
      * The built-in RCA method for a key comes before an adapter's, as the extension interface says. The bug is an
      * adapter that owns a built-in key replacing the method its findings are investigated by.

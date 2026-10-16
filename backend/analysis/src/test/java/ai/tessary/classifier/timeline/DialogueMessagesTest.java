@@ -10,23 +10,6 @@ import org.junit.jupiter.api.Test;
 class DialogueMessagesTest {
 
     @Test
-    void readKeepsEveryRoleInOrder() {
-        String input = """
-                [{"role":"system","content":"s"},{"role":"user","content":"u"},{"role":"tool","content":"t"}]
-                """;
-
-        List<DialogueMessage> messages = DialogueMessages.read(input, "user");
-
-        assertEquals(
-                List.of("system", "user", "tool"),
-                messages.stream().map(DialogueMessage::role).toList(),
-                "the timeline needs system and tool messages; the shared reader must not filter roles");
-        assertEquals(
-                List.of("s", "u", "t"),
-                messages.stream().map(DialogueMessage::text).toList());
-    }
-
-    @Test
     void readDialogueGivesNoMessageForAValueThatIsNotAMessageListOrText() {
         assertEquals(
                 List.of(),

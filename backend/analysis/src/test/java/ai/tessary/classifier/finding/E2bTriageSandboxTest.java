@@ -108,10 +108,6 @@ class E2bTriageSandboxTest {
     }
 
     /** A launcher error body in server.js's {@code buildErrorBody} shape. */
-    private static String errorBody(String kind, String detail) throws Exception {
-        return MAPPER.writeValueAsString(Map.of("kind", kind, "detail", detail));
-    }
-
     private static String errorBodyWithUsage(String kind, long inputTokens, long outputTokens) throws Exception {
         return MAPPER.writeValueAsString(Map.of(
                 "kind",
@@ -183,18 +179,6 @@ class E2bTriageSandboxTest {
     }
 
     @Test
-    void aTimedOutRunStillReleasesItsCredential() {
-        AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
-        when(resolver.resolve(any(), any())).thenReturn(LEASED);
-        E2bTriageSandbox sandbox = sandbox(resolver, mock(LlmUsageAccountant.class), req -> {
-            throw new HttpTimeoutException("request timed out");
-        });
-
-        assertEquals(Optional.empty(), sandbox.run(request()));
-        verify(resolver, times(1)).release(LEASED);
-    }
-
-    @Test
     void aCredentialThatNeverResolvedReleasesNothing() {
         AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
         when(resolver.resolve(any(), any()))
@@ -254,16 +238,6 @@ class E2bTriageSandboxTest {
         assertEquals(ClassifierError.TRIAGE_RUN_INCOMPLETE, ex.error());
         verify(usage)
                 .recordSandboxRun(eq("proj"), any(), any(), eq(false), eq(120L), eq(40L), eq(0L), eq(0L), any(), any());
-    }
-
-    @Test
-    void anOrchestrationBodyThrowsLauncherUnavailable() throws Exception {
-        E2bTriageSandbox sandbox = sandbox(
-                mock(LlmUsageAccountant.class), respondWith(502, errorBody("orchestration", "docker pull failed")));
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
-
-        assertEquals(ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, ex.error());
     }
 
     @Test

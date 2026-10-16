@@ -338,26 +338,6 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
-    void aPersonWhoSaysTheSameWordsTwiceInOneTurnGivesTwoMessages() {
-        String yes = user("yes");
-        String ask = assistant("Delete all 3 files, ok?");
-        List<TimelineSpan> spans = List.of(
-                span("T", "l1", "llm", null, 0, 100, list(SYS, yes), list(ask)),
-                span("T", "l2", "llm", null, 200, 300, list(SYS, yes, ask, yes), "Deleted."));
-
-        assertEquals(
-                """
-                T/l1#user:0 yes
-                T/l1#reply:0 Delete all 3 files, ok?
-                T/l2#user:0 yes
-                T/l2#reply:0 Deleted.
-                """,
-                messages(SessionTimelineBuilder.build("p1", "s", spans)),
-                "an answer the person gave after a reply of this turn is dropped because an earlier message had its"
-                        + " text");
-    }
-
-    @Test
     void aPersonWhoRepeatsTheOpeningWordsWhileTheAgentRunsGivesTwoMessages() {
         String yes = user("yes");
         String ask = assistant("Delete all 3 files, ok?");

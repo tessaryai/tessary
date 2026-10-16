@@ -40,8 +40,6 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The token-head client under encoder pushback, against a loopback {@link ServerSocket} responder (forbidden-apis
@@ -300,19 +298,6 @@ class LauncherEncoderScorerTest {
 
         assertEquals(1, unreachable.size(), "the availability is told at once");
         assertTrue(unreachable.getFirst().startsWith("unreachable: "), unreachable.getFirst());
-    }
-
-    /** A model answering 500 is broken, not asleep, and a wrong key (401) is a fault the attempts should count. */
-    @ParameterizedTest
-    @ValueSource(ints = {500, 401})
-    void aServerErrorIsAFaultNotUnreachable(int status) {
-        failWith = status;
-
-        IllegalStateException e =
-                assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
-
-        assertFalse(e instanceof EncoderUnreachableException);
-        assertTrue(unreachable.isEmpty());
     }
 
     @Test

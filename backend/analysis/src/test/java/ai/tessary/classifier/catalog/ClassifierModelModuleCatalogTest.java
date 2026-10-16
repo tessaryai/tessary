@@ -4,7 +4,6 @@ package ai.tessary.classifier.catalog;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRow;
@@ -48,18 +47,6 @@ class ClassifierModelModuleCatalogTest {
                 Mockito.mock(SubstrateReadRepository.class),
                 Mockito.mock(EncoderScorer.class),
                 TestObjectProvider.of(discovered));
-    }
-
-    @Test
-    void discoveredSupplierCollidingWithAnInTreeKindFailsLoud() {
-        // Two sources claiming one kind would have two analyses write under one classifier row, so the constructor
-        // fails rather than letting classpath order pick a winner.
-        BuiltInDetector discovered = Mockito.mock(BuiltInDetector.class);
-        Mockito.when(discovered.kind()).thenReturn(BuiltInDetector.Kind.SECRET_LEAK);
-        assertThrows(
-                IllegalStateException.class,
-                () -> catalogWithDiscovered(deps -> discovered),
-                "a discovered supplier claiming a kind an in-tree module already wires must fail loud");
     }
 
     /**

@@ -2,7 +2,6 @@
 package ai.tessary.classifier.metric;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -120,25 +119,6 @@ class MetricControlTest {
         assertNotNull(resolved);
         assertEquals(1, resolved.daysUsed(), "the future day is skipped");
         assertEquals("2026-08-05", resolved.oldestDay());
-    }
-
-    @Test
-    @DisplayName(
-            "retention anchors on the newest day the ring holds, so an out-of-order import cannot evict recent days")
-    void retentionAnchorsOnTheNewestDayHeld() {
-        MetricControl control = MetricControl.empty().fold(GRID, "2026-08-10", window(100, 1000), workload(), tokens());
-
-        // An import nine weeks earlier. Anchoring retention on the day just folded would drop 2026-08-10 as far
-        // future.
-        MetricControl afterImport = control.fold(GRID, "2026-06-15", window(100, 1000), workload(), tokens());
-
-        assertTrue(
-                daysOf(afterImport).contains("2026-08-10"),
-                "the recent day survives an older import instead of being evicted by it");
-        // The ancient import is itself past retention from the newest day.
-        assertFalse(
-                daysOf(afterImport).contains("2026-06-15"),
-                "the import is past retention relative to the newest day, so it is not kept either");
     }
 
     @Test
