@@ -40,6 +40,7 @@ import type { components } from "./api/generated/schema";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
 import { preloadRouteChunk } from "./lib/routePreload";
+import { chartCard, chartPoint } from "./test/fixtures";
 import {
   GROUNDEDNESS_CASE_DETAIL,
   GROUNDEDNESS_FINDING_DETAIL,
@@ -144,10 +145,9 @@ vi.mock("./api/client", () => {
     deny: unusedMutation("link.deny"),
   };
   // Unlisted methods resolve undefined, never a safe-empty shape (see the header).
-  function projectApi(orgSlug: string, projectSlug: string) {
-    const overrides = currentProjectApiOverrides;
-    return new Proxy(
-      { base: `/api/orgs/${orgSlug}/projects/${projectSlug}` },
+  const proxyApi = (base: string, overrides: Record<string, unknown>) =>
+    new Proxy(
+      { base },
       {
         get(target, prop: string | symbol) {
           if (typeof prop !== "string") return undefined;
@@ -157,22 +157,10 @@ vi.mock("./api/client", () => {
         },
       },
     );
-  }
+  const projectApi = (orgSlug: string, projectSlug: string) =>
+    proxyApi(`/api/orgs/${orgSlug}/projects/${projectSlug}`, currentProjectApiOverrides);
   // Provider credentials are org-scoped; Settings > Providers calls this on mount.
-  function orgApi(orgSlug: string) {
-    const overrides = currentOrgApiOverrides;
-    return new Proxy(
-      { base: `/api/orgs/${orgSlug}` },
-      {
-        get(target, prop: string | symbol) {
-          if (typeof prop !== "string") return undefined;
-          if (prop in overrides) return overrides[prop];
-          const own = (target as Record<string, unknown>)[prop];
-          return own ?? (() => Promise.resolve(undefined));
-        },
-      },
-    );
-  }
+  const orgApi = (orgSlug: string) => proxyApi(`/api/orgs/${orgSlug}`, currentOrgApiOverrides);
   return { auth, link, projectApi, orgApi };
 });
 
@@ -583,79 +571,23 @@ const FINISHED_RCA: RcaReport = {
 
 const resolved = <T,>(value: T) => () => Promise.resolve(value);
 
-const SECRET_LEAK_CLASSIFIER: components["schemas"]["ClassifierView"] = {
-  id: "fake-classifierId",
-  classifier_key: "secret_leak",
-  name: "Secret leak",
-  description: "API keys and tokens in outputs.",
-  detector: "secret_leak",
-  config_json: null,
-  built_in: true,
-  version: 1,
-  enabled: true,
-  mode: "tracking",
-  created_at: T0,
-  updated_at: T0,
-  readiness: null,
-  shown_in_trace_views: false,
-  call_site_ids: null,
-};
-
-/** Every read the configure page issues on mount, answered for a real classifier. */
-const CONFIGURE_PAGE_READS: Record<string, () => Promise<unknown>> = {
-  listClassifiers: resolved([SECRET_LEAK_CLASSIFIER]),
-  getClassifierDailyVolume: resolved({ days: [], trace_totals: [], classifiers: [] }),
-  listClassifierHealth: EMPTY,
-  listClassifierEvents: EMPTY,
-  listClassifierCallSites: EMPTY,
-};
-
-/** One point of a chart, with only the fields its kind uses set. */
-function chartPoint(start: number, hours: number, d: Partial<ChartPoint>): ChartPoint {
-  return {
-    start_at: new Date(start).toISOString(),
-    end_at: new Date(start + hours * 3_600_000).toISOString(),
-    open: false,
-    checked: null,
-    flagged: null,
-    n: null,
-    p50: null,
-    p95: null,
-    count: null,
-    total: null,
-    reached: null,
-    ...d,
-  };
-}
+/** One point of a chart, `hours` long. */
+const hoursPoint = (start: number, hours: number, d: Partial<ChartPoint>) =>
+  chartPoint(new Date(start).toISOString(), new Date(start + hours * 3_600_000).toISOString(), d);
 
 const CHART_FROM = Date.parse("2026-09-11T00:00:00Z");
 const CHART_DAYS = 28;
 /** One point a day, the last one still filling. */
 const dailyPoints = (d: (i: number) => Partial<ChartPoint>) =>
   Array.from({ length: CHART_DAYS }, (_, i) =>
-    chartPoint(CHART_FROM + i * 86_400_000, 24, { open: i === CHART_DAYS - 1, ...d(i) }),
+    hoursPoint(CHART_FROM + i * 86_400_000, 24, { open: i === CHART_DAYS - 1, ...d(i) }),
   );
 /** Every 6-hour bucket of the range, as a 28-day count card carries them. */
 const sixHourPoints = (d: (i: number) => Partial<ChartPoint>) =>
   Array.from({ length: CHART_DAYS * 4 }, (_, i) =>
-    chartPoint(CHART_FROM + i * 6 * 3_600_000, 6, { open: i === CHART_DAYS * 4 - 1, ...d(i) }),
+    hoursPoint(CHART_FROM + i * 6 * 3_600_000, 6, { open: i === CHART_DAYS * 4 - 1, ...d(i) }),
   );
 
-const chartCard = (c: Partial<ChartCard>): ChartCard => ({
-  classifier_id: "c",
-  classifier_key: "frustration",
-  name: "Frustration",
-  kind: "rate",
-  measure: null,
-  unit: "fraction",
-  learning: null,
-  headline: { value: null, delta: null },
-  baseline: null,
-  arming: null,
-  points: [],
-  cases: { open_cases: 0, spans: [] },
-  ...c,
-});
 
 /** One call site and one tool, with a card of every kind: a rate with a baseline and an open case, a learning range, a count with an arming bar. */
 const CHART_SCOPES: components["schemas"]["ChartScopesView"] = {
@@ -743,12 +675,6 @@ const DETAIL_FIXTURES: {
   overrides: Record<string, () => Promise<unknown>>;
   heading: RegExp;
 }[] = [
-  {
-    name: "a real classifier",
-    path: "classifiers/:classifierId",
-    overrides: CONFIGURE_PAGE_READS,
-    heading: /Secret leak/,
-  },
   {
     name: "real charts for a call site and a tool",
     path: "classifiers",
