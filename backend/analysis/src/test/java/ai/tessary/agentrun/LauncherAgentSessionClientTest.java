@@ -766,7 +766,9 @@ class LauncherAgentSessionClientTest {
     void anInterruptedCallKeepsTheInterruptAndADeadLauncherIsUnavailable() throws Exception {
         assertEquals(
                 AgentRunError.LAUNCHER_UNAVAILABLE,
-                assertThrows(TessaryException.class, () -> client(closedPortUrl()).events("s-1", 0))
+                assertThrows(
+                                TessaryException.class,
+                                () -> client(closedPortUrl()).events("s-1", 0))
                         .error());
         try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
             LauncherAgentSessionClient client = client("http://127.0.0.1:" + silent.getLocalPort());

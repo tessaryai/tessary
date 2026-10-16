@@ -58,8 +58,8 @@ class ClassifierControllerTest {
                         ClassifierRowBuilder.of("secret_leak").id("c-s").build(),
                         ClassifierRowBuilder.of("unregistered").id("c-u").build()));
 
-        List<ClassifierView> views =
-                Objects.requireNonNull(controller("owner").list(ctx, "acme", "web").data());
+        List<ClassifierView> views = Objects.requireNonNull(
+                controller("owner").list(ctx, "acme", "web").data());
 
         assertEquals(
                 List.of("c-f true", "c-s false", "c-u false"),
@@ -92,10 +92,19 @@ class ClassifierControllerTest {
                 .thenReturn(ClassifierRowBuilder.of("secret_leak").id("c-1").build());
         when(service.knownCallSiteIds("prj_1")).thenReturn(List.of("cs-a", "cs-b"));
 
-        assertEquals("c-1", Objects.requireNonNull(controller.reset(ctx, "acme", "web", "c-1").data()).id());
         assertEquals(
                 "c-1",
-                Objects.requireNonNull(controller.setCallSites(ctx, "acme", "web", "c-1", scope).data()).id());
-        assertEquals(List.of("cs-a", "cs-b"), controller.callSites(ctx, "acme", "web").data());
+                Objects.requireNonNull(
+                                controller.reset(ctx, "acme", "web", "c-1").data())
+                        .id());
+        assertEquals(
+                "c-1",
+                Objects.requireNonNull(controller
+                                .setCallSites(ctx, "acme", "web", "c-1", scope)
+                                .data())
+                        .id());
+        assertEquals(
+                List.of("cs-a", "cs-b"),
+                controller.callSites(ctx, "acme", "web").data());
     }
 }

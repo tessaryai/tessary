@@ -92,7 +92,9 @@ class ModelsDevRatesTest {
 
     /** An error status, or a 200 that prices nothing, is retried after the outage window, not the refresh interval. */
     @ParameterizedTest
-    @CsvSource(delimiter = '|', value = {"503 | upstream unavailable", "200 | {\"xai\":{\"models\":{}}}"})
+    @CsvSource(
+            delimiter = '|',
+            value = {"503 | upstream unavailable", "200 | {\"xai\":{\"models\":{}}}"})
     void anErrorStatusOrAnEmptyFileIsAnOutageToo(int status, String body) throws Exception {
         answer(status, body);
         ModelsDevRates rates = rates();

@@ -125,7 +125,9 @@ class MalformedOutputDetectorTest {
     @Test
     void aSchemaThatFailsWhileValidatingIsTreatedAsNoneDeclared() {
         MalformedOutputDetector d = detector(Map.of("cs-1", "{\"$dynamicRef\":\"#nope\"}"));
-        assertFalse(d.detectBatch(List.of(obs("cs-1", "{\"answer\":1}")), null).get(0).fired());
+        assertFalse(d.detectBatch(List.of(obs("cs-1", "{\"answer\":1}")), null)
+                .get(0)
+                .fired());
     }
 
     /**

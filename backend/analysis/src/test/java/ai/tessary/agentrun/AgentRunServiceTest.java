@@ -282,7 +282,8 @@ class AgentRunServiceTest {
     @ParameterizedTest
     @CsvSource(
             nullValues = "NULL",
-            value = {"Bearer ghs_tok, https://x-access-token:ghs_tok@github.com/acme/app.git, sha-1", "NULL, NULL, NULL"})
+            value = {"Bearer ghs_tok, https://x-access-token:ghs_tok@github.com/acme/app.git, sha-1", "NULL, NULL, NULL"
+            })
     void clonesTheRepositoryAtItsHeadWhenTheProjectHasOne(
             @Nullable String header, @Nullable String cloneUrl, @Nullable String headSha) {
         anOwnedProject();

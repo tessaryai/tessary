@@ -59,7 +59,9 @@ class SessionTimelineServiceTest {
 
     /** The second row stops mid-page: an unsettled trace read first lets the next page's first trace in, not its second. */
     @ParameterizedTest
-    @CsvSource(delimiter = '|', value = {"false | t3 | 2", "true | t0;t3,t2 | 1"})
+    @CsvSource(
+            delimiter = '|',
+            value = {"false | t3 | 2", "true | t0;t3,t2 | 1"})
     void loadTailReadsNoTraceItThenLeavesOut(boolean anUnsettledTrace, String expectedPages, int endedReads) {
         stubTraces(
                 anUnsettledTrace ? List.of(new SessionTrace("t0", null, null, T0.toString(), false, null)) : List.of(),

@@ -449,7 +449,8 @@ class SessionTimelineBuilderTest {
                         .callSite("cs-llm")
                         .model("gpt-x")
                         .usage(50L, 10L)
-                        .attributes("{\"gen_ai.request.temperature\":0.2,\"gen_ai.request.model\":\"gpt-x\",\"seed\":7}")
+                        .attributes(
+                                "{\"gen_ai.request.temperature\":0.2,\"gen_ai.request.model\":\"gpt-x\",\"seed\":7}")
                         .build(),
                 rich("tr-a", "a3", "tool", "a1", 210, 300, null, null)
                         .name("execute_tool")

@@ -245,8 +245,7 @@ class ClassifierServiceTest {
         when(signals.setCallSiteIds(PID, "sig-a", null)).thenReturn(0);
 
         TessaryException e = assertThrows(TessaryException.class, () -> service.setEnabled(PID, "sig-a", false));
-        TessaryException scope =
-                assertThrows(TessaryException.class, () -> service.setCallSiteIds(PID, "sig-a", null));
+        TessaryException scope = assertThrows(TessaryException.class, () -> service.setCallSiteIds(PID, "sig-a", null));
 
         assertEquals(ClassifierError.NOT_FOUND, e.error());
         assertEquals(ClassifierError.NOT_FOUND, scope.error());
