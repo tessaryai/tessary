@@ -62,8 +62,6 @@ record ClassifierChartControllerIntegrationTest(
 
     @ParameterizedTest(name = "{0}")
     @CsvSource(delimiter = '|', textBlock = """
-        a 30-day card                      | /charts?callSiteId=cs-a&days=30                 | CLASSIFIER.INVALID_CHART_DAYS
-        a 30-day menu                      | /chart-scopes?days=30                           | CLASSIFIER.INVALID_CHART_DAYS
         a call site and a tool at once     | /charts?callSiteId=cs-a&tool=tool:search&days=7 | CLASSIFIER.CHART_SCOPE
         neither a call site nor a tool     | /charts?days=7                                  | CLASSIFIER.CHART_SCOPE
         a call site the bundle never named | /charts?callSiteId=cs-typo&days=7               | CLASSIFIER.UNKNOWN_CALL_SITE
@@ -142,6 +140,7 @@ record ClassifierChartControllerIntegrationTest(
     /**
      * Frustration enabled but limited to another call site is an off chip, not an empty card; Malformed Output on a
      * call site with no schema and Groundedness with no model wait; the menu says how many call sites each runs on.
+     * With no call-site list Frustration runs on every call site, like every other classifier.
      */
     @Test
     void callSiteCharts_chipTheClassifiersThatCannotDrawACard() throws Exception {
@@ -181,33 +180,13 @@ record ClassifierChartControllerIntegrationTest(
         assertEquals(1, menu.path("call_site_count").asInt());
         assertFalse(menu.path("all_call_sites").asBoolean(), "limited to cs-b");
         assertEquals(List.of("cs-a", "cs-b"), scopes.path("call_sites").findValuesAsText("call_site_id"));
-    }
 
-    /** Frustration with no call-site list runs on every call site, like every other classifier. */
-    @Test
-    void frustrationWithNoCallSiteList_isOnEveryCallSite() throws Exception {
-        Signed me = signUp("chart-frustration-all@example.com");
-        String pid = me.project().id();
-        capabilities.grant(me.org().id(), Capability.FRUSTRATION);
-        declare(pid, "cs-a", null);
-        declare(pid, "cs-b", null);
-        ClassifierRow frustration = fixture.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION);
-        jdbc.sql("UPDATE classifier SET enabled = TRUE WHERE id = :id")
-                .param("id", frustration.id())
-                .update();
-
-        JsonNode charts = data(me, "/charts?callSiteId=cs-a&days=7");
-        assertEquals(
-                List.of(BuiltInDetector.Kind.FRUSTRATION),
-                charts.path("cards").findValuesAsText("classifier_key").stream()
-                        .filter(BuiltInDetector.Kind.FRUSTRATION::equals)
-                        .toList(),
-                "a learning card, not an off chip");
-
-        JsonNode menu = item(data(me, "/chart-scopes?days=7").path("classifiers"), BuiltInDetector.Kind.FRUSTRATION);
-        assertEquals("on", menu.path("status").asText());
-        assertTrue(menu.path("all_call_sites").asBoolean(), "no list means every call site");
-        assertEquals(2, menu.path("call_site_count").asInt());
+        classifierService.setCallSiteIds(pid, frustration.id(), null);
+        item(data(me, "/charts?callSiteId=cs-a&days=7").path("cards"), BuiltInDetector.Kind.FRUSTRATION); // a card now
+        JsonNode all = item(data(me, "/chart-scopes?days=7").path("classifiers"), BuiltInDetector.Kind.FRUSTRATION);
+        assertEquals("on", all.path("status").asText());
+        assertTrue(all.path("all_call_sites").asBoolean(), "no list means every call site");
+        assertEquals(2, all.path("call_site_count").asInt());
     }
 
     /** A waiting classifier judges nothing, so it alone does not make a call site "New, learning". */

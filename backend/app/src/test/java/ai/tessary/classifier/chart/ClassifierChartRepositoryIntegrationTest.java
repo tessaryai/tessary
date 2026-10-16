@@ -513,17 +513,7 @@ record ClassifierChartRepositoryIntegrationTest(
         fx.ingestedAt(output(pid, "cs-a", sep20.plus(Duration.ofDays(2))), sep20.plus(Duration.ofDays(2)));
         sweptTo(pid, malformed, "2026-10-08T00:00:00Z");
         turn(pid, "cs-a", sep20.plus(Duration.ofDays(3)), 1_000);
-        Instant toolAt = sep20.plus(Duration.ofDays(4));
-        String trace = turn(pid, "cs-b", toolAt, 1_000);
-        var tool = fx.spanSeed(pid)
-                .traceId(trace)
-                .parentSpanId(rootOf(pid, trace))
-                .kind("tool")
-                .name("search")
-                .at(toolAt)
-                .write();
-        fx.toolCall(pid, new SpanRef(trace, tool.id()), "search", null, toolAt);
-        fx.rollup(pid, trace);
+        fx.toolCallTurns(pid, "search", List.of(new ToolCallTurn(sep20.plus(Duration.ofDays(4)), null, null, null)));
 
         assertEquals(
                 Map.of(
