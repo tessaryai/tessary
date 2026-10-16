@@ -125,24 +125,11 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function whereLabel(kind: string | null): string {
-  switch (kind) {
-    case "prompt":
-      return "Prompt";
-    case "model":
-      return "Model";
-    case "tool":
-      return "Tool";
-    case "data":
-      return "Data";
-    case "code":
-    case "unknown":
-    case null:
-      return "Code";
-    default:
-      return "Where";
-  }
-}
+const WHERE_LABEL: Record<string, string> = {
+  prompt: "Prompt", model: "Model", tool: "Tool", data: "Data", code: "Code", unknown: "Code",
+};
+
+const whereLabel = (kind: string | null): string => WHERE_LABEL[kind ?? "code"] ?? "Where";
 
 /** On an older report only a lead carries a level; a proven cause there has no badge. */
 function Confidence({ level, current }: { level: string; current: boolean }) {

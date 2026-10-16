@@ -154,6 +154,7 @@ describe("RcaReport", () => {
     ]);
   });
 
+  // Bug: a cause's place labelled with another kind's name, or a kind this page does not know given one.
   it("places a cause in the repository by kind, path, and commit", async () => {
     report = {
       ...GROUNDEDNESS_REPORT,
@@ -162,18 +163,28 @@ describe("RcaReport", () => {
           ...GROUNDEDNESS_REPORT.causes[0],
           attribution: { kind: "prompt", path: "agent/system.md", commit: "c0ffee1234abcd", excerpt: null },
         },
-        {
-          ...GROUNDEDNESS_REPORT.causes[1],
-          attribution: { kind: "code", path: "rag/retrieve.py", commit: null, excerpt: null },
-        },
+        ...["code", "model", "tool", "data", "a_kind_from_later"].map((kind) => ({
+          ...GROUNDEDNESS_REPORT.causes[0],
+          attribution: { kind, path: `${kind}.py`, commit: null, excerpt: null },
+        })),
       ],
     };
     renderReport();
 
     expect(await screen.findByText("agent/system.md @ c0ffee1")).toBeTruthy();
-    expect(screen.getByText("rag/retrieve.py")).toBeTruthy();
-    expect(screen.getByText("Prompt")).toBeTruthy();
-    expect(screen.getByText("Code")).toBeTruthy();
+    expect(screen.getByText("code.py")).toBeTruthy();
+    expect(["Prompt", "Code", "Model", "Tool", "Data", "Where"].map((label) => screen.getAllByText(label).length)).toEqual([
+      1, 1, 1, 1, 1, 1,
+    ]);
+  });
+
+  // Bug: a report on a measure with no cause words of its own borrows another kind's, so a standing cause reads
+  // "Why it fails more".
+  it("asks why it happens for a standing cause on a measure with no words of its own", async () => {
+    report = { ...CURRENT_GROUNDEDNESS_REPORT, report_kind: "owned_causes", metric: "item_check" };
+    renderReport();
+
+    expect(await screen.findByText("Why it happens")).toBeTruthy();
   });
 
   it("re-runs the analysis as a new report and opens it", async () => {

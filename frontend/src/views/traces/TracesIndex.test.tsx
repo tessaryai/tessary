@@ -96,6 +96,38 @@ describe("the trace rows", () => {
   });
 });
 
+// Bug: past 200 rows the list draws the wrong slice for the scroll position, never follows the scroll, or sizes the
+// space for the rows it leaves out wrong, so the scrollbar jumps.
+it("draws only the rows near the screen once the list is long, and follows the scroll", async () => {
+  let scrolled = 1_000;
+  vi.spyOn(HTMLTableRowElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLTableRowElement) {
+    return this.sectionRowIndex * 20;
+  });
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return { top: this.tagName === "TBODY" ? -scrolled : 0 } as DOMRect;
+  });
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(400);
+  const frames: FrameRequestCallback[] = [];
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+  api.listTraces.mockResolvedValue(page(Array.from({ length: 200 }, (_, i) => trace({ id: `tr-${i}`, name: null }))));
+  renderRoute(<main><TracesIndex /></main>);
+  const drawn = () => ["tr-19", "tr-20", "tr-99", "tr-100"].map((id) => screen.queryByText(id) != null);
+  const spacers = () =>
+    screen.getAllByRole("row", { hidden: true }).flatMap((r) => (r.getAttribute("aria-hidden") ? [(r.firstChild as HTMLElement).style.height] : []));
+
+  // 20 px rows, 1,000 px scrolled and 400 px shown: rows 50 to 70 are on screen, kept with 30 more each side, in tens.
+  await screen.findByText("tr-20");
+  expect(drawn()).toEqual([false, true, true, false]);
+  expect(spacers()).toEqual(["400px", "2000px"]);
+
+  scrolled = 3_000;
+  fireEvent.scroll(screen.getByRole("main"));
+  act(() => frames.forEach((frame) => frame(0)));
+  expect(screen.queryByText("tr-119")).toBeNull();
+  expect(screen.getByText("tr-199")).toBeTruthy();
+  expect(spacers()).toEqual(["2400px"]);
+});
+
 describe("filters", () => {
   it("searches on Enter, not per keystroke, and the chip removes it", async () => {
     renderRoute(<TracesIndex />);
@@ -305,6 +337,11 @@ describe("detected by", () => {
       within(screen.getByRole("group", { name: "Detected by" })).getByRole("button", { name: /Any detection/ }),
     );
     await waitFor(() => expect(lastListCall().detectedBy).toBe("any"));
+
+    // Bug: All traces in the menu leaves the detection filter on.
+    fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Detected by" })).getByRole("button", { name: /All traces/ }));
+    await waitFor(() => expect(lastListCall().detectedBy).toBeUndefined());
   });
 
   it("names the classifier on a flagged row and on no other", async () => {
@@ -669,28 +706,24 @@ describe("dropdowns and stored choices", () => {
   });
 
   it("still renders with storage blocked, with auto-refresh off", async () => {
-    const getItem = vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
-      throw new Error("SecurityError");
-    });
-    const setItem = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new Error("SecurityError");
-    });
-    try {
-      renderRoute(<TracesIndex />);
-      await screen.findByText("checkout-agent");
-      expect(screen.getByTitle("Refresh now · auto-refresh is off")).toBeTruthy();
-
-      fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
-      fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
-      expect(screen.getByTitle("Refresh now · auto-refreshing every 30s")).toBeTruthy();
-
-      fireEvent.click(screen.getByRole("button", { name: /Columns/ }));
-      fireEvent.click(within(screen.getByRole("group", { name: "Visible columns" })).getByRole("button", { name: "Trace ID" }));
-      expect(screen.getByRole("columnheader", { name: "Trace ID" })).toBeTruthy();
-    } finally {
-      getItem.mockRestore();
-      setItem.mockRestore();
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      for (const method of ["getItem", "setItem"] as const) {
+        vi.spyOn(storage, method).mockImplementation(() => {
+          throw new Error("SecurityError");
+        });
+      }
     }
+    renderRoute(<TracesIndex />);
+    await screen.findByText("checkout-agent");
+    expect(screen.getByTitle("Refresh now · auto-refresh is off")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
+    fireEvent.click(screen.getByRole("button", { name: /Auto-refresh every 30s/ }));
+    expect(screen.getByTitle("Refresh now · auto-refreshing every 30s")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Columns/ }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Visible columns" })).getByRole("button", { name: "Trace ID" }));
+    expect(screen.getByRole("columnheader", { name: "Trace ID" })).toBeTruthy();
   });
 
   it("picks all time, and a custom window closed at both ends", async () => {
