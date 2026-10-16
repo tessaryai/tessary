@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import static ai.tessary.sandbox.AgentSpanTelemetry.markError;
+
 import ai.tessary.agentrun.E2bAgentRunSandbox;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.ObserverProperties.Agentic;
@@ -21,7 +23,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
-import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
@@ -344,11 +345,5 @@ public class E2bTriageSandbox implements TriageSandbox {
                     default -> diag.isBlank() ? "" : " — " + diag;
                 };
         return "status " + status + " from " + launcherUrl + remedy;
-    }
-
-    private static void markError(Span span, String message) {
-        span.setStatus(StatusCode.ERROR, message);
-        span.setAttribute("langfuse.observation.level", "ERROR");
-        span.setAttribute("langfuse.observation.status_message", message);
     }
 }

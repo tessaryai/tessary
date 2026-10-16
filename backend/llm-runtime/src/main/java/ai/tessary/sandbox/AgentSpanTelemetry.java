@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,6 +27,13 @@ public final class AgentSpanTelemetry {
 
     public static final String OP_CHAT = "chat"; // a single LLM call (one turn)
     public static final String OP_INVOKE_AGENT = "invoke_agent"; // a (multi-turn) agent invocation
+
+    /** A failed run's span, marked failed for OTel and for Langfuse, which reads its own level attributes. */
+    public static void markError(Span span, String message) {
+        span.setStatus(StatusCode.ERROR, message);
+        span.setAttribute("langfuse.observation.level", "ERROR");
+        span.setAttribute("langfuse.observation.status_message", message);
+    }
 
     /**
      * Stamped via {@code langfuse.observation.input}/{@code output} so the root is not mis-rendered as a model call.
