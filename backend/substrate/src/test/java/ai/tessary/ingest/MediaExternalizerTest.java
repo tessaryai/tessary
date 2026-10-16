@@ -80,7 +80,7 @@ class MediaExternalizerTest {
             })
     void anOpenAiDataUriPartBecomesARef(String mediaType, String partTemplate, String refType) throws Exception {
         String dataUri = "data:" + mediaType + ";base64," + Base64.getEncoder().encodeToString(new byte[] {9, 8, 7});
-        String json = "[{\"role\":\"user\",\"content\":[" + partTemplate.formatted(dataUri) + "]}]";
+        String json = "[{\"role\":\"user\",\"content\":[" + partTemplate.replace("%s", dataUri) + "]}]";
 
         MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
         String out = java.util.Objects.requireNonNull(result.payload());
