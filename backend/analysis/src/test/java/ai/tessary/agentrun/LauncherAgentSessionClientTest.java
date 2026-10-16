@@ -463,12 +463,19 @@ class LauncherAgentSessionClientTest {
                 events);
     }
 
-    /** Catches a truncated frame yielded as an empty delta. */
-    @Test
-    void aFrameThatDoesNotParseIsBadOutput() {
+    /** Catches a truncated frame yielded as an empty delta, or a field of the wrong shape or an unknown reason. */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "text        | {\"delta\":",
+                "text        | {\"delta\":5}",
+                "message_end | {\"usage\":{\"input_tokens\":1},\"reason\":\"crashed\"}",
+                "closed      | {\"reason\":\"evicted\"}"
+            })
+    void aFrameThatDoesNotParseOrFitIsBadOutput(String type, String data) {
         LauncherAgentSessionClient client = aStartedSession();
-        fake.events(
-                "/sessions/s-1/events?after=0", FakeLauncher.Ending.END, FakeLauncher.frame(1, "text", "{\"delta\":"));
+        fake.events("/sessions/s-1/events?after=0", FakeLauncher.Ending.END, FakeLauncher.frame(1, type, data));
 
         TessaryException ex = assertThrows(TessaryException.class, () -> read(client, 0));
 
