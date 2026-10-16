@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, KeyRound } from "lucide-react";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { ledgerTime } from "../../lib/ledgerTime";
 import { ApiError } from "../../api/types";
@@ -9,9 +8,7 @@ import type { McpTokenView } from "../../api/types-auth";
 import {
   Badge,
   Button,
-  CopyButton,
   Field,
-  IconButton,
   Input,
   Modal,
   PageBody,
@@ -22,11 +19,7 @@ import {
   useCopy,
   useToast,
 } from "../../ui";
-
-
-function KeyGlyph({ size = 20 }: { size?: number }) {
-  return <KeyRound size={size} strokeWidth={1.5} aria-hidden="true" />;
-}
+import { IssuedFooter, IssuedSecret, IssuedTitle, NoSecrets, RevokeButton } from "./secretParts";
 
 export function McpTokens() {
   const api = useProjectApi();
@@ -85,7 +78,6 @@ export function McpTokens() {
     2,
   );
 
-
   const rows = tokens.data ?? [];
   const isEmpty = tokens.isSuccess && rows.length === 0;
 
@@ -113,18 +105,9 @@ export function McpTokens() {
             {(tokens.error as ApiError)?.message ?? "Could not load tokens. Try again."}
           </p>
         ) : isEmpty ? (
-          <div className="flex flex-col items-center text-center py-14">
-            <span className="flex size-[42px] items-center justify-center rounded-card bg-surface border border-border-strong text-muted">
-              <KeyGlyph />
-            </span>
-            <div className="text-h3 text-fg mt-4">No tokens yet</div>
-            <p className="text-small text-muted mt-2 max-w-sm">
-              Issue one to connect Claude Code, then add it to your MCP config below.
-            </p>
-            <Button variant="primary" className="mt-5" onClick={openModal}>
-              New token
-            </Button>
-          </div>
+          <NoSecrets title="No tokens yet" action="New token" onAction={openModal}>
+            Issue one to connect Claude Code, then add it to your MCP config below.
+          </NoSecrets>
         ) : (
           <div className="overflow-hidden rounded-card border border-border">
             <div className="flex items-center gap-3 px-4 py-2.5 bg-surface border-b border-border text-column-header text-muted">
@@ -208,14 +191,9 @@ export function McpTokens() {
         size="sm"
         title={
           issued ? (
-            <span className="flex items-center gap-2.5">
-              <span className="flex size-6 items-center justify-center rounded-pill bg-accent-subtle border border-accent-edge text-accent">
-                <KeyGlyph size={13} />
-              </span>
-              <span>
-                Token <span className="font-mono font-normal text-muted">{issued.name}</span> created
-              </span>
-            </span>
+            <IssuedTitle>
+              Token <span className="font-mono font-normal text-muted">{issued.name}</span> created
+            </IssuedTitle>
           ) : (
             "New token"
           )
@@ -223,12 +201,7 @@ export function McpTokens() {
         subtitle={issued ? undefined : "Give it a name you'll recognize later, then issue it."}
         footer={
           issued ? (
-            <div className="flex w-full items-center gap-3">
-              <Button variant="primary" onClick={closeModal}>
-                Done
-              </Button>
-              <span className="ml-auto text-label text-subtle">Closing without copying loses the token.</span>
-            </div>
+            <IssuedFooter noun="token" onDone={closeModal} />
           ) : (
             <>
               <Button variant="ghost" onClick={closeModal}>
@@ -247,25 +220,7 @@ export function McpTokens() {
         }
       >
         {issued ? (
-          <div>
-            <div className="text-label uppercase text-muted">Copy it now. It won't be shown again.</div>
-            <div className="mt-2.5 flex items-center gap-2.5 rounded-control border border-accent-edge bg-bg px-3.5 py-3">
-              <span className="flex-1 min-w-0 font-mono text-small text-fg truncate">{issued.plaintext}</span>
-              <CopyButton
-                value={issued.plaintext}
-                size="sm"
-                variant="primary"
-                className="flex-none"
-                onCopyFailed={() => toast.error("Could not copy", "Copy the token manually.")}
-              />
-            </div>
-            <div className="mt-3.5 flex items-start gap-2.5 rounded-control border border-warning bg-warning-subtle px-3.5 py-2.5">
-              <AlertTriangle size={14} strokeWidth={1.5} aria-hidden="true" className="mt-px flex-none text-warning" />
-              <span className="text-label text-fg leading-snug">
-                Tessary stores only a hash. If you lose this, revoke it and issue a new one. There's no recovery.
-              </span>
-            </div>
-          </div>
+          <IssuedSecret plaintext={issued.plaintext} noun="token" lost="revoke it and issue a new one" />
         ) : (
           <Field label="Name" hint="A label to recognize it later, for example my-laptop or ci-pipeline.">
             {(p) => (
@@ -318,13 +273,7 @@ function TokenRow({
         ) : revoking ? (
           <Spinner size="sm" />
         ) : (
-          <IconButton
-            label={`Revoke ${token.name}`}
-            size="sm"
-            onClick={onRevoke}
-            className="text-error hover:text-error hover:bg-[color:var(--color-error-subtle)] px-2 w-auto">
-            <span className="text-label font-medium">Revoke</span>
-          </IconButton>
+          <RevokeButton name={token.name} onRevoke={onRevoke} />
         )}
       </span>
     </div>
