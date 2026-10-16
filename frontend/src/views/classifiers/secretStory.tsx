@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import type { components } from "../../api/generated/schema";
 import type { BehaviorFinding } from "../../api/types";
 import { PageHeader } from "../../ui";
-import { RunTriageButton, detectorLabel, triageState } from "./shared";
+import { FindingKicker, TriageAction } from "./shared";
 import { Pin, PinList } from "./rateStory";
 
 type SecretLeakDetail = components["schemas"]["SecretLeakDetail"];
@@ -284,12 +284,7 @@ export function SecretHeader({
   return (
     <PageHeader
       breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
-      kicker={
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="text-muted">{finding.detector ? detectorLabel(finding.detector) : "Finding"}</span>
-          {finding.callSiteId && <span className="text-muted">{finding.callSiteId}</span>}
-        </span>
-      }
+      kicker={<FindingKicker finding={finding} />}
       title={
         <span>
           <span className="font-mono">{secretLeak.rule}</span> in <span className="font-mono">{site}</span> output
@@ -302,15 +297,7 @@ export function SecretHeader({
           {secretLeak.traceCount.toLocaleString()} trace{secretLeak.traceCount === 1 ? "" : "s"}
         </span>
       }
-      actions={
-        finding.triageStatus === "done" ? (
-          <span className="font-mono text-label uppercase text-muted rounded-control border border-border-strong bg-raised py-1.25 px-2.75">
-            {triageState(finding).label}
-          </span>
-        ) : (
-          <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
-        )
-      }
+      actions={<TriageAction finding={finding} busy={busy} onAnalyze={onAnalyze} />}
     />
   );
 }

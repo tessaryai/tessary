@@ -6,7 +6,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
-import { CONTAINER, ResolveVerbs, RunTriageButton, chainWords, detectorLabel, stamp, triageState } from "./shared";
+import {
+  CONTAINER, FindingKicker, ResolveVerbs, RunTriageButton, TriageAction, chainWords, detectorLabel, stamp, triageState,
+} from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
   ShiftBehind,
@@ -379,12 +381,7 @@ export function FindingPage() {
     return (
       <PageHeader
         breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
-        kicker={
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-muted">{f.detector ? detectorLabel(f.detector) : "Finding"}</span>
-            {f.callSiteId && <span className="text-muted">{f.callSiteId}</span>}
-          </span>
-        }
+        kicker={<FindingKicker finding={f} />}
         title={
           <span>
             {measureNoun(sh.measure)}{" "}
@@ -402,16 +399,7 @@ export function FindingPage() {
             {[bucket, window && `${window} vs ${referenceWords(sh.reference)}`].filter(Boolean).join(" · ")}
           </span>
         }
-        actions={
-          f.triageStatus === "done" ? (
-            <span
-              className="font-mono text-label uppercase text-muted rounded-control border border-border-strong bg-raised py-1.25 px-2.75">
-              {triageState(f).label}
-            </span>
-          ) : (
-            <RunTriageButton finding={f} busy={disabled} onAnalyze={onAnalyze} />
-          )
-        }
+        actions={<TriageAction finding={f} busy={disabled} onAnalyze={onAnalyze} />}
       />
     );
   }
@@ -434,12 +422,7 @@ export function FindingPage() {
     return (
       <PageHeader
         breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
-        kicker={
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-muted">{f.detector ? detectorLabel(f.detector) : "Finding"}</span>
-            {f.callSiteId && <span className="text-muted">{f.callSiteId}</span>}
-          </span>
-        }
+        kicker={<FindingKicker finding={f} />}
         title={
           <span>
             Failure rate{" "}
@@ -459,16 +442,7 @@ export function FindingPage() {
               .join(" · ")}
           </span>
         }
-        actions={
-          f.triageStatus === "done" ? (
-            <span
-              className="font-mono text-label uppercase text-muted rounded-control border border-border-strong bg-raised py-1.25 px-2.75">
-              {triageState(f).label}
-            </span>
-          ) : (
-            <RunTriageButton finding={f} busy={disabled} onAnalyze={onAnalyze} />
-          )
-        }
+        actions={<TriageAction finding={f} busy={disabled} onAnalyze={onAnalyze} />}
       />
     );
   }

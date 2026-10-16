@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The model's flags include false alarms and miss real ones, so only the rate's direction is reliable:
 // every number is labelled a flagged share, never a share of wrong answers.
-import { Link } from "react-router-dom";
-import type { BehaviorFinding, GroundednessDetail } from "../../api/types";
+import type { GroundednessDetail } from "../../api/types";
 import { PageHeader } from "../../ui";
-import { ResolveVerbs, RunTriageButton, detectorLabel, triageState } from "./shared";
+import { RulingActions, detectorLabel, type FindingHeaderProps } from "./shared";
 import { Pin, PinList, RateChart } from "./rateStory";
 import { dateTime } from "./groundedness";
 
@@ -13,21 +12,8 @@ function pinRate(r: number): string {
   return `${(r * 100).toFixed(1)}%`;
 }
 
-export function GroundednessHeader({
-  finding,
-  detail,
-  basePath,
-  busy,
-  onAnalyze,
-  onResolve,
-}: {
-  finding: BehaviorFinding;
-  detail: GroundednessDetail;
-  basePath: string;
-  busy: boolean;
-  onAnalyze: () => void;
-  onResolve: (action: "expected" | "not_expected") => void;
-}) {
+export function GroundednessHeader({ detail, ...props }: FindingHeaderProps & { detail: GroundednessDetail }) {
+  const { finding, basePath } = props;
   const rate = detail.rate;
   const since = rate.onsetAt ? dateTime(rate.onsetAt) : null;
   const learned = `vs the rate it learned from its first ${detail.baselineTraces.toLocaleString()} traces`;
@@ -41,29 +27,7 @@ export function GroundednessHeader({
           {since ? `since ${since} ${learned}` : learned}
         </span>
       }
-      actions={
-        finding.triageStatus === "done" ? (
-          <span className="flex items-center gap-2">
-            <span className="font-mono text-label uppercase text-muted rounded-control border border-border-strong bg-raised py-1.25 px-2.75">
-              {triageState(finding).label}
-            </span>
-            {finding.caseId && (
-              <Link
-                to={`${basePath}/cases/${encodeURIComponent(finding.caseId)}`}
-                className="inline-flex items-center h-7 px-2.5 rounded-control border border-border-strong bg-raised text-small text-fg hover:bg-hover transition-colors"
-                style={{ transitionDuration: "var(--duration-micro)" }}
-              >
-                View case
-              </Link>
-            )}
-          </span>
-        ) : (
-          <span className="flex flex-wrap items-center gap-2">
-            <ResolveVerbs busy={busy} onResolve={onResolve} />
-            <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
-          </span>
-        )
-      }
+      actions={<RulingActions {...props} />}
     />
   );
 }

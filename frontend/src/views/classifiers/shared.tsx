@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { Link } from "react-router-dom";
 import type { BehaviorFinding } from "../../api/types";
 import { cn } from "../../ui";
 
@@ -114,6 +115,68 @@ export function ResolveVerbs({
         Confirm and open a case
       </VerbButton>
     </>
+  );
+}
+
+/** The props every finding header with verbs takes. */
+export type FindingHeaderProps = {
+  finding: BehaviorFinding;
+  basePath: string;
+  busy: boolean;
+  onAnalyze: () => void;
+  onResolve: (action: "expected" | "not_expected") => void;
+};
+
+/** The detector's name, and the call site when the finding has one. */
+export function FindingKicker({ finding }: { finding: BehaviorFinding }) {
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <span className="text-muted">{finding.detector ? detectorLabel(finding.detector) : "Finding"}</span>
+      {finding.callSiteId && <span className="text-muted">{finding.callSiteId}</span>}
+    </span>
+  );
+}
+
+export function TriageBadge({ finding }: { finding: BehaviorFinding }) {
+  return (
+    <span className="font-mono text-label uppercase text-muted rounded-control border border-border-strong bg-raised py-1.25 px-2.75">
+      {triageState(finding).label}
+    </span>
+  );
+}
+
+/** The ruling once triage is done, else the button that runs it. */
+export function TriageAction({ finding, busy, onAnalyze }: Omit<FindingHeaderProps, "basePath" | "onResolve">) {
+  if (finding.triageStatus === "done") return <TriageBadge finding={finding} />;
+  return <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />;
+}
+
+/** The ruling and, once the finding has one, a way to its case. */
+export function RulingWithCase({ finding, basePath }: { finding: BehaviorFinding; basePath: string }) {
+  return (
+    <span className="flex items-center gap-2">
+      <TriageBadge finding={finding} />
+      {finding.caseId && (
+        <Link
+          to={`${basePath}/cases/${encodeURIComponent(finding.caseId)}`}
+          className="inline-flex items-center h-7 px-2.5 rounded-control border border-border-strong bg-raised text-small text-fg hover:bg-hover transition-colors"
+          style={{ transitionDuration: "var(--duration-micro)" }}
+        >
+          View case
+        </Link>
+      )}
+    </span>
+  );
+}
+
+/** The ruling and its case once triage is done, else the verbs that rule the finding. */
+export function RulingActions({ finding, basePath, busy, onAnalyze, onResolve }: FindingHeaderProps) {
+  if (finding.triageStatus === "done") return <RulingWithCase finding={finding} basePath={basePath} />;
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <ResolveVerbs busy={busy} onResolve={onResolve} />
+      <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
+    </span>
   );
 }
 
