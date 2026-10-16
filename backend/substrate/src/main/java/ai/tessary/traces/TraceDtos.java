@@ -59,12 +59,16 @@ public final class TraceDtos {
     public record DetectionLabel(
             @JsonProperty("classifier_id") String classifierId, String name) {}
 
-    /** One classifier's flag on a trace, at the span it judged, so a view can mark where it occurred. */
+    /**
+     * One classifier's flag on a trace, at the span it judged, so a view can mark where it occurred. {@code grain}
+     * {@code trace} judged the person's turn, {@code span} one span's output.
+     */
     public record DetectionMark(
             @JsonProperty("classifier_id") String classifierId,
             String name,
             @JsonProperty("trace_id") String traceId,
-            @JsonProperty("span_id") @Nullable String spanId) {}
+            @JsonProperty("span_id") @Nullable String spanId,
+            String grain) {}
 
     /** Null cursor at the end. */
     public record TracesPage(
@@ -89,7 +93,12 @@ public final class TraceDtos {
 
     public static List<DetectionMark> marks(List<TraceDetectionRepository.Mark> marks) {
         return marks.stream()
-                .map(m -> new DetectionMark(m.classifierId(), m.classifierName(), m.traceId(), m.spanId()))
+                .map(m -> new DetectionMark(
+                        m.classifierId(),
+                        m.classifierName(),
+                        m.traceId(),
+                        m.spanId(),
+                        m.grain().subjectKind()))
                 .toList();
     }
 

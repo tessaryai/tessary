@@ -418,7 +418,8 @@ record TracesControllerTest(
         flag(t.pid(), frustration.id(), clearedTrace, clearedSpan.id(), "2026-06-22T09:00:00Z");
 
         assertEquals(
-                List.of(new TraceDtos.DetectionMark(frustration.id(), frustration.name(), traceId, scored.id())),
+                List.of(new TraceDtos.DetectionMark(
+                        frustration.id(), frustration.name(), traceId, scored.id(), "trace")),
                 ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId)).detections());
         assertEquals(
                 List.of(),

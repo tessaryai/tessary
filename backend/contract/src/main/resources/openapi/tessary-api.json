@@ -4600,6 +4600,9 @@
           "classifier_id" : {
             "type" : "string"
           },
+          "grain" : {
+            "type" : "string"
+          },
           "name" : {
             "type" : "string"
           },
@@ -4615,6 +4618,7 @@
         },
         "required" : [
           "classifier_id",
+          "grain",
           "name",
           "span_id",
           "trace_id"

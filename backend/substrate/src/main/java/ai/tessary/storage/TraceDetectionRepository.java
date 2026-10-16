@@ -23,7 +23,13 @@ public class TraceDetectionRepository {
 
     public static final String ANY = "any";
 
-    public record Mark(String traceId, @Nullable String spanId, String classifierId, String classifierName) {}
+    /** @param grain what the classifier judged: a whole turn ({@code trace}) or one span's output ({@code span}) */
+    public record Mark(
+            String traceId,
+            @Nullable String spanId,
+            String classifierId,
+            String classifierName,
+            DetectionTable.Grain grain) {}
 
     public record SessionMark(String sessionId, String classifierId, String classifierName) {}
 
@@ -40,8 +46,8 @@ public class TraceDetectionRepository {
             return List.of();
         }
         String sql = sources.stream()
-                .map(s -> "SELECT d.subject_trace_id, d.subject_span_id, c.id AS classifier_id, c.name"
-                        + " FROM classifier c JOIN " + s.table() + " d"
+                .map(s -> "SELECT d.subject_trace_id, d.subject_span_id, c.id AS classifier_id, c.name, '"
+                        + s.grain().name() + "' AS grain FROM classifier c JOIN " + s.table() + " d"
                         + " ON d.project_id = c.project_id AND d.classifier_id = c.id"
                         + " WHERE c.project_id = :pid AND c.detector = '" + s.detectorKind() + "'"
                         + " AND d.subject_trace_id IN (:traceIds)" + uncleared(s))
@@ -53,7 +59,8 @@ public class TraceDetectionRepository {
                         rs.getString("subject_trace_id"),
                         rs.getString("subject_span_id"),
                         rs.getString("classifier_id"),
-                        rs.getString("name")))
+                        rs.getString("name"),
+                        DetectionTable.Grain.valueOf(rs.getString("grain"))))
                 .list();
     }
 

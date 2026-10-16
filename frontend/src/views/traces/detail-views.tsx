@@ -17,6 +17,7 @@ export type { Emphasis } from "./detail-chat";
 export type EmphasisBySpan = Map<string, Emphasis[]>;
 
 const NO_EMPHASIS: EmphasisBySpan = new Map();
+const NO_MARKS = new Map<string, string[]>();
 
 const ofPart = (entries: Emphasis[] | undefined, part: Emphasis["part"]) =>
   (entries ?? []).filter((e) => e.part === part);
@@ -29,6 +30,7 @@ export function ConversationView({
   spans,
   focusId,
   marks = [],
+  spanMarks = NO_MARKS,
   showPrior = true,
   emphasis = NO_EMPHASIS,
   dim = true,
@@ -36,7 +38,10 @@ export function ConversationView({
 }: {
   spans: Span[];
   focusId: string | null;
+  /** The classifiers that judged the person's turn. */
   marks?: string[];
+  /** The classifiers that judged a span's output, by span id. */
+  spanMarks?: Map<string, string[]>;
   showPrior?: boolean;
   emphasis?: EmphasisBySpan;
   dim?: boolean;
@@ -67,6 +72,14 @@ export function ConversationView({
   const questionDimmed = dimming && questionEmphasis.length === 0;
   const replyDimmed = dimming && replyEmphasis.length === 0;
 
+  const groups = batchSteps(steps, tools);
+  const itemsOf = (o: Span) => spanItems(plan.bySpan.get(o.id));
+  const drawn = new Set(groups.flatMap((g) => (g.kind === "span" && itemsOf(g.span).length > 0 ? [g.span.id] : [])));
+  // A flagged span this view draws no block for (a tool call) is named on the reply, so the flag is never lost.
+  const replyMarks = [
+    ...new Set([root, ...steps.filter((o) => !drawn.has(o.id))].flatMap((o) => (o ? spanMarks.get(o.id) ?? [] : []))),
+  ];
+
   const chrome = (o: Span, body: React.ReactNode, dimmed = false) => (
     <SpanBlock key={o.id} o={o} focused={focusId === o.id} body={body} dimmed={dimmed} note={contextNote} />
   );
@@ -83,7 +96,7 @@ export function ConversationView({
           questionDimmed,
         )}
 
-      {batchSteps(steps, tools).map((group, i) =>
+      {groups.map((group, i) =>
         group.kind === "tools" ? (
           <Dimmable
             key={`tools-${i}`}
@@ -95,13 +108,19 @@ export function ConversationView({
         ) : (
           (() => {
             const o = group.span;
-            const items = spanItems(plan.bySpan.get(o.id));
+            const items = itemsOf(o);
             if (items.length === 0) return null;
             const stepEmphasis = ofPart(emphasis.get(o.id), "step");
             const dimmed = dimming && stepEmphasis.length === 0;
             return chrome(
               o,
-              <ChatItems items={items} failed={o.status === "error"} emphasis={stepEmphasis} dimmed={dimmed} />,
+              <ChatItems
+                items={items}
+                failed={o.status === "error"}
+                agentMarks={spanMarks.get(o.id)}
+                emphasis={stepEmphasis}
+                dimmed={dimmed}
+              />,
               dimmed,
             );
           })()
@@ -110,7 +129,13 @@ export function ConversationView({
 
       {root && reply.length > 0 && (
         <Dimmable dimmed={replyDimmed} note={contextNote}>
-          <ChatItems items={reply} failed={root.status === "error"} emphasis={replyEmphasis} dimmed={replyDimmed} />
+          <ChatItems
+            items={reply}
+            failed={root.status === "error"}
+            agentMarks={replyMarks}
+            emphasis={replyEmphasis}
+            dimmed={replyDimmed}
+          />
         </Dimmable>
       )}
     </div>
@@ -186,8 +211,6 @@ function Dimmable({ dimmed, note, children }: { dimmed: boolean; note?: string; 
 }
 
 /* -------------------------------------------------------------------- tree */
-
-const NO_MARKS = new Map<string, string[]>();
 
 /** Nested spans with inline duration · tokens · cost — the conforming grammar. */
 export function TreeView({
@@ -468,6 +491,7 @@ export function SessionConversationView({
   spansByTrace,
   focusId,
   marksByTrace = NO_MARKS,
+  spanMarks = NO_MARKS,
   emphasis = NO_EMPHASIS,
   dim = true,
   contextNote,
@@ -477,6 +501,8 @@ export function SessionConversationView({
   focusId: string | null;
   /** The classifiers that flagged each trace's turn, by trace id. */
   marksByTrace?: Map<string, string[]>;
+  /** The classifiers that flagged a span's output, by span id, across every trace drawn. */
+  spanMarks?: Map<string, string[]>;
   /** The parts a caller marks, by span id, across every trace drawn. */
   emphasis?: EmphasisBySpan;
   /** Whether a marked trace dims its parts with no entry; a trace with no entry is never dimmed. */
@@ -500,6 +526,7 @@ export function SessionConversationView({
             spans={spansByTrace.get(t.id) ?? []}
             focusId={focusId}
             marks={marksByTrace.get(t.id) ?? []}
+            spanMarks={spanMarks}
             showPrior={i === 0}
             emphasis={emphasis}
             dim={dim}

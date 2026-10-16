@@ -5,7 +5,7 @@ import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { SessionConversationView, SessionTreeView, SessionTimelineView } from "./detail-views";
-import { namesBy } from "./detection-marker";
+import { conversationMarks, namesBy } from "./detection-marker";
 import { RawJsonView } from "./detail-json";
 import { useSessionDetail, useSessionSpans, useSpansByTrace, sessionSummary } from "./session-detail-data";
 
@@ -20,7 +20,7 @@ export function SessionDetail() {
   const detail = q.data;
   const traces = detail?.traces ?? [];
   const detections = detail?.detections ?? [];
-  const marksByTrace = namesBy(detections, "trace_id");
+  const said = conversationMarks(detections);
   const marksBySpan = namesBy(detections, "span_id");
   const spansByTrace = useSpansByTrace(spansQ.data?.spans);
 
@@ -75,7 +75,8 @@ export function SessionDetail() {
                 traces={traces}
                 spansByTrace={spansByTrace}
                 focusId={focusId}
-                marksByTrace={marksByTrace}
+                marksByTrace={said.byTrace}
+                spanMarks={said.bySpan}
               />
             )}
             {view === "tree" && (

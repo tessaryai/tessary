@@ -30,53 +30,56 @@ record TraceDetectionRepositoryTest(
 
     /**
      * Only a table registered as shown marks a trace, and registering it shown is all it takes. The bug is a reader
-     * that names its tables itself, so a newly shown table marks nothing or a hidden one marks everything.
+     * that names its tables itself, so a newly shown table marks nothing or a hidden one marks everything. Each mark
+     * carries its table's grain, so a view can tell a judged turn from a judged span.
      */
     @Test
     void aTableNotShownInTraceViewsMarksNothing() {
         String pid = project("trace-marks-hidden");
         String frustration = classifier(pid, "frustration", "Frustration");
-        String secretLeak = classifier(pid, "secret_leak", "Secret Leak");
-        frustrationFlag(pid, frustration, "tr-1");
-        secretLeakFlag(pid, secretLeak, "tr-2");
+        String malformed = classifier(pid, "malformed_output", "Malformed Output");
+        flag("frustration_detection", pid, frustration, "tr-1");
+        flag("malformed_output_detection", pid, malformed, "tr-2");
 
-        assertEquals(
-                List.of(new TraceDetectionRepository.Mark("tr-1", "sp-tr-1", frustration, "Frustration")),
-                repository(false).forTraces(pid, List.of("tr-1", "tr-2")));
+        var turn = new TraceDetectionRepository.Mark("tr-1", "sp-tr-1", frustration, "Frustration", Grain.TRACE);
+        assertEquals(List.of(turn), repository(false).forTraces(pid, List.of("tr-1", "tr-2")));
         assertEquals(
                 List.of(
-                        new TraceDetectionRepository.Mark("tr-1", "sp-tr-1", frustration, "Frustration"),
-                        new TraceDetectionRepository.Mark("tr-2", "sp-tr-2", secretLeak, "Secret Leak")),
+                        turn,
+                        new TraceDetectionRepository.Mark(
+                                "tr-2", "sp-tr-2", malformed, "Malformed Output", Grain.SPAN)),
                 repository(true).forTraces(pid, List.of("tr-1", "tr-2")));
     }
 
     /**
-     * Filtering the traces list by a classifier the views do not show matches no trace, though it flagged one; the
-     * shown classifier's pick lists its trace.
+     * Read through the open registry: a Secret Leak pick lists the trace that leaked, and a pick of a classifier the
+     * views do not show matches no trace, though it flagged one. The bugs are Secret Leak dropped from the shown
+     * tables, and a hidden table that filters.
      */
     @Test
-    void aDetectedByPickOfAHiddenClassifierMatchesNoTrace() {
+    void aDetectedByPickListsAShownClassifiersTracesOnly() {
         String pid = project("trace-filter-hidden");
-        String frustration = classifier(pid, "frustration", "Frustration");
         String secretLeak = classifier(pid, "secret_leak", "Secret Leak");
+        String malformed = classifier(pid, "malformed_output", "Malformed Output");
         seedTrace(pid, "tr-1");
         seedTrace(pid, "tr-2");
-        frustrationFlag(pid, frustration, "tr-1");
-        secretLeakFlag(pid, secretLeak, "tr-2");
+        flag("secret_leak_detection", pid, secretLeak, "tr-1");
+        flag("malformed_output_detection", pid, malformed, "tr-2");
 
-        assertEquals(List.of(), listedBy(pid, secretLeak));
-        assertEquals(List.of("tr-1"), listedBy(pid, frustration));
+        assertEquals(List.of("tr-1"), listedBy(pid, secretLeak));
+        assertEquals(List.of(), listedBy(pid, malformed));
     }
 
     // ---- fixtures ---------------------------------------------------------------------------------
 
-    /** The open registry's frustration table, beside secret_leak's shown or hidden as asked. */
-    private TraceDetectionRepository repository(boolean secretLeakShown) {
+    /** The open registry's frustration table, beside malformed_output's shown or hidden as asked. */
+    private TraceDetectionRepository repository(boolean malformedShown) {
         StaticListableBeanFactory beans = new StaticListableBeanFactory(Map.of(
                 "frustration",
                 new DetectionTable("frustration", "frustration_detection", Grain.TRACE, true, true),
-                "secretLeak",
-                new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN, secretLeakShown, false)));
+                "malformed",
+                new DetectionTable(
+                        "malformed_output", "malformed_output_detection", Grain.SPAN, malformedShown, false)));
         return new TraceDetectionRepository(
                 jdbc, new DetectionTableRegistry(beans.getBeanProvider(DetectionTable.class)));
     }
@@ -117,33 +120,15 @@ record TraceDetectionRepositoryTest(
                 .update();
     }
 
-    private void frustrationFlag(String pid, String classifierId, String traceId) {
+    /** One high-confidence detection of the trace's {@code sp-<trace>} span, in a table every open kind shares the columns of. */
+    private void flag(String table, String pid, String classifierId, String traceId) {
         jdbc.sql("""
-            INSERT INTO frustration_detection (id, project_id, classifier_id, classifier_key,
+            INSERT INTO {table} (id, project_id, classifier_id, classifier_key,
                 subject_session_id, subject_trace_id, subject_span_id, subject_started_at, severity,
                 confidence)
-            VALUES (:id, :pid, :cid, 'frustration', :sid, :tid, :spid, CAST(:t0 AS timestamptz),
-                    'warn', 'high')
-            """)
-                .param("id", pid + "-fd-" + traceId)
-                .param("pid", pid)
-                .param("cid", classifierId)
-                .param("sid", "s-" + traceId)
-                .param("tid", traceId)
-                .param("spid", "sp-" + traceId)
-                .param("t0", T0)
-                .update();
-    }
-
-    private void secretLeakFlag(String pid, String classifierId, String traceId) {
-        jdbc.sql("""
-            INSERT INTO secret_leak_detection (id, project_id, classifier_id, classifier_key,
-                subject_session_id, subject_trace_id, subject_span_id, subject_started_at, severity,
-                confidence)
-            VALUES (:id, :pid, :cid, 'secret_leak', :sid, :tid, :spid, CAST(:t0 AS timestamptz),
-                    'critical', 'high')
-            """)
-                .param("id", pid + "-sl-" + traceId)
+            VALUES (:id, :pid, :cid, 'k', :sid, :tid, :spid, CAST(:t0 AS timestamptz), 'warn', 'high')
+            """.replace("{table}", table))
+                .param("id", pid + "-" + table + "-" + traceId)
                 .param("pid", pid)
                 .param("cid", classifierId)
                 .param("sid", "s-" + traceId)
