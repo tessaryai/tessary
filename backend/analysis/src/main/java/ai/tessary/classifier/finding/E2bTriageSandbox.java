@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.agentrun.E2bAgentRunSandbox;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.ObserverProperties.Agentic;
 import ai.tessary.llm.AgenticCredentialResolver;
@@ -246,7 +247,7 @@ public class E2bTriageSandbox implements TriageSandbox {
         }
         if (resp.statusCode() / 100 != 2) {
             // 404 almost certainly means the launcher image predates the /triage route.
-            String diag = describeLauncherError(resp.body());
+            String diag = E2bAgentRunSandbox.describeLauncherError(resp.body());
             log.error(
                     Markers.OPS,
                     "triage launcher rejected the run launcherUrl={} status={}{}",
@@ -302,23 +303,12 @@ public class E2bTriageSandbox implements TriageSandbox {
             return FailureClass.MISCONFIGURED;
         }
         if (status / 100 == 5) {
-            return status == 502 && RUN_FAILURE_KINDS.contains(kindOf(body))
+            return status == 502 && RUN_FAILURE_KINDS.contains(E2bAgentRunSandbox.kindOf(body))
                     ? FailureClass.RUN
                     : FailureClass.LAUNCHER_UNAVAILABLE;
         }
         return FailureClass.RUN;
     }
-
-    private static String kindOf(String body) {
-        try {
-            return KIND_MAPPER.readTree(body).path("kind").asText("");
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    /** A bare mapper so {@link #classifyFailure} stays callable with no Spring context. */
-    private static final ObjectMapper KIND_MAPPER = new ObjectMapper();
 
     private void bookUsage(
             String projectId, String findingId, String model, String envelopeJson, boolean platformFunded) {
@@ -354,25 +344,6 @@ public class E2bTriageSandbox implements TriageSandbox {
                     default -> diag.isBlank() ? "" : " — " + diag;
                 };
         return "status " + status + " from " + launcherUrl + remedy;
-    }
-
-    private String describeLauncherError(String body) {
-        try {
-            JsonNode n = mapper.readTree(body);
-            StringBuilder sb = new StringBuilder();
-            if (n.hasNonNull("kind")) sb.append("kind=").append(n.get("kind").asText());
-            if (n.hasNonNull("detail")) {
-                if (!sb.isEmpty()) sb.append(' ');
-                sb.append("detail=").append(n.get("detail").asText());
-            }
-            if (n.hasNonNull("sandbox_id")) {
-                if (!sb.isEmpty()) sb.append(' ');
-                sb.append("sandbox=").append(n.get("sandbox_id").asText());
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     private static void markError(Span span, String message) {

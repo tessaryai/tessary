@@ -292,7 +292,8 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     private static final ObjectMapper KIND_MAPPER = new ObjectMapper();
 
-    static String kindOf(String body) {
+    /** Shared with {@code E2bTriageSandbox}, which reads the same launcher's error bodies. */
+    public static String kindOf(String body) {
         try {
             return KIND_MAPPER.readTree(body).path("kind").asText("");
         } catch (JsonProcessingException | RuntimeException e) {
@@ -329,7 +330,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
     }
 
     /** Never the rest of the body. */
-    static String describeLauncherError(String body) {
+    public static String describeLauncherError(String body) {
         try {
             JsonNode n = KIND_MAPPER.readTree(body);
             StringBuilder sb = new StringBuilder();
