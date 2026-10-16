@@ -5,8 +5,10 @@
  * through the files API, runs session.js in the background and dials its port through the sandbox
  * host. The real server.js runs as a child process with fixtures/fake-e2b in relay mode, which posts
  * every SDK call to a control server in this process; the control server starts a fake session
- * (fixtures/fake-session) on 127.0.0.1 for each session command, so the same session tests as on
- * Docker run here, plus the create, the file, the command and the kill on every way out.
+ * (fixtures/fake-session) on 127.0.0.1 for each session command, so the session tests as on Docker
+ * run here, plus the create, the file, the command and the kill on every way out. The route checks
+ * that never reach a driver (an unknown id, a busy session, a bad text, the event buffer) run on
+ * Docker only: docker-sessions.test.js.
  */
 process.env.SANDBOX_BACKEND = 'e2b'; // keep require('../server.js') side-effect free (no docker fail-fast, no listen)
 const test = require('node:test');
@@ -216,26 +218,6 @@ test('on E2B a reconnect with after replays only the rest, then follows live (a 
   });
 });
 
-test('on E2B a message during a reply is 409 busy, and the reply ends once (two prompts racing in one sandbox)', T, async () => {
-  await withE2bLauncher({ shape: { hold: true } }, async ({ start, send, events, control }) => {
-    const id = (await start()).body.session_id;
-    assert.equal((await send(id, 'one')).status, 202);
-    assert.deepEqual(await send(id, 'two'), { status: 409, body: { error: 'session busy', kind: 'busy' } });
-    assert.deepEqual(control.fakes[SBX1].messages, ['one']);
-
-    await events(id, { after: 0, until: 1 });
-    control.fakes[SBX1].release();
-    await events(id, { after: 0, until: 2 });
-    assert.equal((await send(id, 'two')).status, 202);
-    const read = await events(id, { after: 0, until: 6 });
-    assert.deepEqual(
-      read.events.map((e) => [e.id, e.type, e.data.reason]),
-      [[1, 'text', undefined], [2, 'message_end', 'done'], [3, 'text', undefined], [4, 'tool_start', undefined], [5, 'tool_end', undefined], [6, 'message_end', 'done']],
-      'the held reply ends once, and the next reply follows it',
-    );
-  });
-});
-
 test('DELETE kills the E2B sandbox: closed stopped, later calls 404 (a stopped session that keeps its E2B sandbox and bill)', T, async () => {
   await withE2bLauncher({}, async ({ start, send, abort, stop, events, control }) => {
     const id = (await start()).body.session_id;
@@ -433,17 +415,6 @@ test('a proxy error page or a stray line on the script\'s event stream never rea
   });
 });
 
-test('on E2B an unknown session id is 404 on every route (an E2B launcher that answers for sessions it does not hold)', T, async () => {
-  await withE2bLauncher({}, async ({ send, abort, stop, port }) => {
-    for (const id of ['00000000-0000-4000-8000-000000000000', 'nope']) {
-      assert.deepEqual(await send(id, 'x'), { status: 404, body: NOT_FOUND }, `messages ${id}`);
-      assert.deepEqual(await abort(id), { status: 404, body: NOT_FOUND }, `abort ${id}`);
-      assert.deepEqual(await request(port, 'GET', `/sessions/${id}/events`, { auth: 'Bearer testkey' }), { status: 404, body: NOT_FOUND }, `events ${id}`);
-      assert.deepEqual(await stop(id), { status: 404, body: NOT_FOUND }, `delete ${id}`);
-    }
-  });
-});
-
 test('on E2B the credential never reaches session.json; the secret and the keys ride in the command env (a credential on the microVM\'s disk)', T, async () => {
   await withE2bLauncher({}, async ({ start, control, sessionPort }) => {
     assert.equal((await start()).status, 201);
@@ -488,37 +459,6 @@ test('on E2B the cap refuses the next start with 429, spends no sandbox on it, a
     assert.equal((await stop(a.body.session_id)).status, 204);
     assert.equal((await start()).status, 201);
     assert.notEqual(control.envs[SBX1].SESSION_SECRET, control.envs['sbx-fake-2'].SESSION_SECRET, 'each session has its own secret');
-  });
-});
-
-test('on E2B the buffer keeps the last SANDBOX_SESSION_BUFFER events; an older after is 410 (a stale reader that gets a silent gap)', T, async () => {
-  await withE2bLauncher({ env: { SANDBOX_SESSION_BUFFER: '3' } }, async ({ start, send, events, port }) => {
-    const id = (await start()).body.session_id;
-    const live = events(id, { after: 0, until: 4 });
-    await send(id, 'one');
-    assert.deepEqual((await live).events, numbered(reply(1, 'one'), 1), 'a live reader gets every event, whatever the buffer holds');
-
-    assert.deepEqual(await events(id, { after: 0 }), { status: 410, body: { error: 'events no longer held', kind: 'gone' } });
-    assert.deepEqual((await events(id, { after: 1, until: 4 })).events, numbered(reply(1, 'one'), 1).slice(1));
-    for (const [after, detail] of [['5', 'session.js: after is past the last event'], ['x', 'session.js: after must be a non-negative integer']]) {
-      const res = await request(port, 'GET', `/sessions/${id}/events?after=${after}`, { auth: 'Bearer testkey' });
-      assert.equal(res.status, 502, after);
-      assert.equal(res.body.kind, 'bad_request', after);
-      assert.equal(res.body.detail, detail);
-    }
-  });
-});
-
-test('on E2B a message with no text, or text over 1 MiB, is the caller\'s bad_request (a bad text sent into the sandbox)', T, async () => {
-  await withE2bLauncher({}, async ({ start, send, control }) => {
-    const id = (await start()).body.session_id;
-    for (const text of ['', 'a'.repeat((1 << 20) + 1)]) {
-      const res = await send(id, text);
-      assert.equal(res.status, 502);
-      assert.equal(res.body.kind, 'bad_request');
-      assert.equal(res.body.detail, 'session.js: text must be a non-empty string of at most 1 MiB');
-    }
-    assert.deepEqual(control.fakes[SBX1].messages, []);
   });
 });
 
