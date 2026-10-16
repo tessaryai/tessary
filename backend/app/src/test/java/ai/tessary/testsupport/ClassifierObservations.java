@@ -7,8 +7,8 @@ package ai.tessary.testsupport;
  * scores. Signal tests use these so they exercise the real production shape — the gap that let a
  * prompt-injection encoder score the envelope JSON structure itself and fire on benign traffic.
  *
- * <p>Both the {@code content} string form and the {@code parts[]} form are produced by real
- * instrumentation, so both are offered here.
+ * <p>Real instrumentation also produces a {@code parts[]} content array; no test here needs that
+ * form, so only the {@code content} string form is offered.
  */
 public final class ClassifierObservations {
 
@@ -22,12 +22,6 @@ public final class ClassifierObservations {
     /** An assistant turn as a gen_ai output envelope: {@code [{"role":"assistant","content":"…"}]}. */
     public static String assistantOutput(String text) {
         return envelope("assistant", text);
-    }
-
-    /** A message with a {@code parts[]} content array (the other real instrumentation shape). */
-    public static String assistantParts(String text) {
-        return "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":" + quote(text)
-                + "}],\"finish_reason\":\"stop\"}]";
     }
 
     private static String envelope(String role, String text) {

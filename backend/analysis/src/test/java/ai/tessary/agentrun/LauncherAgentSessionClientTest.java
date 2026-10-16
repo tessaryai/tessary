@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.agentrun;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -20,6 +22,7 @@ import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.AgentRunError;
+import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.sandbox.AgentSpanTelemetry;
@@ -32,9 +35,11 @@ import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -52,6 +57,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
@@ -198,8 +204,10 @@ class LauncherAgentSessionClientTest {
     }
 
     /**
-     * Catches a failed start that keeps a Tessary AI run slot: the credential is freed whatever the
-     * launcher answered, or when nothing listens at all (status 0 here).
+     * Catches a failed start that keeps a Tessary AI run slot, a launcher-side timeout read as some other failure, or
+     * a full launcher read as a broken run ({@code RUN_FAILED}), which a caller would not retry: the credential is
+     * freed whatever the launcher answered (an answer with no session id included), or when nothing listens at all
+     * (status 0 here).
      */
     @ParameterizedTest
     @CsvSource(
@@ -207,7 +215,11 @@ class LauncherAgentSessionClientTest {
             value = {
                 "502 | {\"kind\":\"bad_request\",\"detail\":\"session.js: model must be a non-empty string\"} | RUN_FAILED",
                 "502 | {\"kind\":\"orchestration\"}                                                          | LAUNCHER_UNAVAILABLE",
-                "0   | ''                                                                                 | LAUNCHER_UNAVAILABLE"
+                "502 | {\"kind\":\"timeout\"}                                                                | TIMED_OUT",
+                "0   | ''                                                                                 | LAUNCHER_UNAVAILABLE",
+                "201 | not json                                                                           | BAD_OUTPUT",
+                "201 | {}                                                                                 | BAD_OUTPUT",
+                "429 | {\"error\":\"sandbox session capacity reached\",\"kind\":\"capacity\"}                  | CAPACITY"
             })
     void aStartTheLauncherRefusesOrCannotTakeStillFreesTheCredential(int status, String body, AgentRunError expected)
             throws Exception {
@@ -218,18 +230,6 @@ class LauncherAgentSessionClientTest {
         TessaryException ex = assertThrows(TessaryException.class, () -> client.start(START));
 
         assertEquals(expected, ex.error());
-        verify(credentials).release(START_CRED);
-    }
-
-    /** Catches a full launcher read as a broken run ({@code RUN_FAILED}), which a caller would not retry. */
-    @Test
-    void aLauncherAtItsCapIsCapacity() {
-        aGrokLaneWithItsCredential();
-        fake.answer("POST", "/sessions", 429, "{\"error\":\"sandbox session capacity reached\",\"kind\":\"capacity\"}");
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> client().start(START));
-
-        assertEquals(AgentRunError.CAPACITY, ex.error());
         verify(credentials).release(START_CRED);
     }
 
@@ -463,12 +463,25 @@ class LauncherAgentSessionClientTest {
                 events);
     }
 
-    /** Catches a truncated frame yielded as an empty delta. */
-    @Test
-    void aFrameThatDoesNotParseIsBadOutput() {
+    static Stream<String> unfitFrames() {
+        return Stream.of(
+                FakeLauncher.frame(1, "text", "{\"delta\":"),
+                FakeLauncher.frame(1, "thinking", "5"),
+                FakeLauncher.frame(1, "text", "{\"delta\":5}"),
+                FakeLauncher.frame(1, "message_end", "{\"usage\":{\"input_tokens\":1},\"reason\":\"crashed\"}"),
+                FakeLauncher.frame(1, "closed", "{\"reason\":\"evicted\"}"),
+                "event: text\ndata: {\"delta\":\"a\"}\n\n");
+    }
+
+    /**
+     * Catches a truncated frame yielded as an empty delta, and a frame with no id, data that is not an object, a field
+     * of the wrong shape or an unknown reason yielded as an event.
+     */
+    @ParameterizedTest
+    @MethodSource("unfitFrames")
+    void aFrameThatDoesNotParseOrFitIsBadOutput(String frame) {
         LauncherAgentSessionClient client = aStartedSession();
-        fake.events(
-                "/sessions/s-1/events?after=0", FakeLauncher.Ending.END, FakeLauncher.frame(1, "text", "{\"delta\":"));
+        fake.events("/sessions/s-1/events?after=0", FakeLauncher.Ending.END, frame);
 
         TessaryException ex = assertThrows(TessaryException.class, () -> read(client, 0));
 
@@ -723,6 +736,83 @@ class LauncherAgentSessionClientTest {
                         "POST /sessions/s-1/abort",
                         "DELETE /sessions/s-1"),
                 fake.seen().stream().map(r -> r.method() + " " + r.path()).toList());
+    }
+
+    /** Catches a launcher fault on cleanup read as done, so a sandbox the launcher still runs is forgotten. */
+    @Test
+    void anAbortOrStopTheLauncherFailsIsThrown() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.answer("POST", "/sessions/s-1/abort", 502, "{\"kind\":\"orchestration\"}");
+        fake.answer("DELETE", "/sessions/s-1", 502, "{\"kind\":\"orchestration\"}");
+
+        assertEquals(
+                AgentRunError.LAUNCHER_UNAVAILABLE,
+                assertThrows(TessaryException.class, () -> client.abort("s-1")).error());
+        assertEquals(
+                AgentRunError.LAUNCHER_UNAVAILABLE,
+                assertThrows(TessaryException.class, () -> client.stop("s-1")).error());
+    }
+
+    /**
+     * Catches an interrupt swallowed while waiting on the launcher (the silent socket accepts and never answers), an
+     * events read from a dead launcher yielded as an empty stream, and an error body cut short read as a crash.
+     */
+    @Test
+    void anInterruptedCallKeepsTheInterruptAndADeadLauncherIsUnavailable() throws Exception {
+        assertEquals(
+                AgentRunError.LAUNCHER_UNAVAILABLE,
+                assertThrows(
+                                TessaryException.class,
+                                () -> client(closedPortUrl()).events("s-1", 0))
+                        .error());
+        try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            LauncherAgentSessionClient client = client("http://127.0.0.1:" + silent.getLocalPort());
+            for (Runnable call : List.<Runnable>of(() -> client.events("s-1", 0), () -> client.abort("s-1"))) {
+                Thread.currentThread().interrupt();
+                assertEquals(
+                        CommonError.INTERRUPTED,
+                        assertThrows(TessaryException.class, call::run).error());
+                assertTrue(Thread.interrupted(), "the interrupt is kept");
+            }
+        }
+        try (ServerSocket cut = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            Thread.ofVirtual().start(() -> {
+                try (Socket s = cut.accept()) {
+                    s.getInputStream().read(new byte[8192]);
+                    s.getOutputStream().write("HTTP/1.1 500 X\r\nContent-Length: 99\r\n\r\n{".getBytes(UTF_8));
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+            LauncherAgentSessionClient client = client("http://127.0.0.1:" + cut.getLocalPort());
+            assertEquals(
+                    AgentRunError.LAUNCHER_UNAVAILABLE,
+                    assertThrows(TessaryException.class, () -> client.events("s-1", 0))
+                            .error());
+        }
+    }
+
+    /** Catches two messages both sent when the second claims the session between the first's check and its claim. */
+    @Test
+    void aMessageThatLosesTheClaimToAConcurrentOneIsBusyAndFreesItsCredential() {
+        aGrokLane();
+        fake.answer("POST", "/sessions", 201, "{\"session_id\":\"s-1\"}");
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        LauncherAgentSessionClient client = client();
+        List<AgentSessionClient.SendOutcome> concurrent = new java.util.ArrayList<>();
+        when(credentials.resolve(PROJECT, ModelProvider.GROK))
+                .thenReturn(START_CRED)
+                .thenAnswer(i -> {
+                    concurrent.add(client.send("s-1", "first"));
+                    return REPLY2_CRED;
+                })
+                .thenReturn(REPLY_CRED);
+        client.start(START);
+
+        assertEquals(AgentSessionClient.SendOutcome.BUSY, client.send("s-1", "second"));
+        assertEquals(List.of(AgentSessionClient.SendOutcome.ACCEPTED), concurrent);
+        verify(credentials).release(REPLY2_CRED);
+        verify(credentials, never()).release(REPLY_CRED);
     }
     /**
      * Catches a replayed {@code message_end} that frees the newer reply's credential, so a Tessary AI

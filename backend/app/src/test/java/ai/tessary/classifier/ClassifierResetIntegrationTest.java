@@ -206,15 +206,19 @@ record ClassifierResetIntegrationTest(
         ClassifierRow frustration = classifier(pid, "frustration");
         ClassifierRow costDrift = classifier(pid, "cost_drift");
         ClassifierRow durationDrift = classifier(pid, "duration_drift");
+        ClassifierRow malformed = classifier(pid, "malformed_output");
         rateState("frustration_state", pid, "cs-1");
         rateState("groundedness_state", pid, "cs-1");
+        rateState("malformed_output_state", pid, "cs-1");
         metricBaseline(pid, costDrift);
         metricBaseline(pid, durationDrift);
 
         reset.reset(pid, frustration.id(), null);
         reset.reset(pid, costDrift.id(), null);
+        reset.reset(pid, malformed.id(), null);
 
         assertEquals(0, rows("frustration_state", pid));
+        assertEquals(0, rows("malformed_output_state", pid));
         assertEquals(1, rows("groundedness_state", pid), "groundedness learned its own normal");
         assertEquals(0, metricBaselines(costDrift));
         assertEquals(1, metricBaselines(durationDrift));

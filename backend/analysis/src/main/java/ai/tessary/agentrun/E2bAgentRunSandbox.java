@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.agentrun;
 
+import static ai.tessary.sandbox.AgentSpanTelemetry.markError;
+
 import ai.tessary.config.AgentRunProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.llm.ModelsDevRates;
@@ -18,7 +20,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
-import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import java.io.IOException;
 import java.net.URI;
@@ -292,7 +293,8 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     private static final ObjectMapper KIND_MAPPER = new ObjectMapper();
 
-    static String kindOf(String body) {
+    /** Shared with {@code E2bTriageSandbox}, which reads the same launcher's error bodies. */
+    public static String kindOf(String body) {
         try {
             return KIND_MAPPER.readTree(body).path("kind").asText("");
         } catch (JsonProcessingException | RuntimeException e) {
@@ -328,8 +330,11 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
         return "status " + status + " from " + launcherUrl + remedy;
     }
 
-    /** Never the rest of the body. */
-    static String describeLauncherError(String body) {
+    /**
+     * Never the rest of the body. Shared with the triage and RCA sandboxes; an unparseable body (e.g. a proxy's own 502
+     * page) yields an empty string.
+     */
+    public static String describeLauncherError(String body) {
         try {
             JsonNode n = KIND_MAPPER.readTree(body);
             StringBuilder sb = new StringBuilder();
@@ -342,6 +347,10 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
                 if (!sb.isEmpty()) sb.append(' ');
                 sb.append("sandbox=").append(n.get("sandbox_id").asText());
             }
+            if (n.has("elapsed_ms")) {
+                if (!sb.isEmpty()) sb.append(' ');
+                sb.append("elapsed_ms=").append(n.get("elapsed_ms").asLong());
+            }
             return sb.toString();
         } catch (JsonProcessingException | RuntimeException e) {
             return "";
@@ -351,11 +360,5 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
     private static TessaryException badOutput(Span span, String why) {
         markError(span, why);
         return new TessaryException(AgentRunError.BAD_OUTPUT, why);
-    }
-
-    private static void markError(Span span, String message) {
-        span.setStatus(StatusCode.ERROR, message);
-        span.setAttribute("langfuse.observation.level", "ERROR");
-        span.setAttribute("langfuse.observation.status_message", message);
     }
 }

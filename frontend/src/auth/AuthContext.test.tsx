@@ -41,24 +41,21 @@ describe("the route guard", () => {
     expect(auth.loginUrl).not.toHaveBeenCalled();
   });
 
-  it("sends a signed-out visitor to sign in, carrying the page they were on", async () => {
-    auth.me.mockRejectedValue(new ApiError(401, { code: "AUTH.UNAUTHORIZED", message: "Unauthorized" }));
+  it.each([
+    ["sends a signed-out visitor to sign in, carrying the page they were on", 401, []],
+    [
+      "treats any other failed session read as signed out too, and says so in the console",
+      503,
+      [["auth/me failed:", expect.stringContaining("down")]],
+    ],
+  ])("%s", async (_, status, warned) => {
+    auth.me.mockRejectedValue(new ApiError(status, { code: `HTTP_${status}`, message: "down" }));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     guarded();
 
     await waitFor(() => expect(auth.loginUrl).toHaveBeenCalledWith("/orgs/acme/projects/default/traces?q=refund"));
     expect(screen.queryByText("the page")).toBeNull();
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it("treats any other failed session read as signed out too, and says so in the console", async () => {
-    auth.me.mockRejectedValue(new ApiError(503, { code: "UNAVAILABLE", message: "down" }));
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    guarded();
-
-    await waitFor(() => expect(auth.loginUrl).toHaveBeenCalled());
-    expect(screen.queryByText("the page")).toBeNull();
-    expect(warn).toHaveBeenCalledWith("auth/me failed:", expect.stringContaining("down"));
+    expect(warn.mock.calls).toEqual(warned);
   });
 });
 

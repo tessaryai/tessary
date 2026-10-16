@@ -8,6 +8,7 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.open.jobqueue.LeasedJobSql;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
 import java.net.InetAddress;
@@ -15,8 +16,6 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.Callable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -44,8 +43,8 @@ public class RcaWorker {
     private final FindingRepository findings;
 
     private final CaseEventRepository caseEvents;
-    private final String leaseOwner = shortHost(() -> InetAddress.getLocalHost().getHostName()) + "-"
-            + UUID.randomUUID().toString().substring(0, 8);
+    private final String leaseOwner =
+            LeasedJobSql.leaseOwner(() -> InetAddress.getLocalHost().getHostName());
 
     public RcaWorker(
             RcaJobRepository jobs,
@@ -149,15 +148,6 @@ public class RcaWorker {
                             Instant.now()));
         } catch (RuntimeException e) {
             log.warn(Markers.OPS, "rca completed trail line failed job={}: {}", job.id(), e.getMessage());
-        }
-    }
-
-    /** Falls back to {@code host} when this machine's name does not resolve. */
-    static String shortHost(Callable<String> hostName) {
-        try {
-            return hostName.call();
-        } catch (Exception e) {
-            return "host";
         }
     }
 }

@@ -121,6 +121,15 @@ class MalformedOutputDetectorTest {
         assertFalse(ds.get(0).fired(), "an envelope with no assistant completion has nothing to validate");
     }
 
+    /** Catches one poisoned schema (it compiles, then fails validating: a dangling $dynamicRef) failing the sweep. */
+    @Test
+    void aSchemaThatFailsWhileValidatingIsTreatedAsNoneDeclared() {
+        MalformedOutputDetector d = detector(Map.of("cs-1", "{\"$dynamicRef\":\"#nope\"}"));
+        assertFalse(d.detectBatch(List.of(obs("cs-1", "{\"answer\":1}")), null)
+                .get(0)
+                .fired());
+    }
+
     /**
      * SSRF guard: an agent-authored schema whose $ref points anywhere outside itself (IMDS, a local
      * port, the host's files) must never be fetched. A live local server serves a schema the output

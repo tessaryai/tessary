@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -24,7 +23,6 @@ import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.testsupport.Props;
 import io.micrometer.tracing.Tracer;
-import java.net.UnknownHostException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -176,17 +174,5 @@ class RcaWorkerTickTest {
                 caseId,
                 "2026-08-01T00:00:00Z",
                 "2026-08-02T00:00:00Z");
-    }
-
-    /**
-     * On a host whose name does not resolve, building the lease owner threw and the worker never constructed. It
-     * falls back to a fixed name.
-     */
-    @Test
-    void aHostWhoseNameDoesNotResolveStillNamesItsLeaseOwner() {
-        assertEquals("box-1", RcaWorker.shortHost(() -> "box-1"));
-        assertEquals("host", RcaWorker.shortHost(() -> {
-            throw new UnknownHostException("box-1");
-        }));
     }
 }

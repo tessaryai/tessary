@@ -158,6 +158,10 @@ describe("project lifecycle", () => {
     expect(within(dialog()).getByRole("heading", { name: 'Delete project "old"?' })).toBeTruthy();
     fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+    // Bug: the dialog's close button leaves it open.
+    click("old", "Delete project");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(auth.deleteProject).not.toHaveBeenCalled();
 
     click("old", "Delete project");

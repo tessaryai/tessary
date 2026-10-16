@@ -199,12 +199,20 @@ describe("ChartCard", () => {
   it("names the case on hover", () => {
     renderCard(card({ cases: { open_cases: 1, spans: [span({})] } }));
 
-    fireEvent.mouseEnter(screen.getByRole("link", { name: /Opens C-43/ }));
+    const bar = screen.getByRole("link", { name: /Opens C-43/ });
+    fireEvent.mouseEnter(bar);
 
     const tip = screen.getByRole("tooltip");
     expect(tip.textContent).toContain("Opens C-43");
     expect(tip.textContent).toContain("Users on support_agent.reply grew frustrated");
     expect(tip.textContent).toContain("Open since Oct 4");
+    // Bug: the hover text stuck once the pointer or focus left the bar, or never shown to a keyboard reader.
+    fireEvent.mouseLeave(bar);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.focus(bar);
+    expect(screen.getByRole("tooltip").textContent).toContain("Opens C-43");
+    fireEvent.blur(bar);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   // Bug: more than three rows squeezed into the strip, or the extra cases silently dropped.
@@ -244,6 +252,25 @@ describe("ChartCard", () => {
     expect(screen.getByRole("tooltip").textContent).toContain("Sep 11, 00:00-24:00 UTC");
     fireEvent.keyDown(chart, { key: "End" });
     expect(screen.getByRole("tooltip").textContent).toContain("Oct 8, 00:00-14:00 UTC");
+    // Bug: the chart swallowed Tab, so a keyboard reader could not leave it, or kept the hover text after leaving.
+    expect(fireEvent.keyDown(chart, { key: "Tab" })).toBe(true);
+    fireEvent.blur(chart);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  // Bug: the pointer reads another point than the one under it, or the hover text stays once the pointer leaves.
+  it("reads the point nearest the pointer, and drops it when the pointer leaves", () => {
+    renderCard(card({}));
+    const chart = screen.getByRole("group", { name: /Frustration/ });
+    vi.spyOn(chart, "getBoundingClientRect").mockReturnValue({ left: 100, width: 520 } as DOMRect);
+    const plot = chart.querySelector("rect[fill='transparent']")!;
+
+    fireEvent.mouseMove(plot, { clientX: 100 });
+    expect(screen.getByRole("tooltip").textContent).toContain("Sep 11, 00:00-24:00 UTC");
+    fireEvent.mouseMove(plot, { clientX: 620 });
+    expect(screen.getByRole("tooltip").textContent).toContain("Oct 8, 00:00-14:00 UTC, still filling");
+    fireEvent.mouseLeave(plot);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   // Bug: a hovered point past the end of new, shorter data (another range, a refetch) crashed the card.

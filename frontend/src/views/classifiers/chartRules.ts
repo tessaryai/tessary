@@ -360,15 +360,9 @@ export function toolGroups(
 }
 
 export function defaultTool(tools: ChartToolOption[], callSite: string | null): string | null {
-  const groups = toolGroups(tools, callSite);
-  const mine = callSite != null && groups[0]?.label === "Called by this call site" ? groups[0].tools : [];
-  const all = groups.flatMap((g) => g.tools);
-  const pick =
-    mine.find((t) => t.open_cases > 0) ??
-    all.find((t) => t.open_cases > 0) ??
-    [...mine].sort((a, b) => b.calls - a.calls)[0] ??
-    [...all].sort((a, b) => b.calls - a.calls)[0];
-  return pick?.tool_key ?? null;
+  // This call site's tools come first, and each group is ordered by open cases and then calls.
+  const all = toolGroups(tools, callSite).flatMap((g) => g.tools);
+  return (all.find((t) => t.open_cases > 0) ?? all[0])?.tool_key ?? null;
 }
 
 export function callersText(t: ChartToolOption): string {

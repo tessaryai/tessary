@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -56,30 +58,21 @@ record AuthControllerTest(MockMvc mvc, AuthProvider provider) {
                 .andExpect(jsonPath("$.data.email").value("login-happy@example.com"));
     }
 
-    @Test
-    void loginWrongPasswordIsRejected() throws Exception {
+    /** After a signup, a login with the wrong password is 401 and a second signup for the same email is 409. */
+    @ParameterizedTest
+    @CsvSource({
+        "wrong-pw@example.com, /auth/login, not-the-password, 401",
+        "dup@example.com, /auth/signup, a-different-password, 409"
+    })
+    void aWrongPasswordOrATakenEmailIsRejected(String email, String then, String password, int expected)
+            throws Exception {
         mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("wrong-pw@example.com", "a-good-password")))
+                        .content(body(email, "a-good-password")))
                 .andExpect(status().isOk());
 
-        mvc.perform(post("/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("wrong-pw@example.com", "not-the-password")))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void signupDuplicateEmailIsRejected() throws Exception {
-        mvc.perform(post("/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("dup@example.com", "a-good-password")))
-                .andExpect(status().isOk());
-
-        mvc.perform(post("/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("dup@example.com", "a-different-password")))
-                .andExpect(status().isConflict());
+        mvc.perform(post(then).contentType(MediaType.APPLICATION_JSON).content(body(email, password)))
+                .andExpect(status().is(expected));
     }
 
     @Test

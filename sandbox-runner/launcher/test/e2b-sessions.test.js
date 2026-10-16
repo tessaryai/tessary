@@ -5,8 +5,10 @@
  * through the files API, runs session.js in the background and dials its port through the sandbox
  * host. The real server.js runs as a child process with fixtures/fake-e2b in relay mode, which posts
  * every SDK call to a control server in this process; the control server starts a fake session
- * (fixtures/fake-session) on 127.0.0.1 for each session command, so the same session tests as on
- * Docker run here, plus the create, the file, the command and the kill on every way out.
+ * (fixtures/fake-session) on 127.0.0.1 for each session command, so the session tests as on Docker
+ * run here, plus the create, the file, the command and the kill on every way out. The route checks
+ * that never reach a driver (an unknown id, a busy session, a bad text, the event buffer) run on
+ * Docker only: docker-sessions.test.js.
  */
 process.env.SANDBOX_BACKEND = 'e2b'; // keep require('../server.js') side-effect free (no docker fail-fast, no listen)
 const test = require('node:test');
@@ -15,7 +17,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { spawnLauncher, request, readSse, freePort, withoutElapsed, reply, numbered, sleep, until } = require('./fixtures/launcher-harness');
 const { startFakeSession } = require('./fixtures/fake-session');
-const { e2bSessionAddress } = require('../server.js');
+const { e2bSessionAddress, waitSessionReady } = require('../server.js');
 
 const FAKE_E2B = path.join(__dirname, 'fixtures', 'fake-e2b');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -216,26 +218,6 @@ test('on E2B a reconnect with after replays only the rest, then follows live (a 
   });
 });
 
-test('on E2B a message during a reply is 409 busy, and the reply ends once (two prompts racing in one sandbox)', T, async () => {
-  await withE2bLauncher({ shape: { hold: true } }, async ({ start, send, events, control }) => {
-    const id = (await start()).body.session_id;
-    assert.equal((await send(id, 'one')).status, 202);
-    assert.deepEqual(await send(id, 'two'), { status: 409, body: { error: 'session busy', kind: 'busy' } });
-    assert.deepEqual(control.fakes[SBX1].messages, ['one']);
-
-    await events(id, { after: 0, until: 1 });
-    control.fakes[SBX1].release();
-    await events(id, { after: 0, until: 2 });
-    assert.equal((await send(id, 'two')).status, 202);
-    const read = await events(id, { after: 0, until: 6 });
-    assert.deepEqual(
-      read.events.map((e) => [e.id, e.type, e.data.reason]),
-      [[1, 'text', undefined], [2, 'message_end', 'done'], [3, 'text', undefined], [4, 'tool_start', undefined], [5, 'tool_end', undefined], [6, 'message_end', 'done']],
-      'the held reply ends once, and the next reply follows it',
-    );
-  });
-});
-
 test('DELETE kills the E2B sandbox: closed stopped, later calls 404 (a stopped session that keeps its E2B sandbox and bill)', T, async () => {
   await withE2bLauncher({}, async ({ start, send, abort, stop, events, control }) => {
     const id = (await start()).body.session_id;
@@ -412,14 +394,24 @@ test('a cut event stream from an E2B sandbox is resumed with from and loses noth
   });
 });
 
-test('on E2B an unknown session id is 404 on every route (an E2B launcher that answers for sessions it does not hold)', T, async () => {
-  await withE2bLauncher({}, async ({ send, abort, stop, port }) => {
-    for (const id of ['00000000-0000-4000-8000-000000000000', 'nope']) {
-      assert.deepEqual(await send(id, 'x'), { status: 404, body: NOT_FOUND }, `messages ${id}`);
-      assert.deepEqual(await abort(id), { status: 404, body: NOT_FOUND }, `abort ${id}`);
-      assert.deepEqual(await request(port, 'GET', `/sessions/${id}/events`, { auth: 'Bearer testkey' }), { status: 404, body: NOT_FOUND }, `events ${id}`);
-      assert.deepEqual(await stop(id), { status: 404, body: NOT_FOUND }, `delete ${id}`);
-    }
+test('an E2B session script gone before its command stream is reattached fails the start at once and the launcher serves on (a reattach to a dead pid that crashed the launcher)', T, async () => {
+  await withE2bLauncher({ shapes: [{ exitAtStart: { code: 2, stderr: '' }, waitDrops: 1 }] }, async ({ start, control, stderr }) => {
+    const failed = await start();
+    assert.deepEqual([failed.status, failed.body.detail], [502, 'session.js did not become ready (sandbox exited)']);
+    assert.match(stderr(), /session\.js pid 1 not found on reattach \(NotFoundError\)/);
+    assert.deepEqual(control.ops().filter((op) => op === 'connect'), ['connect']);
+    assert.equal((await start()).status, 201);
+  });
+});
+
+test('a proxy error page or a stray line on the script\'s event stream never reaches the reader, and no event is lost (an HTML 502 counted as script lines)', T, async () => {
+  await withE2bLauncher({ shape: { eventsAnswer: 502, strayLines: ['not json', '{"type":"debug","data":{}}'] } }, async ({ start, send, events, control, stderr }) => {
+    const id = (await start()).body.session_id;
+    assert.equal((await send(id, 'one')).status, 202);
+
+    assert.deepEqual((await events(id, { after: 0, until: 4 })).events, numbered(reply(1, 'one'), 1));
+    assert.deepEqual(control.fakes[SBX1].eventFroms, [0, 0]);
+    assert.match(stderr(), /dropped event of type unparseable[\s\S]*dropped event of type debug/);
   });
 });
 
@@ -467,37 +459,6 @@ test('on E2B the cap refuses the next start with 429, spends no sandbox on it, a
     assert.equal((await stop(a.body.session_id)).status, 204);
     assert.equal((await start()).status, 201);
     assert.notEqual(control.envs[SBX1].SESSION_SECRET, control.envs['sbx-fake-2'].SESSION_SECRET, 'each session has its own secret');
-  });
-});
-
-test('on E2B the buffer keeps the last SANDBOX_SESSION_BUFFER events; an older after is 410 (a stale reader that gets a silent gap)', T, async () => {
-  await withE2bLauncher({ env: { SANDBOX_SESSION_BUFFER: '3' } }, async ({ start, send, events, port }) => {
-    const id = (await start()).body.session_id;
-    const live = events(id, { after: 0, until: 4 });
-    await send(id, 'one');
-    assert.deepEqual((await live).events, numbered(reply(1, 'one'), 1), 'a live reader gets every event, whatever the buffer holds');
-
-    assert.deepEqual(await events(id, { after: 0 }), { status: 410, body: { error: 'events no longer held', kind: 'gone' } });
-    assert.deepEqual((await events(id, { after: 1, until: 4 })).events, numbered(reply(1, 'one'), 1).slice(1));
-    for (const [after, detail] of [['5', 'session.js: after is past the last event'], ['x', 'session.js: after must be a non-negative integer']]) {
-      const res = await request(port, 'GET', `/sessions/${id}/events?after=${after}`, { auth: 'Bearer testkey' });
-      assert.equal(res.status, 502, after);
-      assert.equal(res.body.kind, 'bad_request', after);
-      assert.equal(res.body.detail, detail);
-    }
-  });
-});
-
-test('on E2B a message with no text, or text over 1 MiB, is the caller\'s bad_request (a bad text sent into the sandbox)', T, async () => {
-  await withE2bLauncher({}, async ({ start, send, control }) => {
-    const id = (await start()).body.session_id;
-    for (const text of ['', 'a'.repeat((1 << 20) + 1)]) {
-      const res = await send(id, text);
-      assert.equal(res.status, 502);
-      assert.equal(res.body.kind, 'bad_request');
-      assert.equal(res.body.detail, 'session.js: text must be a non-empty string of at most 1 MiB');
-    }
-    assert.deepEqual(control.fakes[SBX1].messages, []);
   });
 });
 
@@ -597,4 +558,8 @@ test('an E2B session script that exits before it is ready is a 502 at once, its 
 test('a session on real E2B is dialed over https at the sandbox host (a session secret sent in clear text to E2B\'s proxy)', () => {
   assert.equal(e2bSessionAddress('9400-sbx-1.e2b.app', false), 'https://9400-sbx-1.e2b.app');
   assert.equal(e2bSessionAddress('9400-sbx-1.e2b.app', true), 'http://9400-sbx-1.e2b.app');
+});
+
+test('a session script that never says ready fails its start at the 90 s deadline (a start that waits forever on a hung script)', T, async () => {
+  await assert.rejects(waitSessionReady({ exited: false }, Date.now() - 90_000), { message: 'session.js did not become ready in 90000ms', launcherKind: 'timeout' });
 });

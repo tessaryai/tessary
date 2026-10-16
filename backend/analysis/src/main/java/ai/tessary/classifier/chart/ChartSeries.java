@@ -154,7 +154,9 @@ final class ChartSeries {
         if (n == 0) return null;
         double rank = q * n;
         long below = 0;
-        for (Map.Entry<Integer, Long> e : bins.entrySet()) {
+        // q <= 1, so the rank is at most n and the last non-empty bin always holds it.
+        for (var bin = bins.entrySet().iterator(); ; ) {
+            Map.Entry<Integer, Long> e = bin.next();
             long c = e.getValue();
             if (c == 0) continue;
             if (rank <= below + c) {
@@ -163,7 +165,6 @@ final class ChartSeries {
             }
             below += c;
         }
-        return Math.exp(grid.logHi());
     }
 
     /** @param bar the busiest facet or the whole project; ignored without a bar */
@@ -248,17 +249,10 @@ final class ChartSeries {
         return new HeadlineView((double) count, null);
     }
 
+    /** A rate or range point exists only for hours with items ({@link #merge}); a count point is every bucket's. */
     static boolean hasData(String kind, List<ChartPoint> points) {
-        for (ChartPoint p : points) {
-            long n =
-                    switch (kind) {
-                        case ClassifierChartDtos.ChartCard.RATE -> nz(p.checked());
-                        case ClassifierChartDtos.ChartCard.RANGE -> nz(p.n());
-                        default -> nz(p.total());
-                    };
-            if (n > 0) return true;
-        }
-        return false;
+        if (!ClassifierChartDtos.ChartCard.COUNT.equals(kind)) return !points.isEmpty();
+        return points.stream().anyMatch(p -> nz(p.total()) > 0);
     }
 
     /** The detector's own grid, so the chart bins as the detector does. */

@@ -17,6 +17,7 @@ import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.plan.Capability;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
@@ -64,6 +65,7 @@ record GroundednessFlaggedAnswersIntegrationTest(
         FindingRepository findings,
         FindingEvidenceRepository evidence,
         GroundednessDetailService detail,
+        FindingService findingService,
         JdbcClient jdbc,
         TraceV2Repository traces) {
 
@@ -135,7 +137,7 @@ record GroundednessFlaggedAnswersIntegrationTest(
         SpanRef unstoredRef =
                 new SpanRef(other.path("traceId").asText(), other.path("spanId").asText());
         Map<SpanRef, List<FlaggedSentenceText>> sentences =
-                detail.flaggedSentences(finding, List.of(storedRef, unstoredRef));
+                findingService.flaggedSentences(pid, finding.id(), List.of(storedRef, unstoredRef));
         assertEquals(
                 List.of(new FlaggedSentenceText(FIRST, 0.981), new FlaggedSentenceText(SECOND, 0.992)),
                 sentences.get(storedRef));

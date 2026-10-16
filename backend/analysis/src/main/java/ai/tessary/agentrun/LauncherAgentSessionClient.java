@@ -267,7 +267,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         }
         boolean accepted = false;
         try {
-            String body = mapper.writeValueAsString(mapper.createObjectNode().put("text", text));
+            String body = mapper.createObjectNode().put("text", text).toString();
             HttpRequest request = request(launcherUrl, sessionPath(sessionId) + "/messages")
                     .timeout(REQUEST_TIMEOUT)
                     .header("Accept", "application/json")
@@ -286,8 +286,6 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 return SendOutcome.CLOSED;
             }
             throw refusal("message", status, resp.body(), launcherUrl, state.lane.wire(), REQUEST_TIMEOUT);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("a message body always serializes", e);
         } finally {
             if (!accepted) {
                 state.open.compareAndSet(reply, null);

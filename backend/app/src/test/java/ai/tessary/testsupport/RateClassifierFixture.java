@@ -122,7 +122,7 @@ public class RateClassifierFixture {
                 null));
     }
 
-    private void frustrationFlag(
+    public void frustrationFlag(
             String pid, ClassifierRow signal, String traceId, String conversation, String callSite, Instant at) {
         jdbc.sql("INSERT INTO frustration_detection"
                         + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"

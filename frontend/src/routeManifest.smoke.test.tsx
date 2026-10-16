@@ -39,6 +39,7 @@ import type {
 import type { components } from "./api/generated/schema";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
+import { preloadRouteChunk } from "./lib/routePreload";
 import {
   GROUNDEDNESS_CASE_DETAIL,
   GROUNDEDNESS_FINDING_DETAIL,
@@ -886,6 +887,9 @@ async function mountAndSettle(url: string): Promise<HTMLElement> {
 describe("route manifest render smoke test", () => {
   beforeAll(async () => {
     await Promise.all(Object.values(VIEW_MODULES).map((load) => load()));
+    // Bug: a view whose chunk main.tsx already warmed never renders, while every cold one mounts here. So warm every
+    // chunk App registers before the first mount, and those views take the warm path.
+    VIEWS.forEach((v) => preloadRouteChunk(resolveUrl(v.fullPath)));
   });
 
   it("has a distinct fullPath for every view entry (proves the collision fix, not just trusts it)", () => {

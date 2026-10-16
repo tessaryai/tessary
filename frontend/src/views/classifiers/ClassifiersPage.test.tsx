@@ -149,7 +149,8 @@ describe("ClassifiersPage", () => {
     await waitFor(() => expect(api.getClassifierCharts).toHaveBeenCalledWith({ tool: "tool:lookup_customer" }, 28));
   });
 
-  // Bug: the pickers work by mouse only: no arrow keys, and focus is lost after a pick or Escape.
+  // Bug: the pickers work by mouse only: no arrow keys, Tab swallowed, left open when focus leaves, and focus lost
+  // after a pick or Escape.
   it("moves through a picker with the arrow keys and gives focus back after a pick or Escape", async () => {
     renderPage();
     await within(await toolSection()).findByRole("region", { name: "Tool Errors" });
@@ -162,6 +163,11 @@ describe("ClassifiersPage", () => {
     expect(document.activeElement).toBe(within(list).getByRole("option", { name: /lookup_customer/ }));
     fireEvent.keyDown(document.activeElement!, { key: "End" });
     expect(document.activeElement).toBe(within(list).getByRole("option", { name: /classify_ticket/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /lookup_customer/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "Home" });
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /search_orders/ }));
+    expect(fireEvent.keyDown(document.activeElement!, { key: "Tab" })).toBe(true);
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
@@ -170,9 +176,14 @@ describe("ClassifiersPage", () => {
     fireEvent.click(within(screen.getByRole("listbox", { name: "Tools" })).getByRole("option", { name: /lookup_customer/ }));
     expect(await within(await toolSection()).findByRole("button", { name: "Tool: lookup_customer" })).toBe(trigger);
     expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    fireEvent.blur(document.activeElement!, { relatedTarget: screen.getByRole("button", { name: "7d" }) });
+    expect(screen.queryByRole("listbox")).toBeNull();
   });
 
-  // Bug: the search box of a picker is a dead end for the keyboard: the arrows never reach the options under it.
+  // Bug: the search box of a picker is a dead end for the keyboard: the arrows never reach the options under it or
+  // come back up, and Enter picks nothing.
   it("moves from a picker's search box into its options with the down arrow", async () => {
     renderPage();
     await within(await callSiteSection()).findByRole("region", { name: "Frustration" });
@@ -185,6 +196,10 @@ describe("ClassifiersPage", () => {
     expect(document.activeElement).toBe(
       within(screen.getByRole("listbox", { name: "Call sites" })).getByRole("option", { name: /triage_router\.classify/ }),
     );
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(search);
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() => expect(api.getClassifierCharts).toHaveBeenCalledWith({ callSiteId: "triage_router.classify" }, 28));
   });
 
   // Bug: after a new range is picked, the old range's cards stay up with nothing to say they are out of date.
@@ -254,8 +269,8 @@ describe("ClassifiersPage", () => {
     expect(currentLocation()).toBe("/orgs/acme/projects/default/classifiers/id-frustration");
   });
 
-  // Bug: the Configure menu says it is a menu but takes no arrow keys, stays open when focus leaves it, and drops
-  // focus on Escape.
+  // Bug: the Configure menu says it is a menu but takes no arrow keys or swallows Tab, stays open when focus leaves
+  // it, and drops focus on Escape.
   it("moves through the Configure menu with the arrow keys, and gives focus back on Escape", async () => {
     renderPage();
     await within(await callSiteSection()).findByRole("region", { name: "Frustration" });
@@ -273,6 +288,7 @@ describe("ClassifiersPage", () => {
     expect(document.activeElement).toBe(items[0]);
     fireEvent.keyDown(items[0], { key: "ArrowUp" });
     expect(document.activeElement).toBe(items[2]);
+    expect(fireEvent.keyDown(items[2], { key: "Tab" })).toBe(true);
     fireEvent.keyDown(items[2], { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(trigger);

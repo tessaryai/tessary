@@ -9,7 +9,7 @@
  * Expected values are by hand: secret 'a' x 64, max_tool_calls_per_message 2 (so the agent's steps
  * are 3), and costs that are binary fractions so the sums are exact.
  */
-const { test } = require('node:test');
+const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -22,6 +22,7 @@ const BETA_TOKEN = 'tsy_a_betatoken';
 const SYSTEM_PROMPT = 'You are the session agent. Answer from the traces.';
 const usage = (input, output, cacheRead, cacheWrite, cost) => ({ input, output, cache_read: cacheRead, cache_write: cacheWrite, cost });
 const ev = (type, data) => ({ type, data });
+const NO_USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0 };
 
 const SCRIPT_A = {
   replies: [
@@ -295,21 +296,79 @@ test('the dossier lands under dossier/', async (t) => {
   assert.equal(fs.readFileSync(path.join(session.workDir, 'dossier', 'notes', 'a.md'), 'utf8'), 'hello');
 });
 
-test('a dossier path that escapes fails the start, and the session closes as failed', async (t) => {
-  // Bug caught: a session that cannot start stays up and looks alive to the launcher.
-  const session = await startSession({ input: { files: { '../x': 'y' } } });
-  t.after(() => session.cleanup());
-  await session.waitListening();
+// Each waits out the script's 5 s exit grace or its 2 s settle, so they run side by side.
+describe('sessions that end on a timer', { concurrency: true }, () => {
+  test('a bad session.json or a dossier path that escapes fails the start, and the session closes as failed', async (t) => {
+    // Bug caught: a session that cannot start stays up and looks alive to the launcher. The rows run
+    // side by side, as each waits out the 5 s exit grace.
+    await Promise.all([
+      [{ files: { '../x': 'y' } }, 'dossier path escapes root: ../x'],
+      ['{"system_prompt":', 'session.json: not valid JSON'],
+      [{ files: { 'a.md': 1 } }, 'session.json: files must map relative paths to strings'],
+      [{ mcp_servers: [{ name: 'Alpha', url: 'http://x', token: 't' }] }, 'session.json: each mcp_servers name must match /^[a-z][a-z0-9-]{0,31}$/'],
+      [{ mcp_servers: [{ name: 'alpha', url: 'http://x' }] }, 'session.json: mcp_servers alpha needs a url and a token'],
+      [{ max_tool_calls_per_message: 1001 }, 'session.json: max_tool_calls_per_message must be an integer from 1 to 1000'],
+    ].map(async ([input, detail]) => {
+      const session = await startSession({ input });
+      t.after(() => session.cleanup());
+      await session.waitListening();
 
-  const events = await session.readEvents(0, 'closed', 1);
+      assert.deepEqual(await session.readEvents(0, 'closed', 1), [ev('error', { kind: 'start', detail }), ev('closed', { reason: 'failed' })]);
+      assert.deepEqual((await session.request('GET', '/healthz')).body, { state: 'failed' });
+      assert.deepEqual((await session.request('POST', '/message', { text: 'hi' })).body, { kind: 'failed' });
+      assert.deepEqual(await withDeadline(session.exited, 7_000), { code: 1, signal: null });
+    }));
+  });
 
-  assert.deepEqual(events, [
-    ev('error', { kind: 'start', detail: 'dossier path escapes root: ../x' }),
-    ev('closed', { reason: 'failed' }),
-  ]);
-  assert.deepEqual((await session.request('GET', '/healthz')).body, { state: 'failed' });
-  assert.deepEqual((await session.request('POST', '/message', { text: 'hi' })).body, { kind: 'failed' });
-  assert.deepEqual(await withDeadline(session.exited, 7_000), { code: 1, signal: null });
+  test('a reply whose message never completes after an error still ends', async (t) => {
+    // Bug caught: OpenCode reports idle and never completes the message, and the reply stays open,
+    // so every later message is 409.
+    const script = {
+      replies: [
+        { steps: [{ usage: usage(5, 0, 0, 0, 0.5) }], error: { name: 'APIError', data: { message: 'overloaded' } } },
+        { steps: [{ text: ['Back.'], usage: usage(1, 1, 0, 0, 0.125) }] },
+      ],
+    };
+    const { session } = await readySession(t, { script, env: { FAKE_OPENCODE_NEVER_SETTLE: '1' } });
+
+    await send(session, 'hello');
+    const events = await session.readEvents(0, 'message_end', 1);
+
+    assert.deepEqual(events.map((e) => e.type), ['error', 'message_end']);
+    assert.equal(events[1].data.reason, 'done');
+    await send(session, 'again');
+    assert.deepEqual((await session.readEvents(2, 'message_end', 1))[0], ev('text', { delta: 'Back.' }));
+  });
+
+  test('an OpenCode that dies mid-session closes the session as failed', async (t) => {
+    // Bug caught: the launcher keeps a dead session as live.
+    const { session } = await readySession(t, { env: { FAKE_OPENCODE_EXIT_ON_PROMPT: '1' } });
+
+    const res = await session.request('POST', '/message', { text: 'hello' });
+    assert.equal(res.status, 502);
+    assert.equal(res.body.kind, 'prompt');
+    assert.equal(typeof res.body.detail, 'string');
+
+    const events = await session.eventsWithin(0, 6_000);
+    assert.deepEqual([...events], [ev('error', { kind: 'opencode_exit', detail: 'exit code 3' }), ev('closed', { reason: 'failed' })]);
+    assert.equal(events.ended, true, 'the /events response ends');
+    assert.deepEqual(await withDeadline(session.exited, 7_000), { code: 1, signal: null });
+  });
+
+  test('a tool OpenCode never settles after an abort still gets its tool_end', async (t) => {
+    // Bug caught: the step stays open in the backend forever, since its tool_end never comes.
+    const script = { replies: [{ steps: [{ tools: [{ name: 'alpha_slow', input: {}, duration_ms: 0, hang: true }], usage: usage(5, 1, 0, 0, 0.5) }] }] };
+    const { session } = await readySession(t, { script, env: { FAKE_OPENCODE_NEVER_SETTLE: '1' } });
+
+    await send(session, 'take your time');
+    await session.readEvents(0, 'tool_start', 1);
+    assert.equal((await session.request('POST', '/abort')).status, 204);
+
+    assert.deepEqual((await session.readEvents(0, 'message_end', 1)).slice(1), [
+      ev('tool_end', { call_id: 'call_1_1_1', result_summary: 'Tool did not finish', bytes: 19, duration_ms: 0, ok: false }),
+      ev('message_end', { usage: NO_USAGE, reason: 'aborted' }),
+    ]);
+  });
 });
 
 test('a lost SSE frame still yields tool_end and text before message_end', async (t) => {
@@ -363,41 +422,6 @@ test('a provider error is reported and the reply still ends once', async (t) => 
   assert.deepEqual([...later], [], 'the second idle pair ends nothing');
 });
 
-test('a reply whose message never completes after an error still ends', async (t) => {
-  // Bug caught: OpenCode reports idle and never completes the message, and the reply stays open,
-  // so every later message is 409.
-  const script = {
-    replies: [
-      { steps: [{ usage: usage(5, 0, 0, 0, 0.5) }], error: { name: 'APIError', data: { message: 'overloaded' } } },
-      { steps: [{ text: ['Back.'], usage: usage(1, 1, 0, 0, 0.125) }] },
-    ],
-  };
-  const { session } = await readySession(t, { script, env: { FAKE_OPENCODE_NEVER_SETTLE: '1' } });
-
-  await send(session, 'hello');
-  const events = await session.readEvents(0, 'message_end', 1);
-
-  assert.deepEqual(events.map((e) => e.type), ['error', 'message_end']);
-  assert.equal(events[1].data.reason, 'done');
-  await send(session, 'again');
-  assert.deepEqual((await session.readEvents(2, 'message_end', 1))[0], ev('text', { delta: 'Back.' }));
-});
-
-test('an OpenCode that dies mid-session closes the session as failed', async (t) => {
-  // Bug caught: the launcher keeps a dead session as live.
-  const { session } = await readySession(t, { env: { FAKE_OPENCODE_EXIT_ON_PROMPT: '1' } });
-
-  const res = await session.request('POST', '/message', { text: 'hello' });
-  assert.equal(res.status, 502);
-  assert.equal(res.body.kind, 'prompt');
-  assert.equal(typeof res.body.detail, 'string');
-
-  const events = await session.eventsWithin(0, 6_000);
-  assert.deepEqual([...events], [ev('error', { kind: 'opencode_exit', detail: 'exit code 3' }), ev('closed', { reason: 'failed' })]);
-  assert.equal(events.ended, true, 'the /events response ends');
-  assert.deepEqual(await withDeadline(session.exited, 7_000), { code: 1, signal: null });
-});
-
 test('a reader that reconnects with from gets only what it has not read', async (t) => {
   // Bug caught: the launcher numbers a replayed event twice or skips one.
   const { session } = await readySession(t);
@@ -431,11 +455,13 @@ test('a late idle from the previous reply does not end the new one', async (t) =
   assert.deepEqual(await playScriptA(session), [...REPLY_1_EVENTS, ...REPLY_2_EVENTS]);
 });
 
-test('a reply whose idle was lost in a stream reconnect still ends', async (t) => {
+test('a reply whose idle was lost in a stream reconnect, or in a broken stream, still ends', async (t) => {
   // Bug caught: the reply stays open and every later message is 409.
-  const { session } = await readySession(t, { env: { FAKE_OPENCODE_DROP_BEFORE_IDLE: '1' } });
+  for (const drop of ['1', 'reset']) {
+    const { session } = await readySession(t, { env: { FAKE_OPENCODE_DROP_BEFORE_IDLE: drop } });
 
-  assert.deepEqual(await playScriptA(session), [...REPLY_1_EVENTS, ...REPLY_2_EVENTS]);
+    assert.deepEqual(await playScriptA(session), [...REPLY_1_EVENTS, ...REPLY_2_EVENTS], drop);
+  }
 });
 
 test('a reply whose user message was lost in a stream reconnect still ends', async (t) => {
@@ -490,6 +516,52 @@ test('a reply OpenCode compacts midway streams the steps after it and books ever
       reason: 'done',
     }),
   ]);
+});
+
+test('a built-in tool is reported with no server', async (t) => {
+  // Bug caught: a bash call is credited to an MCP server, or reported with no tool name.
+  const script = { replies: [{ steps: [{ tools: [{ name: 'bash', input: { command: 'ls' }, duration_ms: 2 }], usage: usage(1, 1, 0, 0, 0.125) }] }] };
+  const { session } = await readySession(t, { script });
+
+  await send(session, 'look around');
+
+  assert.deepEqual((await session.readEvents(0, 'tool_start', 1))[0], ev('tool_start', { call_id: 'call_1_1_1', server: null, tool: 'bash', input_summary: '{"command":"ls"}' }));
+});
+
+test('a reply whose stored messages cannot be read still ends, and the session takes the next message', async (t) => {
+  // Bug caught: the reply stays open, so every later message is 409.
+  const { session } = await readySession(t, { env: { FAKE_OPENCODE_FAIL: 'message' } });
+
+  await send(session, 'find the angry traces');
+
+  assert.deepEqual(await session.readEvents(0, 'message_end', 1), [...REPLY_1_EVENTS.slice(0, 5), ev('message_end', { usage: NO_USAGE, reason: 'done' })]);
+  assert.match(session.stderr(), /session messages unread at reply end: /);
+  await send(session, 'now the widget');
+});
+
+test('a reconnect whose status read fails leaves the session up', async (t) => {
+  // Bug caught: one failed OpenCode call after a stream reconnect kills the whole session.
+  const { session } = await readySession(t, { env: { FAKE_OPENCODE_DROP_BEFORE_IDLE: '1', FAKE_OPENCODE_FAIL: 'status' } });
+
+  await send(session, 'find the angry traces');
+  await session.waitForStderr(/reply not recovered after a reconnect: /);
+
+  assert.deepEqual((await session.request('GET', '/healthz')).body, { state: 'ready' });
+});
+
+test('an abort OpenCode refuses, at the tool cap or asked for, is reported and the session stays', async (t) => {
+  // Bug caught: a refused abort crashes the session, or reads as a 204.
+  const hanging = { text: ['s3'], tools: [{ name: 'alpha_list_traces', input: { q: 'q3' }, duration_ms: 1, hang: true }], usage: usage(1, 1, 0, 0, 0.125) };
+  const script = { replies: [{ steps: [toolStep(1), toolStep(2), hanging] }] };
+  const { session } = await readySession(t, { script, env: { FAKE_OPENCODE_FAIL: 'abort' } });
+
+  await send(session, 'keep going');
+  await session.waitForStderr(/reply not aborted at its tool cap: /);
+  const refused = await session.request('POST', '/abort');
+
+  assert.deepEqual([refused.status, refused.body.kind], [502, 'abort']);
+  assert.match(refused.body.detail, /fake abort failure/);
+  assert.deepEqual((await session.request('GET', '/healthz')).body, { state: 'ready' });
 });
 
 function withDeadline(promise, ms) {

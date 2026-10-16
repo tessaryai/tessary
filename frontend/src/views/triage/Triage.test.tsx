@@ -139,27 +139,18 @@ describe("the open cases", () => {
   });
 
   // Bug: the setup screen dropped with the empty list, so a project with no classifier running reads as all
-  // clear and is never told what to do next.
-  it("keeps the setup screen in the Cases section while a stage still needs action", async () => {
-    api.getTriage.mockResolvedValue(
-      triage({ cases: [], watching: { ...WATCHING, classifiers: 0 } as TriageView["watching"] }),
-    );
+  // clear and is never told what to do next; or a stopped exporter hidden behind "Nothing needs you.", which reads
+  // as all clear while nothing arrives.
+  it.each([
+    ["while a stage still needs action", { classifiers: 0 }, "No classifiers running"],
+    ["when traces have stopped, even with every stage running", { traces_last_day: 0 }, /No traces have arrived in the last 24 hours/],
+  ])("keeps the setup screen in the Cases section %s", async (_, watching, said) => {
+    api.getTriage.mockResolvedValue(triage({ cases: [], watching: { ...WATCHING, ...watching } as TriageView["watching"] }));
     renderPage();
 
-    expect(await within(section("Cases")).findByText("No classifiers running")).toBeTruthy();
+    expect(await within(section("Cases")).findByText(said)).toBeTruthy();
     expect(screen.queryByText("Nothing needs you.")).toBeNull();
     expect(screen.queryByRole("heading", { level: 2, name: "Findings" })).toBeNull();
-  });
-
-  // Bug: a stopped exporter hidden behind "Nothing needs you.", which reads as all clear while nothing arrives.
-  it("keeps the setup screen when traces have stopped, even with every stage running", async () => {
-    api.getTriage.mockResolvedValue(
-      triage({ cases: [], watching: { ...WATCHING, traces_last_day: 0 } as TriageView["watching"] }),
-    );
-    renderPage();
-
-    expect(await within(section("Cases")).findByText(/No traces have arrived in the last 24 hours/)).toBeTruthy();
-    expect(screen.queryByText("Nothing needs you.")).toBeNull();
   });
 });
 

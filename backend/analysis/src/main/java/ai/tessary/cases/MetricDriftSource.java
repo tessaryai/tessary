@@ -86,7 +86,7 @@ public class MetricDriftSource implements CaseSource {
      * them.
      */
     private static String basis(FindingRow finding, @Nullable Read read) {
-        String gate = gateSentence(finding);
+        String gate = GenericFindingCaseSource.gateSentence(finding);
         if (read == null) {
             return gate + " Its measured shift could not be read back from the finding — see the finding "
                     + "itself on the Classifiers page.";
@@ -100,13 +100,6 @@ public class MetricDriftSource implements CaseSource {
                 Math.abs(read.w1Log()),
                 read.nCur(),
                 sampleWord(read.measure()));
-    }
-
-    private static String gateSentence(FindingRow finding) {
-        if (finding.humanVerdictAt() != null) {
-            return "A human ruled this a real deviation.";
-        }
-        return "A triage run audited this claim and found it sound.";
     }
 
     /**

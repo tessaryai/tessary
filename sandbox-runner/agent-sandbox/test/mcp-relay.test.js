@@ -113,24 +113,6 @@ test('a large tools/call result reads next_cursor as well as nextCursor', async 
   assert.equal(summary.cursor, 'xyz789', 'the snake_case wire spelling is read too');
 });
 
-test('sequential large calls number their files 001, 002, ... by tool', async (t) => {
-  const bigRows = Array.from({ length: 500 }, (_, i) => ({ id: i, value: 'x'.repeat(30) }));
-  const upstream = await startStubUpstream((reqBody, req, res) => {
-    res.writeHead(200, { 'content-type': 'application/json' }).end(
-      JSON.stringify(jsonRpcToolResult(reqBody.id, { rows: bigRows })),
-    );
-  });
-  t.after(() => upstream.close());
-  const workDir = tempWorkDir();
-  const relay = await relayFor(upstream.url, 'test-token', workDir);
-  t.after(() => relay.close());
-
-  const first = await callTool(relay.url, 10, 'get_finding_evidence');
-  const second = await callTool(relay.url, 11, 'get_trace');
-  assert.equal(JSON.parse(first.body.result.content[0].text).file, path.join('checks', 'mcp', '001-get_finding_evidence.json'));
-  assert.equal(JSON.parse(second.body.result.content[0].text).file, path.join('checks', 'mcp', '002-get_trace.json'));
-});
-
 test('the file sequence keeps incrementing across a mix of small and large calls', async (t) => {
   const bigRows = Array.from({ length: 500 }, (_, i) => ({ id: i, value: 'x'.repeat(30) }));
   const upstream = await startStubUpstream((reqBody, req, res) => {

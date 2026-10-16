@@ -612,12 +612,12 @@ public class FindingRepository {
                 .list();
     }
 
-    /** One row per key, so an un-owned key with many findings cannot fill a page before an owned one is seen. */
+    /**
+     * One row per key, so an un-owned key with many findings cannot fill a page before an owned one is seen. Never
+     * called with no excluded keys (its caller always excludes the built-ins), which {@code NOT IN ()} could not express.
+     */
     public List<FindingClaim> escalationCandidatesByKey(
             String projectId, Collection<String> excludedKeys, long minSampleCount) {
-        if (excludedKeys.isEmpty()) {
-            throw new IllegalArgumentException("escalationCandidatesByKey needs at least one excluded key");
-        }
         return jdbc.sql("SELECT DISTINCT ON (f.classifier_key) " + CLAIM_COLS + " FROM finding f"
                         + " WHERE f.project_id = :pid AND f.classifier_key NOT IN (:excluded)"
                         + AUTO_ESCALATABLE

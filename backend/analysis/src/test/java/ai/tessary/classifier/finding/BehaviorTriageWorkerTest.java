@@ -39,6 +39,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.core.task.SyncTaskExecutor;
 
@@ -260,6 +261,27 @@ class BehaviorTriageWorkerTest {
                 .tick();
 
         verify(jobs, times(100)).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
+    }
+
+    /**
+     * The bugs: a lease shorter than the 30-minute agentic run plus 300 s headroom lets a live run be re-claimed and a
+     * second microVM spawn; an operator's longer {@code lease-seconds} being ignored.
+     */
+    @ParameterizedTest
+    @CsvSource({"1800, 2100", "9000, 9000"})
+    void theClaimLeaseOutlastsTheAgenticRunUnlessConfiguredLonger(long leaseSeconds, long expected) {
+        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
+        new BehaviorTriageWorker(
+                        jobs,
+                        List.of(FakeTriageSource.briefing()),
+                        mock(BehaviorTriageEngine.class),
+                        Props.of(ClassifierProperties.class),
+                        Props.of(ObserverProperties.class, "lease-seconds", leaseSeconds),
+                        new TraceMdcBridge(mock(Tracer.class)),
+                        new SyncTaskExecutor(),
+                        breaker())
+                .tick();
+        verify(jobs).claimBatch(anyString(), anyInt(), eq(expected), anyInt());
     }
 
     /** A breaker that trips on the first launcher failure and parks for an hour. */

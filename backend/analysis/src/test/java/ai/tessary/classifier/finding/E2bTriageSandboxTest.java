@@ -18,11 +18,14 @@ import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
+import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.testsupport.Props;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import ai.tessary.usage.LlmUsageAccountant;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.api.OpenTelemetry;
 import java.io.ByteArrayOutputStream;
@@ -328,6 +331,32 @@ class E2bTriageSandboxTest {
                         eq(0L),
                         eq(new BigDecimal("0.5")),
                         eq(new LlmUsageAccountant.Subject(E2bTriageSandbox.SUBJECT_KIND, "f1")));
+    }
+
+    /** A pinned TRIAGE lane runs its own provider and model, at that model's rates, not the deployment default's. */
+    @Test
+    void aPinnedLaneSendsItsProviderModelAndRates() throws Exception {
+        ProjectModelSettings settings = mock(ProjectModelSettings.class);
+        when(settings.resolveAgenticModel("proj", ModelLane.TRIAGE))
+                .thenReturn(Optional.of(
+                        new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.GROK, "grok-4.6", "xai/grok-4.6")));
+        StringBuilder posted = new StringBuilder();
+        new E2bTriageSandbox(
+                props(), settings, credentials(), mock(LlmUsageAccountant.class), RATES, OpenTelemetry.noop(), MAPPER) {
+            @Override
+            HttpResponse<String> send(HttpRequest req) {
+                posted.append(ScriptedHttpClient.body(req));
+                return respondWith(200, "{}");
+            }
+        }.run(request());
+
+        JsonNode body = MAPPER.readTree(posted.toString());
+        assertEquals("grok-4.6", body.path("model").asText());
+        assertEquals("GROK", body.path("provider").asText());
+        assertEquals(
+                MAPPER.readTree(MAPPER.writeValueAsString(
+                        RATES.cost("xai/grok-4.6").orElseThrow().toOpencodeCost(MAPPER))),
+                body.path("model_cost"));
     }
 
     /**

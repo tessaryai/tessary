@@ -124,13 +124,16 @@ class RcaAnalysisServiceTest {
     }
 
     /**
-     * An owned finding's RCA dossier carries its adapter's RCA method, not its triage method. The bug is the triage
-     * method, written for a ruling, handed to the RCA agent.
+     * An owned finding's RCA dossier carries its adapter's RCA method, not its triage method, and, with no evidence
+     * file of the owner's, the payload fenced longer than any backtick run in it. The bugs are the triage method,
+     * written for a ruling, handed to the RCA agent, and a payload holding a code block closing the fence early.
      */
     @Test
     void anOwnedFindingsRcaDossierCarriesItsAdaptersRcaMethod() {
         when(evidence.claimFirst(PROJECT, "f1", ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP))
                 .thenReturn(new FindingEvidenceRepository.Head(List.of(WITNESS_ROW), false));
+        when(findings.findClaim(PROJECT, "f1"))
+                .thenReturn(Optional.of(claim("custom-x", "{\"note\":\"```sh rm ```\"}", "{\"witness\":1}")));
 
         Map<String, String> dossier = dossierOf(FindingAdapters.of(
                 List.of(FakeFindingAdapter.owning("custom-x", "# Triage method\n", "# RCA method\n", null))));
@@ -139,6 +142,9 @@ class RcaAnalysisServiceTest {
                 Set.of("findings/1-f1/finding.md", "findings/1-f1/evidence.md", "method.md", "tools.md"),
                 dossier.keySet());
         assertEquals("# RCA method\n", dossier.get("method.md"));
+        assertEquals(
+                "# Classifier evidence\n\n````json\n{\"note\":\"```sh rm ```\"}\n````\n",
+                dossier.get("findings/1-f1/evidence.md"));
     }
 
     /**

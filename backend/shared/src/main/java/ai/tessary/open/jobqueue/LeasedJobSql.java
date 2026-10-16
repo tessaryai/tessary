@@ -2,6 +2,8 @@
 package ai.tessary.open.jobqueue;
 
 import java.util.Locale;
+import java.util.UUID;
+import java.util.concurrent.Callable;
 
 /**
  * The single source of the claim and dead-letter SQL for leased job kinds. Every argument is a code-level constant,
@@ -10,6 +12,20 @@ import java.util.Locale;
 public final class LeasedJobSql {
 
     private LeasedJobSql() {}
+
+    /**
+     * This process's name on the leases it holds: the host's name, or {@code host} when it does not resolve, since a
+     * name that threw would stop the worker constructing; the suffix tells two workers on one host apart.
+     */
+    public static String leaseOwner(Callable<String> hostName) {
+        String host;
+        try {
+            host = hostName.call();
+        } catch (Exception e) {
+            host = "host";
+        }
+        return host + "-" + UUID.randomUUID().toString().substring(0, 8);
+    }
 
     /**
      * Due when {@code pending}, or {@code claimed} with an expired lease under the attempt cap. The status disjunction

@@ -20,7 +20,6 @@ import ai.tessary.tenant.OrgMembershipRepository;
 import ai.tessary.tenant.ProjectRepository;
 import ai.tessary.usage.LlmUsageAccountant;
 import jakarta.annotation.PostConstruct;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -190,12 +189,7 @@ public class AgentRunService {
 
     private @Nullable String orgOwnerPrincipal(String projectId) {
         return projects.findById(projectId)
-                .flatMap(p -> memberships.findByOrg(p.orgId()).stream()
-                        .filter(OrgMembership::isOwner)
-                        .sorted(Comparator.comparing(OrgMembership::createdAt)
-                                .thenComparing(OrgMembership::principalId))
-                        .findFirst())
-                .map(OrgMembership::principalId)
+                .flatMap(p -> OrgMembership.eldestOwner(memberships.findByOrg(p.orgId())))
                 .orElse(null);
     }
 

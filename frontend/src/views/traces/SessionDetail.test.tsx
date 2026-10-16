@@ -260,4 +260,9 @@ it("detections: marks the turn a classifier flagged, in its own trace only", asy
   const marker = screen.getByText("Frustration");
   expect(screen.getAllByText("Frustration")).toHaveLength(1);
   expect(second.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+  // Bug: the tree opens the first trace only, so a mark in a later one stays folded away.
+  cleanup();
+  renderSession("?view=tree");
+  expect(await screen.findAllByText("Frustration")).toHaveLength(1);
 });

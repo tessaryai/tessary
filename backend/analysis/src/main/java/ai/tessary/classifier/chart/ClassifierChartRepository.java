@@ -239,14 +239,12 @@ public class ClassifierChartRepository {
 
     private Optional<LocalDate> lastDay(
             String sql, String projectId, String classifierId, String scorerVersion, String callSite, Instant before) {
-        return jdbc.sql(sql)
+        return day(jdbc.sql(sql)
                 .param("pid", projectId)
                 .param("cid", classifierId)
                 .param("scorerVersion", scorerVersion)
                 .param("callSite", callSite)
-                .param("before", at(before))
-                .query((rs, n) -> Optional.ofNullable(utcDay(rs.getObject("last_at", OffsetDateTime.class))))
-                .single();
+                .param("before", at(before)));
     }
 
     /**
@@ -282,7 +280,7 @@ public class ClassifierChartRepository {
 
     public Optional<LocalDate> malformedLastDay(
             String projectId, String callSite, Instant before, String checkedBefore) {
-        return jdbc.sql("""
+        return day(jdbc.sql("""
                         SELECT MAX(s.started_at) AS last_at
                           FROM span s
                           JOIN call_site cs
@@ -296,9 +294,7 @@ public class ClassifierChartRepository {
                 .param("pid", projectId)
                 .param("callSite", callSite)
                 .param("before", at(before))
-                .param("checkedBefore", checkedBefore)
-                .query((rs, n) -> Optional.ofNullable(utcDay(rs.getObject("last_at", OffsetDateTime.class))))
-                .single();
+                .param("checkedBefore", checkedBefore));
     }
 
     /**
@@ -340,13 +336,12 @@ public class ClassifierChartRepository {
 
     public Optional<LocalDate> toolCallLastDay(String projectId, Collection<String> names, Instant before) {
         if (names.isEmpty()) return Optional.empty();
-        return jdbc.sql("SELECT MAX(tc.started_at) AS last_at FROM tool_call tc " + TOOL_SPAN_JOIN + TOOL_CALLS_WHERE
-                        + " AND tc.started_at < :before AND COALESCE(NULLIF(tc.name, ''), 'unnamed') IN (:names)")
+        return day(jdbc.sql(
+                        "SELECT MAX(tc.started_at) AS last_at FROM tool_call tc " + TOOL_SPAN_JOIN + TOOL_CALLS_WHERE
+                                + " AND tc.started_at < :before AND COALESCE(NULLIF(tc.name, ''), 'unnamed') IN (:names)")
                 .param("pid", projectId)
                 .param("before", at(before))
-                .param("names", names)
-                .query((rs, n) -> Optional.ofNullable(utcDay(rs.getObject("last_at", OffsetDateTime.class))))
-                .single();
+                .param("names", names));
     }
 
     public record ToolCallerRow(String name, @Nullable String callSiteId, long calls) {}
@@ -401,7 +396,7 @@ public class ClassifierChartRepository {
     }
 
     public Optional<LocalDate> turnLastDay(String projectId, String callSite, Instant before, boolean priced) {
-        return jdbc.sql("""
+        return day(jdbc.sql("""
                         SELECT MAX(tr.started_at) AS last_at FROM trace tr
                          WHERE tr.project_id = :pid AND tr.is_settled AND tr.is_deleted IS NOT TRUE
                            AND COALESCE(tr.call_site_id, '__unattributed__') = :callSite
@@ -409,9 +404,7 @@ public class ClassifierChartRepository {
                         """ + (priced ? PRICED : ""))
                 .param("pid", projectId)
                 .param("callSite", callSite)
-                .param("before", at(before))
-                .query((rs, n) -> Optional.ofNullable(utcDay(rs.getObject("last_at", OffsetDateTime.class))))
-                .single();
+                .param("before", at(before)));
     }
 
     private List<RangeRow> histogram(String hourAndValue, String projectId, String callSite, Instant from, Grid grid) {
@@ -493,7 +486,7 @@ public class ClassifierChartRepository {
             Instant from,
             Instant before) {
         if (names.isEmpty()) return Optional.empty();
-        return toolDuration(
+        return day(toolDuration(
                         "SELECT MAX(s.started_at) AS last_at",
                         " AND s.started_at < :before",
                         "",
@@ -501,9 +494,7 @@ public class ClassifierChartRepository {
                         names,
                         callSiteIds,
                         from)
-                .param("before", at(before))
-                .query((rs, n) -> Optional.ofNullable(utcDay(rs.getObject("last_at", OffsetDateTime.class))))
-                .single();
+                .param("before", at(before)));
     }
 
     /**
@@ -599,7 +590,7 @@ public class ClassifierChartRepository {
     public Optional<LocalDate> countLastDay(
             String detectorKind, String projectId, String classifierId, String callSite, Instant before) {
         String table = Objects.requireNonNull(detections.tableFor(detectorKind));
-        return jdbc.sql("SELECT MAX(d.subject_started_at) AS last_at FROM " + table + " d"
+        return day(jdbc.sql("SELECT MAX(d.subject_started_at) AS last_at FROM " + table + " d"
                         + " JOIN span s ON s.project_id = d.project_id"
                         + " AND s.trace_id = d.subject_trace_id AND s.id = d.subject_span_id"
                         + " WHERE d.project_id = :pid AND d.classifier_id = :cid"
@@ -607,9 +598,7 @@ public class ClassifierChartRepository {
                 .param("pid", projectId)
                 .param("cid", classifierId)
                 .param("callSite", callSite)
-                .param("before", at(before))
-                .query((rs, n) -> Optional.ofNullable(utcDay(rs.getObject("last_at", OffsetDateTime.class))))
-                .single();
+                .param("before", at(before)));
     }
 
     /** Compared as instants, not as the ISO text the columns hold, which drops a zero fraction and so does not sort. */
@@ -768,6 +757,12 @@ public class ClassifierChartRepository {
     private static @Nullable Double nullableDouble(ResultSet rs, String column) throws SQLException {
         double v = rs.getDouble(column);
         return rs.wasNull() ? null : v;
+    }
+
+    /** The UTC day of {@code lastAt}'s one {@code last_at} column, empty when it is null. */
+    private static Optional<LocalDate> day(JdbcClient.StatementSpec lastAt) {
+        return lastAt.query((rs, n) -> Optional.ofNullable(utcDay(rs.getObject("last_at", OffsetDateTime.class))))
+                .single();
     }
 
     private static @Nullable LocalDate utcDay(@Nullable OffsetDateTime at) {

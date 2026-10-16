@@ -24,7 +24,6 @@ import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -171,12 +170,7 @@ public class BehaviorTriageEngine {
     /** Earliest membership wins, so runs attribute stably. */
     private @Nullable String orgOwnerPrincipal(String projectId) {
         return projects.findById(projectId)
-                .flatMap(p -> memberships.findByOrg(p.orgId()).stream()
-                        .filter(OrgMembership::isOwner)
-                        .sorted(Comparator.comparing(OrgMembership::createdAt)
-                                .thenComparing(OrgMembership::principalId))
-                        .findFirst())
-                .map(OrgMembership::principalId)
+                .flatMap(p -> OrgMembership.eldestOwner(memberships.findByOrg(p.orgId())))
                 .orElse(null);
     }
 

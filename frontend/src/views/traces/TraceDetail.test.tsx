@@ -10,7 +10,7 @@
  * Tree nests each execution under the llm call that asked for it; Timeline scales bars to the trace.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { TraceDetailView } from "../../api/types";
 import { span, traceItem, type SpanView } from "../../test/fixtures";
 import { currentParams, renderRoute } from "../../test/render";
@@ -261,13 +261,15 @@ describe("Tree", () => {
 describe("JSON", () => {
   const longInput = j([...HISTORY, QUESTION, TOOL_REQUEST_REPLAYED, TOOL_RESULTS]);
 
-  it("folds each span, and shows every string in full once expanded", async () => {
+  it("folds each span, shows every string in full once expanded, and folds again on Collapse all", async () => {
     renderTrace("?view=json");
 
     await screen.findByRole("button", { name: "Expand all" });
     expect(screen.queryByText(longInput)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
     expect(screen.getByText(longInput)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.queryByText(longInput)).toBeNull();
   });
 
   it("copies the response exactly as the API sent it", async () => {
@@ -277,6 +279,21 @@ describe("JSON", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
     expect(writeText).toHaveBeenCalledWith(JSON.stringify(detail(), null, 2));
+  });
+
+  // Bug: Download saves nothing, saves under another trace's name, or holds other bytes than Copy gives.
+  it("downloads the response as the trace's own file, and frees it after", async () => {
+    const saved: Blob[] = [];
+    const revoke = vi.fn();
+    Object.assign(URL, { createObjectURL: (blob: Blob) => (saved.push(blob), "blob:trace"), revokeObjectURL: revoke });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderTrace("?view=json");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+    const files = click.mock.contexts as HTMLAnchorElement[];
+    expect(files.map((a) => [a.download, a.href])).toEqual([["trace-tr-1.json", "blob:trace"]]);
+    expect(await saved[0].text()).toBe(JSON.stringify(detail(), null, 2));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:trace"));
   });
 });
 
