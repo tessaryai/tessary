@@ -75,10 +75,8 @@ class KafkaSpoolTest {
     private MockConsumer<String, byte[]> consumer = new MockConsumer<>("earliest");
 
     private KafkaSpool spool(Object... keyValues) {
-        Object[] prefixed = keyValues.clone();
-        for (int i = 0; i < prefixed.length; i += 2) prefixed[i] = "kafka." + prefixed[i];
         IngestSpoolProperties.Kafka props =
-                Props.of(IngestSpoolProperties.class, prefixed).kafka();
+                Props.of(IngestSpoolProperties.class, keyValues).kafka();
         return new KafkaSpool(props, mapper, producer, admin, () -> consumer, nanos::get);
     }
 
@@ -158,7 +156,7 @@ class KafkaSpoolTest {
      */
     @Test
     void anOversizeOrUnencodableBatchNeverReachesTheBroker() {
-        KafkaSpool small = spool("max-message-bytes", 64);
+        KafkaSpool small = spool("kafka.max-message-bytes", 64);
         assertEquals(IngestSpool.Admission.OVERSIZE, small.append("p", ENTRIES));
         assertEquals(0, small.pressure());
 
