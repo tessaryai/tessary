@@ -15,7 +15,7 @@ import { AuthProvider } from "../../auth/AuthContext";
 import { TenantProvider } from "../../tenant/TenantContext";
 import { ToastProvider } from "../../ui/Toast";
 import { ConnectGate } from "./ConnectGate";
-import { TAG_REPAIR_PROMPT } from "../components/SourceConnect";
+import { OTLP_PROMPT, TAG_REPAIR_PROMPT } from "../components/SourceConnect";
 import type { Me, Project } from "../../api/types-auth";
 import { useLocation } from "react-router-dom";
 
@@ -231,6 +231,11 @@ describe("ConnectGate — the token and the endpoint", () => {
     fireEvent.click(within(token).getByRole("button", { name: /Copy/ }));
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("tsy_test_token"));
     expect(createApiKeyCalls).toBe(1);
+
+    // Bug: the prompt copies something other than the instructions, or copies without a word.
+    fireEvent.click(screen.getByRole("button", { name: /Copy prompt/ }));
+    expect(await screen.findByText("Prompt copied")).toBeTruthy();
+    expect(writeText).toHaveBeenLastCalledWith(OTLP_PROMPT);
   });
 });
 

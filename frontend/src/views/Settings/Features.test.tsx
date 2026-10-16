@@ -55,6 +55,18 @@ describe("changing", () => {
     );
   });
 
+  // Bug: a refused change says nothing, so the reader believes automatic triage changed.
+  it("says why a change was refused", async () => {
+    auth.setCapabilityOverride.mockRejectedValue(new Error("Only an owner can change this"));
+    renderRoute(<Features />);
+    await waitFor(() => expect(toggle().disabled).toBe(false));
+
+    fireEvent.click(toggle());
+
+    expect(await screen.findByText("Could not change automatic triage")).toBeTruthy();
+    expect(screen.getByText("Only an owner can change this")).toBeTruthy();
+  });
+
   it.each(["member", "viewer"])("offers no switch to a %s", async (role) => {
     session.role = role;
     renderRoute(<Features />);

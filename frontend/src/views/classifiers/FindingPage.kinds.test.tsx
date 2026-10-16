@@ -373,7 +373,8 @@ const owned = (over: Partial<Finding> = {}, detail: ClassifierDetail = CLASSIFIE
   );
 
 describe("a finding with a classifier detail", () => {
-  // Bug: a detailed finding fell through to the generic layout, with no figure and the verbs below the title.
+  // Bug: a detailed finding fell through to the generic layout, with no figure and the verbs below the title, or its
+  // verbs sent nothing.
   it("heads the page with its title and one triage button, and tells the rate in its unit", async () => {
     api.getBehaviorFinding.mockResolvedValue(owned());
     renderPage();
@@ -398,6 +399,8 @@ describe("a finding with a classifier detail", () => {
 
     fireEvent.click(button("Run triage"));
     await waitFor(() => expect(api.analyzeBehaviorFinding).toHaveBeenCalledWith("fnd-1"));
+    fireEvent.click(button("Confirm and open a case"));
+    await waitFor(() => expect(api.resolveBehaviorFinding).toHaveBeenCalledWith("fnd-1", "not_expected"));
   });
 
   // Bug: a ruled finding kept offering verbs that 409, or hid the case its ruling opened.

@@ -18,15 +18,17 @@ const STATE: EmptyState = {
 };
 const ENDPOINT = `${window.location.origin}/v1/traces`;
 
-it("PipelineEmpty: says when the endpoint could not be copied, and shows it to copy by hand", async () => {
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
-    configurable: true,
-  });
+it.each([
+  ["was copied", () => Promise.resolve(), "Endpoint copied"],
+  ["could not be copied", () => Promise.reject(new Error("denied")), "Could not copy"],
+])("PipelineEmpty: says the endpoint %s, and names it to copy by hand", async (_, copy, said) => {
+  const writeText = vi.fn(copy);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   renderRoute(<PipelineEmpty state={STATE} />);
 
   fireEvent.click(screen.getByRole("button", { name: "Copy endpoint" }));
 
-  expect(await screen.findByText("Could not copy")).toBeTruthy();
+  expect(await screen.findByText(said)).toBeTruthy();
   expect(screen.getByText(ENDPOINT)).toBeTruthy();
+  expect(writeText).toHaveBeenCalledWith(ENDPOINT);
 });

@@ -18,6 +18,7 @@ import { AuthProvider } from "../../auth/AuthContext";
 import { renderRoute } from "../../test/render";
 import { CasePage } from "./CasePage";
 import { stamp } from "../classifiers/shared";
+import { FLAGGED_LIST_ID } from "../classifiers/classifierStory";
 import {
   CURRENT_GROUNDEDNESS_REPORT, FLAGGED_ANSWER, GROUNDEDNESS_CASE_DETAIL, GROUNDEDNESS_DETAIL, GROUNDEDNESS_REPORT,
 } from "../../test/groundednessFixtures";
@@ -181,14 +182,16 @@ describe("closing a case", () => {
   });
 
   it.each([
-    ["Close", api.closeCase],
-    ["Absorb", api.absorbCase],
-  ])("dismisses the %s dialog on Cancel without sending it", async (verb, send) => {
+    ["Close", "Cancel", api.closeCase],
+    ["Close", "Close", api.closeCase],
+    ["Absorb", "Cancel", api.absorbCase],
+    ["Absorb", "Close", api.absorbCase],
+  ])("dismisses the %s dialog on %s without sending it", async (verb, dismiss, send) => {
     renderPage();
     await heading(BASE.case.title);
 
     fireEvent.click(button(verb));
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: dismiss }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await settle();
@@ -221,19 +224,23 @@ describe("closing a case", () => {
     expect(screen.queryByRole("button", { name: "Absorb" })).toBeNull();
   });
 
-  it("offers no verbs on a closed case, and says who closed it and why", async () => {
+  it.each([
+    ["fixed", "Closed as fixed"],
+    ["false_alarm", "Closed as a false alarm"],
+    [null, "Closed"],
+  ])("offers no verbs on a closed case, and says who closed it and why (%s)", async (disposition, closed) => {
     api.getCase.mockResolvedValue({
       ...BASE,
       case: {
         ...BASE.case,
         state: "resolved", resolved_at: "2026-09-23T15:00:00Z", resolved_by: "dana@example.com",
-        resolution_reason: "prompt fixed", disposition: "fixed",
+        resolution_reason: "prompt fixed", disposition,
       },
     });
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.getByText(/Closed as fixed .* by dana@example.com: prompt fixed/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`^${closed} (?!as ).* by dana@example.com: prompt fixed$`))).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^(Close|Absorb|Re-run RCA)$/ })).toBeNull();
   });
 
@@ -632,6 +639,13 @@ describe("a case with a classifier detail", () => {
     expect(screen.getAllByRole("button", { name: /^Show \d+ items?$/ }).map((b) => b.textContent)).toEqual([
       "Show 2 items",
     ]);
+
+    // Bug: Show N items scrolls nowhere, because the case page and the flagged list a build adds disagree on its id.
+    const list = document.body.appendChild(Object.assign(document.createElement("div"), { id: FLAGGED_LIST_ID }));
+    list.scrollIntoView = vi.fn();
+    fireEvent.click(button("Show 2 items"));
+    expect(list.scrollIntoView).toHaveBeenCalled();
+    list.remove();
   });
 
   // Bug: a report of another kind on a detailed case offered a filter its causes cannot drive.

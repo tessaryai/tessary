@@ -148,6 +148,10 @@ it("revoking: asks in the page rather than through the browser's blocking confir
   fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
   await settle();
   expect(screen.queryByRole("dialog")).toBeNull();
+  // Bug: the dialog's close button leaves it open.
+  fireEvent.click(revoke);
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
   expect(api.revokeMcpToken).not.toHaveBeenCalled();
 
   fireEvent.click(revoke);
