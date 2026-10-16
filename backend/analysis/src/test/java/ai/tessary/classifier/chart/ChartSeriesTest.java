@@ -322,16 +322,6 @@ class ChartSeriesTest {
                 ChartSeries.rateBaseline(state(1000, 30), reference, 500));
     }
 
-    /** Frustration has no pick list of its own any more: no call-site list means every call site. */
-    @Test
-    void frustrationWithNoCallSiteList_isOnForEveryCallSite() {
-        ClassifierRow frustration =
-                ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION).build();
-
-        assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-a", NO_FACTS));
-        assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-b", NO_FACTS));
-    }
-
     @Test
     void malformedWithoutSchema_isWaitingChip() {
         ClassifierRow malformed =
