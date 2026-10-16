@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -58,8 +59,8 @@ class SessionTimelineServiceTest {
 
     /** The second row stops mid-page: an unsettled trace read first lets the next page's first trace in, not its second. */
     @ParameterizedTest
-    @CsvSource(delimiter = '|', value = {"false | t3", "true | t0;t3,t2"})
-    void loadTailReadsNoTraceItThenLeavesOut(boolean anUnsettledTrace, String expectedPages) {
+    @CsvSource(delimiter = '|', value = {"false | t3 | 2", "true | t0;t3,t2 | 1"})
+    void loadTailReadsNoTraceItThenLeavesOut(boolean anUnsettledTrace, String expectedPages, int endedReads) {
         stubTraces(
                 anUnsettledTrace ? List.of(new SessionTrace("t0", null, null, T0.toString(), false, null)) : List.of(),
                 settled("t3", 3000),
@@ -76,6 +77,7 @@ class SessionTimelineServiceTest {
                 expectedPages,
                 read.getAllValues().stream().map(page -> String.join(",", page)).collect(Collectors.joining(";")),
                 "a tail that one trace fills reads the spans and payloads of a whole page of traces");
+        verify(traces, times(endedReads)).listEndedSessionTraces(eq(PID), eq(SID), any(), anyInt());
         assertEquals(List.of(), tail.events(), "no event of 1 byte or less exists");
         assertEquals(true, tail.truncated());
     }
