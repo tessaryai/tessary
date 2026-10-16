@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest.substrate;
 
-import static java.util.Map.entry;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +12,7 @@ import ai.tessary.ingest.substrate.v2.TraceRollupMetrics;
 import ai.tessary.testsupport.LogCapture;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -72,41 +72,15 @@ class IngestThroughputReporterTest {
         lateness.record(70_000);
         reporter.report();
         assertEquals(
-                Map.ofEntries(
-                        entry("event", "ingest.throughput"),
-                        entry("batches", 5L),
-                        entry("spans", 60L),
-                        entry("unwritable_spans", 4L),
-                        entry("shed_batches", 2L),
-                        entry("failed_batches", 1L),
-                        entry("queue_depth", 21L),
-                        entry("spool_mode", "memory"),
-                        entry("spool_oldest_age_ms", 250L),
-                        entry("spool_dead_lettered", 3L),
-                        entry("queue_bytes", 2048L),
-                        entry("queue_max_bytes", 4096L),
-                        entry("refused_batches", 7L),
-                        entry("oversize_batches", 11L),
-                        entry("drainer_alive", true),
-                        entry("drainers_alive", 2),
-                        entry("drainers", 2),
-                        entry("drainer_restarts", 1L),
-                        entry("unparseable_tool_args", 13L),
-                        entry("unparseable_tool_results", 14L),
-                        entry("rollup_claimed", 6L),
-                        entry("rollup_recomputed", 5L),
-                        entry("rollup_settled", 4L),
-                        entry("rollup_failed", 2L),
-                        entry("rollup_rearmed", 8L),
-                        entry("rollup_queue_depth", 4),
-                        entry("rollup_overdue_ms", 1500L),
-                        entry("late_negative", 0L),
-                        entry("late_lt_1s", 1L),
-                        entry("late_lt_10s", 0L),
-                        entry("late_lt_60s", 0L),
-                        entry("late_lt_5m", 1L),
-                        entry("late_ge_5m", 0L)),
-                fields(log.events().get(1)));
+                "{batches=5, drainer_alive=true, drainer_restarts=1, drainers=2, drainers_alive=2, "
+                        + "event=ingest.throughput, failed_batches=1, late_ge_5m=0, late_lt_10s=0, late_lt_1s=1, "
+                        + "late_lt_5m=1, late_lt_60s=0, late_negative=0, oversize_batches=11, queue_bytes=2048, "
+                        + "queue_depth=21, queue_max_bytes=4096, refused_batches=7, rollup_claimed=6, "
+                        + "rollup_failed=2, rollup_overdue_ms=1500, rollup_queue_depth=4, rollup_rearmed=8, "
+                        + "rollup_recomputed=5, rollup_settled=4, shed_batches=2, spans=60, spool_dead_lettered=3, "
+                        + "spool_mode=memory, spool_oldest_age_ms=250, unparseable_tool_args=13, "
+                        + "unparseable_tool_results=14, unwritable_spans=4}",
+                new TreeMap<>(fields(log.events().get(1))).toString());
 
         reporter.report();
         assertEquals(2, log.events().size(), "nothing moved, so no third line");
