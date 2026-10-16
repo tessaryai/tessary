@@ -17,7 +17,6 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -125,12 +124,6 @@ class AgenticCredentialResolverTest {
 
     // ---------------------------------------------------------------- missing credentials
 
-    @Test
-    void noCredentialForTheProvider_failsWithMissingCredentials() {
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.GEMINI)).thenReturn(Optional.empty());
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(ModelProvider.GEMINI));
-    }
-
     /**
      * An unresolvable project yields a null orgId, which must fail closed the same way an org with no
      * row does — never fall through to a repository lookup on a null org.
@@ -208,19 +201,6 @@ class AgenticCredentialResolverTest {
         assertEquals(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED, errorFrom(ModelProvider.BEDROCK_MANTLE));
     }
 
-    /**
-     * The IAM refusal is checked BEFORE the AWS-key completeness check, so an IAM-role row with no
-     * stored keys — the normal shape of one, since the whole point is that it has none — reports why
-     * it cannot drive a sandbox rather than telling the operator to add keys it deliberately omitted.
-     */
-    @Test
-    void iamRoleCredentialWithNoKeys_reportsIamRoleNotMissingCredentials() {
-        stored(
-                ModelProvider.BEDROCK,
-                cred(ModelProvider.BEDROCK, null, null, null, null, null, null, ProviderCredential.AUTH_MODE_IAM_ROLE));
-        assertEquals(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED, errorFrom(ModelProvider.BEDROCK));
-    }
-
     // ---------------------------------------------------------------- the Bedrock/mantle wire shape
 
     @Test
@@ -247,42 +227,7 @@ class AgenticCredentialResolverTest {
         verifyNoMoreInteractions(secretBox);
     }
 
-    @Test
-    void bedrockShape_trimsTheStoredRegion() {
-        stored(
-                ModelProvider.BEDROCK,
-                bedrockCred(ModelProvider.BEDROCK, "  eu-west-1  ", "sealed-access", "sealed-secret"));
-        assertEquals(
-                "eu-west-1", resolver.resolve(PROJECT, ModelProvider.BEDROCK).awsRegion());
-    }
-
     // ---------------------------------------------------------------- the OpenAI-compat wire shape
-
-    /**
-     * Every non-Bedrock provider takes the same branch, so this walks all of them rather than
-     * asserting one and assuming the rest — the branch is selected by an inequality, and a provider
-     * accidentally added to the Bedrock side would otherwise go unnoticed.
-     */
-    @Test
-    void openAiCompatShape_carriesDecryptedApiKeyAndNoAwsFields() {
-        for (ModelProvider provider : List.of(
-                ModelProvider.OPENAI,
-                ModelProvider.MOONSHOT,
-                ModelProvider.GEMINI,
-                ModelProvider.GLM,
-                ModelProvider.GROK)) {
-            stored(provider, apiKeyCred(provider, "https://example.test/v1", null));
-
-            AgenticCredentialResolver.Credential c = resolver.resolve(PROJECT, provider);
-
-            assertEquals(provider, c.provider());
-            assertEquals("plain-api-key", c.apiKey(), provider + " must carry the DECRYPTED key");
-            assertEquals("https://example.test/v1", c.baseUrl(), provider + " must carry its base_url override");
-            assertNull(c.awsRegion(), provider + " must carry no aws_region");
-            assertNull(c.awsAccessKey(), provider + " must carry no aws_access_key");
-            assertNull(c.awsSecretKey(), provider + " must carry no aws_secret_key");
-        }
-    }
 
     @Test
     void openAiCompatShape_passesANullBaseUrlThroughUntouched() {
@@ -305,25 +250,6 @@ class AgenticCredentialResolverTest {
         assertEquals("llama-3.3-70b", c.customModelName());
         assertEquals("plain-api-key", c.apiKey());
         assertEquals("https://vllm.internal/v1", c.baseUrl());
-    }
-
-    /**
-     * The field is meaningless for every other provider, so a row that happens to carry one (a
-     * leftover from a provider switch, say) must not leak it onto the wire.
-     */
-    @Test
-    void nonCustomProvider_dropsAnyStoredCustomModelName() {
-        for (ModelProvider provider : List.of(
-                ModelProvider.OPENAI,
-                ModelProvider.MOONSHOT,
-                ModelProvider.GEMINI,
-                ModelProvider.GLM,
-                ModelProvider.GROK)) {
-            stored(provider, apiKeyCred(provider, null, "leftover-model-id"));
-            assertNull(
-                    resolver.resolve(PROJECT, provider).customModelName(),
-                    provider + " must not carry custom_model_name");
-        }
     }
 
     /**

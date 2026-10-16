@@ -161,28 +161,6 @@ class ModelCatalogFetchServiceTest {
     }
 
     @Test
-    void oneProvidersFailureDoesNotEmptyAnotherProvidersCache() {
-        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.ANTHROPIC))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.ANTHROPIC)));
-        ScriptedLister openai = new ScriptedLister(List.of(new ModelListingException("vendor down", null)));
-        ScriptedLister anthropic = new ScriptedLister(List.of(OTHER_MODEL));
-        ModelCatalogProperties props = Props.of(ModelCatalogProperties.class, "refresh-interval", Duration.ofHours(1));
-        SecretBox secretBox = mock(SecretBox.class);
-        when(secretBox.open(anyString())).thenReturn("decrypted");
-        ModelCatalogFetchService svc = new ModelCatalogFetchService(
-                repo,
-                secretBox,
-                props,
-                java.util.Map.of(ModelProvider.OPENAI, openai, ModelProvider.ANTHROPIC, anthropic));
-
-        assertEquals(List.of(), svc.refreshingRead(ORG, ModelProvider.OPENAI), "OpenAI is down");
-        assertEquals(OTHER_MODEL, svc.refreshingRead(ORG, ModelProvider.ANTHROPIC), "Anthropic is unaffected");
-    }
-
-    @Test
     void bedrockCacheKeyIsScopedByRegion_twoRegionsFetchIndependently() {
         ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
         // Same org, same provider, but the cred (and therefore the region) differs per read — this

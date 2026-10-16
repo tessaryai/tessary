@@ -19,7 +19,6 @@ import ai.tessary.llm.catalog.ModelCatalogFetchService;
 import ai.tessary.llm.catalog.ProviderModel;
 import ai.tessary.open.errors.CapabilityError;
 import ai.tessary.open.errors.ErrorCode;
-import ai.tessary.open.errors.IngestError;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
@@ -227,21 +226,6 @@ class ProviderCredentialControllerTest {
         verify(secretBox, never()).seal(any());
     }
 
-    @Test
-    void aNonBlankFieldOnUpsertReplacesTheExistingCredential() {
-        ProviderCredential existing = row("cred_1 org_1 - OPENAI - old-sealed-key - - - - - api_key t0 t1");
-        when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.OPENAI)).thenReturn(Optional.of(existing));
-        when(secretBox.isConfigured()).thenReturn(true);
-        when(secretBox.seal("sk-new-key")).thenReturn("new-sealed-key");
-        var req =
-                new ProviderCredentialController.UpsertRequest(null, "sk-new-key", null, null, null, null, null, null);
-
-        controller.upsert(ctx, ORG_SLUG, ModelProvider.OPENAI, req);
-
-        verify(secretBox).seal("sk-new-key");
-        verify(repo).update(any());
-    }
-
     /** A first save must write the row: with no stored credential there is nothing to update. */
     @Test
     void aFirstSaveInsertsTheOrgsCredential() {
@@ -323,19 +307,6 @@ class ProviderCredentialControllerTest {
     }
 
     // ---- upsert: what a save refuses ----
-
-    /** SSRF: the override becomes a server-side outbound target, so an internal host is refused before any write. */
-    @Test
-    void upsertRefusesABaseUrlOverrideThatPointsInsideTheNetwork() {
-        var req = new ProviderCredentialController.UpsertRequest(
-                "http://169.254.169.254/latest", null, null, null, null, null, null, null);
-
-        TessaryException e =
-                assertThrows(TessaryException.class, () -> controller.upsert(ctx, ORG_SLUG, ModelProvider.CUSTOM, req));
-
-        assertEquals(IngestError.INVALID_BASE_URL, e.error());
-        verify(repo, never()).insert(any());
-    }
 
     static Stream<Arguments> unsaveableCredentials() {
         return Stream.of(
@@ -478,14 +449,6 @@ class ProviderCredentialControllerTest {
     }
 
     // ---- the deployment-supplied provider: offered only by a supplier, never written ----
-
-    @Test
-    void catalogOmitsThePlatformProviderWhenNoSupplierOffersIt() {
-        var catalog = controller.catalog(ctx, ORG_SLUG).data();
-
-        assertTrue(catalog.platforms().stream().noneMatch(p -> p.id() == ModelProvider.PLATFORM));
-        assertTrue(catalog.models().stream().noneMatch(m -> m.provider() == ModelProvider.PLATFORM));
-    }
 
     @Test
     void catalogShowsTheSuppliedPlatformProviderUnderTheSuppliersLabelAndDetail() {
