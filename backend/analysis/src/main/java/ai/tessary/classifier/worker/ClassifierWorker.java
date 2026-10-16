@@ -17,6 +17,7 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.open.jobqueue.LeasedJobSql;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.RepeatedFailureLogger;
@@ -34,8 +35,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -88,8 +87,8 @@ public class ClassifierWorker {
     private final ClassifierProperties props;
     private final TaskExecutor executor;
     private final TraceMdcBridge traceBridge;
-    private final String leaseOwner = shortHost(() -> InetAddress.getLocalHost().getHostName()) + "-"
-            + UUID.randomUUID().toString().substring(0, 8);
+    private final String leaseOwner =
+            LeasedJobSql.leaseOwner(() -> InetAddress.getLocalHost().getHostName());
     private final RepeatedFailureLogger sweepFailures = new RepeatedFailureLogger(SWEEP_FAILURE_SUMMARY_EVERY);
 
     public ClassifierWorker(
@@ -767,14 +766,6 @@ public class ClassifierWorker {
                     .field("error", e.getMessage())
                     .log();
             return false;
-        }
-    }
-
-    static String shortHost(Callable<String> hostName) {
-        try {
-            return hostName.call();
-        } catch (Exception e) {
-            return "host";
         }
     }
 }

@@ -34,6 +34,7 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.open.jobqueue.LeasedJobSql;
 import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -391,10 +392,11 @@ class ClassifierWorkerTest {
      */
     @Test
     void aHostWhoseNameDoesNotResolveStillNamesItsLeaseOwner() {
-        assertEquals("box-1", ClassifierWorker.shortHost(() -> "box-1"));
-        assertEquals("host", ClassifierWorker.shortHost(() -> {
-            throw new UnknownHostException("box-1");
-        }));
+        assertTrue(LeasedJobSql.leaseOwner(() -> "box-1").matches("box-1-[0-9a-f]{8}"));
+        assertTrue(LeasedJobSql.leaseOwner(() -> {
+                    throw new UnknownHostException("box-1");
+                })
+                .matches("host-[0-9a-f]{8}"));
     }
 
     /** A streak past the summary interval says it is still failing, with its count; otherwise it looks recovered. */
