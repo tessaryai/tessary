@@ -286,7 +286,8 @@ describe("pointTooltip", () => {
     ]);
   });
 
-  // Bug: "reached" judged on every detection of the call site rather than on what the arming bar counts.
+  // Bug: "reached" judged on every detection of the call site rather than on what the arming bar counts, or
+  // detections left out of the count with no word of why.
   it("says whether a count bucket's arming window reached the bar that opens a finding", () => {
     const arming = { threshold: 2, window_seconds: 86_400, basis: "event_count", confidence: "high" as const };
     const c = card({
@@ -302,7 +303,8 @@ describe("pointTooltip", () => {
       "Oct 7, 06:00-12:00 UTC",
       "3 detections",
       "1 counted toward a finding",
-      "Below 2 that day, no finding",
+      "Only high-confidence detections count",
+      "Fewer than 2 that day, no finding",
     ]);
     expect(pointTooltip(c, 2)[0]).toBe("Oct 8, 12:00-18:00 UTC, still filling");
     expect(pointTooltip(card({ kind: "count", unit: "count", points: [point("2026-10-06T06:00:00Z", "2026-10-06T07:00:00Z", { count: 1, total: 1 })] }), 0)).toEqual([
