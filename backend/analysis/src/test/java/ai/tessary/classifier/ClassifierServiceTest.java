@@ -53,6 +53,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 
@@ -89,7 +90,8 @@ class ClassifierServiceTest {
     private final BuiltInClassifierCatalog catalog = mock(BuiltInClassifierCatalog.class);
 
     /** A sweep from outside the tree, for a kind no catalog module declares. */
-    private final ClassifierSweep undeclaredSweep = mock(ClassifierSweep.class);
+    /** Real defaults, so a sweep that declares no enable check is what the accepting test runs. */
+    private final ClassifierSweep undeclaredSweep = mock(ClassifierSweep.class, Answers.CALLS_REAL_METHODS);
 
     private final ClassifierService service = new ClassifierService(
             signals,
@@ -240,10 +242,14 @@ class ClassifierServiceTest {
     void aWriteThatMatchesNoRowIsNotFound() {
         when(signals.findById(PID, "sig-a")).thenReturn(Optional.of(row()));
         when(signals.setEnabled(PID, "sig-a", false)).thenReturn(0);
+        when(signals.setCallSiteIds(PID, "sig-a", null)).thenReturn(0);
 
         TessaryException e = assertThrows(TessaryException.class, () -> service.setEnabled(PID, "sig-a", false));
+        TessaryException scope =
+                assertThrows(TessaryException.class, () -> service.setCallSiteIds(PID, "sig-a", null));
 
         assertEquals(ClassifierError.NOT_FOUND, e.error());
+        assertEquals(ClassifierError.NOT_FOUND, scope.error());
     }
 
     /**
