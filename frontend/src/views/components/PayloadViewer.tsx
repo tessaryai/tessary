@@ -260,29 +260,17 @@ function messageFromObj(m: Obj): ChatMessage {
 /** image/svg+xml is excluded: SVG is an active document that can carry <script>. */
 const ALLOWED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-/** Only `https://` and `data:image/<allowed>`; everything else is rejected. */
-function safeImageUrl(url: unknown): string | null {
-  if (typeof url !== "string") return null;
-  const u = url.trim();
-  if (u.startsWith("https://")) return u;
-  if (u.startsWith("data:")) {
-    const m = /^data:([^;,]+)[;,]/.exec(u);
-    const mime = m ? m[1].toLowerCase() : "";
-    return ALLOWED_IMAGE_MIME.has(mime) ? u : null;
-  }
-  return null;
-}
-
 const ALLOWED_DOCUMENT_MIME = new Set(["application/pdf"]);
 
-function safeDocumentUrl(url: unknown): string | null {
+/** Only `https://` and `data:<allowed>`; everything else is rejected. */
+function safeUrl(url: unknown, allowed: Set<string>): string | null {
   if (typeof url !== "string") return null;
   const u = url.trim();
   if (u.startsWith("https://")) return u;
   if (u.startsWith("data:")) {
     const m = /^data:([^;,]+)[;,]/.exec(u);
     const mime = m ? m[1].toLowerCase() : "";
-    return ALLOWED_DOCUMENT_MIME.has(mime) ? u : null;
+    return allowed.has(mime) ? u : null;
   }
   return null;
 }
@@ -427,12 +415,12 @@ function extractMedia(raw: unknown, resolveMedia?: ((mediaId: string) => string)
 }
 
 function pushImageUrl(out: MediaView[], url: unknown) {
-  const src = safeImageUrl(url);
+  const src = safeUrl(url, ALLOWED_IMAGE_MIME);
   out.push(src ? { kind: "img", src } : UNSUPPORTED_CHIP);
 }
 
 function pushDocumentUrl(out: MediaView[], url: unknown) {
-  const src = safeDocumentUrl(url);
+  const src = safeUrl(url, ALLOWED_DOCUMENT_MIME);
   out.push(src ? { kind: "doc", src } : UNSUPPORTED_DOCUMENT_CHIP);
 }
 
