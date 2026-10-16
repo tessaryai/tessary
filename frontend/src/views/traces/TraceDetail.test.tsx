@@ -308,7 +308,7 @@ describe("Timeline", () => {
 });
 
 describe("detections", () => {
-  const FLAGGED = [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-1", span_id: "sp-llm-1" }];
+  const FLAGGED = [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-1", span_id: "sp-llm-1", grain: "trace" }];
 
   it("marks the question Frustration flagged in Conversation, and the span it scored in Tree and Timeline", async () => {
     api.getTrace.mockResolvedValue(detail({ detections: FLAGGED }));
@@ -328,6 +328,24 @@ describe("detections", () => {
     cleanup();
     renderTrace("?view=timeline");
     expect(await screen.findAllByText("Frustration")).toHaveLength(1);
+  });
+
+  // Bug: a span's leak named under the person's question, as if they had leaked the credential.
+  it("marks what the span Secret Leak flagged said in Conversation, not the question", async () => {
+    const leak = { classifier_id: "cls-sl", name: "Secret Leak", trace_id: "tr-1", span_id: "sp-llm-1", grain: "span" };
+    api.getTrace.mockResolvedValue(detail({ detections: [leak] }));
+    renderTrace();
+
+    const marker = await screen.findByText("Secret Leak");
+    expect(screen.getAllByText("Secret Leak")).toHaveLength(1);
+    const said = screen.getByText("Let me check that.");
+    const reply = screen.getAllByText("It ships today.").at(-1)!;
+    expect(said.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(marker.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    cleanup();
+    renderTrace("?view=tree");
+    expect(await screen.findAllByText("Secret Leak")).toHaveLength(1);
   });
 
   it("still draws and marks the question when an earlier message said the same words", async () => {

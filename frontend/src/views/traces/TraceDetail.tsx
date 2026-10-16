@@ -6,7 +6,7 @@ import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { ConversationView, TimelineView, TreeView } from "./detail-views";
-import { namesBy } from "./detection-marker";
+import { isTurnMark, namesBy } from "./detection-marker";
 import { RawJsonView } from "./detail-json";
 import { clockLabel, traceSummary, useTraceDetail } from "./detail-data";
 
@@ -35,7 +35,8 @@ export function TraceDetail() {
   const spans = useMemo(() => detail?.spans ?? [], [detail]);
   const detections = useMemo(() => detail?.detections ?? [], [detail]);
   const marksBySpan = useMemo(() => namesBy(detections, "span_id"), [detections]);
-  const turnMarks = useMemo(() => [...new Set(detections.map((d) => d.name))], [detections]);
+  const turnMarks = useMemo(() => [...new Set(detections.filter(isTurnMark).map((d) => d.name))], [detections]);
+  const spanMarks = useMemo(() => namesBy(detections.filter((d) => !isTurnMark(d)), "span_id"), [detections]);
 
   const select = (id: string) => patch({ span: id });
 
@@ -79,7 +80,7 @@ export function TraceDetail() {
           <div className="flex items-start gap-6">
             <div className="min-w-0 flex-1">
               <TraceMedia>
-                {view === "conversation" && <ConversationView spans={spans} focusId={focusId} marks={turnMarks} />}
+                {view === "conversation" && <ConversationView spans={spans} focusId={focusId} marks={turnMarks} spanMarks={spanMarks} />}
                 {view === "tree" && (
                   <TreeView spans={spans} focusId={focusId} onSelect={select} marksBySpan={marksBySpan} />
                 )}

@@ -282,10 +282,13 @@ export function pointTooltip(card: ChartCard, index: number): string[] {
     const count = p.count ?? total;
     const lines = [when, plural(total, "detection", "detections")];
     if (!card.arming || p.reached == null) return lines;
-    if (count !== total) lines.push(`${count.toLocaleString("en-US")} counted toward a finding`);
-    const { threshold, window_seconds } = card.arming;
+    const { threshold, window_seconds, confidence } = card.arming;
+    if (count !== total) {
+      lines.push(`${count.toLocaleString("en-US")} counted toward a finding`);
+      if (confidence === "high") lines.push("Only high-confidence detections count");
+    }
     const that = lengthWords(window_seconds * 1000).that;
-    lines.push(p.reached ? `Reached ${threshold} that ${that}, opened a finding` : `Below ${threshold} that ${that}, no finding`);
+    lines.push(p.reached ? `Reached ${threshold} that ${that}, opened a finding` : `Fewer than ${threshold} that ${that}, no finding`);
     return lines;
   }
   if (card.kind === "range") {

@@ -382,17 +382,20 @@ function Items({
   items,
   failed,
   marks = [],
+  agentMarks = [],
   emphasis = NO_EMPHASIS,
   dimmed = false,
 }: {
   items: ChatItem[];
   failed?: boolean;
   marks?: string[];
+  agentMarks?: string[];
   emphasis?: Emphasis[];
   dimmed?: boolean;
 }) {
   const grouped = groupTools(items);
   const markedAt = marks.length > 0 ? lastMessage(grouped, (g) => isHumanSpeech(g.message)) : -1;
+  const agentMarkedAt = agentMarks.length > 0 ? lastMessage(grouped, (g) => !isHumanSpeech(g.message)) : -1;
   const question = emphasis.some((e) => e.part === "question");
   const emphasisAt =
     emphasis.length > 0 ? lastMessage(grouped, (g) => !question || isHumanSpeech(g.message)) : -1;
@@ -406,7 +409,7 @@ function Items({
             key={`m${i}`}
             item={group}
             failed={failed}
-            marks={i === markedAt ? marks : []}
+            marks={[...(i === markedAt ? marks : []), ...(i === agentMarkedAt ? agentMarks : [])]}
             emphasis={i === emphasisAt ? emphasis : NO_EMPHASIS}
             dimmed={dimmed}
           />
@@ -440,21 +443,28 @@ export function PriorContext({ messages }: { messages: ChatMessage[] }) {
   );
 }
 
-/** `marks` is drawn on the person's message only; it is not `failed`, since nothing broke. */
+/**
+ * `marks` is drawn on the person's message only, `agentMarks` on the last thing the agent said; neither is
+ * `failed`, since nothing broke.
+ */
 export function ChatItems({
   items,
   failed,
   marks,
+  agentMarks,
   emphasis,
   dimmed,
 }: {
   items: ChatItem[];
   failed?: boolean;
   marks?: string[];
+  agentMarks?: string[];
   emphasis?: Emphasis[];
   dimmed?: boolean;
 }) {
-  return <Items items={items} failed={failed} marks={marks} emphasis={emphasis} dimmed={dimmed} />;
+  return (
+    <Items items={items} failed={failed} marks={marks} agentMarks={agentMarks} emphasis={emphasis} dimmed={dimmed} />
+  );
 }
 
 function Turn({

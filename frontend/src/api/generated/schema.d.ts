@@ -2780,6 +2780,7 @@ export interface components {
         };
         DetectionMark: {
             classifier_id: string;
+            grain: string;
             name: string;
             span_id: string | null;
             trace_id: string;

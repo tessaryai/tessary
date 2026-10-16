@@ -252,7 +252,7 @@ describe("SessionRail", () => {
 
 it("detections: marks the turn a classifier flagged, in its own trace only", async () => {
   api.getSession.mockResolvedValue(
-    session({ detections: [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-b", span_id: "b-llm" }] }),
+    session({ detections: [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-b", span_id: "b-llm", grain: "trace" }] }),
   );
   renderSession();
 

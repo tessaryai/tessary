@@ -543,7 +543,8 @@ class SessionsControllerTest {
         fx.trace(fpid, flaggedTrace, sessionId, t0.plusSeconds(60));
         flag(fpid, frustration.id(), flaggedTrace, "span-scored");
 
-        var mark = new TraceDtos.DetectionMark(frustration.id(), frustration.name(), flaggedTrace, "span-scored");
+        var mark =
+                new TraceDtos.DetectionMark(frustration.id(), frustration.name(), flaggedTrace, "span-scored", "trace");
         var filtered = ok(controller.detail(
                 fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, frustration.id()));
         assertEquals(List.of(flaggedTrace), filtered.matchedTraceIds());

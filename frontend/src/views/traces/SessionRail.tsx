@@ -6,7 +6,7 @@ import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { SessionConversationView, SessionTreeView, SessionTimelineView } from "./detail-views";
 import { RawJsonView } from "./detail-json";
-import { namesBy } from "./detection-marker";
+import { conversationMarks, namesBy } from "./detection-marker";
 import { useSessionDetail, useSessionSpans, useSpansByTrace, sessionSummary } from "./session-detail-data";
 
 export function SessionRail({ sessionId, onClose }: { sessionId: string | null; onClose: () => void }) {
@@ -23,7 +23,7 @@ export function SessionRail({ sessionId, onClose }: { sessionId: string | null; 
   const detail = q.data;
   const traces = detail?.traces ?? [];
   const detections = detail?.detections ?? [];
-  const marksByTrace = namesBy(detections, "trace_id");
+  const said = conversationMarks(detections);
   const marksBySpan = namesBy(detections, "span_id");
   const loading = q.isLoading || spansQ.isLoading;
   const error = q.error ?? spansQ.error;
@@ -53,7 +53,8 @@ export function SessionRail({ sessionId, onClose }: { sessionId: string | null; 
                 traces={traces}
                 spansByTrace={spansByTrace}
                 focusId={focusId}
-                marksByTrace={marksByTrace}
+                marksByTrace={said.byTrace}
+                spanMarks={said.bySpan}
               />
           )}
           {view === "tree" && (

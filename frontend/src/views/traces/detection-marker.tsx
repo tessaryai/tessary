@@ -7,6 +7,12 @@ export type DetectionMark = TraceDetailView["detections"][number];
 /** The Detected by value that matches a flag by any classifier. */
 export const ANY_DETECTION = "any";
 
+/**
+ * Whether a mark judged the person's turn (Frustration), drawn on their message, rather than one span's
+ * output (Secret Leak), drawn on what that span said.
+ */
+export const isTurnMark = (d: DetectionMark) => d.grain === "trace";
+
 /** The classifier names, by trace id or by span id, for the views to mark. */
 export function namesBy(detections: DetectionMark[], key: "trace_id" | "span_id"): Map<string, string[]> {
   const out = new Map<string, string[]>();
@@ -18,6 +24,17 @@ export function namesBy(detections: DetectionMark[], key: "trace_id" | "span_id"
     out.set(id, names);
   }
   return out;
+}
+
+/** Conversation's marks: each judged turn by trace id, each judged span's output by span id. */
+export function conversationMarks(detections: DetectionMark[]): {
+  byTrace: Map<string, string[]>;
+  bySpan: Map<string, string[]>;
+} {
+  return {
+    byTrace: namesBy(detections.filter(isTurnMark), "trace_id"),
+    bySpan: namesBy(detections.filter((d) => !isTurnMark(d)), "span_id"),
+  };
 }
 
 /**

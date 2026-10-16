@@ -8,15 +8,15 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Registers this build's {@link DetectionTable}s. The registry keys on {@code detectorKind}, so kinds can share a
- * table. {@code FRUSTRATION} is trace grain (a turn is a trace) and the one table the trace and session views show. It
- * and {@code GROUNDEDNESS} are clearable by a false-alarm close.
+ * table. The trace and session views show {@code FRUSTRATION}, trace grain (a turn is a trace), and {@code SECRET_LEAK},
+ * span grain (the leaking span). {@code FRUSTRATION} and {@code GROUNDEDNESS} are clearable by a false-alarm close.
  */
 @Configuration
 public class OpenDetectionTables {
 
     @Bean
     public DetectionTable secretLeakDetectionTable() {
-        return new DetectionTable(BuiltInDetector.Kind.SECRET_LEAK, "secret_leak_detection", Grain.SPAN, false, false);
+        return new DetectionTable(BuiltInDetector.Kind.SECRET_LEAK, "secret_leak_detection", Grain.SPAN, true, false);
     }
 
     @Bean
