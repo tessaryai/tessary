@@ -3,7 +3,8 @@
 /*
  * session.js run the way a launcher runs it: a real child over a real session.json, with
  * test/fixtures/fake-opencode on PATH as `opencode` playing `script`. No extension, so node --test
- * skips it. `secret: null` starts the child with no SESSION_SECRET at all.
+ * skips it. `secret: null` starts the child with no SESSION_SECRET at all; an `input` string is
+ * written as session.json verbatim.
  */
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -34,7 +35,7 @@ async function startSession({ input = {}, script = { replies: [] }, env = {}, se
   const scriptDir = tmp('session-script-');
   const scriptPath = path.join(scriptDir, 'script.json');
   fs.writeFileSync(scriptPath, JSON.stringify(script));
-  fs.writeFileSync(path.join(workDir, 'session.json'), JSON.stringify({
+  fs.writeFileSync(path.join(workDir, 'session.json'), typeof input === 'string' ? input : JSON.stringify({
     system_prompt: 'You are the session agent.',
     files: {},
     model: 'anthropic/claude-sonnet-5',
@@ -137,6 +138,14 @@ async function startSession({ input = {}, script = { replies: [] }, env = {}, se
     throw new Error(`session not listening after ${DEADLINE_MS}ms: ${stderr}`);
   }
 
+  async function waitForStderr(pattern) {
+    const deadline = Date.now() + DEADLINE_MS;
+    while (!pattern.test(stderr)) {
+      if (Date.now() >= deadline) throw new Error(`stderr never matched ${pattern}: ${stderr}`);
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+
   async function waitReady() {
     const deadline = Date.now() + DEADLINE_MS;
     while (Date.now() < deadline) {
@@ -196,6 +205,7 @@ async function startSession({ input = {}, script = { replies: [] }, env = {}, se
     eventsWithin,
     waitListening,
     waitReady,
+    waitForStderr,
     records,
     stdout: () => stdout,
     stderr: () => stderr,
