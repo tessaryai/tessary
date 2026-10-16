@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -189,11 +190,14 @@ class AuthFilterPostureTest {
     private static final TenantContext SOME_AUTHENTICATED_USER =
             new TenantContext("user-1", "someone@example.com", null, null, null, null);
 
-    @Test
-    @DisplayName("an authenticated, non-staff caller is rejected 403, not served")
-    void actuatorGuardedPathsRejectNonStaffWithForbidden() throws ServletException, IOException {
+    @ParameterizedTest(name = "staff={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName(
+            "an authenticated non-staff caller is rejected 403, not served; a platform-staff caller reaches the chain")
+    void actuatorGuardedPathsServeOnlyStaff(boolean staff) throws ServletException, IOException {
         for (String path : ACTUATOR_GUARDED) {
-            AuthFilter filter = filter(false, authenticatingAs(SOME_AUTHENTICATED_USER), notStaff());
+            AuthFilter filter =
+                    filter(false, authenticatingAs(SOME_AUTHENTICATED_USER), staff ? isStaff() : notStaff());
             MockHttpServletRequest req = new MockHttpServletRequest("GET", path);
             req.addHeader("Authorization", "Bearer irrelevant-to-the-stub");
             MockHttpServletResponse res = new MockHttpServletResponse();
@@ -201,24 +205,9 @@ class AuthFilterPostureTest {
 
             filter.doFilterInternal(req, res, chain);
 
-            assertEquals(403, res.getStatus(), path + " must reject an authenticated non-staff caller");
-            assertNull(chain.getRequest(), path + " must never reach the filter chain for a non-staff caller");
-        }
-    }
-
-    @Test
-    @DisplayName("an authenticated, platform-staff caller reaches the chain")
-    void actuatorGuardedPathsPassStaff() throws ServletException, IOException {
-        for (String path : ACTUATOR_GUARDED) {
-            AuthFilter filter = filter(false, authenticatingAs(SOME_AUTHENTICATED_USER), isStaff());
-            MockHttpServletRequest req = new MockHttpServletRequest("GET", path);
-            req.addHeader("Authorization", "Bearer irrelevant-to-the-stub");
-            MockHttpServletResponse res = new MockHttpServletResponse();
-            MockFilterChain chain = new MockFilterChain();
-
-            filter.doFilterInternal(req, res, chain);
-
-            assertEquals(req, chain.getRequest(), path + " must reach the chain for a staff caller");
+            assertEquals(
+                    staff ? 200 : 403, res.getStatus(), path + " must reject only an authenticated non-staff caller");
+            assertEquals(staff ? req : null, chain.getRequest(), path + " must reach the chain for staff alone");
         }
     }
 

@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
@@ -81,31 +83,22 @@ class HomeTessaryClientTest {
         assertEquals("/v1/pricing/manifest.json is over the 4-byte limit", ex.getMessage());
     }
 
-    /** The bug: an error page's body is returned as if it were the file, and gets hashed and stored. */
-    @Test
-    void getBytesReturnsNoBodyForANon200() throws Exception {
+    /**
+     * The bugs: an error page's body is returned as if it were the file, and gets hashed and stored; a body exactly at
+     * the limit is refused, or trimmed, instead of returned whole.
+     */
+    @ParameterizedTest
+    @CsvSource({"404, not found, 1024, ''", "200, '{\"a\"}', 5, '{\"a\"}'"})
+    void getBytesReturnsTheBodyOfA200WholeUpToTheLimitAndNoneOtherwise(
+            int status, String served, int limit, String returned) throws Exception {
         when(http.send(any(HttpRequest.class), ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
                 .thenReturn(streamed);
-        when(streamed.statusCode()).thenReturn(404);
-        when(streamed.body()).thenReturn(new ByteArrayInputStream("not found".getBytes(StandardCharsets.UTF_8)));
+        when(streamed.statusCode()).thenReturn(status);
+        when(streamed.body()).thenReturn(new ByteArrayInputStream(served.getBytes(StandardCharsets.UTF_8)));
 
-        HomeTessaryClient.Fetched fetched = new HomeTessaryClient(http).getBytes("/v1/pricing/manifest.json", 1024);
+        HomeTessaryClient.Fetched fetched = new HomeTessaryClient(http).getBytes("/v1/pricing/manifest.json", limit);
 
-        assertEquals(404, fetched.status());
-        assertEquals(0, fetched.body().length);
-    }
-
-    /** The bug: a body exactly at the limit is refused, or trimmed, instead of returned whole. */
-    @Test
-    void getBytesReturnsABodyExactlyAtTheLimitWhole() throws Exception {
-        when(http.send(any(HttpRequest.class), ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
-                .thenReturn(streamed);
-        when(streamed.statusCode()).thenReturn(200);
-        when(streamed.body()).thenReturn(new ByteArrayInputStream("{\"a\"}".getBytes(StandardCharsets.UTF_8)));
-
-        HomeTessaryClient.Fetched fetched = new HomeTessaryClient(http).getBytes("/v1/pricing/manifest.json", 5);
-
-        assertEquals(200, fetched.status());
-        assertEquals("{\"a\"}", new String(fetched.body(), StandardCharsets.UTF_8));
+        assertEquals(status, fetched.status());
+        assertEquals(returned, new String(fetched.body(), StandardCharsets.UTF_8));
     }
 }

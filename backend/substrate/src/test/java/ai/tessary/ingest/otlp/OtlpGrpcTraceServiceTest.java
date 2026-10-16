@@ -45,10 +45,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
@@ -143,34 +147,31 @@ class OtlpGrpcTraceServiceTest {
         assertEquals(Set.of("01"), Set.of(captor.getValue().get(0).sourceExternalId()));
     }
 
-    @Test
-    void unresolvableToken_rejectedUnauthenticated_andNeverTouchesSubstrate() {
-        when(bearerAuth.authenticate(anyString())).thenReturn(Optional.empty());
+    /**
+     * An unresolvable token, a user-session-shaped context (no project id, not an MCP token), and a project-scoped but
+     * query-only key are refused on the ingest path: parity with the HTTP path's keyPermits(WRITE) gate, or gRPC would
+     * be a scope-bypass for query-only keys.
+     */
+    @ParameterizedTest
+    @MethodSource("tokensThatCannotIngest")
+    void aTokenThatCannotIngestIsRefusedAndNeverTouchesSubstrate(
+            Optional<TenantContext> resolved, io.grpc.Status.Code refused) {
+        when(bearerAuth.authenticate(anyString())).thenReturn(resolved);
 
-        assertEquals(io.grpc.Status.Code.UNAUTHENTICATED, refusal("badtoken"));
+        assertEquals(refused, refusal(VALID_TOKEN));
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 
-    @Test
-    void nonProjectScopedToken_rejectedUnauthenticated() {
-        // A user-session-shaped context (no project id, not an MCP token) must be refused on the ingest path.
-        when(bearerAuth.authenticate(anyString()))
-                .thenReturn(Optional.of(new TenantContext("user-1", null, "org-1", null, "owner", null)));
-
-        assertEquals(io.grpc.Status.Code.UNAUTHENTICATED, refusal(VALID_TOKEN));
-        verify(substrateWriter, never()).enqueue(anyString(), any());
-    }
-
-    @Test
-    void queryScopedToken_rejectedPermissionDenied_andNeverTouchesSubstrate() {
-        // A project-scoped but query-only key must not be able to ingest over gRPC — parity with the HTTP
-        // ingest path's keyPermits(WRITE) gate (otherwise gRPC would be a scope-bypass for query-only keys).
-        when(bearerAuth.authenticate(anyString()))
-                .thenReturn(Optional.of(
-                        new TenantContext("user-1", null, "org-1", "proj-grpc", "member", "tok-1", KeyScope.QUERY)));
-
-        assertEquals(io.grpc.Status.Code.PERMISSION_DENIED, refusal(VALID_TOKEN));
-        verify(substrateWriter, never()).enqueue(anyString(), any());
+    static Stream<Arguments> tokensThatCannotIngest() {
+        return Stream.of(
+                Arguments.of(Optional.empty(), io.grpc.Status.Code.UNAUTHENTICATED),
+                Arguments.of(
+                        Optional.of(new TenantContext("user-1", null, "org-1", null, "owner", null)),
+                        io.grpc.Status.Code.UNAUTHENTICATED),
+                Arguments.of(
+                        Optional.of(new TenantContext(
+                                "user-1", null, "org-1", "proj-grpc", "member", "tok-1", KeyScope.QUERY)),
+                        io.grpc.Status.Code.PERMISSION_DENIED));
     }
 
     /**
