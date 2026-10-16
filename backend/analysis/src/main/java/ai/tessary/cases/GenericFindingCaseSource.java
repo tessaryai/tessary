@@ -57,8 +57,8 @@ public class GenericFindingCaseSource implements CaseSource {
         return detail == null || detail.isBlank() ? gate : gate + " " + detail;
     }
 
-    /** Ordering only, as with every other source. */
-    private static String gateSentence(FindingRow finding) {
+    /** Ordering only, as with every other source; {@link MetricDriftSource} says the same. */
+    static String gateSentence(FindingRow finding) {
         if (finding.humanVerdictAt() != null) {
             return "A human ruled this a real deviation.";
         }
