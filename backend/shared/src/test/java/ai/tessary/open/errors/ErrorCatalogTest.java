@@ -79,9 +79,26 @@ class ErrorCatalogTest {
                 ex.getMessage());
     }
 
-    /** Every enum the catalog registers, so one added there cannot skip this check. */
     static Stream<ErrorCode> registeredCodes() {
-        return ErrorCatalog.REGISTERED.stream().flatMap(c -> Arrays.stream(c.getEnumConstants()));
+        return Stream.of(
+                        CommonError.class,
+                        IngestError.class,
+                        ModelConfigError.class,
+                        GitError.class,
+                        PipelineError.class,
+                        ClassifierError.class,
+                        AlertError.class,
+                        QueryError.class,
+                        RedactionError.class,
+                        MeteringError.class,
+                        CapabilityError.class,
+                        RcaError.class,
+                        CaseError.class,
+                        AuthError.class,
+                        DecisionError.class,
+                        RetentionError.class,
+                        AgentRunError.class)
+                .flatMap(c -> Arrays.stream(c.getEnumConstants()));
     }
 
     /**

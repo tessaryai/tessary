@@ -18,7 +18,7 @@ public class ErrorCatalog {
 
     private static final Logger log = LoggerFactory.getLogger(ErrorCatalog.class);
 
-    static final List<Class<? extends ErrorCode>> REGISTERED = List.of(
+    private static final List<Class<? extends ErrorCode>> REGISTERED = List.of(
             CommonError.class,
             IngestError.class,
             ModelConfigError.class,
