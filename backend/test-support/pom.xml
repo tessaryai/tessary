@@ -15,7 +15,7 @@
     <description>
         Test infrastructure for the app module's Spring tests: the JVM-lifetime Testcontainers Postgres
         and the context initializer that points a Spring test at it. Also the HTTP doubles the substrate,
-        product and analysis unit tests share: a scripted java.net.http.HttpClient and a loopback stub.
+        product and analysis unit tests share: a scripted java.net.http.HttpClient, a loopback stub and a log capture.
 
         Only fixtures that depend on NOTHING in the platform live here. Anything that builds a tenant,
         a trace or a classifier belongs beside the module that owns those types - otherwise this module
@@ -49,6 +49,14 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
         </dependency>
     </dependencies>
 </project>

@@ -40,14 +40,10 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.plan.EncoderAvailability;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.LogCapture;
 import ai.tessary.testsupport.Props;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -55,7 +51,6 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
-import org.slf4j.LoggerFactory;
 
 /**
  * The metric-drift dial behind {@code GET/PUT .../tuning} and its false-alarm rate, {@link
@@ -75,7 +70,6 @@ import org.slf4j.LoggerFactory;
  */
 class ClassifierServiceTest {
 
-    private static final String ORG = "org-1";
     private static final String PID = "proj-1";
     private static final String T0 = "2026-01-01T00:00:00Z";
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -262,11 +256,12 @@ class ClassifierServiceTest {
         TessaryException refusal = new TessaryException(ClassifierError.NOT_FOUND, "x");
         doThrow(refusal).when(undeclaredSweep).checkEnable(row);
 
-        List<Map<String, Object>> events = logged(
-                ClassifierService.class,
-                "classifier.enable.refused",
-                () -> assertSame(
-                        refusal, assertThrows(TessaryException.class, () -> service.setEnabled(PID, "cls-u", true))));
+        List<Map<String, Object>> events = LogCapture.during(
+                        ClassifierService.class,
+                        () -> assertSame(
+                                refusal,
+                                assertThrows(TessaryException.class, () -> service.setEnabled(PID, "cls-u", true))))
+                .fields("classifier.enable.refused");
 
         assertEquals(
                 List.of(Map.of(
@@ -447,26 +442,5 @@ class ClassifierServiceTest {
                 null,
                 "2026-01-01T00:00:00Z",
                 "2026-01-01T00:00:00Z");
-    }
-
-    /** The structured fields of every event named {@code name} that {@code source}'s logger wrote while {@code action} ran. */
-    private static List<Map<String, Object>> logged(Class<?> source, String name, Runnable action) {
-        Logger logger = (Logger) LoggerFactory.getLogger(source);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            action.run();
-        } finally {
-            logger.detachAppender(appender);
-        }
-        List<Map<String, Object>> events = new ArrayList<>();
-        for (ILoggingEvent e : appender.list) {
-            if (e.getKeyValuePairs() == null) continue;
-            Map<String, Object> fields = new HashMap<>();
-            e.getKeyValuePairs().forEach(kv -> fields.put(kv.key, kv.value));
-            if (name.equals(fields.get("event"))) events.add(fields);
-        }
-        return events;
     }
 }

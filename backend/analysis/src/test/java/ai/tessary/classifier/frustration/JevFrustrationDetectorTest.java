@@ -42,11 +42,10 @@ import ai.tessary.llm.decisions.DecisionTarget;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.DecisionError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.LogCapture;
 import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -73,11 +72,11 @@ import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
-import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
@@ -90,6 +89,9 @@ class JevFrustrationDetectorTest {
     private static final String CLASSIFIER = "cls-1";
     private static final Instant NOW = Instant.parse("2026-09-21T12:00:00Z");
     private static final String RESPONDED = "typesafe/jev-1.13-20260917";
+
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(JevFrustrationDetector.class);
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final ConversationThreadAssembler assembler = mock(ConversationThreadAssembler.class);
@@ -432,69 +434,53 @@ class JevFrustrationDetectorTest {
      */
     @Test
     void aRefusedRequestPausesAsRequestRefusedAndLogsTheProvidersWords() {
-        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            SubstrateObservation ok = eligibleTurn("t-ok", "conv-a");
-            SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
-            client.answer("t-ok", 0.9, 0.0);
-            client.fail("t-refused", DecisionError.REQUEST_REFUSED);
-            JevFrustrationDetector d = detector();
+        SubstrateObservation ok = eligibleTurn("t-ok", "conv-a");
+        SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
+        client.answer("t-ok", 0.9, 0.0);
+        client.fail("t-refused", DecisionError.REQUEST_REFUSED);
+        JevFrustrationDetector d = detector();
 
-            JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(ok, refused));
-            assertEquals(List.of(), d.complete(signal("{}"), page, PageAction.ABORT, 5));
+        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(ok, refused));
+        assertEquals(List.of(), d.complete(signal("{}"), page, PageAction.ABORT, 5));
 
-            assertEquals(Status.ABORTED, page.status());
-            assertEquals(ClassifierPause.REQUEST_REFUSED, page.pauseReason());
-            verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.REQUEST_REFUSED, NOW);
-            verify(assessments, never()).insert(any());
-            List<String> warned = appender.list.stream()
-                    .filter(e -> e.getLevel() == Level.WARN)
-                    .map(ILoggingEvent::getFormattedMessage)
-                    .toList();
-            assertEquals(2, warned.size(), warned.toString());
-            assertTrue(warned.get(0).startsWith("TYPESAFE refused a frustration call: "), warned.get(0));
-            assertTrue(
-                    warned.get(1).contains("request_refused") || warned.get(1).contains("refused the request"),
-                    warned.get(1));
-        } finally {
-            logger.detachAppender(appender);
-        }
+        assertEquals(Status.ABORTED, page.status());
+        assertEquals(ClassifierPause.REQUEST_REFUSED, page.pauseReason());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.REQUEST_REFUSED, NOW);
+        verify(assessments, never()).insert(any());
+        List<String> warned = log.events().stream()
+                .filter(e -> e.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
+        assertEquals(2, warned.size(), warned.toString());
+        assertTrue(warned.get(0).startsWith("TYPESAFE refused a frustration call: "), warned.get(0));
+        assertTrue(
+                warned.get(1).contains("request_refused") || warned.get(1).contains("refused the request"),
+                warned.get(1));
     }
 
     /** An aborted page records nothing and logs a pause with its reason; a silent pause reads as a quiet week. */
     @Test
     void anAbortedPageRecordsNothingAndLogsThePauseWithItsReason() {
-        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
-            client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
-            JevFrustrationDetector d = detector();
-            JevFrustrationDetector.Page rejected = d.score(signal("{}"), List.of(refused));
-            assertEquals(List.of(), d.complete(signal("{}"), rejected, PageAction.ABORT, 5));
+        SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
+        client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
+        JevFrustrationDetector d = detector();
+        JevFrustrationDetector.Page rejected = d.score(signal("{}"), List.of(refused));
+        assertEquals(List.of(), d.complete(signal("{}"), rejected, PageAction.ABORT, 5));
 
-            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
-            JevFrustrationDetector.Page noKey = d.score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
-            assertEquals(List.of(), d.complete(signal("{}"), noKey, PageAction.ABORT, 5));
+        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
+        JevFrustrationDetector.Page noKey = d.score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+        assertEquals(List.of(), d.complete(signal("{}"), noKey, PageAction.ABORT, 5));
 
-            List<Object> pauses = appender.list.stream()
-                    .filter(e -> e.getLevel() == Level.WARN)
-                    .map(e -> e.getKeyValuePairs().stream()
-                            .filter(kv -> "reason".equals(kv.key))
-                            .findFirst()
-                            .map(kv -> kv.value)
-                            .orElse("none"))
-                    .toList();
-            assertEquals(List.of(ClassifierPause.PROVIDER_REJECTED, ClassifierPause.NO_PROVIDER), pauses);
-            verify(assessments, never()).insert(any());
-        } finally {
-            logger.detachAppender(appender);
-        }
+        List<Object> pauses = log.events().stream()
+                .filter(e -> e.getLevel() == Level.WARN)
+                .map(e -> e.getKeyValuePairs().stream()
+                        .filter(kv -> "reason".equals(kv.key))
+                        .findFirst()
+                        .map(kv -> kv.value)
+                        .orElse("none"))
+                .toList();
+        assertEquals(List.of(ClassifierPause.PROVIDER_REJECTED, ClassifierPause.NO_PROVIDER), pauses);
+        verify(assessments, never()).insert(any());
     }
 
     @Test

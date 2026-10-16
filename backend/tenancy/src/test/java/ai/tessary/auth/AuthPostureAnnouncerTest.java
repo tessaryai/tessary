@@ -5,14 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
+import ai.tessary.testsupport.LogCapture;
 import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 /**
  * {@code tessary.auth.disabled} alone decides which posture this announces,
@@ -23,21 +20,8 @@ import org.slf4j.LoggerFactory;
  */
 class AuthPostureAnnouncerTest {
 
-    private ListAppender<ILoggingEvent> appender;
-    private Logger logbackLogger;
-
-    @BeforeEach
-    void attachAppender() {
-        logbackLogger = (Logger) LoggerFactory.getLogger(AuthPostureAnnouncer.class);
-        appender = new ListAppender<>();
-        appender.start();
-        logbackLogger.addAppender(appender);
-    }
-
-    @AfterEach
-    void detachAppender() {
-        logbackLogger.detachAppender(appender);
-    }
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(AuthPostureAnnouncer.class);
 
     private static AuthProperties disabled(boolean disabled) {
         AuthProperties props = new AuthProperties();
@@ -52,8 +36,8 @@ class AuthPostureAnnouncerTest {
         // logged "enforced" -- the opposite of what AuthFilter actually did.
         new AuthPostureAnnouncer(mock(AuthProvider.class), disabled(true)).announce();
 
-        assertEquals(1, appender.list.size());
-        ILoggingEvent event = appender.list.get(0);
+        assertEquals(1, log.events().size());
+        ILoggingEvent event = log.events().get(0);
         assertEquals(Level.WARN, event.getLevel());
         assertTrue(event.getFormattedMessage().contains("AUTH IS DISABLED"));
     }
