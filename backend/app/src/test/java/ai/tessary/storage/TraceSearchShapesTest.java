@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.storage;
 
+import static ai.tessary.open.errors.QueryError.SEARCH_TOO_BROAD;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.tessary.open.errors.QueryError;
+import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
@@ -17,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.function.Executable;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -36,6 +38,7 @@ record TraceSearchShapesTest(
         SubstrateV2Fixtures fx,
         TenantService tenants,
         TraceV2Repository traces,
+        SessionRepository sessions,
         SpanRepository spans,
         JdbcClient jdbc,
         DataSource dataSource) {
@@ -69,8 +72,9 @@ record TraceSearchShapesTest(
     }
 
     /**
-     * A search that runs past the timeout fails with a clear error rather than holding a connection. A held lock on
-     * {@code span_payload} makes the search wait, so the timeout fires however fast the machine is.
+     * A search that runs past the timeout fails with a clear error rather than holding a connection, on the traces list,
+     * the sessions list and a session's matching traces alike. A held lock on {@code span_payload} makes the search
+     * wait, so the timeout fires however fast the machine is.
      */
     @Test
     @Timeout(value = 20, unit = TimeUnit.SECONDS)
@@ -88,13 +92,18 @@ record TraceSearchShapesTest(
             blocker.setAutoCommit(false);
             lock.execute("LOCK TABLE span_payload IN ACCESS EXCLUSIVE MODE");
             try {
-                TessaryException e = assertThrows(
-                        TessaryException.class, () -> traces.list(pid, query("refund"), null, 10, null, null, null));
-                assertEquals(QueryError.SEARCH_TOO_BROAD, e.error());
+                TraceV2Repository.TraceQuery refund = query("refund");
+                assertEquals(SEARCH_TOO_BROAD, errorOf(() -> traces.list(pid, refund, null, 10, null, null, null)));
+                assertEquals(SEARCH_TOO_BROAD, errorOf(() -> sessions.listByProject(pid, refund, 10, null, null)));
+                assertEquals(SEARCH_TOO_BROAD, errorOf(() -> traces.idsInSessionMatching(pid, "s", refund, 10)));
             } finally {
                 blocker.rollback();
             }
         }
+    }
+
+    private static ErrorCode errorOf(Executable read) {
+        return assertThrows(TessaryException.class, read).error();
     }
 
     private static TraceV2Repository.TraceQuery query(String q) {
