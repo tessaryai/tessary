@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, KeyRound } from "lucide-react";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { ledgerTime } from "../../lib/ledgerTime";
 import { ApiError } from "../../api/types";
@@ -9,7 +8,6 @@ import type { ApiKey, ApiKeyAudit, KeyScope } from "../../api/types-auth";
 import {
   Badge,
   Button,
-  CopyButton,
   Field,
   IconButton,
   Input,
@@ -22,6 +20,7 @@ import {
   cn,
   useToast,
 } from "../../ui";
+import { IssuedFooter, IssuedSecret, IssuedTitle, NoSecrets, RevokeButton } from "./secretParts";
 
 const SCOPES: { value: KeyScope; label: string; hint: string }[] = [
   { value: "write", label: "Write", hint: "Ingest traces (POST /v1/traces)." },
@@ -34,10 +33,6 @@ const SCOPE_TONE: Record<KeyScope, "info" | "accent" | "success"> = {
   query: "success",
   admin: "accent",
 };
-
-function KeyGlyph({ size = 20 }: { size?: number }) {
-  return <KeyRound size={size} strokeWidth={1.5} aria-hidden="true" />;
-}
 
 export function ApiKeys() {
   const api = useProjectApi();
@@ -142,18 +137,9 @@ export function ApiKeys() {
         ) : keys.isError ? (
           <p className="text-small text-error">{(keys.error as ApiError)?.message ?? "Could not load keys. Try again."}</p>
         ) : isEmpty ? (
-          <div className="flex flex-col items-center text-center py-14">
-            <span className="flex size-[42px] items-center justify-center rounded-card bg-surface border border-border-strong text-muted">
-              <KeyGlyph />
-            </span>
-            <div className="text-h3 text-fg mt-4">No keys yet</div>
-            <p className="text-small text-muted mt-2 max-w-sm">
-              Create one to ingest traces or query this project from your own code.
-            </p>
-            <Button variant="primary" className="mt-5" onClick={openCreate}>
-              New key
-            </Button>
-          </div>
+          <NoSecrets title="No keys yet" action="New key" onAction={openCreate}>
+            Create one to ingest traces or query this project from your own code.
+          </NoSecrets>
         ) : (
           <div className="overflow-hidden rounded-card border border-border">
             <div className="flex items-center gap-3 px-4 py-2.5 bg-surface border-b border-border text-column-header text-muted">
@@ -209,15 +195,10 @@ export function ApiKeys() {
         size="sm"
         title={
           issued ? (
-            <span className="flex items-center gap-2.5">
-              <span className="flex size-6 items-center justify-center rounded-pill bg-accent-subtle border border-accent-edge text-accent">
-                <KeyGlyph size={13} />
-              </span>
-              <span>
-                Key <span className="font-mono font-normal text-muted">{issued.name}</span>{" "}
-                {rotating ? "rotated" : "created"}
-              </span>
-            </span>
+            <IssuedTitle>
+              Key <span className="font-mono font-normal text-muted">{issued.name}</span>{" "}
+              {rotating ? "rotated" : "created"}
+            </IssuedTitle>
           ) : rotating ? (
             "Rotate key"
           ) : (
@@ -233,12 +214,7 @@ export function ApiKeys() {
         }
         footer={
           issued ? (
-            <div className="flex w-full items-center gap-3">
-              <Button variant="primary" onClick={closeModal}>
-                Done
-              </Button>
-              <span className="ml-auto text-label text-subtle">Closing without copying loses the key.</span>
-            </div>
+            <IssuedFooter noun="key" onDone={closeModal} />
           ) : (
             <>
               <Button variant="ghost" onClick={closeModal}>
@@ -257,25 +233,7 @@ export function ApiKeys() {
         }
       >
         {issued ? (
-          <div>
-            <div className="text-label uppercase text-muted">Copy it now. It won't be shown again.</div>
-            <div className="mt-2.5 flex items-center gap-2.5 rounded-control border border-accent-edge bg-bg px-3.5 py-3">
-              <span className="flex-1 min-w-0 font-mono text-small text-fg truncate">{issued.plaintext}</span>
-              <CopyButton
-                value={issued.plaintext}
-                size="sm"
-                variant="primary"
-                className="flex-none"
-                onCopyFailed={() => toast.error("Could not copy", "Copy the key manually.")}
-              />
-            </div>
-            <div className="mt-3.5 flex items-start gap-2.5 rounded-control border border-warning bg-warning-subtle px-3.5 py-2.5">
-              <AlertTriangle size={14} strokeWidth={1.5} aria-hidden="true" className="mt-px flex-none text-warning" />
-              <span className="text-label text-fg leading-snug">
-                Tessary stores only a hash. If you lose this, rotate the key for a fresh secret. There's no recovery.
-              </span>
-            </div>
-          </div>
+          <IssuedSecret plaintext={issued.plaintext} noun="key" lost="rotate the key for a fresh secret" />
         ) : rotating ? (
           <div className="flex flex-col gap-3.5">
             <div className="rounded-control border border-border bg-surface px-3.5 py-3">
@@ -371,13 +329,7 @@ function KeyRow({
               className="text-muted hover:text-fg px-2 w-auto">
               <span className="text-label font-medium">Rotate</span>
             </IconButton>
-            <IconButton
-              label={`Revoke ${apiKey.name}`}
-              size="sm"
-              onClick={onRevoke}
-              className="text-error hover:text-error hover:bg-[color:var(--color-error-subtle)] px-2 w-auto">
-              <span className="text-label font-medium">Revoke</span>
-            </IconButton>
+            <RevokeButton name={apiKey.name} onRevoke={onRevoke} />
           </>
         )}
       </span>

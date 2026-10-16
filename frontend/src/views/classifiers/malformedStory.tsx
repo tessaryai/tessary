@@ -9,7 +9,7 @@ import type { components } from "../../api/generated/schema";
 import type { BehaviorFinding, MalformedOutputDetail, MalformedOutputRow, MalformedOutputSchemaField } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, IconButton, PageHeader, TableSkeleton, cn } from "../../ui";
-import { RunTriageButton, detectorLabel, triageState } from "./shared";
+import { FindingKicker, TriageAction } from "./shared";
 import { RateChart, RatePins } from "./rateStory";
 
 type RateDetail = components["schemas"]["RateDetail"];
@@ -38,12 +38,7 @@ export function MalformedHeader({
   return (
     <PageHeader
       breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
-      kicker={
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="text-muted">{finding.detector ? detectorLabel(finding.detector) : "Finding"}</span>
-          {finding.callSiteId && <span className="text-muted">{finding.callSiteId}</span>}
-        </span>
-      }
+      kicker={<FindingKicker finding={finding} />}
       title={
         <span>
           Schema failure rate{" "}
@@ -57,15 +52,7 @@ export function MalformedHeader({
       subtitle={
         since ? <span title={finding.causeKey}>since {since} vs the rate it was fitted at</span> : undefined
       }
-      actions={
-        finding.triageStatus === "done" ? (
-          <span className="font-mono text-label uppercase text-muted rounded-control border border-border-strong bg-raised py-1.25 px-2.75">
-            {triageState(finding).label}
-          </span>
-        ) : (
-          <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
-        )
-      }
+      actions={<TriageAction finding={finding} busy={busy} onAnalyze={onAnalyze} />}
     />
   );
 }

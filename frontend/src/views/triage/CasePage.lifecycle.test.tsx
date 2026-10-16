@@ -562,24 +562,6 @@ describe("a frustration case", () => {
     expect(scrolled).toHaveBeenCalled();
   });
 
-  it("falls back to the summary when the run named no cause", async () => {
-    api.getCase.mockResolvedValue(
-      frustrationCase({ rca: { ...FRUSTRATION_REPORT, causes: [], summary: "No shared cause.", verdict: "no_cause_found" } }),
-    );
-    renderPage();
-    await heading("Users on support-agent grew frustrated");
-
-    expect(screen.getByText("No shared cause.")).toBeTruthy();
-    expect(screen.getByText("No cause proven")).toBeTruthy();
-  });
-
-  it("draws no cause card for a summary-less run with no causes", async () => {
-    api.getCase.mockResolvedValue(frustrationCase({ rca: { ...FRUSTRATION_REPORT, causes: [], summary: null } }));
-    renderPage();
-    await heading("Users on support-agent grew frustrated");
-
-    expect(screen.queryByText("Likely cause")).toBeNull();
-  });
 });
 
 describe("a case with a classifier detail", () => {

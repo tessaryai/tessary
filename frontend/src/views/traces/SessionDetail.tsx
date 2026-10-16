@@ -3,6 +3,7 @@
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
+import { searchPatch } from "../../lib/searchPatch";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { SessionConversationView, SessionTreeView, SessionTimelineView } from "./detail-views";
 import { conversationMarks, namesBy } from "./detection-marker";
@@ -24,14 +25,7 @@ export function SessionDetail() {
   const marksBySpan = namesBy(detections, "span_id");
   const spansByTrace = useSpansByTrace(spansQ.data?.spans);
 
-  const patch = (kv: Record<string, string | null>) => {
-    const next = new URLSearchParams(sp);
-    for (const [k, v] of Object.entries(kv)) {
-      if (v === null) next.delete(k);
-      else next.set(k, v);
-    }
-    setSp(next, { replace: true });
-  };
+  const patch = searchPatch(sp, setSp, true);
 
   const view = (sp.get("view") as TraceView | null) ?? "conversation";
   const focusId = sp.get("span");
