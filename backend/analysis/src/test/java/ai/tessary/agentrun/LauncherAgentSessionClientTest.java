@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.agentrun;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,9 +35,11 @@ import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -201,8 +204,8 @@ class LauncherAgentSessionClientTest {
     }
 
     /**
-     * Catches a failed start that keeps a Tessary AI run slot: the credential is freed whatever the
-     * launcher answered (an answer with no session id included), or when nothing listens at all (status 0 here).
+     * Catches a failed start that keeps a Tessary AI run slot, or a launcher-side timeout read as some other failure:
+     * the credential is freed whatever the launcher answered (an answer with no session id included), or when nothing listens at all (status 0 here).
      */
     @ParameterizedTest
     @CsvSource(
@@ -210,6 +213,7 @@ class LauncherAgentSessionClientTest {
             value = {
                 "502 | {\"kind\":\"bad_request\",\"detail\":\"session.js: model must be a non-empty string\"} | RUN_FAILED",
                 "502 | {\"kind\":\"orchestration\"}                                                          | LAUNCHER_UNAVAILABLE",
+                "502 | {\"kind\":\"timeout\"}                                                                | TIMED_OUT",
                 "0   | ''                                                                                 | LAUNCHER_UNAVAILABLE",
                 "201 | not json                                                                           | BAD_OUTPUT",
                 "201 | {}                                                                                 | BAD_OUTPUT"
@@ -759,8 +763,8 @@ class LauncherAgentSessionClientTest {
     }
 
     /**
-     * Catches an interrupt swallowed while waiting on the launcher (the silent socket accepts and never answers), and
-     * an events read from a dead launcher yielded as an empty stream.
+     * Catches an interrupt swallowed while waiting on the launcher (the silent socket accepts and never answers), an
+     * events read from a dead launcher yielded as an empty stream, and an error body cut short read as a crash.
      */
     @Test
     void anInterruptedCallKeepsTheInterruptAndADeadLauncherIsUnavailable() throws Exception {
@@ -779,6 +783,21 @@ class LauncherAgentSessionClientTest {
                         assertThrows(TessaryException.class, call::run).error());
                 assertTrue(Thread.interrupted(), "the interrupt is kept");
             }
+        }
+        try (ServerSocket cut = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            Thread.ofVirtual().start(() -> {
+                try (Socket s = cut.accept()) {
+                    s.getInputStream().read(new byte[8192]);
+                    s.getOutputStream().write("HTTP/1.1 500 X\r\nContent-Length: 99\r\n\r\n{".getBytes(UTF_8));
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+            LauncherAgentSessionClient client = client("http://127.0.0.1:" + cut.getLocalPort());
+            assertEquals(
+                    AgentRunError.LAUNCHER_UNAVAILABLE,
+                    assertThrows(TessaryException.class, () -> client.events("s-1", 0))
+                            .error());
         }
     }
 
