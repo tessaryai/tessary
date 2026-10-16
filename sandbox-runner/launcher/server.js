@@ -299,11 +299,7 @@ function credentialKey(credential) {
 }
 
 function hostOf(url) {
-  try {
-    return url ? new URL(url).hostname : null;
-  } catch {
-    return null;
-  }
+  return url && URL.canParse(url) ? new URL(url).hostname : null;
 }
 
 /**
@@ -713,21 +709,21 @@ async function reapOrphanSandboxContainers() {
     try { await dockerJson('POST', `/containers/${c.Id}/stop?t=1`); } catch { /* best effort */ }
     try { await dockerJson('DELETE', `/containers/${c.Id}?force=true`); } catch { /* best effort */ }
   }
-  removeOrphanWorkDirs(reapedWork, keptWork);
+  removeOrphanWorkDirs(LAUNCHER_WORK_DIR, reapedWork, keptWork);
 }
 
 // A work dir can hold MCP tokens and results, and only its own run removes it, so after a restart the
 // reaper removes reaped containers' dirs and every pre-boot dir no kept container uses.
-function removeOrphanWorkDirs(reapedWork, keptWork) {
+function removeOrphanWorkDirs(workDir, reapedWork, keptWork) {
   let entries;
   try {
-    entries = fs.readdirSync(LAUNCHER_WORK_DIR, { withFileTypes: true });
+    entries = fs.readdirSync(workDir, { withFileTypes: true });
   } catch {
     return;
   }
   for (const d of entries) {
     if (!d.isDirectory() || !WORK_DIR_NAME.test(d.name) || keptWork.has(d.name)) continue;
-    const dir = path.join(LAUNCHER_WORK_DIR, d.name);
+    const dir = path.join(workDir, d.name);
     if (!reapedWork.has(d.name)) {
       let changedMs;
       try { changedMs = fs.statSync(dir).mtimeMs; } catch { continue; }
@@ -1446,9 +1442,8 @@ async function startSession(body) {
   s.state = 'live';
   s.readerDone = readSessionEvents(s);
   armIdle(s);
-  const lifeLeft = SANDBOX_SESSION_MAX_MS - (Date.now() - s.createdAt);
-  if (lifeLeft > 0) s.lifeTimer = setTimeout(() => closeSession(s, 'idle'), lifeLeft);
-  else setImmediate(() => closeSession(s, 'idle'));
+  const lifeLeft = Math.max(0, SANDBOX_SESSION_MAX_MS - (Date.now() - s.createdAt));
+  s.lifeTimer = setTimeout(() => closeSession(s, 'idle'), lifeLeft);
   const h = s.handle || {};
   const where = h.containerId ? ` container=${h.containerId.slice(0, 12)}` : h.sandboxId ? ` sandbox=${h.sandboxId}` : '';
   console.log(`session ${s.id}: live${where} ready_ms=${Date.now() - arrivedAt}`);
@@ -1677,4 +1672,6 @@ module.exports = {
   providerConfig,
   agentEnvs,
   e2bSessionAddress,
+  removeOrphanWorkDirs,
+  waitSessionReady,
 };

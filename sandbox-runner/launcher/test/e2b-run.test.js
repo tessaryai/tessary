@@ -187,4 +187,7 @@ test('an egress credential creates the sandbox with the key injected at its egre
   });
   assert.equal(calls[2].envs.ANTHROPIC_API_KEY, 'injected-at-egress');
   assert.ok(!calls[1].content.includes('egress_secret'), 'the credential never reaches the sandbox filesystem');
+
+  const scp = await runOnce('ok', '/rca', {}, { ...payload, clone_url: 'git@github.com:acme/app.git' });
+  assert.deepEqual([scp.status, scp.calls[0].network.allowOut], [200, ['api.anthropic.com', 'tessary.example.com']], 'a clone_url that is not a URL opens no host and fails no run');
 });

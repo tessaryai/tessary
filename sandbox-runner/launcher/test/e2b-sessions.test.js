@@ -15,7 +15,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { spawnLauncher, request, readSse, freePort, withoutElapsed, reply, numbered, sleep, until } = require('./fixtures/launcher-harness');
 const { startFakeSession } = require('./fixtures/fake-session');
-const { e2bSessionAddress } = require('../server.js');
+const { e2bSessionAddress, waitSessionReady } = require('../server.js');
 
 const FAKE_E2B = path.join(__dirname, 'fixtures', 'fake-e2b');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -412,6 +412,27 @@ test('a cut event stream from an E2B sandbox is resumed with from and loses noth
   });
 });
 
+test('an E2B session script gone before its command stream is reattached fails the start at once and the launcher serves on (a reattach to a dead pid that crashed the launcher)', T, async () => {
+  await withE2bLauncher({ shapes: [{ exitAtStart: { code: 2, stderr: '' }, waitDrops: 1 }] }, async ({ start, control, stderr }) => {
+    const failed = await start();
+    assert.deepEqual([failed.status, failed.body.detail], [502, 'session.js did not become ready (sandbox exited)']);
+    assert.match(stderr(), /session\.js pid 1 not found on reattach \(NotFoundError\)/);
+    assert.deepEqual(control.ops().filter((op) => op === 'connect'), ['connect']);
+    assert.equal((await start()).status, 201);
+  });
+});
+
+test('a proxy error page or a stray line on the script\'s event stream never reaches the reader, and no event is lost (an HTML 502 counted as script lines)', T, async () => {
+  await withE2bLauncher({ shape: { eventsAnswer: 502, strayLines: ['not json', '{"type":"debug","data":{}}'] } }, async ({ start, send, events, control, stderr }) => {
+    const id = (await start()).body.session_id;
+    assert.equal((await send(id, 'one')).status, 202);
+
+    assert.deepEqual((await events(id, { after: 0, until: 4 })).events, numbered(reply(1, 'one'), 1));
+    assert.deepEqual(control.fakes[SBX1].eventFroms, [0, 0]);
+    assert.match(stderr(), /dropped event of type unparseable[\s\S]*dropped event of type debug/);
+  });
+});
+
 test('on E2B an unknown session id is 404 on every route (an E2B launcher that answers for sessions it does not hold)', T, async () => {
   await withE2bLauncher({}, async ({ send, abort, stop, port }) => {
     for (const id of ['00000000-0000-4000-8000-000000000000', 'nope']) {
@@ -597,4 +618,8 @@ test('an E2B session script that exits before it is ready is a 502 at once, its 
 test('a session on real E2B is dialed over https at the sandbox host (a session secret sent in clear text to E2B\'s proxy)', () => {
   assert.equal(e2bSessionAddress('9400-sbx-1.e2b.app', false), 'https://9400-sbx-1.e2b.app');
   assert.equal(e2bSessionAddress('9400-sbx-1.e2b.app', true), 'http://9400-sbx-1.e2b.app');
+});
+
+test('a session script that never says ready fails its start at the 90 s deadline (a start that waits forever on a hung script)', T, async () => {
+  await assert.rejects(waitSessionReady({ exited: false }, Date.now() - 90_000), { message: 'session.js did not become ready in 90000ms', launcherKind: 'timeout' });
 });

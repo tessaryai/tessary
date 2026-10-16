@@ -7,6 +7,7 @@
  * its deadline, one that floods stdout, a pull that fails mid-stream, a create the daemon refuses,
  * and the startup reconciliation pass against a daemon holding stale sandboxes.
  */
+process.env.SANDBOX_BACKEND = 'e2b'; // keep require('../server.js') side-effect free; withLauncher sets its own
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
@@ -14,7 +15,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { withoutElapsed } = require('./fixtures/launcher-harness');
+const { withoutElapsed, tempDir } = require('./fixtures/launcher-harness');
+const { removeOrphanWorkDirs } = require('../server.js');
 
 const SERVER_JS = path.join(__dirname, '..', 'server.js');
 const CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
@@ -344,4 +346,23 @@ test('startup removes the work dirs a dead launcher left and keeps the ones stil
 
     assert.deepEqual(fs.readdirSync(workDir).sort(), ['notes', 'run-fresh1', 'run-keptA1'], stderr());
   });
+});
+
+test('a work dir that cannot be removed is logged and the reaper goes on to the rest (one stuck dir that strands every token after it)', (t) => {
+  const workDir = tempDir('reap-');
+  for (const name of ['run-stuck1', 'run-gone01']) fs.mkdirSync(path.join(workDir, name));
+  const rmSync = fs.rmSync;
+  t.mock.method(fs, 'rmSync', (dir, opts) => {
+    if (dir.endsWith('run-stuck1')) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+    return rmSync(dir, opts);
+  });
+  const logged = t.mock.method(console, 'error', () => {});
+
+  removeOrphanWorkDirs(workDir, new Set(['run-stuck1', 'run-gone01']), new Set());
+
+  assert.deepEqual(fs.readdirSync(workDir), ['run-stuck1']);
+  assert.deepEqual(logged.mock.calls.map((c) => c.arguments[0]).sort(), [
+    'docker backend: removed orphaned work dir run-gone01',
+    'warning: could not remove orphaned work dir run-stuck1: EBUSY',
+  ]);
 });
