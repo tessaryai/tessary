@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.crypto.SecretBox;
@@ -241,6 +242,9 @@ class AgenticCredentialResolverTest {
         // The sealed ciphertext is what reaches the box — not the row, and not the plaintext.
         verify(secretBox).open("sealed-access");
         verify(secretBox).open("sealed-secret");
+        // This build reserves nothing per run: releasing opens nothing and never throws into a run's finally.
+        resolver.release(c);
+        verifyNoMoreInteractions(secretBox);
     }
 
     @Test

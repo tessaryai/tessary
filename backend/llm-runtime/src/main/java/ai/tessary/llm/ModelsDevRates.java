@@ -81,7 +81,7 @@ public class ModelsDevRates {
                 mapper,
                 props,
                 Clock.systemUTC(),
-                loadBundled(mapper));
+                loadBundled(mapper, BUNDLED_RESOURCE));
     }
 
     ModelsDevRates(
@@ -174,14 +174,14 @@ public class ModelsDevRates {
                 .log();
     }
 
-    private static Map<String, ModelCost> loadBundled(ObjectMapper mapper) {
-        try (InputStream in = new ClassPathResource(BUNDLED_RESOURCE).getInputStream()) {
+    static Map<String, ModelCost> loadBundled(ObjectMapper mapper, String resource) {
+        try (InputStream in = new ClassPathResource(resource).getInputStream()) {
             return parse(mapper, in.readAllBytes());
         } catch (IOException e) {
             log.warn(
                     Markers.OPS,
                     "bundled models.dev copy unreadable at {}; sandbox runs depend on the live file",
-                    BUNDLED_RESOURCE,
+                    resource,
                     e);
             return Map.of();
         }

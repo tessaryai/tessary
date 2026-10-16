@@ -2,6 +2,7 @@
 package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -25,6 +26,8 @@ import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Against a mocked {@link HttpClient} fed canned answers. Pins the order rates come from (live, then the
@@ -87,11 +90,33 @@ class ModelsDevRatesTest {
         fetches(2);
     }
 
+    /** An error status, or a 200 that prices nothing, is retried after the outage window, not the refresh interval. */
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {"503 | upstream unavailable", "200 | {\"xai\":{\"models\":{}}}"})
+    void anErrorStatusOrAnEmptyFileIsAnOutageToo(int status, String body) throws Exception {
+        answer(status, body);
+        ModelsDevRates rates = rates();
+
+        assertEquals(Optional.of(BUNDLED_GROK), rates.cost("xai/grok-4.6"));
+        clock.advance(ModelsDevRates.RETRY_AFTER);
+        rates.cost("xai/grok-4.6");
+        fetches(2);
+    }
+
+    /** The bug: an interrupted fetch swallowing the interrupt, so a run being shut down keeps going. */
     @Test
-    void anErrorStatusIsAnOutageToo() throws Exception {
-        answer(503, "upstream unavailable");
+    void anInterruptedFetchFallsBackToTheBundledCopyAndKeepsTheInterrupt() throws Exception {
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(new InterruptedException());
 
         assertEquals(Optional.of(BUNDLED_GROK), rates().cost("xai/grok-4.6"));
+        assertTrue(Thread.interrupted());
+    }
+
+    /** A jar without its bundled copy degrades to the live file rather than failing startup. */
+    @Test
+    void aMissingBundledCopyIsEmptyNotAStartupFailure() {
+        assertEquals(Map.of(), ModelsDevRates.loadBundled(MAPPER, "models-dev/absent.json"));
     }
 
     @Test
