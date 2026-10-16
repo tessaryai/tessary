@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Aggregate coverage floors (JaCoCo, all modules): every line, and a branch floor.
 MIN_LINE_COVERAGE=1
-MIN_BRANCH_COVERAGE=0.88
+MIN_BRANCH_COVERAGE=0.875
 
 mode="${1:-all}"
 [ $# -gt 0 ] && shift

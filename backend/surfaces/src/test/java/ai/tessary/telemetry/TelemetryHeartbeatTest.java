@@ -156,14 +156,16 @@ class TelemetryHeartbeatTest {
     }
 
     @Test
-    void aFailedPriceBookCheckNeverEscapesTheTick() {
+    void aFailedSendAndAFailedPriceBookCheckNeverEscapeTheTick() throws Exception {
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenReturn(INSTANCE_ID);
+        HomeTessaryClient client = mock(HomeTessaryClient.class);
+        when(client.postJson(anyString(), anyString())).thenThrow(new IOException("connection refused"));
         when(fetcher.refresh()).thenThrow(new IllegalStateException("boom"));
 
-        assertDoesNotThrow(
-                () -> heartbeat(Props.of(TelemetryProperties.class), instanceIds, mock(HomeTessaryClient.class))
-                        .tick());
+        assertDoesNotThrow(() -> heartbeat(Props.of(TelemetryProperties.class), instanceIds, client)
+                .tick());
+        verify(fetcher).refresh();
     }
 
     @Test
@@ -185,7 +187,7 @@ class TelemetryHeartbeatTest {
         when(projects.countAll()).thenReturn(3L);
         when(findings.countAll()).thenThrow(new IllegalStateException("statement timeout"));
         HomeTessaryClient client = mock(HomeTessaryClient.class);
-        when(client.postJson(anyString(), anyString())).thenReturn(204);
+        when(client.postJson(anyString(), anyString())).thenReturn(400);
 
         heartbeat(Props.of(TelemetryProperties.class), instanceIds, client).tick();
 
