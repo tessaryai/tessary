@@ -44,27 +44,19 @@ it("reading: shows only automatic triage, with the build's default", async () =>
 });
 
 describe("changing", () => {
-  it("pins the override on for the org", async () => {
+  // Bug: the wrong key or value sent, or a refused change that says nothing, so the reader believes it changed.
+  it.each([
+    ["pins the override on for the org", () => Promise.resolve(triage({ enabled: true })), "Automatic triage is on"],
+    ["says why a change was refused", () => Promise.reject(new Error("Only an owner can change this")), "Only an owner can change this"],
+  ])("%s", async (_, answer, said) => {
+    auth.setCapabilityOverride.mockImplementation(answer);
     renderRoute(<Features />);
     await waitFor(() => expect(toggle().disabled).toBe(false));
 
     fireEvent.click(toggle());
 
-    await waitFor(() =>
-      expect(auth.setCapabilityOverride).toHaveBeenCalledWith("acme", "triage_automatic_enabled", true),
-    );
-  });
-
-  // Bug: a refused change says nothing, so the reader believes automatic triage changed.
-  it("says why a change was refused", async () => {
-    auth.setCapabilityOverride.mockRejectedValue(new Error("Only an owner can change this"));
-    renderRoute(<Features />);
-    await waitFor(() => expect(toggle().disabled).toBe(false));
-
-    fireEvent.click(toggle());
-
-    expect(await screen.findByText("Could not change automatic triage")).toBeTruthy();
-    expect(screen.getByText("Only an owner can change this")).toBeTruthy();
+    expect(await screen.findByText(said)).toBeTruthy();
+    expect(auth.setCapabilityOverride).toHaveBeenCalledWith("acme", "triage_automatic_enabled", true);
   });
 
   it.each(["member", "viewer"])("offers no switch to a %s", async (role) => {

@@ -261,13 +261,15 @@ describe("Tree", () => {
 describe("JSON", () => {
   const longInput = j([...HISTORY, QUESTION, TOOL_REQUEST_REPLAYED, TOOL_RESULTS]);
 
-  it("folds each span, and shows every string in full once expanded", async () => {
+  it("folds each span, shows every string in full once expanded, and folds again on Collapse all", async () => {
     renderTrace("?view=json");
 
     await screen.findByRole("button", { name: "Expand all" });
     expect(screen.queryByText(longInput)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
     expect(screen.getByText(longInput)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.queryByText(longInput)).toBeNull();
   });
 
   it("copies the response exactly as the API sent it", async () => {
