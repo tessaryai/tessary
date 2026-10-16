@@ -14,6 +14,9 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class ToolErrorStateRepository {
 
+    /** The reset note written when the scorer or the tuning changed under a key's state. */
+    public static final String TUNING_CHANGED = "tuning changed";
+
     private final JdbcClient jdbc;
     private final String table;
     private final String keyColumn;
@@ -207,5 +210,15 @@ public class ToolErrorStateRepository {
                 .param("note", note)
                 .param("at", resetAt)
                 .update();
+    }
+
+    /** Relearns {@code stale} under {@code epoch}, stamped so the next pass does not reset it again while it learns. */
+    public static CarriedState retune(
+            ToolErrorStateRepository states, String projectId, CarriedState stale, String epoch, String now) {
+        states.resetAndRelearn(projectId, stale.toolKey(), null, TUNING_CHANGED, now);
+        CarriedState fresh = new CarriedState(
+                stale.toolKey(), State.EMPTY, null, null, epoch, stale.pendingPinBy(), stale.pendingPinAt(), now);
+        states.save(projectId, fresh, now);
+        return fresh;
     }
 }

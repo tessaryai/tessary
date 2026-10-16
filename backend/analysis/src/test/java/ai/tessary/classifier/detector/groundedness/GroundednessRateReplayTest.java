@@ -193,7 +193,7 @@ class GroundednessRateReplayTest {
         h.refresh();
 
         assertEquals(
-                List.of(new Reset("p1", CALL_SITE, null, GroundednessRateService.TUNING_CHANGED, h.now)),
+                List.of(new Reset("p1", CALL_SITE, null, ToolErrorStateRepository.TUNING_CHANGED, h.now)),
                 h.states.resets);
         assertEquals(
                 new Save(
