@@ -5,7 +5,8 @@
  * product brief or a hand calculation.
  */
 import { describe, expect, it } from "vitest";
-import type { ChartCard, ChartCaseSpan, ChartChip, ChartPoint, ChartToolOption, ClassifierMenuItem } from "../../api/types";
+import type { ChartChip, ChartToolOption, ClassifierMenuItem } from "../../api/types";
+import { caseSpan as span, chartCard as card, chartPoint as point } from "../../test/fixtures";
 import {
   armingLine, axisTitle, chipText, countBar, defaultCallSite, defaultTool, headlineOf, lanesOf, laneTooltip, menuStatus,
   pointTooltip, spanLabel,
@@ -15,30 +16,8 @@ import {
 
 const HOUR = 3_600_000;
 
-/** A point from `start_at` to `end_at`, with only the fields its kind uses set. */
-const point = (start_at: string, end_at: string, d: Partial<ChartPoint>): ChartPoint => ({
-  start_at, end_at, open: false, checked: null, flagged: null, n: null, p50: null, p95: null, count: null, total: null,
-  reached: null, ...d,
-});
-
-function card(c: Partial<ChartCard>): ChartCard {
-  return {
-    classifier_id: "c1", classifier_key: "frustration", name: "Frustration", kind: "rate", measure: null,
-    unit: "fraction", learning: null,
-    headline: { value: null, delta: null }, baseline: null, arming: null, points: [],
-    cases: { open_cases: 0, spans: [] }, ...c,
-  };
-}
-
 const rateBaseline = (rate: number) => ({ calls: 1000, failures: 42, rate, pinned: false, p50: null, p95: null });
 const rangeBaseline = (p50: number, p95: number) => ({ calls: null, failures: null, rate: null, pinned: null, p50, p95 });
-
-function span(s: Partial<ChartCaseSpan>): ChartCaseSpan {
-  return {
-    finding_id: "f", case_id: "case", case_reference: "C-1", case_title: "A case", case_state: "open",
-    start_at: "2026-10-01T09:00:00Z", end_at: null, resolution: null, disposition: null, ...s,
-  };
-}
 
 describe("yAxis", () => {
   // Bug: ticks at odd steps (1.95%, 3.9%) that a reader cannot hold, or a top tick below the data.

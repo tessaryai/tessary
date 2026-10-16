@@ -3,7 +3,9 @@
  * Builders for the wire shapes several page tests render. Each returns a fully populated value with
  * neutral defaults, so a test states only the fields its assertion is about.
  */
-import type { Classifier, GroundednessStatus, TraceDetailView, TraceListItemView } from "../api/types";
+import type {
+  ChartCard, ChartCaseSpan, ChartPoint, Classifier, GroundednessStatus, TraceDetailView, TraceListItemView,
+} from "../api/types";
 
 export type SpanView = TraceDetailView["spans"][number];
 
@@ -41,5 +43,26 @@ export function groundednessStatus(over: Partial<GroundednessStatus> = {}): Grou
   return {
     state: "off", mode: "dev", configured: false, available: false, reason: "no encoder URL configured",
     checked_at: null, ever_swept: false, last_scored_at: null, last_caught_up_at: null, setup_ref: "v1.3.0", ...over,
+  };
+}
+
+/** A chart point from `start_at` to `end_at`, with only the fields its kind uses set. */
+export const chartPoint = (start_at: string, end_at: string, d: Partial<ChartPoint> = {}): ChartPoint => ({
+  start_at, end_at, open: false, checked: null, flagged: null, n: null, p50: null, p95: null, count: null, total: null,
+  reached: null, ...d,
+});
+
+export function chartCard(c: Partial<ChartCard> = {}): ChartCard {
+  return {
+    classifier_id: "c1", classifier_key: "frustration", name: "Frustration", kind: "rate", measure: null,
+    unit: "fraction", learning: null, headline: { value: null, delta: null }, baseline: null, arming: null, points: [],
+    cases: { open_cases: 0, spans: [] }, ...c,
+  };
+}
+
+export function caseSpan(s: Partial<ChartCaseSpan> = {}): ChartCaseSpan {
+  return {
+    finding_id: "f", case_id: "case", case_reference: "C-1", case_title: "A case", case_state: "open",
+    start_at: "2026-10-01T09:00:00Z", end_at: null, resolution: null, disposition: null, ...s,
   };
 }

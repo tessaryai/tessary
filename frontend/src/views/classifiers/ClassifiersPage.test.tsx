@@ -9,6 +9,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import type { ChartCard, ChartScopes, ClassifierCharts } from "../../api/types";
+import { chartCard, chartPoint } from "../../test/fixtures";
 import { currentLocation, renderRoute } from "../../test/render";
 import { ClassifiersPage } from "./ClassifiersPage";
 import { api } from "../../test/api";
@@ -37,20 +38,12 @@ function scopes(s: Partial<ChartScopes> = {}): ChartScopes {
   };
 }
 
-const frustrationCard: ChartCard = {
-  classifier_id: "id-frustration", classifier_key: "frustration", name: "Frustration", kind: "rate", measure: null,
-  unit: "fraction", learning: null,
+const frustrationCard = chartCard({
+  classifier_id: "id-frustration",
   headline: { value: 0.072, delta: 0.03 },
   baseline: { calls: 1000, failures: 42, rate: 0.042, pinned: false, p50: null, p95: null },
-  arming: null,
-  points: [
-    {
-      start_at: "2026-10-08T00:00:00Z", end_at: "2026-10-08T09:00:00Z", open: true, checked: 100, flagged: 7, n: null,
-      p50: null, p95: null, count: null, total: null, reached: null,
-    },
-  ],
-  cases: { open_cases: 0, spans: [] },
-};
+  points: [chartPoint("2026-10-08T00:00:00Z", "2026-10-08T09:00:00Z", { open: true, checked: 100, flagged: 7 })],
+});
 
 const toolErrorCard: ChartCard = {
   ...frustrationCard, classifier_id: "id-tool-error", classifier_key: "tool_error", name: "Tool Errors",
