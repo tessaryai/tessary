@@ -54,6 +54,9 @@ class SessionsControllerTest {
     SessionRepository sessions;
 
     @Autowired
+    SessionReadService reads;
+
+    @Autowired
     TraceV2Repository traces;
 
     @Autowired
@@ -436,6 +439,9 @@ class SessionsControllerTest {
                 ok(controller.detail(ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null));
         assertEquals(cap, detail.traces().size());
         assertTrue(detail.tracesTruncated(), "one trace past the cap is a truncated session, not a full one");
+        var conversation = reads.conversation(pid, sessionId).orElseThrow();
+        assertEquals(cap, conversation.traces().size());
+        assertTrue(conversation.tracesTruncated(), "the conversation read is cut at the same cap");
 
         var got = ok(controller.spans(ctx, org, proj, sessionId));
         assertEquals(SessionReadService.SESSION_SPAN_CAP, got.spans().size());
