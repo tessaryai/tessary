@@ -40,7 +40,7 @@ export default defineConfig({
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/**/*.d.ts", "src/main.tsx"],
       reporter: ["text-summary", "json-summary", "json", "html"],
-      thresholds: { lines: 96.8 },
+      thresholds: { lines: 100, branches: 93.4 },
     },
   },
 });
