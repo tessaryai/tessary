@@ -10,6 +10,7 @@ import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -161,13 +162,19 @@ public class FrustrationShadowSweep {
                 .timeout(Duration.ofSeconds(5))
                 .GET()
                 .build();
+        HttpResponse<String> response = send(req);
+        return response != null && response.statusCode() / 100 == 2;
+    }
+
+    /** Null on a transport failure; an interrupt is kept. */
+    private @Nullable HttpResponse<String> send(HttpRequest req) {
         try {
-            return http.send(req, HttpResponse.BodyHandlers.ofString()).statusCode() / 100 == 2;
+            return http.send(req, HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {
-            return false;
+            return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return false;
+            return null;
         }
     }
 
@@ -176,14 +183,7 @@ public class FrustrationShadowSweep {
 
     @Nullable
     Answer ask(Backlog b) {
-        ObjectNode body;
-        try {
-            JsonNode stored = mapper.readTree(b.requestJson());
-            if (!stored.isObject()) return refusal("stored request is not an object", 0);
-            body = (ObjectNode) stored;
-        } catch (IOException e) {
-            return refusal("stored request is not JSON", 0);
-        }
+        if (!(tree(b.requestJson()) instanceof ObjectNode body)) return refusal("stored request is not an object", 0);
         body.put("model", props.model());
         HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(props.baseUrl() + "/v1/systemone"))
                 .timeout(Duration.ofMillis(props.timeoutMs()))
@@ -191,15 +191,8 @@ public class FrustrationShadowSweep {
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString()));
         if (!props.apiKey().isBlank()) req.header("Authorization", "Bearer " + props.apiKey());
         long t0 = clock.millis();
-        HttpResponse<String> response;
-        try {
-            response = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
-        } catch (IOException e) {
-            return null;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        }
+        HttpResponse<String> response = send(req.build());
+        if (response == null) return null;
         int latency = (int) Math.min(Integer.MAX_VALUE, clock.millis() - t0);
         int status = response.statusCode();
         if (status >= 500) return null;
@@ -217,15 +210,20 @@ public class FrustrationShadowSweep {
     /** {@code answers.<question>.probabilities.<main option>} of a 2xx body, else null. */
     @Nullable
     Double score(String body) {
+        JsonNode p = tree(body)
+                .path("answers")
+                .path(JevFrustrationQuestion.NAME)
+                .path("probabilities")
+                .path(JevFrustrationQuestion.UNHAPPY_WITH_ASSISTANT);
+        return p.isNumber() ? p.doubleValue() : null;
+    }
+
+    /** A missing node for text that is not JSON. */
+    private JsonNode tree(String json) {
         try {
-            JsonNode p = mapper.readTree(body)
-                    .path("answers")
-                    .path(JevFrustrationQuestion.NAME)
-                    .path("probabilities")
-                    .path(JevFrustrationQuestion.UNHAPPY_WITH_ASSISTANT);
-            return p.isNumber() ? p.doubleValue() : null;
+            return mapper.readTree(json);
         } catch (IOException e) {
-            return null;
+            return MissingNode.getInstance();
         }
     }
 

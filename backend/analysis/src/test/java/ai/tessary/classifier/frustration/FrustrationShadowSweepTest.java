@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.frustration;
 
+import static ai.tessary.testsupport.ScriptedHttpClient.response;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -19,12 +20,10 @@ import ai.tessary.classifier.frustration.FrustrationShadowRepository.Backlog;
 import ai.tessary.classifier.frustration.FrustrationShadowRepository.ShadowRow;
 import ai.tessary.classifier.frustration.FrustrationShadowRepository.Summary;
 import ai.tessary.testsupport.Props;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.net.ConnectException;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -32,11 +31,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
-/** Against a mocked {@link HttpClient}, as the decision client's tests are. */
+/** Against a scripted {@link java.net.http.HttpClient}. */
 class FrustrationShadowSweepTest {
 
+    private static final String HEALTH = "http://10.2.1.9:8000/health";
+    private static final String SCORE = "http://10.2.1.9:8000/v1/systemone";
     private static final String REQUEST =
             "{\"model\":\"~typesafe/jev-latest\",\"state\":{\"current_user_message\":\"again??\",\"earlier_messages\":[]},"
                     + "\"questions\":{\"user_stance\":{\"type\":\"choice\",\"instructions\":\"x\",\"criteria\":{}}}}";
@@ -47,85 +47,29 @@ class FrustrationShadowSweepTest {
             "{\"answers\":{\"user_stance\":{\"type\":\"choice\",\"choice\":\"neutral_or_positive\","
                     + "\"probabilities\":{\"unhappy_with_assistant\":0.12,\"unhappy_other_cause\":0.03,\"neutral_or_positive\":0.85}}}}";
 
-    private final HttpClient http = mock(HttpClient.class);
+    private final ScriptedHttpClient http = new ScriptedHttpClient();
     private final FrustrationShadowRepository shadows = mock(FrustrationShadowRepository.class);
     private final ClassifierRepository classifiers = mock(ClassifierRepository.class);
     private final List<ShadowRow> written = new ArrayList<>();
 
-    private FrustrationShadowSweep sweep() {
-        return sweep("decider", "");
-    }
-
-    private FrustrationShadowSweep sweep(String model, String apiKey) {
-        FrustrationShadowProperties props = Props.of(
-                FrustrationShadowProperties.class,
-                "url",
-                "http://10.2.1.9:8000/",
-                "batch",
-                2,
-                "model",
-                model,
-                "api-key",
-                apiKey);
+    /** {@code props} override the url and a batch of two. */
+    private FrustrationShadowSweep sweep(Object... props) {
+        List<Object> keyValues = new ArrayList<>(List.of("url", "http://10.2.1.9:8000/", "batch", 2));
+        keyValues.addAll(List.of(props));
         when(shadows.summary()).thenReturn(new Summary(0, 0, 0, 0, 0));
         when(shadows.insert(any())).thenAnswer(inv -> written.add(inv.getArgument(0)));
         when(classifiers.findById(any(), any())).thenReturn(Optional.empty());
         return new FrustrationShadowSweep(
-                shadows, classifiers, props, new ObjectMapper(), http, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
+                shadows,
+                classifiers,
+                Props.of(FrustrationShadowProperties.class, keyValues.toArray()),
+                new ObjectMapper(),
+                http,
+                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
     }
 
     private static Backlog turn(String id, boolean referenceFlag) {
         return new Backlog(id, "p1", "c1", "t-" + id, "v1", REQUEST, referenceFlag);
-    }
-
-    /** A plain response, not a mock: building a mock inside a stubbing would leave it unfinished. */
-    private static HttpResponse<String> response(int status, String body) {
-        return new HttpResponse<>() {
-            @Override
-            public int statusCode() {
-                return status;
-            }
-
-            @Override
-            public String body() {
-                return body;
-            }
-
-            @Override
-            public HttpRequest request() {
-                return HttpRequest.newBuilder(java.net.URI.create("http://10.2.1.9:8000/"))
-                        .build();
-            }
-
-            @Override
-            public Optional<HttpResponse<String>> previousResponse() {
-                return Optional.empty();
-            }
-
-            @Override
-            public java.net.http.HttpHeaders headers() {
-                return java.net.http.HttpHeaders.of(java.util.Map.of(), (a, b) -> true);
-            }
-
-            @Override
-            public Optional<javax.net.ssl.SSLSession> sslSession() {
-                return Optional.empty();
-            }
-
-            @Override
-            public java.net.URI uri() {
-                return request().uri();
-            }
-
-            @Override
-            public HttpClient.Version version() {
-                return HttpClient.Version.HTTP_1_1;
-            }
-        };
-    }
-
-    private static boolean isHealth(@org.jspecify.annotations.Nullable HttpRequest r) {
-        return r != null && r.uri().getPath().endsWith("/health");
     }
 
     @Test
@@ -143,27 +87,23 @@ class FrustrationShadowSweepTest {
     }
 
     @Test
-    void leavesTheBacklogWhileTheServerIsAsleep() throws Exception {
+    void leavesTheBacklogWhileTheServerIsAsleep() {
         FrustrationShadowSweep s = sweep();
-        when(http.<String>send(any(), any())).thenThrow(new ConnectException("refused"));
+        http.on(HEALTH, new ConnectException("refused"));
         FrustrationShadowSweep.Run run = s.sweep();
         assertFalse(run.serverUp());
         verify(shadows, never()).backlog(anyInt());
     }
 
     @Test
-    void drainsTheBacklogInBatchesAndFlagsAgainstTheThreshold() throws Exception {
+    void drainsTheBacklogInBatchesAndFlagsAgainstTheThreshold() {
         FrustrationShadowSweep s = sweep();
         when(shadows.backlog(2))
                 .thenReturn(List.of(turn("a1", true), turn("a2", false)))
                 .thenReturn(List.of(turn("a3", true)))
                 .thenReturn(List.of());
-        when(http.<String>send(argThat(FrustrationShadowSweepTest::isHealth), any()))
-                .thenReturn(response(200, "{\"ok\":true}"));
-        when(http.<String>send(argThat(r -> !isHealth(r)), any()))
-                .thenReturn(response(200, ANSWER_HIGH))
-                .thenReturn(response(200, ANSWER_LOW))
-                .thenReturn(response(200, ANSWER_LOW));
+        http.on(HEALTH, response(200, "{\"ok\":true}"))
+                .on(SCORE, response(200, ANSWER_HIGH), response(200, ANSWER_LOW), response(200, ANSWER_LOW));
 
         FrustrationShadowSweep.Run run = s.sweep();
 
@@ -184,34 +124,28 @@ class FrustrationShadowSweepTest {
     }
 
     @Test
-    void sendsTheStoredBodyWithOnlyTheModelReplaced() throws Exception {
-        FrustrationShadowSweep s = sweep("eikos", "k");
+    void sendsTheStoredBodyWithOnlyTheModelReplaced() {
+        FrustrationShadowSweep s = sweep("model", "eikos", "api-key", "k");
         when(shadows.backlog(2)).thenReturn(List.of(turn("a1", false))).thenReturn(List.of());
-        when(http.<String>send(argThat(FrustrationShadowSweepTest::isHealth), any()))
-                .thenReturn(response(200, "{}"));
-        ArgumentCaptor<HttpRequest> sent = ArgumentCaptor.forClass(HttpRequest.class);
-        when(http.<String>send(argThat(r -> !isHealth(r)), any())).thenReturn(response(200, ANSWER_LOW));
+        http.on(HEALTH, response(200, "{}")).on(SCORE, response(200, ANSWER_LOW));
 
         s.sweep();
 
-        verify(http, org.mockito.Mockito.times(2)).send(sent.capture(), any());
-        HttpRequest post = sent.getAllValues().get(1);
-        assertEquals("http://10.2.1.9:8000/v1/systemone", post.uri().toString());
+        assertEquals(2, http.sent().size());
+        HttpRequest post = http.sent().get(1);
+        assertEquals(SCORE, post.uri().toString());
         assertEquals(Optional.of("Bearer k"), post.headers().firstValue("Authorization"));
-        String body = bodyOf(post);
+        String body = ScriptedHttpClient.body(post);
         assertTrue(body.contains("\"model\":\"eikos\""), body);
         assertTrue(body.contains("\"current_user_message\":\"again??\""), body);
         assertFalse(body.contains("jev-latest"), body);
     }
 
     @Test
-    void aFourHundredIsRecordedAsARefusalSoTheTurnIsNotResent() throws Exception {
+    void aFourHundredIsRecordedAsARefusalSoTheTurnIsNotResent() {
         FrustrationShadowSweep s = sweep();
         when(shadows.backlog(2)).thenReturn(List.of(turn("a1", false))).thenReturn(List.of());
-        when(http.<String>send(argThat(FrustrationShadowSweepTest::isHealth), any()))
-                .thenReturn(response(200, "{}"));
-        when(http.<String>send(argThat(r -> !isHealth(r)), any()))
-                .thenReturn(response(400, "{\"error\":{\"message\":\"too many options\"}}"));
+        http.on(HEALTH, response(200, "{}")).on(SCORE, response(400, "{\"error\":{\"message\":\"too many options\"}}"));
 
         FrustrationShadowSweep.Run run = s.sweep();
 
@@ -222,13 +156,25 @@ class FrustrationShadowSweepTest {
         assertTrue(written.get(0).responseJson().contains("HTTP 400"));
     }
 
+    /** A gateway's error page in a 2xx has no probability: the turn is refused, not scored or left to crash the run. */
     @Test
-    void aFiveHundredEndsTheRunWithoutARow() throws Exception {
+    void aTwoHundredWithNoProbabilityIsRecordedAsARefusal() {
+        FrustrationShadowSweep s = sweep();
+        when(shadows.backlog(2)).thenReturn(List.of(turn("a1", true))).thenReturn(List.of());
+        http.on(HEALTH, response(200, "{}")).on(SCORE, response(200, "<html>502 Bad Gateway</html>"));
+
+        FrustrationShadowSweep.Run run = s.sweep();
+
+        assertEquals(new FrustrationShadowSweep.Run(1, 0, 1, true, false), run);
+        assertNull(written.get(0).score());
+        assertNull(written.get(0).frustrated());
+    }
+
+    @Test
+    void aFiveHundredEndsTheRunWithoutARow() {
         FrustrationShadowSweep s = sweep();
         when(shadows.backlog(2)).thenReturn(List.of(turn("a1", false), turn("a2", false)));
-        when(http.<String>send(argThat(FrustrationShadowSweepTest::isHealth), any()))
-                .thenReturn(response(200, "{}"));
-        when(http.<String>send(argThat(r -> !isHealth(r)), any())).thenReturn(response(503, "going down"));
+        http.on(HEALTH, response(200, "{}")).on(SCORE, response(503, "going down"));
 
         FrustrationShadowSweep.Run run = s.sweep();
 
@@ -237,8 +183,47 @@ class FrustrationShadowSweepTest {
         assertTrue(written.isEmpty());
     }
 
+    /** Interrupted mid-send, the run stops as if the server went away, and the scheduler still sees the interrupt. */
     @Test
-    void usesTheClassifiersOwnThreshold() throws Exception {
+    void anInterruptedSendEndsTheRunWithoutARowAndKeepsTheInterrupt() {
+        FrustrationShadowSweep s = sweep();
+        when(shadows.backlog(2)).thenReturn(List.of(turn("a1", false), turn("a2", false)));
+        http.on(HEALTH, response(200, "{}")).on(SCORE, new InterruptedException("shutting down"));
+
+        FrustrationShadowSweep.Run run = s.sweep();
+
+        assertTrue(Thread.interrupted(), "the interrupt is kept");
+        assertEquals(new FrustrationShadowSweep.Run(0, 0, 0, false, false), run);
+        assertTrue(written.isEmpty());
+    }
+
+    /** A run past its budget yields before sending more, so the next sweep carries on. */
+    @Test
+    void aSpentBudgetEndsTheRunBeforeTheNextSend() {
+        FrustrationShadowSweep s = sweep("budget-ms", 0);
+        when(shadows.backlog(2)).thenReturn(List.of(turn("a1", false)));
+        http.on(HEALTH, response(200, "{}"));
+
+        FrustrationShadowSweep.Run run = s.sweep();
+
+        assertEquals(new FrustrationShadowSweep.Run(0, 0, 0, true, true), run);
+        assertEquals(
+                List.of(HEALTH),
+                http.sent().stream().map(r -> r.uri().toString()).toList());
+    }
+
+    /** A failing sweep must not escape into the scheduler thread; the next tick tries again. */
+    @Test
+    void aFailingScheduledSweepIsContained() {
+        FrustrationShadowSweep s = sweep();
+        http.on(HEALTH, response(200, "{}"));
+        when(shadows.backlog(2)).thenThrow(new IllegalStateException("database unavailable"));
+
+        assertDoesNotThrow(s::scheduled);
+    }
+
+    @Test
+    void usesTheClassifiersOwnThreshold() {
         FrustrationShadowSweep s = sweep();
         ClassifierRow row = new ClassifierRow(
                 "c1",
@@ -257,47 +242,10 @@ class FrustrationShadowSweepTest {
                 null);
         when(classifiers.findById("p1", "c1")).thenReturn(Optional.of(row));
         when(shadows.backlog(2)).thenReturn(List.of(turn("a1", true))).thenReturn(List.of());
-        when(http.<String>send(argThat(FrustrationShadowSweepTest::isHealth), any()))
-                .thenReturn(response(200, "{}"));
-        when(http.<String>send(argThat(r -> !isHealth(r)), any())).thenReturn(response(200, ANSWER_HIGH));
+        http.on(HEALTH, response(200, "{}")).on(SCORE, response(200, ANSWER_HIGH));
 
         s.sweep();
 
         assertEquals(Boolean.FALSE, written.get(0).frustrated()); // 0.91 < 0.95
-    }
-
-    private static String bodyOf(HttpRequest request) throws IOException {
-        var publisher = request.bodyPublisher().orElseThrow();
-        var out = new java.io.ByteArrayOutputStream();
-        var latch = new java.util.concurrent.CountDownLatch(1);
-        publisher.subscribe(new java.util.concurrent.Flow.Subscriber<java.nio.ByteBuffer>() {
-            @Override
-            public void onSubscribe(java.util.concurrent.Flow.Subscription s) {
-                s.request(Long.MAX_VALUE);
-            }
-
-            @Override
-            public void onNext(java.nio.ByteBuffer item) {
-                byte[] b = new byte[item.remaining()];
-                item.get(b);
-                out.writeBytes(b);
-            }
-
-            @Override
-            public void onError(Throwable t) {
-                latch.countDown();
-            }
-
-            @Override
-            public void onComplete() {
-                latch.countDown();
-            }
-        });
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        return out.toString(java.nio.charset.StandardCharsets.UTF_8);
     }
 }

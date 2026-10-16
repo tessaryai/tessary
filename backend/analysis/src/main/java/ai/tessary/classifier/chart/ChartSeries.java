@@ -154,7 +154,9 @@ final class ChartSeries {
         if (n == 0) return null;
         double rank = q * n;
         long below = 0;
-        for (Map.Entry<Integer, Long> e : bins.entrySet()) {
+        // q <= 1, so the rank is at most n and the last non-empty bin always holds it.
+        for (var bin = bins.entrySet().iterator(); ; ) {
+            Map.Entry<Integer, Long> e = bin.next();
             long c = e.getValue();
             if (c == 0) continue;
             if (rank <= below + c) {
@@ -163,7 +165,6 @@ final class ChartSeries {
             }
             below += c;
         }
-        return Math.exp(grid.logHi());
     }
 
     /** @param bar the busiest facet or the whole project; ignored without a bar */

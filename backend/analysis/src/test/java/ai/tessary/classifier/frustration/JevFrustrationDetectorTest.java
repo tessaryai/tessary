@@ -305,6 +305,24 @@ class JevFrustrationDetectorTest {
         assertEquals(1, Objects.requireNonNull(page.get()).sent());
     }
 
+    /** A call that comes back interrupted stops the page: the session waiting for its permit is not sent. */
+    @Test
+    void anInterruptedCallStopsTheSessionWaitingForItsPermit() {
+        props = Props.of(FrustrationProperties.class, "concurrency", 1);
+        AtomicInteger sends = new AtomicInteger();
+        JevFrustrationDetector d = detector((projectId, lane, t, request) -> {
+            sends.incrementAndGet();
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("the provider call was interrupted");
+        });
+
+        JevFrustrationDetector.Page page =
+                d.score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a"), eligibleTurn("t-2", "conv-b")));
+
+        assertEquals(1, sends.get(), "the second session took the released permit and stopped");
+        assertEquals(1, page.sent());
+    }
+
     /**
      * A task dying of an {@link Error} its catch misses vanished, and the page scored without it. It must fail the
      * page.
