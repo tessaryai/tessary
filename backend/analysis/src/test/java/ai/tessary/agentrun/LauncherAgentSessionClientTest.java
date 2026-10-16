@@ -204,8 +204,10 @@ class LauncherAgentSessionClientTest {
     }
 
     /**
-     * Catches a failed start that keeps a Tessary AI run slot, or a launcher-side timeout read as some other failure:
-     * the credential is freed whatever the launcher answered (an answer with no session id included), or when nothing listens at all (status 0 here).
+     * Catches a failed start that keeps a Tessary AI run slot, a launcher-side timeout read as some other failure, or
+     * a full launcher read as a broken run ({@code RUN_FAILED}), which a caller would not retry: the credential is
+     * freed whatever the launcher answered (an answer with no session id included), or when nothing listens at all
+     * (status 0 here).
      */
     @ParameterizedTest
     @CsvSource(
@@ -216,7 +218,8 @@ class LauncherAgentSessionClientTest {
                 "502 | {\"kind\":\"timeout\"}                                                                | TIMED_OUT",
                 "0   | ''                                                                                 | LAUNCHER_UNAVAILABLE",
                 "201 | not json                                                                           | BAD_OUTPUT",
-                "201 | {}                                                                                 | BAD_OUTPUT"
+                "201 | {}                                                                                 | BAD_OUTPUT",
+                "429 | {\"error\":\"sandbox session capacity reached\",\"kind\":\"capacity\"}                  | CAPACITY"
             })
     void aStartTheLauncherRefusesOrCannotTakeStillFreesTheCredential(int status, String body, AgentRunError expected)
             throws Exception {
@@ -227,18 +230,6 @@ class LauncherAgentSessionClientTest {
         TessaryException ex = assertThrows(TessaryException.class, () -> client.start(START));
 
         assertEquals(expected, ex.error());
-        verify(credentials).release(START_CRED);
-    }
-
-    /** Catches a full launcher read as a broken run ({@code RUN_FAILED}), which a caller would not retry. */
-    @Test
-    void aLauncherAtItsCapIsCapacity() {
-        aGrokLaneWithItsCredential();
-        fake.answer("POST", "/sessions", 429, "{\"error\":\"sandbox session capacity reached\",\"kind\":\"capacity\"}");
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> client().start(START));
-
-        assertEquals(AgentRunError.CAPACITY, ex.error());
         verify(credentials).release(START_CRED);
     }
 
