@@ -10,9 +10,11 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ArmingView;
 import ai.tessary.classifier.chart.ClassifierChartDtos.CaseSpan;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartCard;
+import ai.tessary.classifier.chart.ClassifierChartDtos.ChartChip;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartPoint;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartsView;
 import ai.tessary.classifier.chart.ClassifierChartDtos.HeadlineView;
+import ai.tessary.classifier.chart.ClassifierChartDtos.ToolOption;
 import ai.tessary.classifier.chart.ClassifierChartRepository.ClassifierOnCallSite;
 import ai.tessary.classifier.chart.ClassifierChartRepository.CountRow;
 import ai.tessary.classifier.chart.ClassifierChartRepository.RangeRow;
@@ -24,8 +26,12 @@ import ai.tessary.classifier.frustration.FrustrationRateRepository;
 import ai.tessary.classifier.frustration.JevFrustrationQuestion;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
+import ai.tessary.classifier.metric.MetricHistogram;
 import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
+import ai.tessary.classifier.toolerror.CarriedState;
+import ai.tessary.classifier.toolerror.ToolErrorDetector;
+import ai.tessary.classifier.toolerror.ToolErrorRate;
 import ai.tessary.classifier.toolerror.ToolErrorReferenceRepository;
 import ai.tessary.classifier.toolerror.ToolErrorRepository;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
@@ -36,19 +42,25 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.EncoderFixture;
 import ai.tessary.testsupport.RateClassifierFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
+import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.SubstrateV2Fixtures.ToolCallTurn;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -81,7 +93,8 @@ record ClassifierChartRepositoryIntegrationTest(
         FindingRepository findings,
         ClassifierJobRepository jobs,
         SubstrateReadRepository substrate,
-        ObjectMapper mapper) {
+        ObjectMapper mapper,
+        EncoderFixture encoder) {
 
     private static final String VERSION =
             JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
@@ -106,6 +119,11 @@ record ClassifierChartRepositoryIntegrationTest(
                 substrate,
                 mapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @AfterEach
+    void encoderDown() {
+        encoder.down();
     }
 
     /**
@@ -460,12 +478,148 @@ record ClassifierChartRepositoryIntegrationTest(
         assertEquals(Map.of("tool:search", 1), charts.openCasesByTool(pid));
     }
 
+    /**
+     * A card with a reference and nothing in the range is a quiet chip naming the last day before it that had data,
+     * read from that card's own source: Frustration's turns, Groundedness's observations, the outputs Malformed Output
+     * checked, a turn's duration, and a tool's calls and spans.
+     */
+    @Test
+    void quietCards_nameTheLastDayTheirOwnDataWasSeen() {
+        String pid = project(
+                "chart-quiet",
+                Capability.FRUSTRATION,
+                Capability.GROUNDEDNESS,
+                Capability.MALFORMED_OUTPUT,
+                Capability.DURATION_DRIFT,
+                Capability.TOOL_ERROR);
+        declare(pid, "cs-a", "{\"type\":\"object\"}");
+        encoder.up();
+        ClassifierRow frustration = enable(fixture.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION));
+        ClassifierRow groundedness = enable(fixture.builtIn(pid, BuiltInDetector.Kind.GROUNDEDNESS));
+        ClassifierRow malformed = enable(fixture.builtIn(pid, BuiltInDetector.Kind.MALFORMED_OUTPUT));
+        ClassifierRow drift = enable(fixture.builtIn(pid, BuiltInDetector.Kind.DURATION_DRIFT));
+        enable(fixture.builtIn(pid, BuiltInDetector.Kind.TOOL_ERROR));
+        for (ToolErrorStateRepository states :
+                List.of(frustrationRates.states(), groundednessRates.states(), malformedRates.states())) {
+            learned(states, pid, "cs-a");
+        }
+        toolErrorReferences.pin(pid, "tool:search", 10_000, 100, null, "2026-09-01T00:00:00Z");
+        pin(baseline(pid, drift, "turn_duration", "call_site", "cs-a"));
+        pin(baseline(pid, drift, "tool_duration", "tool", "tool:search"));
+        Instant sep20 = Instant.parse("2026-09-20T10:00:00Z");
+        fixture.frustrationAssessment(pid, frustration, "t-f", "conv-f", "cs-a", sep20, false, VERSION);
+        fixture.groundednessAnswer(
+                pid, groundedness, "t-g", "s-g", "cs-a", sep20.plus(Duration.ofDays(1)), false, "{}");
+        fx.ingestedAt(output(pid, "cs-a", sep20.plus(Duration.ofDays(2))), sep20.plus(Duration.ofDays(2)));
+        jobs.enqueue(pid, malformed.id(), 0);
+        jobs.markSwept(jobs.findByClassifier(pid, malformed.id()).orElseThrow().id(), "2026-10-08T00:00:00Z", "c");
+        turn(pid, "cs-a", sep20.plus(Duration.ofDays(3)), 1_000);
+        Instant toolAt = sep20.plus(Duration.ofDays(4));
+        String trace = turn(pid, "cs-b", toolAt, 1_000);
+        var tool = fx.spanSeed(pid)
+                .traceId(trace)
+                .parentSpanId(rootOf(pid, trace))
+                .kind("tool")
+                .name("search")
+                .at(toolAt)
+                .write();
+        fx.toolCall(pid, new SpanRef(trace, tool.id()), "search", null, toolAt);
+        fx.rollup(pid, trace);
+
+        assertEquals(
+                Map.of(
+                        BuiltInDetector.Kind.FRUSTRATION, "2026-09-20",
+                        BuiltInDetector.Kind.GROUNDEDNESS, "2026-09-21",
+                        BuiltInDetector.Kind.MALFORMED_OUTPUT, "2026-09-22",
+                        BuiltInDetector.Kind.DURATION_DRIFT, "2026-09-23"),
+                quiet(service().charts(pid, "cs-a", null, 7)));
+        assertEquals(
+                Map.of(
+                        BuiltInDetector.Kind.TOOL_ERROR,
+                        "2026-09-24",
+                        BuiltInDetector.Kind.DURATION_DRIFT,
+                        "2026-09-24"),
+                quiet(service().charts(pid, null, "tool:search", 7)));
+    }
+
+    /** The tool menu counts each tool's calls in the range and names the call sites that made them. */
+    @Test
+    void chartScopes_listEachToolWithTheCallSitesThatCalledIt() {
+        String pid = project("chart-tool-menu", Capability.TOOL_ERROR);
+        Instant at = Instant.parse("2026-10-06T10:00:00Z");
+        String trace = turn(pid, "cs-b", at, 1_000);
+        fx.toolCall(pid, new SpanRef(trace, rootOf(pid, trace)), "lookup", null, at);
+
+        assertEquals(
+                List.of(new ToolOption("tool:lookup", "lookup", 0, 1, List.of("cs-b"))),
+                service().scopes(pid, 7).tools());
+    }
+
+    /**
+     * An arming window as wide as the card's bucket is read off the bar itself, so each hour is reached by its own
+     * count; and the card counts the open case its finding belongs to.
+     */
+    @Test
+    void countCard_withAnHourlyWindowIsReachedByEachHoursOwnCountAndCountsItsOpenCase() {
+        String pid = project("chart-hourly", Capability.SECRET_LEAK);
+        declare(pid, "cs-a", null);
+        ClassifierRow refunds = ClassifierRows.insertRow(
+                classifierRows,
+                pid,
+                "refund-words",
+                "Refund words",
+                BuiltInDetector.Kind.REGEX,
+                "{\"arming\":{\"threshold\":1,\"window_seconds\":3600}}",
+                ClassifierRow.Mode.DISCOVERY,
+                true);
+        Instant hour = Instant.parse("2026-10-06T10:00:00Z");
+        match(pid, refunds, "cs-a", hour.plusSeconds(60));
+        String open = caseRow(pid, 1, "classifier", "classifier", "refund-words", "open", null);
+        finding(pid, "refund-words", "classifier", "refund-words", "cs-a", hour.toString(), open);
+
+        ChartCard card = card(service().charts(pid, "cs-a", null, 7), "refund-words");
+
+        assertEquals(ChartPoint.count(hour, hour.plusSeconds(3600), false, 1, 1, true), point(card, hour));
+        Instant before = hour.minusSeconds(3600);
+        assertEquals(ChartPoint.count(before, hour, false, 0, 0, false), point(card, before));
+        assertEquals(1, card.cases().openCases());
+    }
+
     // ---- seeds --------------------------------------------------------------------------------------
 
-    private String project(String slug, Capability capability) {
-        return TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), capability))
+    private String project(String slug, Capability... granted) {
+        return TenantFixture.bootstrap(tenants, slug, org -> {
+                    for (Capability c : granted) capabilities.grant(org.id(), c);
+                })
                 .project()
                 .id();
+    }
+
+    /** A reference of 10,000 calls for {@code key}, past every rate classifier's minimum. */
+    private static void learned(ToolErrorStateRepository states, String pid, String key) {
+        ToolErrorRate reference = new ToolErrorRate();
+        reference.addCounts(10_000, 100);
+        states.save(
+                pid,
+                new CarriedState(key, ToolErrorDetector.State.EMPTY, reference, null, "e", null, null, null),
+                NOW.toString());
+    }
+
+    /** Pins {@code bucket}'s reference to one 1 s sample on the duration grid. */
+    private void pin(String bucket) {
+        MetricHistogram sketch = new MetricHistogram(Grid.duration());
+        sketch.add(Math.log(1_000));
+        jdbc.sql("UPDATE metric_baseline SET pinned_sketch_json = :sketch WHERE id = :id")
+                .param("sketch", sketch.toJson())
+                .param("id", bucket)
+                .update();
+    }
+
+    /** Each quiet chip's last day with data, by classifier key. */
+    private static Map<String, String> quiet(ChartsView view) {
+        return view.chips().stream()
+                .filter(c -> "quiet".equals(c.state()) && c.since() != null)
+                .collect(Collectors.toMap(ChartChip::classifierKey, c -> Objects.requireNonNull(c.since())));
     }
 
     private ClassifierRow enable(ClassifierRow row) {
