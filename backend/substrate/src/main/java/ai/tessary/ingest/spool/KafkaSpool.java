@@ -20,6 +20,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
@@ -29,12 +31,14 @@ import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.KafkaException;
@@ -71,11 +75,11 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     record KafkaReceipt(ConsumerRecord<String, byte[]> record) implements Receipt {}
 
     private static final class Slot {
-        final KafkaConsumer<String, byte[]> consumer;
+        final Consumer<String, byte[]> consumer;
         final Thread owner;
         final AtomicLong inFlightRecordMillis = new AtomicLong();
 
-        Slot(KafkaConsumer<String, byte[]> consumer, Thread owner) {
+        Slot(Consumer<String, byte[]> consumer, Thread owner) {
             this.consumer = consumer;
             this.owner = owner;
         }
@@ -84,8 +88,10 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     private final IngestSpoolProperties.Kafka props;
     private final ObjectMapper mapper;
     private final long publishTimeoutMs;
-    private final KafkaProducer<String, byte[]> producer;
+    private final Producer<String, byte[]> producer;
     private final Admin admin;
+    private final Supplier<Consumer<String, byte[]>> consumers;
+    private final LongSupplier nanos;
     private final Map<Thread, Slot> slots = new ConcurrentHashMap<>();
 
     private volatile boolean closing;
@@ -99,31 +105,69 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     private volatile long cachedAtNanos;
 
     public KafkaSpool(IngestSpoolProperties.Kafka props, ObjectMapper mapper) {
+        this(props, mapper, producer(props), admin(props), () -> consumer(props), System::nanoTime);
+    }
+
+    /** Over clients the caller built: {@code consumers} hands each drainer thread its own, read on {@code nanos}. */
+    public KafkaSpool(
+            IngestSpoolProperties.Kafka props,
+            ObjectMapper mapper,
+            Producer<String, byte[]> producer,
+            Admin admin,
+            Supplier<Consumer<String, byte[]>> consumers,
+            LongSupplier nanos) {
         this.props = props;
         this.mapper = mapper;
-        this.publishTimeoutMs = Math.max(MIN_PUBLISH_TIMEOUT_MS, props.publishTimeoutMs());
+        this.publishTimeoutMs = publishTimeoutMs(props);
+        this.producer = producer;
+        this.admin = admin;
+        this.consumers = consumers;
+        this.nanos = nanos;
+        ensureTopics();
+    }
+
+    private static long publishTimeoutMs(IngestSpoolProperties.Kafka props) {
+        return Math.max(MIN_PUBLISH_TIMEOUT_MS, props.publishTimeoutMs());
+    }
+
+    private static Producer<String, byte[]> producer(IngestSpoolProperties.Kafka props) {
+        long publishTimeoutMs = publishTimeoutMs(props);
         Properties p = new Properties();
         p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
         p.put(ProducerConfig.ACKS_CONFIG, "all");
         p.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
         p.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
-        p.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, String.valueOf(frameBytes()));
+        p.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, String.valueOf(frameBytes(props)));
         p.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, String.valueOf(publishTimeoutMs));
         p.put(
                 ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG,
                 String.valueOf(Math.max(MIN_PUBLISH_TIMEOUT_MS, publishTimeoutMs / 2)));
         p.put(ProducerConfig.LINGER_MS_CONFIG, "0");
         p.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, String.valueOf(publishTimeoutMs));
-        this.producer = new KafkaProducer<>(p, new StringSerializer(), new ByteArraySerializer());
+        return new KafkaProducer<>(p, new StringSerializer(), new ByteArraySerializer());
+    }
+
+    private static Admin admin(IngestSpoolProperties.Kafka props) {
         Properties a = new Properties();
         a.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
         a.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, String.valueOf(ADMIN_TIMEOUT_MS));
         a.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, String.valueOf(ADMIN_TIMEOUT_MS));
-        this.admin = Admin.create(a);
-        ensureTopics();
+        return Admin.create(a);
     }
 
-    private long frameBytes() {
+    private static Consumer<String, byte[]> consumer(IngestSpoolProperties.Kafka props) {
+        Properties p = new Properties();
+        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
+        p.put(ConsumerConfig.GROUP_ID_CONFIG, props.groupId());
+        p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "1");
+        p.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, String.valueOf(frameBytes(props)));
+        p.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, String.valueOf(frameBytes(props)));
+        return new KafkaConsumer<>(p, new StringDeserializer(), new ByteArrayDeserializer());
+    }
+
+    private static long frameBytes(IngestSpoolProperties.Kafka props) {
         return props.maxMessageBytes() + 64 * 1024;
     }
 
@@ -131,12 +175,12 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     private boolean ensureTopics() {
         if (topicsReady.get()) return true;
         // At most one attempt per admin timeout, so a down broker does not add seconds to every push.
-        long now = System.nanoTime();
+        long now = nanos.getAsLong();
         if (now - topicsTriedAtNanos < ADMIN_TIMEOUT_MS * 1_000_000L) return false;
         topicsTriedAtNanos = now;
         Map<String, String> configs = Map.of(
                 "max.message.bytes",
-                String.valueOf(frameBytes()),
+                String.valueOf(frameBytes(props)),
                 // Set with the replication factor, since replicas the leader never waits for do not make a publish
                 // durable.
                 "min.insync.replicas",
@@ -154,8 +198,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                         props.replicationFactor(),
                         props.minInSyncReplicas());
             } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
-                if (cause instanceof TopicExistsException) {
+                if (e.getCause() instanceof TopicExistsException) {
                     // These apply at CREATE only, so log what was asked; the broker holds what is in force.
                     log.info(
                             "ingest spool topic exists topic={}; it keeps the settings it was created with,"
@@ -165,13 +208,9 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                             props.replicationFactor(),
                             props.minInSyncReplicas());
                 } else {
-                    log.warn(
-                            "ingest spool topic not created topic={} error={}",
-                            topic,
-                            cause == null ? "unknown" : cause.getClass().getSimpleName());
-                    publishFailure = "broker refused topic " + topic + ": "
-                            + (cause == null ? "unknown" : cause.getClass().getSimpleName());
-                    publishFailedAtNanos = System.nanoTime();
+                    log.warn("ingest spool topic not created topic={} error={}", topic, causeName(e));
+                    publishFailure = "broker refused topic " + topic + ": " + causeName(e);
+                    publishFailedAtNanos = nanos.getAsLong();
                     return false;
                 }
             } catch (TimeoutException | KafkaException e) {
@@ -179,7 +218,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                         "ingest spool broker not reachable bootstrap={}; publishes shed until it is",
                         props.bootstrapServers());
                 publishFailure = "broker not reachable at " + props.bootstrapServers();
-                publishFailedAtNanos = System.nanoTime();
+                publishFailedAtNanos = nanos.getAsLong();
                 return false;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -206,9 +245,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                 log.info(
                         "ingest spool topic={} keeps the broker's own write caching (not Redpanda, or refused): {}",
                         topic,
-                        e.getCause() == null
-                                ? "unknown"
-                                : e.getCause().getClass().getSimpleName());
+                        causeName(e));
             } catch (TimeoutException | KafkaException e) {
                 log.info(
                         "ingest spool topic={} write caching not set: {}",
@@ -218,6 +255,11 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                 Thread.currentThread().interrupt();
             }
         }
+    }
+
+    private static String causeName(ExecutionException e) {
+        Throwable cause = e.getCause();
+        return cause == null ? "unknown" : cause.getClass().getSimpleName();
     }
 
     @Override
@@ -253,7 +295,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
             // Not persisted, so not accepted: the edge answers 503 + Retry-After.
             Throwable cause = e instanceof ExecutionException ee && ee.getCause() != null ? ee.getCause() : e;
             publishFailure = "publish failed: " + cause.getClass().getSimpleName();
-            publishFailedAtNanos = System.nanoTime();
+            publishFailedAtNanos = nanos.getAsLong();
             log.warn(
                     "ingest spool publish failed — shed batch project={} spans={} error={}",
                     projectId,
@@ -270,13 +312,12 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     public Optional<Claimed> claim(Duration wait) throws InterruptedException {
         closeStaleSlots();
         if (closing) {
-            Slot mine = slots.remove(Thread.currentThread());
-            if (mine != null) mine.consumer.close(Duration.ofSeconds(5));
+            closeOwnConsumer();
             Thread.sleep(Math.min(wait.toMillis(), 200));
             return Optional.empty();
         }
         Slot slot = slot();
-        KafkaConsumer<String, byte[]> c = slot.consumer;
+        Consumer<String, byte[]> c = slot.consumer;
         ConsumerRecords<String, byte[]> records;
         try {
             records = c.poll(wait);
@@ -307,7 +348,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                 envelope.projectId(),
                 envelope.entries(),
                 record.value().length,
-                System.nanoTime(),
+                nanos.getAsLong(),
                 new KafkaReceipt(record)));
     }
 
@@ -325,7 +366,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
      * Never throws: a failed dead-letter publish seeks back for redelivery, and a failed commit after a rebalance is
      * redelivered to the new owner.
      */
-    private void settle(KafkaConsumer<String, byte[]> c, ConsumerRecord<String, byte[]> record, boolean deadLetter) {
+    private void settle(Consumer<String, byte[]> c, ConsumerRecord<String, byte[]> record, boolean deadLetter) {
         Slot mine = slots.get(Thread.currentThread());
         if (mine != null) mine.inFlightRecordMillis.set(0);
         TopicPartition tp = new TopicPartition(record.topic(), record.partition());
@@ -379,22 +420,13 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     private Slot slot() {
         Thread me = Thread.currentThread();
         if (closing) {
-            Slot mine = slots.remove(me);
-            if (mine != null) mine.consumer.close(Duration.ofSeconds(5));
+            closeOwnConsumer();
             throw new IllegalStateException("ingest spool is closing");
         }
         Slot existing = slots.get(me);
         if (existing != null) return existing;
         ensureTopics();
-        Properties p = new Properties();
-        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
-        p.put(ConsumerConfig.GROUP_ID_CONFIG, props.groupId());
-        p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "1");
-        p.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, String.valueOf(frameBytes()));
-        p.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, String.valueOf(frameBytes()));
-        KafkaConsumer<String, byte[]> c = new KafkaConsumer<>(p, new StringDeserializer(), new ByteArrayDeserializer());
+        Consumer<String, byte[]> c = consumers.get();
         c.subscribe(List.of(props.topic()));
         Slot fresh = new Slot(c, me);
         slots.put(me, fresh);
@@ -409,14 +441,15 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         }
     }
 
-    public void resetConsumerForTest() {
+    /** The calling thread's next claim joins the group with a fresh consumer. */
+    public void closeOwnConsumer() {
         Slot mine = slots.remove(Thread.currentThread());
         if (mine != null) mine.consumer.close(Duration.ofSeconds(5));
     }
 
     @Override
     public Stats stats() {
-        long now = System.nanoTime();
+        long now = nanos.getAsLong();
         Stats snapshot = cached;
         if (now - cachedAtNanos < STATS_TTL.toNanos()) {
             return withAge(snapshot);
@@ -508,11 +541,10 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     /** Consumers leave the group so partitions rebalance at once rather than after the session timeout. */
     private void closeConsumers() {
         closing = true;
-        Slot mine = slots.remove(Thread.currentThread());
-        if (mine != null) mine.consumer.close(Duration.ofSeconds(5));
+        closeOwnConsumer();
         for (Slot slot : slots.values()) slot.consumer.wakeup();
-        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-        while (!slots.isEmpty() && System.nanoTime() < deadline) {
+        long deadline = nanos.getAsLong() + Duration.ofSeconds(5).toNanos();
+        while (!slots.isEmpty() && nanos.getAsLong() < deadline) {
             boolean anyOwnerAlive = false;
             for (Slot slot : slots.values()) anyOwnerAlive |= slot.owner.isAlive();
             if (!anyOwnerAlive) break;
