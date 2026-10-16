@@ -157,7 +157,7 @@ record ClassifierChartRepositoryIntegrationTest(
         fixture.frustrationAssessment(pid, signal, "t-1a", "conv-1", "cs-a", crossing, false, VERSION);
         Instant flaggedAt = Instant.parse("2026-10-06T10:00:00Z");
         fixture.frustrationAssessment(pid, signal, "t-1b", "conv-1", "cs-a", flaggedAt, true, VERSION);
-        frustrationFlag(pid, signal, "t-1b", "conv-1", "cs-a", flaggedAt);
+        fixture.frustrationFlag(pid, signal, "t-1b", "conv-1", "cs-a", flaggedAt);
         fixture.frustrationAssessment(
                 pid, signal, "t-2", "conv-2", "cs-a", Instant.parse("2026-10-05T10:00:00Z"), false, VERSION);
 
@@ -501,7 +501,7 @@ record ClassifierChartRepositoryIntegrationTest(
         enable(fixture.builtIn(pid, BuiltInDetector.Kind.TOOL_ERROR));
         for (ToolErrorStateRepository states :
                 List.of(frustrationRates.states(), groundednessRates.states(), malformedRates.states())) {
-            learned(states, pid, "cs-a");
+            withReference(states, pid, "cs-a");
         }
         toolErrorReferences.pin(pid, "tool:search", 10_000, 100, null, "2026-09-01T00:00:00Z");
         pin(baseline(pid, drift, "turn_duration", "call_site", "cs-a"));
@@ -511,8 +511,7 @@ record ClassifierChartRepositoryIntegrationTest(
         fixture.groundednessAnswer(
                 pid, groundedness, "t-g", "s-g", "cs-a", sep20.plus(Duration.ofDays(1)), false, "{}");
         fx.ingestedAt(output(pid, "cs-a", sep20.plus(Duration.ofDays(2))), sep20.plus(Duration.ofDays(2)));
-        jobs.enqueue(pid, malformed.id(), 0);
-        jobs.markSwept(jobs.findByClassifier(pid, malformed.id()).orElseThrow().id(), "2026-10-08T00:00:00Z", "c");
+        sweptTo(pid, malformed, "2026-10-08T00:00:00Z");
         turn(pid, "cs-a", sep20.plus(Duration.ofDays(3)), 1_000);
         Instant toolAt = sep20.plus(Duration.ofDays(4));
         String trace = turn(pid, "cs-b", toolAt, 1_000);
@@ -540,6 +539,31 @@ record ClassifierChartRepositoryIntegrationTest(
                         BuiltInDetector.Kind.DURATION_DRIFT,
                         "2026-09-24"),
                 quiet(service().charts(pid, null, "tool:search", 7)));
+    }
+
+    /** A card still learning counts the trials its call site has seen toward the minimum. */
+    @Test
+    void learningCards_countTheirCallSitesTrials() {
+        String pid = project("chart-learning", Capability.GROUNDEDNESS, Capability.MALFORMED_OUTPUT);
+        declare(pid, "cs-a", "{\"type\":\"object\"}");
+        encoder.up();
+        ClassifierRow groundedness = enable(fixture.builtIn(pid, BuiltInDetector.Kind.GROUNDEDNESS));
+        ClassifierRow malformed = enable(fixture.builtIn(pid, BuiltInDetector.Kind.MALFORMED_OUTPUT));
+        Instant at = Instant.parse("2026-10-06T10:00:00Z");
+        fixture.groundednessAnswer(pid, groundedness, "t-1", "s-1", "cs-a", at, false, "{}");
+        fixture.groundednessAnswer(pid, groundedness, "t-2", "s-2", "cs-a", at, false, "{}");
+        fx.ingestedAt(output(pid, "cs-a", at), at);
+        assertEquals(0, learned(service().charts(pid, "cs-a", null, 7), BuiltInDetector.Kind.MALFORMED_OUTPUT));
+        sweptTo(pid, malformed, "2026-10-08T00:00:00Z");
+
+        ChartsView view = service().charts(pid, "cs-a", null, 7);
+
+        assertEquals(2, learned(view, BuiltInDetector.Kind.GROUNDEDNESS), "two traces scored");
+        assertEquals(1, learned(view, BuiltInDetector.Kind.MALFORMED_OUTPUT), "one output checked since the sweep");
+    }
+
+    private static long learned(ChartsView view, String key) {
+        return Objects.requireNonNull(card(view, key).learning()).learned();
     }
 
     /** The tool menu counts each tool's calls in the range and names the call sites that made them. */
@@ -596,13 +620,19 @@ record ClassifierChartRepositoryIntegrationTest(
     }
 
     /** A reference of 10,000 calls for {@code key}, past every rate classifier's minimum. */
-    private static void learned(ToolErrorStateRepository states, String pid, String key) {
+    private static void withReference(ToolErrorStateRepository states, String pid, String key) {
         ToolErrorRate reference = new ToolErrorRate();
         reference.addCounts(10_000, 100);
         states.save(
                 pid,
                 new CarriedState(key, ToolErrorDetector.State.EMPTY, reference, null, "e", null, null, null),
                 NOW.toString());
+    }
+
+    /** A sweep job for {@code row} whose cursor has reached {@code cursor}. */
+    private void sweptTo(String pid, ClassifierRow row, String cursor) {
+        jobs.enqueue(pid, row.id(), 0);
+        jobs.markSwept(jobs.findByClassifier(pid, row.id()).orElseThrow().id(), cursor, "c");
     }
 
     /** Pins {@code bucket}'s reference to one 1 s sample on the duration grid. */
@@ -649,23 +679,6 @@ record ClassifierChartRepositoryIntegrationTest(
                 .filter(p -> start.toString().equals(p.startAt()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no point at " + start + " in " + card.points()));
-    }
-
-    private void frustrationFlag(
-            String pid, ClassifierRow signal, String traceId, String conversation, String callSite, Instant at) {
-        jdbc.sql("INSERT INTO frustration_detection"
-                        + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
-                        + " severity, confidence, evidence, subject_started_at)"
-                        + " VALUES (:id, :pid, :cid, 'frustration', :conv, :trace, 'warn', 'high',"
-                        + " CAST(:evidence AS jsonb), :at)")
-                .param("id", Ids.ulid())
-                .param("pid", pid)
-                .param("cid", signal.id())
-                .param("conv", conversation)
-                .param("trace", traceId)
-                .param("evidence", "{\"score\":0.71,\"call_site_id\":\"" + callSite + "\"}")
-                .param("at", Timestamp.from(at))
-                .update();
     }
 
     private ai.tessary.storage.SpanRow output(String pid, String callSite, Instant at) {

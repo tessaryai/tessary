@@ -141,7 +141,7 @@ record ClassifierChartControllerIntegrationTest(
 
     /**
      * Frustration enabled but limited to another call site is an off chip, not an empty card; Malformed Output on a
-     * call site with no schema waits; the menu says how many call sites each runs on.
+     * call site with no schema and Groundedness with no model wait; the menu says how many call sites each runs on.
      */
     @Test
     void callSiteCharts_chipTheClassifiersThatCannotDrawACard() throws Exception {
@@ -149,11 +149,13 @@ record ClassifierChartControllerIntegrationTest(
         String pid = me.project().id();
         capabilities.grant(me.org().id(), Capability.FRUSTRATION);
         capabilities.grant(me.org().id(), Capability.MALFORMED_OUTPUT);
+        capabilities.grant(me.org().id(), Capability.GROUNDEDNESS);
         declare(pid, "cs-a", null);
         declare(pid, "cs-b", "{\"type\":\"object\"}");
         ClassifierRow frustration = fixture.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION);
-        jdbc.sql("UPDATE classifier SET enabled = TRUE WHERE id = :id")
-                .param("id", frustration.id())
+        jdbc.sql("UPDATE classifier SET enabled = TRUE WHERE project_id = :pid AND detector IN (:on)")
+                .param("pid", pid)
+                .param("on", List.of(BuiltInDetector.Kind.FRUSTRATION, BuiltInDetector.Kind.GROUNDEDNESS))
                 .update();
         classifierService.setCallSiteIds(pid, frustration.id(), List.of("cs-b"));
 
@@ -168,6 +170,10 @@ record ClassifierChartControllerIntegrationTest(
                 "enabled, but not on this call site");
         assertEquals(
                 Map.of("state", "waiting", "reason", "no_schema"), chip(charts, BuiltInDetector.Kind.MALFORMED_OUTPUT));
+        assertEquals(
+                Map.of("state", "waiting", "reason", "not_set_up"),
+                chip(charts, BuiltInDetector.Kind.GROUNDEDNESS),
+                "no groundedness model has ever answered");
 
         JsonNode scopes = data(me, "/chart-scopes?days=7");
         JsonNode menu = item(scopes.path("classifiers"), BuiltInDetector.Kind.FRUSTRATION);

@@ -217,9 +217,13 @@ class FrustrationShadowSweepTest {
     void aFailingScheduledSweepIsContained() {
         FrustrationShadowSweep s = sweep();
         http.on(HEALTH, response(200, "{}"));
-        when(shadows.backlog(2)).thenThrow(new IllegalStateException("database unavailable"));
+        when(shadows.backlog(2))
+                .thenThrow(new IllegalStateException("database unavailable"))
+                .thenReturn(List.of());
 
         assertDoesNotThrow(s::scheduled);
+        s.scheduled();
+        verify(shadows).summary(); // only a sweep that ran to the end reads it
     }
 
     @Test

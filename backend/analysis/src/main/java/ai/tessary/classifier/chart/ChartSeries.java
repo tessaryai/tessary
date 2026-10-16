@@ -249,17 +249,10 @@ final class ChartSeries {
         return new HeadlineView((double) count, null);
     }
 
+    /** A rate or range point exists only for hours with items ({@link #merge}); a count point is every bucket's. */
     static boolean hasData(String kind, List<ChartPoint> points) {
-        for (ChartPoint p : points) {
-            long n =
-                    switch (kind) {
-                        case ClassifierChartDtos.ChartCard.RATE -> nz(p.checked());
-                        case ClassifierChartDtos.ChartCard.RANGE -> nz(p.n());
-                        default -> nz(p.total());
-                    };
-            if (n > 0) return true;
-        }
-        return false;
+        if (!ClassifierChartDtos.ChartCard.COUNT.equals(kind)) return !points.isEmpty();
+        return points.stream().anyMatch(p -> nz(p.total()) > 0);
     }
 
     /** The detector's own grid, so the chart bins as the detector does. */
