@@ -126,13 +126,14 @@ class PasswordAuthProviderTest {
     }
 
     @Test
-    @DisplayName("the redirect-flow methods fail loudly rather than answer something a caller could follow")
+    @DisplayName("the redirect-flow methods fail loudly, and sign-out has no provider session to end")
     void redirectFlowMethodsFailLoudly() {
         PasswordAuthProvider provider = new PasswordAuthProvider(mock(PrincipalRepository.class), new AuthProperties());
 
         assertThrows(UnsupportedOperationException.class, () -> provider.authorizationUrl("state"));
         assertThrows(UnsupportedOperationException.class, () -> provider.authenticateWithCode("code"));
         assertThrows(UnsupportedOperationException.class, () -> provider.refresh("rt", null));
+        assertEquals("https://app.example.com/", provider.signOutUrl("session_1", "https://app.example.com/"));
     }
 
     @Test
