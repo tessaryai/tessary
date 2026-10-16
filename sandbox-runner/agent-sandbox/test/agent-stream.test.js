@@ -302,7 +302,7 @@ test('sumUsage: pure reducer over a turns[] array', () => {
   assert.deepEqual(sumUsage(undefined), sumUsage([]), 'a missing turns array (e.g. a run with no .turns) is safe');
 });
 
-test('systemPrompt: selects the custom triage agent and routes MCP through a loopback relay', async (t) => {
+test('systemPrompt: selects the custom triage agent, routes MCP through a loopback relay, and opens external_directory to opencode\'s own tmp and tool-output globs, nothing else', async (t) => {
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs, promptBodies } = mockSdk({
@@ -338,48 +338,16 @@ test('systemPrompt: selects the custom triage agent and routes MCP through a loo
 
   assert.equal(promptBodies.length, 1);
   assert.equal(promptBodies[0].agent, 'tessary-triage', 'the custom agent is selected on every session.prompt call');
-});
 
-test('5: triage opens external_directory to opencode\'s own tmp and tool-output globs, nothing else', async (t) => {
-  t.after(() => mock.reset());
-  const { runAgent } = require('../agent-stream');
-  const { serverConfigs } = mockSdk({
-    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
-  });
-
-  await runAgent({
-    model: 'anthropic/claude-sonnet-5',
-    prompt: 'rule on this finding',
-    jsonSchema: SCHEMA,
-    mcp: MCP,
-    systemPrompt: 'You are the triage agent.',
-    timeoutMs: 1000,
-  });
-
-  const extDir = serverConfigs()[0].permission.external_directory;
-  const keys = Object.keys(extDir);
-  assert.equal(keys.length, 3, 'the base deny plus exactly the two allows, nothing more');
+  const extDir = config.permission.external_directory;
+  assert.equal(Object.keys(extDir).length, 3, 'the base deny plus exactly the two allows, nothing more');
   assert.equal(extDir['*'], 'deny');
-  const os = require('node:os');
-  const path = require('node:path');
   assert.equal(extDir[path.join(os.tmpdir(), 'opencode', '*')], 'allow');
   const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
   assert.equal(extDir[path.join(dataHome, 'opencode', 'tool-output', '*')], 'allow');
 });
 
-test('5: RCA (no systemPrompt) keeps external_directory as a blanket deny, unchanged', async (t) => {
-  t.after(() => mock.reset());
-  const { runAgent } = require('../agent-stream');
-  const { serverConfigs } = mockSdk({
-    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
-  });
-
-  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate this finding', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
-
-  assert.deepEqual(serverConfigs()[0].permission.external_directory, { '*': 'deny' });
-});
-
-test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with a bearer header, no agent on the prompt', async (t) => {
+test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with a bearer header, no agent on the prompt, external_directory a blanket deny', async (t) => {
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs, promptBodies } = mockSdk({
@@ -404,6 +372,7 @@ test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with 
     headers: { Authorization: 'Bearer tsy_a_live-token' },
   });
   assert.equal(promptBodies[0].agent, undefined, 'no agent field — the session runs under whatever config.agent picks');
+  assert.deepEqual(config.permission.external_directory, { '*': 'deny' });
 });
 
 /** Whether `relayUrl` is still accepting connections, by trying one. */
