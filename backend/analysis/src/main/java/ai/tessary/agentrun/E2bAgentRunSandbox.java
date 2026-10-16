@@ -330,7 +330,10 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
         return "status " + status + " from " + launcherUrl + remedy;
     }
 
-    /** Never the rest of the body. */
+    /**
+     * Never the rest of the body. Shared with the triage and RCA sandboxes; an unparseable body (e.g. a proxy's own 502
+     * page) yields an empty string.
+     */
     public static String describeLauncherError(String body) {
         try {
             JsonNode n = KIND_MAPPER.readTree(body);
@@ -343,6 +346,10 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
             if (n.hasNonNull("sandbox_id")) {
                 if (!sb.isEmpty()) sb.append(' ');
                 sb.append("sandbox=").append(n.get("sandbox_id").asText());
+            }
+            if (n.has("elapsed_ms")) {
+                if (!sb.isEmpty()) sb.append(' ');
+                sb.append("elapsed_ms=").append(n.get("elapsed_ms").asLong());
             }
             return sb.toString();
         } catch (JsonProcessingException | RuntimeException e) {
