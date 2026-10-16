@@ -1,57 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { Navigate } from "react-router-dom";
 import { auth } from "../../api/client";
-import { useAuth } from "../../auth/AuthContext";
-import { ApiError } from "../../api/types";
-import { Button, Field, Input, Spinner } from "../../ui";
+import { Button, Field, Input } from "../../ui";
+import { ScreenSpinner, useCredentials } from "./credentials";
 
 /**
  * Screen 1 of first run. The backend mints the org and default project on signup, so RootRedirect
  * lands on it; step 2 is ConnectGate.
  */
 export function Signup() {
-  const [params] = useSearchParams();
-  const returnTo = params.get("returnTo") ?? undefined;
-  const nav = useNavigate();
-  const { isAuthenticated, refetch } = useAuth();
+  const { returnTo, isAuthenticated, mode, email, setEmail, password, setPassword, submit, error } = useCredentials(
+    (e, p) => auth.signup(e, p),
+  );
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  if (isAuthenticated) return <Navigate to={returnTo || "/"} replace />;
 
-  const mode = useQuery({ queryKey: ["auth-mode"], queryFn: auth.mode });
-
-  const submit = useMutation({
-    mutationFn: () => auth.signup(email, password),
-    onSuccess: async () => {
-      await refetch();
-      nav(returnTo || "/", { replace: true });
-    },
-  });
-
-  if (isAuthenticated) {
-    return <Navigate to={returnTo || "/"} replace />;
-  }
-
-  if (mode.isLoading) {
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <Spinner />
-      </div>
-    );
-  }
+  if (mode.isLoading) return <ScreenSpinner />;
 
   if (mode.data?.redirectFlow) {
     window.location.replace(auth.loginUrl(returnTo));
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <Spinner />
-      </div>
-    );
+    return <ScreenSpinner />;
   }
-
-  const error = submit.isError ? (submit.error as ApiError).message : null;
 
   return (
     <div className="min-h-screen bg-bg text-fg flex items-center justify-center p-10">
