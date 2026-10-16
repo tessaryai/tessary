@@ -70,6 +70,13 @@ record TraceDetectionRepositoryTest(
         assertEquals(List.of(), listedBy(pid, malformed));
     }
 
+    /** An empty traces page or sessions page has no flags. The bug is an {@code IN ()} that Postgres rejects. */
+    @Test
+    void anEmptyPageReadsNoFlags() {
+        assertEquals(List.of(), repository(true).forTraces("p", List.of()));
+        assertEquals(List.of(), repository(true).forSessions("p", List.of()));
+    }
+
     // ---- fixtures ---------------------------------------------------------------------------------
 
     /** The open registry's frustration table, beside malformed_output's shown or hidden as asked. */
