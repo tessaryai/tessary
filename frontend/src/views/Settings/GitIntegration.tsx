@@ -3,6 +3,7 @@
 // here (?connected, ?install_select, ?github_error, ?github_app_connected). The picker's choice is
 // re-validated server-side, so a tampered pick is rejected.
 import { useEffect, useState } from "react";
+import { searchPatch } from "../../lib/searchPatch";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { useProjectApi } from "../../tenant/TenantContext";
@@ -15,6 +16,7 @@ export function GitIntegration() {
   const qc = useQueryClient();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
+  const patch = searchPatch(params, setParams, true);
 
   const integrationQ = useQuery({ queryKey: ["git-integration", api.base], queryFn: api.getGitIntegration });
 
@@ -28,9 +30,7 @@ export function GitIntegration() {
     if (!justConnected) return;
     invalidate();
     toast.success("Repository connected", "RCA can now read this repository.");
-    const next = new URLSearchParams(params);
-    next.delete("connected");
-    setParams(next, { replace: true });
+    patch({ connected: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justConnected]);
 
@@ -39,9 +39,7 @@ export function GitIntegration() {
   useEffect(() => {
     if (!justSetUpApp) return;
     toast.success("GitHub App configured", "Install it on the repositories Tessary should read, then connect one.");
-    const next = new URLSearchParams(params);
-    next.delete("github_app_connected");
-    setParams(next, { replace: true });
+    patch({ github_app_connected: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justSetUpApp]);
 
@@ -52,9 +50,7 @@ export function GitIntegration() {
       "GitHub connection failed",
       `${githubError}. Try again, or select "Use an existing installation".`,
     );
-    const next = new URLSearchParams(params);
-    next.delete("github_error");
-    setParams(next, { replace: true });
+    patch({ github_error: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [githubError]);
 
@@ -118,9 +114,7 @@ export function GitIntegration() {
         repoName: o.name,
       }),
     onSuccess: () => {
-      const next = new URLSearchParams(params);
-      next.delete("install_select");
-      setParams(next, { replace: true });
+      patch({ install_select: null });
       invalidate();
       toast.success("Repository connected");
     },
@@ -233,11 +227,7 @@ export function GitIntegration() {
 
       <Modal
         open={selectToken != null}
-        onClose={() => {
-          const next = new URLSearchParams(params);
-          next.delete("install_select");
-          setParams(next, { replace: true });
-        }}
+        onClose={() => patch({ install_select: null })}
         title="Choose a repository"
       >
         <p className="text-muted mt-0 mx-0 mb-3.5 text-body">
