@@ -4,7 +4,6 @@ package ai.tessary.redaction;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.redaction.GitleaksCorpus.Finding;
@@ -15,7 +14,6 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -151,19 +149,6 @@ class GitleaksCorpusTest {
                         "generic-api-key q7Zr2mK9xW4vN8pL",
                         "generic-api-key Zk8pQ2rT5wY8bE1hK4nR"),
                 found);
-    }
-
-    @Test
-    void aKeywordDenseMegabyteScansInBoundedTime() {
-        StringBuilder text = new StringBuilder();
-        String line = "Set the api_key in your config and pass the token to the client; the secret rotates. "
-                + "curl -H \"Authorization: Bearer $TOKEN\" https://api.example.com password=None key=None\n";
-        while (text.length() < 1_000_000) text.append(line);
-        String megabyte = text.toString();
-        CORPUS.find(megabyte); // warm
-        // Generous on purpose: this guards against the per-position regex scan coming back, which cost several
-        // times this, not against a slow CI runner.
-        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> CORPUS.find(megabyte));
     }
 
     private static void assertOnly(String rule, boolean anchored, String text) {

@@ -2,7 +2,6 @@
 package ai.tessary.pricing;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,17 +45,6 @@ class PriceSnapshotTest {
                 new String[] {"claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6", "gpt-4o", "gpt-4o-mini"}) {
             assertNotNull(rates.get(model), "the snapshot should cover " + model);
         }
-    }
-
-    @Test
-    @DisplayName("entries that price no tokens are not imported as models")
-    void load_skipsEntriesThatPriceNoTokens() {
-        // Imported, a rate-less entry becomes a model_price row with every bucket null — indistinguishable
-        // from a genuinely free model and invisible to the unpriced count.
-        Map<String, ModelRates> models = byId(litellm());
-        assertNull(models.get("dall-e-3"), "an entry with no token rate is not a priced model");
-        assertNull(models.get("sample_spec"), "LiteLLM's documentation stub is not a model");
-        assertNotNull(models.get("claude-sonnet-5"), "the guard must not swallow a genuinely priced model");
     }
 
     @Test

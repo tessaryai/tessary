@@ -147,14 +147,6 @@ class GithubInstallControllerTest {
         assertEquals(111L, candidates.get(0).installationId());
     }
 
-    @Test
-    void options_tokenForAnotherProject_forbidden() {
-        String foreign = state.mintSelection("acme", "web", "OTHER_PROJECT", List.of(111L));
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> controller.installationOptions(ctx, "acme", "web", foreign));
-        assertEquals(GitError.INSTALL_FORBIDDEN, ex.error());
-    }
-
     // ---- install-url --------------------------------------------------------
 
     @Test

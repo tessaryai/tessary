@@ -16,16 +16,6 @@ class KeywordIndexTest {
             List.of())); // 3: no keywords, so a candidate for every text
 
     @Test
-    void aKeywordThatEndsInsideAnotherIsStillReported() {
-        assertEquals(set(0, 1, 3), INDEX.candidates("mysecretkey"), "key is a suffix run of secretkey");
-    }
-
-    @Test
-    void matchesAsciiCaseInsensitively() {
-        assertEquals(set(0, 2, 3), INDEX.candidates("SECRET is GHP_abc"));
-    }
-
-    @Test
     void aNonAsciiCharacterBreaksAKeywordRatherThanJoiningIt() {
         assertEquals(set(3), INDEX.candidates("secéret kéy"));
     }

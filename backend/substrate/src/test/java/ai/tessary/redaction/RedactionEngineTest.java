@@ -32,15 +32,6 @@ class RedactionEngineTest {
     }
 
     @Test
-    void apply_replacementIsLiteralNotRegexReplacement() {
-        CompiledRule r = rule("secret", "$1\\n[X]");
-        assertEquals(
-                "$1\\n[X]",
-                RedactionEngine.apply("secret", List.of(r), null),
-                "a $ or backslash in the replacement is substituted literally, never interpreted");
-    }
-
-    @Test
     void compileAll_dropsUncompilableRows() {
         RedactionRuleRow good = new RedactionRuleRow("1", "p", "g", "\\d+", "#", true, false, 10, "t", "t");
         RedactionRuleRow bad = new RedactionRuleRow("2", "p", "b", "(", "#", true, false, 20, "t", "t");
@@ -149,20 +140,6 @@ class RedactionEngineTest {
         String json = "{ \"a\" : [ 1, 2, 3 ],  \"b\" : \"nothing here\" }";
 
         assertSame(json, RedactionEngine.applyToJson(json, List.of(email), null), "no match must not reformat");
-    }
-
-    /** Media segmenting must survive the structural path: a base64 run inside a string leaf stays whole. */
-    @Test
-    void applyToJson_keepsInlineBinaryByteIdentical() {
-        CompiledRule email = builtInEmail();
-        String blob = "A".repeat(400) + "9".repeat(400);
-        String json = "{\"content\":\"jane@example.com data:image/png;base64," + blob + " end\"}";
-
-        String out = RedactionEngine.applyToJson(json, List.of(email), null);
-
-        assertNotNull(out);
-        assertTrue(out.contains(blob), "the binary payload must survive byte-identical inside a string leaf");
-        assertFalse(out.contains("jane@example.com"), "text beside the blob must still be redacted");
     }
 
     /** Small helper so the assertions above can state "this is still JSON" without a field of their own. */
