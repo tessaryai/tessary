@@ -60,15 +60,6 @@ class OpenAiCompatModelListerTest {
     }
 
     @Test
-    void noApiKey_sendsNoAuthorizationHeader() throws Exception {
-        stubResponse(200, "{\"data\":[]}");
-
-        lister().list(new ResolvedCredential(null, "https://api.openai.com/v1", null, null, null, false));
-
-        assertTrue(capturedRequest().headers().allValues("Authorization").isEmpty());
-    }
-
-    @Test
     void skipsAnEntryWithNoId() throws Exception {
         stubResponse(200, "{\"data\":[{\"id\":\"gpt-5.5\"},{\"object\":\"model\"}]}");
 

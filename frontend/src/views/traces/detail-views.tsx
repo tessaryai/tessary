@@ -486,6 +486,8 @@ function TraceDivider({ trace, first }: { trace: TraceListItem; first: boolean }
  * The session's whole conversation, each trace's ConversationView with a divider between them. Only the
  * first trace offers earlier messages; a later trace's history is the traces drawn above it.
  */
+const NO_TRACES = <p className="text-subtle py-6 px-0 text-small">This session recorded no traces.</p>;
+
 export function SessionConversationView({
   traces,
   spansByTrace,
@@ -510,13 +512,7 @@ export function SessionConversationView({
   /** A line drawn under each dimmed part, saying why it is dimmed. */
   contextNote?: string;
 }) {
-  if (traces.length === 0) {
-    return (
-      <p className="text-subtle py-6 px-0 text-small">
-        This session recorded no traces.
-      </p>
-    );
-  }
+  if (traces.length === 0) return NO_TRACES;
   return (
     <div className="flex flex-col">
       {traces.map((t, i) => (
@@ -607,13 +603,7 @@ export function SessionTreeView({
       return next;
     });
 
-  if (traces.length === 0) {
-    return (
-      <p className="text-subtle py-6 px-0 text-small">
-        This session recorded no traces.
-      </p>
-    );
-  }
+  if (traces.length === 0) return NO_TRACES;
   return (
     <div className="flex flex-col gap-2">
       {traces.map((t) => {

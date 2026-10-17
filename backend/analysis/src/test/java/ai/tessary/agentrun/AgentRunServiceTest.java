@@ -4,6 +4,7 @@ package ai.tessary.agentrun;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -123,7 +124,8 @@ class AgentRunServiceTest {
         }
     }
 
-    private record Header(String value) implements GitTokenService {
+    /** A null value is a token the provider refuses to mint. */
+    private record Header(@Nullable String value) implements GitTokenService {
         @Override
         public GitProvider provider() {
             return GitProvider.GITHUB;
@@ -131,6 +133,7 @@ class AgentRunServiceTest {
 
         @Override
         public String authHeader(GitIntegrationRow integ) {
+            if (value == null) throw new IllegalStateException("installation token refused");
             return value;
         }
     }
@@ -272,9 +275,17 @@ class AgentRunServiceTest {
         verify(credentials).release(CREDENTIAL);
     }
 
-    /** With an integration the clone URL carries the minted token and the head sha the provider resolved. */
-    @Test
-    void clonesTheRepositoryAtItsHeadWhenTheProjectHasOne() {
+    /**
+     * With an integration the clone URL carries the minted token and the head sha the provider resolved; a token that
+     * cannot be minted runs without the repository rather than failing the run.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            nullValues = "NULL",
+            value = {"Bearer ghs_tok, https://x-access-token:ghs_tok@github.com/acme/app.git, sha-1", "NULL, NULL, NULL"
+            })
+    void clonesTheRepositoryAtItsHeadWhenTheProjectHasOne(
+            @Nullable String header, @Nullable String cloneUrl, @Nullable String headSha) {
         anOwnedProject();
         aMintedKey();
         aResolvedGrokLane();
@@ -283,17 +294,18 @@ class AgentRunServiceTest {
                         "gi1", PROJECT_ID, "github", "api.github.com", "acme", "app", "main", "enc", "t0", "t0")));
         CapturingSandbox sandbox = new CapturingSandbox(null);
         GitProviderFactory providers =
-                new GitProviderFactory(List.of(new HeadAt("sha-1")), List.of(new Header("Bearer ghs_tok")));
+                new GitProviderFactory(List.of(new HeadAt("sha-1")), List.of(new Header(header)));
 
         run(service(props(), sandbox, providers));
 
-        assertEquals(
-                "https://x-access-token:ghs_tok@github.com/acme/app.git",
-                sandbox.seen().cloneUrl());
-        assertEquals("sha-1", sandbox.seen().headSha());
+        assertEquals(cloneUrl, sandbox.seen().cloneUrl());
+        assertEquals(headSha, sandbox.seen().headSha());
     }
 
-    /** The key must not outlive the sandbox and the credential's reservation must be freed, on failure too. */
+    /**
+     * The key must not outlive the sandbox and the credential's reservation must be freed, on failure too; a revoke
+     * that fails must not mask the run's own outcome.
+     */
     @Test
     void revokesTheKeyAndReleasesTheCredentialWhenTheSandboxThrows() {
         anOwnedProject();
@@ -302,6 +314,7 @@ class AgentRunServiceTest {
         when(integrations.findByProject(PROJECT_ID)).thenReturn(Optional.empty());
         CapturingSandbox sandbox =
                 new CapturingSandbox(new TessaryException(AgentRunError.RUN_FAILED, "kind=script_exit"));
+        doThrow(new IllegalStateException("db down")).when(apiKeys).revoke("key1");
 
         TessaryException ex = assertThrows(TessaryException.class, () -> run(service(sandbox)));
 

@@ -24,10 +24,12 @@ const { finished } = require('node:stream');
  *   abortAnswer    /abort answers this status, or 'drop' destroys the connection
  *   acceptAfterMs  /message answers 202 only after this delay, then the reply starts
  *   replyBefore202 /message plays the whole reply first and answers 202 100 ms later
+ *   eventsAnswer   the first /events answers this status with a multi-line HTML body, as a proxy does
+ *   strayLines     raw lines the log starts with, ahead of every event
  */
 async function startFakeSession({ port, secret, shape = {} }) {
   const startingPolls = shape.startingPolls === undefined ? 1 : shape.startingPolls;
-  const lines = [];
+  const lines = (shape.strayLines || []).map((line) => `${line}\n`);
   const readers = new Set();
   let logEnded = false;
   const requests = [];
@@ -130,6 +132,9 @@ async function startFakeSession({ port, secret, shape = {} }) {
         const from = raw === null ? 0 : Number(raw);
         if (!Number.isSafeInteger(from) || from < 0 || from > lines.length) return send(400, { kind: 'bad_request' });
         eventFroms.push(from);
+        if (shape.eventsAnswer && eventFroms.length === 1) {
+          return res.writeHead(shape.eventsAnswer, { 'content-type': 'text/html' }).end('<html>\n<body>Bad Gateway</body>\n</html>\n');
+        }
         eventsCalls++;
         res.writeHead(200, { 'content-type': 'application/x-ndjson' });
         res.flushHeaders();

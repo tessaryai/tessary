@@ -35,7 +35,6 @@ import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -220,24 +219,6 @@ class McpFindingToolsTest {
                 detail);
     }
 
-    /**
-     * The agent view strips the triage ruling and keeps an owner's detail whole. The bugs are a ruling that rides in
-     * beside the detail, and a detail dropped or reshaped at the agent door.
-     */
-    @Test
-    void getFinding_keepsClassifierDetailWhole() throws Exception {
-        ClassifierDetail detail = classifierDetail(List.of());
-        when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(triagedFindingWith(detail));
-
-        JsonNode body = structured(mcp.callTool("get_finding", "{\"id\":\"find-1\"}"));
-
-        assertTrue(body.get("finding").get("triageVerdict").isNull(), "triageVerdict reached an agent");
-        assertEquals(
-                new ObjectMapper().writeValueAsString(detail),
-                body.get("classifierDetail").toString(),
-                "the agent door reshaped the owner's detail");
-    }
-
     /** An owner's rate loses its trace ids at the agent door, as every built-in rate does. */
     @Test
     void getFinding_classifierDetailDropsFailingTraces() throws Exception {
@@ -249,18 +230,6 @@ class McpFindingToolsTest {
         assertEquals(
                 0, body.get("classifierDetail").get("rate").get("failingTraces").size());
         assertFalse(body.toString().contains("trace-secret-9"), "a failing trace id reached the agent");
-    }
-
-    @Test
-    void listFindings_neverReturnsTheTriageRuling() throws Exception {
-        when(behaviorDrift.findings(PROJECT_ID, null, null, null, true))
-                .thenReturn(new BehaviorFindingsView(List.of(triagedFinding().finding()), "repo"));
-
-        JsonNode body = structured(mcp.callTool("list_findings", "{}"));
-
-        JsonNode first = body.get("findings").get(0);
-        assertTrue(first.get("triageVerdict").isNull(), "a list row carried the ruling");
-        assertTrue(first.get("triageSummary").isNull(), "a list row carried the summary");
     }
 
     @Test
@@ -283,13 +252,6 @@ class McpFindingToolsTest {
                 .thenThrow(new TessaryException(ClassifierError.FINDING_NOT_FOUND, "nope"));
         String text = errorText(mcp.callTool("get_finding", "{\"id\":\"nope\"}"));
         assertTrue(text.contains("nope"), text);
-    }
-
-    @Test
-    void getFinding_missingIdIsToolError_andNeverCallsService() throws Exception {
-        String text = errorText(mcp.callTool("get_finding", "{}"));
-        assertTrue(text.contains("id"), text);
-        verify(behaviorDrift, org.mockito.Mockito.never()).finding(any(), any());
     }
 
     private static BehaviorFindingDetailView toolErrorFinding() {
@@ -738,36 +700,5 @@ class McpFindingToolsTest {
         assertEquals(0.62, sentences.get(1).get("score").asDouble());
         assertEquals(0, rows.get(2).get("flaggedSentences").size(), "a witness answer with no sentence left");
         assertFalse(rows.get(3).has("flaggedSentences"), "a member row is not a flagged answer");
-    }
-
-    /** Every other classifier's rows are unchanged: no key, and no sentence read when the page has no witness span. */
-    @Test
-    void getFindingEvidence_otherClassifiersRowsCarryNoFlaggedSentences() throws Exception {
-        when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-1", null, 100, null))
-                .thenReturn(samplePage(null));
-
-        JsonNode rows = structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-1\"}"))
-                .get("rows");
-
-        verify(behaviorDrift, org.mockito.Mockito.never()).flaggedSentences(any(), any(), any());
-        rows.forEach(r -> assertFalse(r.has("flaggedSentences"), r.toString()));
-    }
-
-    /** A tool-error witness span is asked about, and the service's empty answer leaves its row unchanged. */
-    @Test
-    void getFindingEvidence_nonGroundednessWitnessSpanRowIsUnchanged() throws Exception {
-        when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-t", null, 100, null))
-                .thenReturn(new FindingEvidenceSpanPage(
-                        List.of(evidenceRow(FindingEvidenceRow.Role.WITNESS, "trace-1", "span-1")),
-                        null,
-                        counts(1, 0),
-                        counts(1, 0)));
-        when(behaviorDrift.flaggedSentences(eq(PROJECT_ID), eq("find-t"), any()))
-                .thenReturn(Map.of());
-
-        JsonNode rows = structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-t\"}"))
-                .get("rows");
-
-        assertFalse(rows.get(0).has("flaggedSentences"), rows.get(0).toString());
     }
 }

@@ -59,10 +59,6 @@ class CapabilityInterceptorTest {
         public void post() {}
     }
 
-    static final class OpenController {
-        public void list() {}
-    }
-
     @BeforeEach
     void setUp() {
         interceptor = new CapabilityInterceptor(capabilities, orgs);
@@ -86,19 +82,6 @@ class CapabilityInterceptorTest {
 
     private boolean preHandle(Object handler, @Nullable Object uriVars) {
         return interceptor.preHandle(request(uriVars), new MockHttpServletResponse(), handler);
-    }
-
-    @Test
-    void aClassLevelGateRefusesAnOrgThatSwitchedTheCapabilityOff() throws Exception {
-        orgExists();
-        overrides.put(Capability.RCA.wire(), false);
-
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> preHandle(handler(new GatedController(), "report"), Map.of("orgSlug", SLUG)));
-
-        assertEquals(CapabilityError.DISABLED, e.error());
-        assertEquals(CapabilityError.DISABLED.render(Capability.RCA.wire()), e.getMessage());
     }
 
     @Test

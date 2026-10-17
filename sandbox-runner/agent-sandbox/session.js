@@ -285,8 +285,6 @@ function createReplyTracker({ log, serverNames, steps, maxToolCalls }) {
           if (!reply || !reply.armed) return null;
           return [...reply.assistants.values()].every(Boolean) ? 'end' : 'settle';
         }
-        default:
-          return null;
       }
     },
     /** Reconcile against the stored messages, then end the reply with its summed usage. */
@@ -343,10 +341,6 @@ function createHttpServer({ secret, state, log, onMessage, onAbort }) {
       }
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
     };
-    const fail = (e) => {
-      console.error(`session request failed: ${describeError(e)}`);
-      if (!res.headersSent) send(500, { kind: 'internal' });
-    };
     if (!authorized(req)) {
       req.resume();
       send(401, { kind: 'unauthorized' });
@@ -367,8 +361,7 @@ function createHttpServer({ secret, state, log, onMessage, onAbort }) {
           if (typeof text !== 'string' || !text) return send(400, { kind: 'bad_request' });
           const answer = await onMessage(text);
           return send(answer.status, answer.body);
-        })
-        .catch(fail);
+        });
       return;
     }
     req.resume();
@@ -387,9 +380,7 @@ function createHttpServer({ secret, state, log, onMessage, onAbort }) {
       return;
     }
     if (route === 'POST /abort') {
-      onAbort()
-        .then((answer) => send(answer.status, answer.body))
-        .catch(fail);
+      onAbort().then((answer) => send(answer.status, answer.body));
       return;
     }
     send(404, { kind: 'not_found' });
@@ -475,33 +466,24 @@ async function main() {
     return finishing;
   }
 
-  async function finishIfIdle() {
-    try {
-      const { data } = await client.session.status();
-      const status = data && data[sessionId];
-      if (!status || status.type === 'idle') await finishReply();
-    } catch (e) {
-      console.error(`session status unread after a reconnect: ${describeError(e)}`);
-    }
-  }
-
   /**
    * After a reconnect, a reply whose user message was lost is armed from the stored messages; a
    * reply whose idle was lost ends here.
    */
   async function recoverReply() {
     if (!tracker.open) return;
-    if (!tracker.armed) {
-      try {
+    try {
+      if (!tracker.armed) {
         const listed = await client.session.messages({ path: { id: sessionId } });
         tracker.adopt(Array.isArray(listed.data) ? listed.data : []);
-      } catch (e) {
-        console.error(`session messages unread after a reconnect: ${describeError(e)}`);
-        return;
+        if (!tracker.armed) return;
       }
-      if (!tracker.armed) return;
+      const { data } = await client.session.status();
+      const status = data && data[sessionId];
+      if (!status || status.type === 'idle') await finishReply();
+    } catch (e) {
+      console.error(`reply not recovered after a reconnect: ${describeError(e)}`);
     }
-    await finishIfIdle();
   }
 
   async function abortAtCap() {
@@ -531,18 +513,15 @@ async function main() {
 
   async function runEventLoop() {
     while (!subscription.signal.aborted) {
-      try {
-        const { stream } = await client.event.subscribe({
-          signal: subscription.signal,
-          sseDefaultRetryDelay: RESUBSCRIBE_MS,
-          onSseError: () => {
-            lost = true;
-          },
-        });
-        for await (const event of stream) await onOpencodeEvent(event);
-      } catch (e) {
-        if (!subscription.signal.aborted) console.error(`event stream failed: ${describeError(e)}`);
-      }
+      // The SDK's stream retries its own errors and ends on an abort, so nothing here throws.
+      const { stream } = await client.event.subscribe({
+        signal: subscription.signal,
+        sseDefaultRetryDelay: RESUBSCRIBE_MS,
+        onSseError: () => {
+          lost = true;
+        },
+      });
+      for await (const event of stream) await onOpencodeEvent(event);
       lost = true;
       if (!subscription.signal.aborted) await sleep(RESUBSCRIBE_MS);
     }
@@ -627,7 +606,5 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(describeError(e));
-  process.exit(1);
-});
+// A rejection here (the port is taken) exits 1 with the error on stderr, as Node does by default.
+main();

@@ -112,6 +112,38 @@ record AlertingIntegrationTest(
                 "the empty period is consumed, not re-read next tick");
     }
 
+    /** Catches an opened case that pages nobody, or one delivered without moving the anchor past it. */
+    @Test
+    void anOpenedCaseFiresAndAdvancesTheCaseRuleToWhenItOpened() {
+        var fix = TenantFixture.bootstrap(tenants, "alert-case-opened");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
+        String pid = fix.project().id();
+        String opened = Instant.now().toString();
+        jdbc.sql("""
+            INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id, subject_label, metric,
+                                   state, title, basis, severity, onset_at, opened_at, last_seen_at, updated_at)
+            VALUES (:id, :pid, 1, 'metric_drift', 'metric_baseline', 'baseline-1', 'label', 'turn_duration',
+                    'open', 'title', 'basis', 0.5, :opened, :opened, :opened, :opened)
+            """)
+                .param("id", Ids.ulid())
+                .param("pid", pid)
+                .param("opened", opened)
+                .update();
+
+        worker.tick();
+
+        assertEquals(
+                List.of(AlertRuleRow.RuleType.CASE_OPENED),
+                alertEvents.listByProject(pid, 100).stream()
+                        .map(AlertEventRow::ruleType)
+                        .toList());
+        assertEquals(
+                opened,
+                rules.findRollup(pid, AlertRuleRow.RuleType.CASE_OPENED)
+                        .orElseThrow()
+                        .lastEvaluatedAt());
+    }
+
     private static AlertDtos.UpsertAlertRuleRequest digestReq(String cron) {
         return new AlertDtos.UpsertAlertRuleRequest(
                 AlertRuleRow.RuleType.DIGEST,

@@ -4,7 +4,6 @@ package ai.tessary.classifier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.worker.ClassifierJobRepository;
@@ -22,8 +21,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.NullNode;
 import java.util.List;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -45,6 +50,9 @@ record CallSiteFactRewindIntegrationTest(
 
     private static final String SCHEMA =
             "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}},\"required\":[\"answer\"]}";
+
+    private static final String REORDERED_SCHEMA =
+            "{\"required\":[\"answer\"],\"properties\":{\"answer\":{\"type\":\"string\"}},\"type\":\"object\"}";
 
     private static final String SWEPT_AT = "2026-01-01T00:00:00Z";
     private static final String SWEPT_ID = "obs-before-synthesis";
@@ -114,18 +122,28 @@ record CallSiteFactRewindIntegrationTest(
         assertFalse(rewound(pid, "secret_leak"), "reads the trace alone");
     }
 
-    @Test
-    void clearingAStaleSchemaAlsoRewinds() {
-        String pid = projectWithSweptHistory("fact-rewind-clear");
+    /**
+     * History scored against a withdrawn schema is as wrong as against none, so it is re-derived; the same schema again,
+     * even with its keys reordered (they arrive in any order, and compared as raw text it would rewind on every
+     * import), re-scores nothing.
+     */
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {SCHEMA, REORDERED_SCHEMA})
+    void aResweptCallSiteRewindsOnlyWhenItsSchemaChanges(@Nullable String redeclared) {
+        String pid = projectWithSweptHistory("fact-rewind-redeclare");
         pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
         ClassifierJobRow job = jobFor(pid, "malformed_output");
-        jobs.claimBatch("resweep-clear", 500, 300, 5);
+        jobs.claimBatch("resweep", 500, 300, 5);
         jobs.markSwept(job.id(), SWEPT_AT, SWEPT_ID);
 
-        // History scored against a withdrawn schema is as wrong as against none.
-        pipelineService.replace(pid, pipelineWithNullSchema("cs-answer", "rag_answer"));
+        pipelineService.replace(
+                pid,
+                redeclared == null
+                        ? pipelineWithNullSchema("cs-answer", "rag_answer")
+                        : pipelineWithCallSite("cs-answer", "rag_answer", redeclared));
 
-        assertTrue(rewound(pid, "malformed_output"), "the withdrawn schema's verdicts are re-derived");
+        assertEquals(redeclared == null, rewound(pid, "malformed_output"));
     }
 
     @Test
@@ -145,35 +163,6 @@ record CallSiteFactRewindIntegrationTest(
     }
 
     @Test
-    void aKeyReorderedSchemaIsNotAChange() {
-        // Keys arrive in any order; compared as raw text, an identical schema would rewind on every import.
-        String pid = projectWithSweptHistory("fact-rewind-key-order");
-        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
-        ClassifierJobRow job = jobFor(pid, "malformed_output");
-        jobs.claimBatch("resweep-key-order", 500, 300, 5);
-        jobs.markSwept(job.id(), SWEPT_AT, SWEPT_ID);
-
-        String reordered = "{\"required\":[\"answer\"],\"properties\":{\"answer\":{\"type\":\"string\"}},"
-                + "\"type\":\"object\"}";
-        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", reordered));
-
-        assertFalse(rewound(pid, "malformed_output"), "the same schema with its keys reordered re-scores nothing");
-    }
-
-    @Test
-    void aBundleDeclaringTheSameSchemaTwiceRewindsOnce() {
-        String pid = projectWithSweptHistory("fact-rewind-bundle-idempotent");
-        pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
-        ClassifierJobRow job = jobFor(pid, "malformed_output");
-        jobs.claimBatch("resweep-bundle", 500, 300, 5);
-        jobs.markSwept(job.id(), SWEPT_AT, SWEPT_ID);
-
-        pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
-
-        assertFalse(rewound(pid, "malformed_output"), "re-importing an unchanged bundle re-scores nothing");
-    }
-
-    @Test
     void theDefaultUpsertImportPathRewindsToo() {
         // ImportController's default mode is upsert, not replace.
         String pid = projectWithSweptHistory("fact-upsert-path");
@@ -183,40 +172,29 @@ record CallSiteFactRewindIntegrationTest(
         assertTrue(rewound(pid, "malformed_output"), "a schema arriving via upsert re-opens the history");
     }
 
-    @Test
-    void anExplicitNullInTheBundleClearsTheStoredSchema() {
-        // The contract's two nulls. A shard silent on output_schema keeps the stored schema; an explicit null clears
-        // it. Jackson binds that null to NullNode, so without isNull() the column would hold the string "null".
-        String pid = projectWithSweptHistory("fact-bundle-explicit-null");
+    /**
+     * The contract's two nulls: a shard silent on output_schema keeps the stored schema, an explicit null clears it
+     * (Jackson binds that null to NullNode, so without isNull() the column would hold the string "null"), and a
+     * declared schema wins over the carried one, or correcting a stale schema in the bundle is silently undone.
+     */
+    @ParameterizedTest
+    @MethodSource("redeclarations")
+    void aRedeclaredCallSiteStoresTheSchemaItsBundleLeavesIt(Pipeline redeclared, @Nullable JsonNode stored) {
+        String pid = projectWithSweptHistory("fact-bundle-redeclare");
         pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
         assertNotNull(storedSchema(pid, "cs-rag"), "setup: the bundle's schema is stored");
 
-        pipelineService.replace(pid, pipelineWithNullSchema("cs-rag", "rag_answer"));
+        pipelineService.replace(pid, redeclared);
 
-        assertNull(storedSchema(pid, "cs-rag"), "the explicit null cleared the stored schema");
+        assertEquals(stored, storedSchema(pid, "cs-rag"));
     }
 
-    @Test
-    void aSilentShardKeepsTheStoredSchemaThatAnExplicitNullWouldClear() {
-        String pid = projectWithSweptHistory("fact-bundle-silent-vs-null");
-        pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
-
-        // Silent on the fact: the stored schema survives the wipe-and-write.
-        pipelineService.replace(pid, pipelineWithCallSiteShape("cs-rag", "rag_answer"));
-
-        assertEquals(json(SCHEMA), storedSchema(pid, "cs-rag"), "silence carried the schema across");
-    }
-
-    @Test
-    void aBundleDeclaredSchemaOverridesTheCarriedSchema() {
-        // A declared schema wins over the carried one, or correcting a stale schema in the bundle is silently undone.
-        String pid = projectWithSweptHistory("fact-rewind-bundle-wins");
-        pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
-
+    static Stream<Arguments> redeclarations() {
         String corrected = "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"number\"}}}";
-        pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", corrected));
-
-        assertEquals(json(corrected), storedSchema(pid, "cs-rag"), "the bundle's declaration is what is stored");
+        return Stream.of(
+                Arguments.of(pipelineWithNullSchema("cs-rag", "rag_answer"), null),
+                Arguments.of(pipelineWithCallSiteShape("cs-rag", "rag_answer"), json(SCHEMA)),
+                Arguments.of(pipelineWithCallSite("cs-rag", "rag_answer", corrected), json(corrected)));
     }
 
     private @Nullable JsonNode storedSchema(String projectId, String callSiteId) {

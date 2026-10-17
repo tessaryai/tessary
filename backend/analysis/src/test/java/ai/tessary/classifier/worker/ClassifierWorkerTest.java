@@ -34,11 +34,10 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.open.jobqueue.LeasedJobSql;
+import ai.tessary.testsupport.LogCapture;
 import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import io.micrometer.tracing.Tracer;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -47,16 +46,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.LoggerFactory;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
@@ -125,21 +122,8 @@ class ClassifierWorkerTest {
     @Mock
     Tracer tracer;
 
-    private ListAppender<ILoggingEvent> appender;
-    private Logger logbackLogger;
-
-    @BeforeEach
-    void attachAppender() {
-        logbackLogger = (Logger) LoggerFactory.getLogger(ClassifierWorker.class);
-        appender = new ListAppender<>();
-        appender.start();
-        logbackLogger.addAppender(appender);
-    }
-
-    @AfterEach
-    void detachAppender() {
-        logbackLogger.detachAppender(appender);
-    }
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(ClassifierWorker.class);
 
     @Test
     void aDrainKindKeepsPagingInsideOneClaimUntilAPageComesBackShort() {
@@ -191,10 +175,10 @@ class ClassifierWorkerTest {
         verify(jobs, never()).markSwept(anyString(), any(), any());
         verify(catchUp, never()).caughtUp(any(), any(), any());
         assertTrue(
-                appender.list.stream()
+                log.events().stream()
                         .anyMatch(e -> e.getLevel() == Level.WARN
                                 && e.getFormattedMessage().contains("lost its lease")),
-                "a lost lease is said out loud: " + appender.list);
+                "a lost lease is said out loud: " + log.events());
     }
 
     /**
@@ -364,37 +348,16 @@ class ClassifierWorkerTest {
     }
 
     /**
-     * A span with no call site of its own takes its trace's: a tool span under a tagged LLM span is that call site's
-     * traffic. Reading only the span's own column would leave every child span unchecked.
-     */
-    @Test
-    void anUntaggedSpanInATraceTaggedOnAnotherSpanIsInScope() {
-        ClassifierWorker worker = worker(2);
-        armSignal(ClassifierRowBuilder.of(BuiltInDetector.Kind.REGEX)
-                .discovery()
-                .onCallSites("cs-a")
-                .build());
-        SubstrateObservation childOfInScope = span(0, null);
-        SubstrateObservation childOfOther = span(1, null);
-        when(substrate.observationsAfter(PROJECT, null, null, 2)).thenReturn(List.of(childOfInScope, childOfOther));
-        when(substrate.callSitesByTrace(PROJECT, Set.of("trace-0", "trace-1")))
-                .thenReturn(Map.of("trace-0", Set.of("cs-a"), "trace-1", Set.of("cs-b")));
-
-        worker.sweepForTest(job());
-
-        verify(detector).sweepBatch(any(), eq(List.of(childOfInScope)), any());
-    }
-
-    /**
      * On a host whose name does not resolve, building the lease owner threw and the worker never constructed. It
      * falls back to a fixed name.
      */
     @Test
     void aHostWhoseNameDoesNotResolveStillNamesItsLeaseOwner() {
-        assertEquals("box-1", ClassifierWorker.shortHost(() -> "box-1"));
-        assertEquals("host", ClassifierWorker.shortHost(() -> {
-            throw new UnknownHostException("box-1");
-        }));
+        assertTrue(LeasedJobSql.leaseOwner(() -> "box-1").matches("box-1-[0-9a-f]{8}"));
+        assertTrue(LeasedJobSql.leaseOwner(() -> {
+                    throw new UnknownHostException("box-1");
+                })
+                .matches("host-[0-9a-f]{8}"));
     }
 
     /** A streak past the summary interval says it is still failing, with its count; otherwise it looks recovered. */
@@ -407,7 +370,7 @@ class ClassifierWorkerTest {
 
         for (int i = 0; i < 30; i++) worker.sweepForTest(job);
 
-        List<Map<String, Object>> warns = appender.list.stream()
+        List<Map<String, Object>> warns = log.events().stream()
                 .filter(e -> e.getLevel() == Level.WARN)
                 .map(e -> e.getKeyValuePairs().stream()
                         .collect(java.util.stream.Collectors.toMap(kv -> kv.key, kv -> (Object) kv.value)))
@@ -436,12 +399,12 @@ class ClassifierWorkerTest {
         worker.sweepForTest(job);
 
         assertTrue(
-                appender.list.stream()
+                log.events().stream()
                         .anyMatch(e -> e.getLevel() == Level.WARN
                                 && e.getFormattedMessage().contains("no classifier sweep is registered")),
-                "an unregistered kind must be loud, not silent: " + appender.list);
+                "an unregistered kind must be loud, not silent: " + log.events());
         assertTrue(
-                appender.list.stream().noneMatch(e -> e.getLevel() == Level.ERROR),
+                log.events().stream().noneMatch(e -> e.getLevel() == Level.ERROR),
                 "it is not a failure either — no dead letter, no burnt attempt budget");
         verify(jobs).markSwept("job-unclaimed", null, null);
         verify(metricSweep, never()).sweep(any());
@@ -593,11 +556,11 @@ class ClassifierWorkerTest {
         verify(jobs).markSwept("job-1", createdAt(window), handle(window));
         verify(jobs, never()).holdPage(anyString());
         assertEquals(List.of(PageAction.SKIP), detector.actions);
-        long warns = appender.list.stream()
+        long warns = log.events().stream()
                 .filter(e ->
                         e.getLevel() == Level.WARN && e.getFormattedMessage().contains("skipped a page"))
                 .count();
-        assertEquals(1, warns, "one WARN names the skipped page: " + appender.list);
+        assertEquals(1, warns, "one WARN names the skipped page: " + log.events());
     }
 
     @Test
@@ -793,14 +756,8 @@ class ClassifierWorkerTest {
 
     /** The structured fields of the one logged event named {@code name}. */
     private Map<String, Object> event(String name) {
-        List<Map<String, Object>> matches = new ArrayList<>();
-        for (ILoggingEvent e : appender.list) {
-            if (e.getKeyValuePairs() == null) continue;
-            Map<String, Object> fields = new java.util.HashMap<>();
-            e.getKeyValuePairs().forEach(kv -> fields.put(kv.key, kv.value));
-            if (name.equals(fields.get("event"))) matches.add(fields);
-        }
-        assertEquals(1, matches.size(), "exactly one " + name + " event: " + appender.list);
+        List<Map<String, Object>> matches = log.fields(name);
+        assertEquals(1, matches.size(), "exactly one " + name + " event: " + log.events());
         return matches.get(0);
     }
 

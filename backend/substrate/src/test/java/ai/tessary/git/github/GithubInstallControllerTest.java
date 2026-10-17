@@ -34,6 +34,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
@@ -116,42 +117,23 @@ class GithubInstallControllerTest {
                                 && req.repoName().equals("web")));
     }
 
-    @Test
-    void select_tokenMintedForAnotherProject_forbidden() {
-        String foreign = state.mintSelection("acme", "web", "OTHER_PROJECT", List.of(111L));
+    /** A token minted for another project, an installation outside the verified set, a repo it does not hold. */
+    @ParameterizedTest
+    @CsvSource({"OTHER_PROJECT, 111, false", "p1, 999, false", "p1, 111, true"})
+    void select_aForeignTokenInstallationOrRepoIsForbidden(
+            String tokenProject, long installation, boolean repoElsewhere) {
+        String token = state.mintSelection("acme", "web", tokenProject, List.of(111L));
+        if (repoElsewhere) {
+            when(tokenService.listInstallationRepos(111L, HOST))
+                    .thenReturn(List.of(new InstalledRepo("acme", "other", "main")));
+        }
         TessaryException ex = assertThrows(
                 TessaryException.class,
                 () -> controller.selectInstallation(
-                        ctx, "acme", "web", new SelectInstallationRequest(foreign, 111L, "acme", "web")));
+                        ctx, "acme", "web", new SelectInstallationRequest(token, installation, "acme", "web")));
         assertEquals(GitError.INSTALL_FORBIDDEN, ex.error());
         verify(integrations, never()).connect(anyString(), any());
     }
-
-    @Test
-    void select_installationNotInVerifiedSet_forbidden() {
-        String token = state.mintSelection("acme", "web", "p1", List.of(111L));
-        TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> controller.selectInstallation(
-                        ctx, "acme", "web", new SelectInstallationRequest(token, 999L, "acme", "web")));
-        assertEquals(GitError.INSTALL_FORBIDDEN, ex.error());
-        verify(integrations, never()).connect(anyString(), any());
-    }
-
-    @Test
-    void select_repoNotInInstallation_forbidden() {
-        String token = state.mintSelection("acme", "web", "p1", List.of(111L));
-        when(tokenService.listInstallationRepos(111L, HOST))
-                .thenReturn(List.of(new InstalledRepo("acme", "other", "main")));
-        TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> controller.selectInstallation(
-                        ctx, "acme", "web", new SelectInstallationRequest(token, 111L, "acme", "web")));
-        assertEquals(GitError.INSTALL_FORBIDDEN, ex.error());
-        verify(integrations, never()).connect(anyString(), any());
-    }
-
-    // ---- installation-options ----------------------------------------------
 
     @Test
     void options_listsReposBehindTheVerifiedInstallations() {
@@ -163,14 +145,6 @@ class GithubInstallControllerTest {
         assertEquals(2, candidates.size());
         assertEquals("web", candidates.get(0).name());
         assertEquals(111L, candidates.get(0).installationId());
-    }
-
-    @Test
-    void options_tokenForAnotherProject_forbidden() {
-        String foreign = state.mintSelection("acme", "web", "OTHER_PROJECT", List.of(111L));
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> controller.installationOptions(ctx, "acme", "web", foreign));
-        assertEquals(GitError.INSTALL_FORBIDDEN, ex.error());
     }
 
     // ---- install-url --------------------------------------------------------

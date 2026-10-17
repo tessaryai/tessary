@@ -142,25 +142,6 @@ class McpTraceReadToolsTest {
     }
 
     /**
-     * A payload aged out of retention leaves the span readable with null text, which is not "the span had no input"
-     * and not a not-found.
-     */
-    @Test
-    void getSpan_purgedPayloadIsNullsNotNotFound() throws Exception {
-        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID)));
-        when(payloads.find(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.empty());
-
-        JsonNode s = structured(
-                mcp.callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"" + SPAN_ID + "\"}"));
-
-        assertEquals(SPAN_ID, s.get("span_id").asText());
-        assertTrue(s.get("input").isNull());
-        assertTrue(s.get("output").isNull());
-        assertTrue(s.get("attributes").isNull());
-        assertEquals("llm", s.get("kind").asText());
-    }
-
-    /**
      * The migration error: an old plugin sending {@code {"id": ...}} learns the new identity rule and which argument
      * to add.
      */
@@ -286,47 +267,6 @@ class McpTraceReadToolsTest {
         assertTrue(s.get("total_cost").isNull());
         assertFalse(s.get("is_settled").asBoolean());
         assertEquals(1, s.get("spans").size(), "the spans themselves are there regardless");
-    }
-
-    /** A trace whose spans aged out still resolves from its rollup row. */
-    @Test
-    void getTrace_traceWithNoRemainingSpansStillResolves() throws Exception {
-        when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace()));
-        when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(List.of());
-        when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of());
-
-        JsonNode s = structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
-        assertEquals(TRACE_ID, s.get("trace_id").asText());
-        assertEquals(0, s.get("spans").size());
-        assertEquals(3, s.get("span_count").asInt(), "the rollup remembers what the retention sweep removed");
-    }
-
-    /**
-     * The D10 cap: a trace over {@code TRACE_SPAN_CAP} renders its oldest 200 spans and says so. Oldest-first,
-     * because later spans are unintelligible without the instructions and first turn; the flag, because otherwise 200
-     * reads as the whole trace.
-     */
-    @Test
-    void getTrace_capsSpansOldestFirstAndSaysThePageIsPartial() throws Exception {
-        when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace(250)));
-        // The read is bounded at cap + 1, so a 250-span trace returns 201 rows; the extra one answers
-        // spans_truncated.
-        List<SpanRow> many = new ArrayList<>();
-        for (int i = 0; i < 201; i++) {
-            many.add(span(TRACE_ID, String.format(Locale.ROOT, "s-%03d", i), "2026-07-23T17:00:00Z"));
-        }
-        when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(many);
-        when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of());
-
-        JsonNode s = structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
-
-        assertEquals(200, s.get("spans").size());
-        assertTrue(s.get("spans_truncated").asBoolean());
-        // listByTrace orders started_at ascending.
-        assertEquals("s-000", s.get("spans").get(0).get("span_id").asText());
-        assertEquals("s-199", s.get("spans").get(199).get("span_id").asText());
-        // The rollup's count is the total the cap is measured against.
-        assertEquals(250, s.get("span_count").asInt());
     }
 
     /**

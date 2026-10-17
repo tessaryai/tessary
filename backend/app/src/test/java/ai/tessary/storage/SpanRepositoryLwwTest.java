@@ -165,50 +165,12 @@ class SpanRepositoryLwwTest {
     }
 
     private SpanRow version(String name, @Nullable Long outputTokens, Instant eventTs) {
-        return new SpanRow(
-                pid,
-                traceId,
-                spanId,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "llm",
-                name,
-                true,
-                null,
-                null,
-                null,
-                null,
-                t0.toString(),
-                outputTokens == null ? null : eventTs.toString(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                outputTokens,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                SpanRow.CostSource.UNPRICED,
-                null,
-                null,
-                null,
-                SpanRow.ResolverState.PENDING,
-                SpanRow.ResolverState.PENDING,
-                eventTs.toString(),
-                false,
-                null,
-                null,
-                null,
-                null);
+        String endedAt = outputTokens == null ? null : eventTs.toString();
+        SpanRow row = SubstrateV2Fixtures.spanRow(
+                pid, traceId, spanId, null, "llm", t0.toString(), endedAt, eventTs.toString());
+        return SubstrateV2Fixtures.copyOf(row)
+                .name(name)
+                .usage(null, outputTokens, null, null, null)
+                .build();
     }
 }

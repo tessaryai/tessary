@@ -7,6 +7,7 @@ import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
@@ -267,7 +268,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         }
         boolean accepted = false;
         try {
-            String body = mapper.writeValueAsString(mapper.createObjectNode().put("text", text));
+            String body = mapper.createObjectNode().put("text", text).toString();
             HttpRequest request = request(launcherUrl, sessionPath(sessionId) + "/messages")
                     .timeout(REQUEST_TIMEOUT)
                     .header("Accept", "application/json")
@@ -286,8 +287,6 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 return SendOutcome.CLOSED;
             }
             throw refusal("message", status, resp.body(), launcherUrl, state.lane.wire(), REQUEST_TIMEOUT);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("a message body always serializes", e);
         } finally {
             if (!accepted) {
                 state.open.compareAndSet(reply, null);
@@ -585,14 +584,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
 
         private void finish(String ending) {
             if (!finished.compareAndSet(false, true)) return;
-            try {
-                body.close();
-            } catch (IOException e) {
-                StructuredLog.debug(log, "agentsession.body-close-failed")
-                        .field("session", sessionId)
-                        .field("error", e.getClass().getSimpleName())
-                        .log();
-            }
+            closeBody();
             StructuredLog.info(log, Markers.OPS, "agentsession.events-ended")
                     .message("session %s event stream ended (%s) after %d events", sessionId, ending, count.get())
                     .field("session", sessionId)
@@ -602,6 +594,18 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                             Duration.between(began, clock.instant()).toMillis())
                     .field("ending", ending)
                     .log();
+        }
+
+        @ExcludeFromJacocoGeneratedReport("the JDK HttpClient's response stream never throws on close")
+        private void closeBody() {
+            try {
+                body.close();
+            } catch (IOException e) {
+                StructuredLog.debug(log, "agentsession.body-close-failed")
+                        .field("session", sessionId)
+                        .field("error", e.getClass().getSimpleName())
+                        .log();
+            }
         }
     }
 

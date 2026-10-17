@@ -153,7 +153,7 @@ Dense today: `ingest`, `classifier`, `judge`, `mcp`, `tenant`. Frontend has a vi
 (`pnpm run coverage`, wired into `scripts/check-frontend.sh` between lint and build): component and
 unit tests plus a route-render smoke test that mounts every view in the route manifest
 (and the case, finding and RCA pages once more on real payloads, since the manifest pass only
-reaches their not-found branch) and fails on a render error or un-allowlisted console.error. The gate runs OpenAPI/route-manifest drift + `tsc` + vitest with a 96.8% line-coverage floor
+reaches their not-found branch) and fails on a render error or un-allowlisted console.error. The gate runs OpenAPI/route-manifest drift + `tsc` + vitest with a 100% line-coverage floor
 (`vite.config.ts`) + vite build. Auth filter/device-link paths
 are covered lightly (crypto + path resolver + MCP bearer integration) rather than per-filter
 classes; treat deeper auth coverage as product work, not a docs-audit obligation. Packages with
@@ -164,8 +164,12 @@ near-zero tests are thin wrappers or UI-facing glue; a test there has to name th
 
 `jacoco-maven-plugin` is wired into exactly the **10 open backend modules** — `shared`,
 `contract`, `core`, `tenancy`, `substrate`, `product`, `llm-runtime`, `analysis`,
-`surfaces`, `app` — as a `mvn verify` side effect. `scripts/check-backend.sh` (modes `all` and `tests`) fails when the
-aggregate line coverage is below 0.958.
+`surfaces`, `app` — as a `mvn verify` side effect. `scripts/check-backend.sh` (modes `all` and `tests`) fails when any
+line is uncovered or aggregate branch coverage drops below its floor. A line no test can reach (a
+checked exception the JDK or Jackson declares but cannot throw, a client only a live cloud call
+builds) sits in the smallest private method, annotated `@ExcludeFromJacocoGeneratedReport("why")`
+from `shared`; JaCoCo skips methods carrying an annotation whose name contains `Generated`.
+`TessaryApplication` is the one excluded class (`app/pom.xml`).
 
 Per-module HTML/XML reports land at `backend/<module>/target/site/jacoco/`. Each one credits only
 that module's own tests, so code the `app` module's `@SpringBootTest` suite runs shows as uncovered

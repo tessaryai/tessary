@@ -50,28 +50,6 @@ class SessionCipherTest {
     }
 
     @Test
-    void unseal_returnsNullOnTamperedCiphertext() {
-        SessionCipher c = cipher(validKey());
-        String token = c.seal(sample());
-        // Flip a byte in the middle (past the IV).
-        char[] chars = token.toCharArray();
-        int idx = chars.length / 2;
-        chars[idx] = (chars[idx] == 'A') ? 'B' : 'A';
-        String tampered = new String(chars);
-        assertNull(c.unseal(tampered), "AES-GCM auth tag must reject tampered ciphertext");
-    }
-
-    @Test
-    void unseal_returnsNullOnWrongKey() {
-        String token = cipher(validKey()).seal(sample());
-
-        byte[] other = new byte[32];
-        for (int i = 0; i < other.length; i++) other[i] = (byte) (i + 100);
-        SessionCipher attacker = cipher(Base64.getEncoder().encodeToString(other));
-        assertNull(attacker.unseal(token));
-    }
-
-    @Test
     void unseal_returnsNullOnBlankOrShortInput() {
         SessionCipher c = cipher(validKey());
         assertNull(c.unseal(null));

@@ -82,6 +82,7 @@ describe("ConversationView emphasis", () => {
     const spans = [
       ...turn("t1", "First question", "First step", "First reply"),
       ...turn("t2", "Second question", "Second step", "Second reply"),
+      span({ id: "t2-tool", trace_id: "t2", parent_span_id: "t2-agent", kind: "tool", started_at: "2026-09-25T10:00:00.700Z" }),
     ];
     const emphasis: EmphasisBySpan = new Map([
       ["t2-agent", [{ part: "question", kind: "judged", label: "Judged part" }]],
@@ -99,8 +100,8 @@ describe("ConversationView emphasis", () => {
       />,
     );
 
-    // The emphasised trace's step and reply are dimmed, each with the caller's note; its question is not.
-    expect(screen.getAllByText("Not read for this flag.")).toHaveLength(2);
+    // The emphasised trace's step, tool call and reply are dimmed, each with the caller's note; its question is not.
+    expect(screen.getAllByText("Not read for this flag.")).toHaveLength(3);
     expect(bubble("Second step").className).toContain("text-muted");
     expect(bubble("Second reply").className).toContain("text-muted");
     expect(bubble("Second question").className).not.toContain("text-muted");
@@ -109,4 +110,13 @@ describe("ConversationView emphasis", () => {
       expect(bubble(text).className).not.toContain("text-muted");
     }
   });
+});
+
+// Bug: a turn mark pinned on the system prompt, as if the person had said it, when the turn holds no words of theirs.
+it("draws a turn mark on no message when the turn has none from the person", () => {
+  const input = j([{ role: "system", content: "Run the nightly sweep." }]);
+  render(<ConversationView spans={[span({ id: "r", kind: "agent", input })]} focusId={null} marks={["Frustration"]} />);
+
+  expect(screen.getByText("Run the nightly sweep.")).toBeTruthy();
+  expect(screen.queryByText("Frustration")).toBeNull();
 });

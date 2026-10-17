@@ -51,9 +51,6 @@ public class FrustrationRateService implements ClassifierCatchUp {
     /** How far back a replay reads, from the newest scored turn: tool_error's window. */
     static final Duration REPLAY_WINDOW = Duration.ofDays(28);
 
-    /** The reset note written when the scorer or the tuning changed under a call site's state. */
-    static final String TUNING_CHANGED = "tuning changed";
-
     /** How long a spell may go unrefreshed before the next firing is a new one: tool_error's window. */
     static final Duration QUIET_WINDOW = Duration.ofHours(6);
 
@@ -113,7 +110,7 @@ public class FrustrationRateService implements ClassifierCatchUp {
         int retuned = 0;
         for (CarriedState state : states.list(projectId)) {
             if (!epoch.equals(state.stateEpoch())) {
-                carried.put(state.toolKey(), retune(projectId, state, epoch, now));
+                carried.put(state.toolKey(), ToolErrorStateRepository.retune(states, projectId, state, epoch, now));
                 retuned++;
             } else {
                 carried.put(state.toolKey(), state.rebuilding());
@@ -144,23 +141,6 @@ public class FrustrationRateService implements ClassifierCatchUp {
                 .durationMs(started)
                 .log();
         return rising;
-    }
-
-    /** Stamp the new epoch so the next pass does not reset it again while it is still learning. */
-    private CarriedState retune(String projectId, CarriedState stale, String epoch, String now) {
-        ToolErrorStateRepository states = rates.states();
-        states.resetAndRelearn(projectId, stale.toolKey(), null, TUNING_CHANGED, now);
-        CarriedState fresh = new CarriedState(
-                stale.toolKey(),
-                ToolErrorDetector.State.EMPTY,
-                null,
-                null,
-                epoch,
-                stale.pendingPinBy(),
-                stale.pendingPinAt(),
-                now);
-        states.save(projectId, fresh, now);
-        return fresh;
     }
 
     /**

@@ -67,10 +67,10 @@ test('cuts off a body over the size limit rather than reading it all, and keeps 
   }
 });
 
-test('only POST /rca, /triage and /runs reach the analyzers; every other route is 404', async () => {
+test('only POST /rca, /triage and /runs reach the analyzers; every other route is 404, even one that is not a URL path (a // that crashed the launcher)', async () => {
   const { child, port } = await startLauncher(E2B_ENV);
   try {
-    for (const [method, urlPath] of [['GET', '/rca'], ['POST', '/grade'], ['POST', '/rca/extra'], ['PUT', '/triage'], ['GET', '/runs'], ['POST', '/runs/extra']]) {
+    for (const [method, urlPath] of [['GET', '/rca'], ['POST', '/grade'], ['POST', '/rca/extra'], ['PUT', '/triage'], ['GET', '/runs'], ['POST', '/runs/extra'], ['POST', '//']]) {
       assert.deepEqual(
         await request(port, method, urlPath, { auth: 'Bearer testkey' }),
         { status: 404, body: { error: 'not found' } },

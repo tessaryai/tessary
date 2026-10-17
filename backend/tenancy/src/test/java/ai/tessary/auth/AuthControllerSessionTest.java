@@ -323,7 +323,9 @@ class AuthControllerSessionTest {
     void logout_expiresTheSessionCookieAndNamesTheFrontend() throws Exception {
         when(provider.signOutUrl(null, "https://app.example.com/")).thenReturn("https://app.example.com/");
 
-        MockHttpServletResponse res = mvc.perform(post("/auth/logout"))
+        // A sealed session under another cookie name (one from before a cookie-name change) is not the session.
+        String sealed = cipher.seal(new SealedSession("rt_1", EXPIRES.toString(), "wos_1", "org_1", "session_1"));
+        MockHttpServletResponse res = mvc.perform(post("/auth/logout").cookie(new Cookie("sid_old", sealed)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.frontendUrl").value("https://app.example.com/"))
                 .andReturn()

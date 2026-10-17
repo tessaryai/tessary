@@ -19,6 +19,9 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.PagedDetector.FiredTurn;
 import ai.tessary.classifier.catalog.PagedDetector.PageAction;
 import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.Assessment;
+import ai.tessary.classifier.frustration.FrustrationShadowRepository.Backlog;
+import ai.tessary.classifier.frustration.FrustrationShadowRepository.ShadowRow;
+import ai.tessary.classifier.frustration.FrustrationShadowRepository.Summary;
 import ai.tessary.classifier.frustration.StructuredThread.Message;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
@@ -51,6 +54,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -78,6 +82,9 @@ class FrustrationAssessmentIntegrationTest {
 
     @Autowired
     ClassifierDetectionWriteRepository detections;
+
+    @Autowired
+    FrustrationShadowRepository shadows;
 
     @Autowired
     ClassifierRepository classifiers;
@@ -186,6 +193,77 @@ class FrustrationAssessmentIntegrationTest {
                 mapper.readTree((String) detection.get("evidence"))
                         .path("model")
                         .asText());
+    }
+
+    /**
+     * The shadow backlog is every assessment still holding its request and no shadow row; a turn whose request aged
+     * out is never re-sent, a second answer for a turn is dropped, and refusals are counted apart from agreement.
+     * Nothing else in this database writes {@code frustration_shadow}, so the summary is this test's rows.
+     */
+    @Test
+    void aShadowRowIsWrittenOncePerAssessmentAndTakesItOutOfTheBacklog() {
+        String pid = project("fr-shadow");
+        ClassifierRow signal = frustration(pid);
+        Instant started = Instant.now().minus(1, ChronoUnit.HOURS);
+        JevFrustrationDetector detector = detector(Map.of("tr-flagged", 0.82, "tr-calm", 0.05, "tr-aged", 0.05));
+        List<SubstrateObservation> page = List.of(
+                turn(pid, "tr-flagged", "sess-1", null, started),
+                turn(pid, "tr-calm", "sess-2", null, started),
+                turn(pid, "tr-aged", "sess-3", null, started));
+        detector.complete(signal, detector.score(signal, page), PageAction.PERSIST, 3);
+        String version = JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
+        Assessment flagged = find(pid, signal.id(), "tr-flagged", version);
+        Assessment calm = find(pid, signal.id(), "tr-calm", version);
+        jdbc.sql("UPDATE frustration_assessment SET request = NULL WHERE project_id = :pid AND trace_id = 'tr-aged'")
+                .param("pid", pid)
+                .update();
+
+        assertEquals(
+                Set.of(
+                        new Backlog(flagged.id(), pid, signal.id(), "tr-flagged", version, request(flagged), true),
+                        new Backlog(calm.id(), pid, signal.id(), "tr-calm", version, request(calm), false)),
+                Set.copyOf(shadowBacklog(pid)));
+        BigDecimal low = new BigDecimal("0.30000000");
+        ShadowRow scored = new ShadowRow(
+                "sh-1", flagged.id(), pid, signal.id(), "tr-flagged", version, "eikos", low, false, true, "{}", 41);
+        assertTrue(shadows.insert(scored));
+        assertFalse(shadows.insert(new ShadowRow(
+                "sh-2", flagged.id(), pid, signal.id(), "tr-flagged", version, "eikos", low, false, true, "{}", 9)));
+        assertTrue(shadows.insert(new ShadowRow(
+                "sh-3", calm.id(), pid, signal.id(), "tr-calm", version, "eikos", null, null, false, "{}", null)));
+
+        assertEquals(List.of(), shadowBacklog(pid));
+        assertEquals(
+                scored,
+                jdbc.sql("SELECT id, assessment_id, project_id, classifier_id, trace_id, scorer_version,"
+                                + " shadow_model, score, frustrated, reference_frustrated, response::text, latency_ms"
+                                + " FROM frustration_shadow WHERE assessment_id = :id")
+                        .param("id", flagged.id())
+                        .query((rs, n) -> new ShadowRow(
+                                rs.getString(1),
+                                rs.getString(2),
+                                rs.getString(3),
+                                rs.getString(4),
+                                rs.getString(5),
+                                rs.getString(6),
+                                rs.getString(7),
+                                rs.getBigDecimal(8),
+                                (Boolean) rs.getObject(9),
+                                rs.getBoolean(10),
+                                rs.getString(11),
+                                (Integer) rs.getObject(12)))
+                        .single());
+        assertEquals(new Summary(1, 0, 1, 0, 1), shadows.summary(), "one reference-only disagreement, one refusal");
+    }
+
+    private static String request(Assessment a) {
+        return Objects.requireNonNull(a.requestJson());
+    }
+
+    private List<Backlog> shadowBacklog(String pid) {
+        return shadows.backlog(Integer.MAX_VALUE).stream()
+                .filter(b -> pid.equals(b.projectId()))
+                .toList();
     }
 
     @Test

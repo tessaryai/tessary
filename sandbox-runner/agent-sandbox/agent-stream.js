@@ -486,9 +486,8 @@ function toolResultsOf(parts) {
   for (const c of parts) {
     if (!c || (c.type !== 'tool' && c.type !== 'tool_use' && c.type !== 'tool-call')) continue;
     const state = c.state || {};
-    let r = state.output ?? state.result ?? c.output;
+    const r = state.output ?? state.result ?? c.output;
     if (r === undefined || r === null) continue;
-    if (typeof r !== 'string') r = JSON.stringify(r);
     out.push({ id: c.callID || c.id || '', content: r });
   }
   return out;

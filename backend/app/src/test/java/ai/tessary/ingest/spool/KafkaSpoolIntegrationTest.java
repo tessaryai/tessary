@@ -17,7 +17,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.annotation.DirtiesContext;
@@ -29,16 +28,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.redpanda.RedpandaContainer;
 
 /**
- * The opt-in Kafka-API spool end to end against a real broker: an accepted
- * batch is on the broker before the edge answers and reaches the substrate through the same drain;
- * a consumer that dies before its ack is handed the same record again and a redelivered batch is a
- * no-op on the idempotent write; a broker that cannot be reached sheds rather than acknowledges; an
- * oversize batch is refused for the producer to split.
+ * The opt-in Kafka-API spool end to end against a real broker: an accepted batch is on the broker before the edge
+ * answers and reaches the substrate through the same drain, once even when it is sent twice; a consumer that dies
+ * before its ack is handed the same record again. How the spool answers a broker that refuses, fails or cannot be
+ * reached is {@code KafkaSpoolTest}'s.
  */
 @Testcontainers
-// CI only: against a local Docker the drain never reaches the substrate inside the test's wait, so it fails on every
-// branch there. GitHub Actions sets CI=true.
-@EnabledIfEnvironmentVariable(named = "CI", matches = "true")
 @SpringBootTest(properties = {"tessary.ingest.substrate.rollup-enabled=false"})
 // Own context on purpose: it swaps the ingest spool onto a Redpanda container, so its bean graph is not the shared
 // one.
@@ -47,9 +42,9 @@ import org.testcontainers.redpanda.RedpandaContainer;
 @DirtiesContext
 record KafkaSpoolIntegrationTest(
         SubstrateWriter writer, IngestSpool spool, TenantService tenants, JdbcClient jdbc, ObjectMapper mapper) {
+    /** Docker Hub, where the Postgres image comes from too: docker.redpanda.com does not resolve from every daemon. */
     @Container
-    static final RedpandaContainer REDPANDA =
-            new RedpandaContainer("docker.redpanda.com/redpandadata/redpanda:v25.2.1");
+    static final RedpandaContainer REDPANDA = new RedpandaContainer("redpandadata/redpanda:v25.2.1");
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) throws Exception {
@@ -120,18 +115,6 @@ record KafkaSpoolIntegrationTest(
     }
 
     @Test
-    void aRedeliveredBatchIsANoOpOnTheIdempotentWrite() throws Exception {
-        String pid = TenantFixture.bootstrap(tenants, "kafka-replay").project().id();
-        assertTrue(writer.enqueue(pid, batch("kr-1", 5)));
-        assertTrue(writer.awaitIdle(Duration.ofSeconds(60)), "the drainer wrote the batch");
-        assertEquals(5, spans(pid));
-        // What a consumer restarted before its ack would see: the same message again.
-        assertTrue(writer.enqueue(pid, batch("kr-1", 5)));
-        assertTrue(writer.awaitIdle(Duration.ofSeconds(60)));
-        assertEquals(5, spans(pid), "a replayed batch changes nothing");
-    }
-
-    @Test
     void aConsumerThatDiesBeforeItsAckIsRedeliveredTheSameRecord() {
         // A spool of its own, on its own topic and group, so this thread is the consumer's owner and the
         // live drainer cannot race the claims.
@@ -151,7 +134,7 @@ record KafkaSpoolIntegrationTest(
             IngestSpool.Claimed first = claimOne(spool);
             assertEquals(3, first.entries().size());
             // Crash before the ack: the consumer goes away with the offset uncommitted.
-            spool.resetConsumerForTest();
+            spool.closeOwnConsumer();
             IngestSpool.Claimed again = claimOne(spool);
             assertEquals(first.entries(), again.entries(), "the unacked batch is redelivered, not lost");
             spool.ack(again);
@@ -177,30 +160,6 @@ record KafkaSpoolIntegrationTest(
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
-        }
-    }
-
-    @Test
-    void anUnreachableBrokerShedsInsteadOfAcknowledging() {
-        IngestSpoolProperties.Kafka bogus = kafka("bootstrap-servers", "127.0.0.1:1", "publish-timeout-ms", 1_500);
-        try (KafkaSpool down = new KafkaSpool(bogus, mapper)) {
-            assertEquals(IngestSpool.Admission.SHED, down.append("p", batch("kd-1", 1)), "no ack, no 200");
-        }
-    }
-
-    @Test
-    void anOversizeBatchIsRefusedForTheProducerToSplit() {
-        IngestSpoolProperties.Kafka tiny = kafka(
-                "bootstrap-servers",
-                REDPANDA.getBootstrapServers(),
-                "max-message-bytes",
-                256,
-                "topic",
-                "tessary.ingest.tiny",
-                "dead-letter-topic",
-                "tessary.ingest.tiny.dead-letter");
-        try (KafkaSpool small = new KafkaSpool(tiny, mapper)) {
-            assertEquals(IngestSpool.Admission.OVERSIZE, small.append("p", batch("ko-1", 10)));
         }
     }
 

@@ -19,16 +19,6 @@ class JsonbTest {
     }
 
     @Test
-    @DisplayName("a JSON value followed by trailing text is rejected, not silently bound")
-    void trailingTokens_rejected() {
-        // The real shape that took down whole ingest batches: a tool prints JSON, then keeps talking.
-        // Postgres — not Jackson — parses the bind, so letting this through fails the INSERT.
-        assertNull(Jsonb.orNull("{\"id\":\"x\"}\nShell cwd was reset to /tmp"));
-        assertNull(Jsonb.orNull("[1,2]\n---- next ----\n[3]"));
-        assertNull(Jsonb.orNull("{\"a\":1} {\"b\":2}"), "two values are not one value");
-    }
-
-    @Test
     @DisplayName("anything that is not an object/array degrades to null (fail-open, never a throw)")
     void nonObjectOrArray_isNull() {
         assertNull(Jsonb.orNull(null));

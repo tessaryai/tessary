@@ -19,6 +19,7 @@ import {
   cn,
 } from "../../ui";
 import { useProjectApi, useTenant } from "../../tenant/TenantContext";
+import { searchPatch } from "../../lib/searchPatch";
 import { classifierHref } from "../traceLinker";
 import {
   COLUMN_DEFS,
@@ -85,6 +86,7 @@ function TracesList() {
   const { visible, toggle, reset } = useColumnConfig();
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const patch = searchPatch(searchParams, setSearchParams);
   const { state, setRange, setFacet, setCallSite, setSearch, clearAll, activeCount } = useTraceQueryState();
   const { range, facets, callSite, q: submittedQuery } = state;
   // `q` is a server-side filter, so it fires on submit, not per keystroke.
@@ -112,12 +114,7 @@ function TracesList() {
 
   // Sessions page server-side, so a session's totals are accurate when it renders.
   const groupBySession = searchParams.get("groupBy") === "session";
-  const setGroupBySession = (grouped: boolean) => {
-    const next = new URLSearchParams(searchParams);
-    if (grouped) next.set("groupBy", "session");
-    else next.delete("groupBy");
-    setSearchParams(next);
-  };
+  const setGroupBySession = (grouped: boolean) => patch({ groupBy: grouped ? "session" : null });
   const tableMinWidth = Math.max(
     760,
     columns.reduce((sum, c) => sum + c.width, 0) + (groupBySession ? SESSION_EXPAND_COLUMN_WIDTH : 0),
@@ -177,43 +174,19 @@ function TracesList() {
   const displayRows = groupBySession ? sessionRows : rows;
 
   const openTraceId = searchParams.get("trace");
-  const openTrace = (row: TraceListItem) => {
-    const next = new URLSearchParams(searchParams);
-    next.set("trace", row.id);
-    setSearchParams(next);
-  };
+  const openTrace = (row: TraceListItem) => patch({ trace: row.id });
   // A stable handle, so a page landing re-renders only its own rows rather than every row above it.
   const openTraceRef = useRef(openTrace);
   useLayoutEffect(() => {
     openTraceRef.current = openTrace;
   });
   const onOpenRow = useCallback((row: TraceListItem) => openTraceRef.current(row), []);
-  const openTraceById = (traceId: string) => {
-    const next = new URLSearchParams(searchParams);
-    next.set("trace", traceId);
-    setSearchParams(next);
-  };
-  const closeTrace = () => {
-    const next = new URLSearchParams(searchParams);
-    next.delete("trace");
-    next.delete("view");
-    next.delete("span");
-    setSearchParams(next);
-  };
+  const openTraceById = (traceId: string) => patch({ trace: traceId });
+  const closeTrace = () => patch({ trace: null, view: null, span: null });
 
   const openSessionId = searchParams.get("session");
-  const openSession = (row: SessionListItem) => {
-    const next = new URLSearchParams(searchParams);
-    next.set("session", row.id);
-    setSearchParams(next);
-  };
-  const closeSession = () => {
-    const next = new URLSearchParams(searchParams);
-    next.delete("session");
-    next.delete("view");
-    next.delete("span");
-    setSearchParams(next);
-  };
+  const openSession = (row: SessionListItem) => patch({ session: row.id });
+  const closeSession = () => patch({ session: null, view: null, span: null });
 
   return (
     <div className="pt-9 px-10 pb-14">

@@ -53,6 +53,17 @@ class TraceRollupReaperTest {
         assertEquals(errors, log.count(Level.ERROR));
     }
 
+    /** The schedule runs a sweep. The bug is a tick that catches the work along with its failures. */
+    @Test
+    void aTickSweeps() {
+        TraceRollupMetrics metrics = new TraceRollupMetrics();
+        when(traces.reap(anyInt())).thenReturn(2);
+        when(traces.queueStats()).thenReturn(new TraceV2Repository.RollupQueue(4, 0));
+
+        new TraceRollupReaper(traces, metrics, Props.of(SubstrateProperties.class)).tick();
+        assertEquals(2, metrics.rearmedTraces());
+    }
+
     /** A failed sweep is survived, raised at ERROR, and carries only the error's class. */
     @Test
     void aFailedSweepIsRaisedWithoutTheDatabaseError() {

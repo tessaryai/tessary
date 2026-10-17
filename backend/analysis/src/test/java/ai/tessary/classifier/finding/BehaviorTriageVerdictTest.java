@@ -47,17 +47,6 @@ class BehaviorTriageVerdictTest {
         assertNull(v, "an uncited ruling must not become a verdict — it is a failed run, not a low-confidence one");
     }
 
-    /** `unclear` is gone [decision 4]: positive and negative only. */
-    @Test
-    void rejectsUnclear() {
-        BehaviorTriageVerdict v = BehaviorTriageVerdict.parse(mapper, """
-                {"verdict": "unclear", "summary": "the evidence does not settle it",
-                 "citations": [{"path": "window.n_cur", "reason": "too thin to tell"}]}
-                """);
-
-        assertNull(v, "unclear is not a recognised verdict word any more");
-    }
-
     @Test
     void aRunThatSaidNothingIsNotARuling() {
         for (String bad :

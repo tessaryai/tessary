@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // A frustration finding is ruled positive when filed and opens its case in the same step, so the
 // header shows the ruling, never a triage button.
-import { Link } from "react-router-dom";
 import type { ProjectApi } from "../../api/client";
 import type { BehaviorFinding, FrustratedConversation, FrustrationDetail } from "../../api/types";
 import { PageHeader } from "../../ui";
-import { triageState } from "./shared";
+import { RulingWithCase } from "./shared";
 import { Pin, PinList, RateChart, formatRate } from "./rateStory";
 import type { FlaggedLoader, FlaggedPage, FlaggedRow } from "./FlaggedList";
 
@@ -25,7 +24,6 @@ export function FrustrationHeader({
   basePath: string;
 }) {
   const closed = finding.status === "closed";
-  const caseRef = finding.caseId;
   return (
     <PageHeader
       breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
@@ -35,22 +33,7 @@ export function FrustrationHeader({
           ? "This finding is closed. This call site is learning its normal rate again from its next sessions."
           : "Frustration findings skip triage. Tessary opened a case as soon as the rate rose above this call site's normal."
       }
-      actions={
-        <span className="flex items-center gap-2">
-          <span className="font-mono text-label uppercase text-muted rounded-control border border-border-strong bg-raised py-1.25 px-2.75">
-            {triageState(finding).label}
-          </span>
-          {caseRef && (
-            <Link
-              to={`${basePath}/cases/${encodeURIComponent(caseRef)}`}
-              className="inline-flex items-center h-7 px-2.5 rounded-control border border-border-strong bg-raised text-small text-fg hover:bg-hover transition-colors"
-              style={{ transitionDuration: "var(--duration-micro)" }}
-            >
-              View case
-            </Link>
-          )}
-        </span>
-      }
+      actions={<RulingWithCase finding={finding} basePath={basePath} />}
     />
   );
 }

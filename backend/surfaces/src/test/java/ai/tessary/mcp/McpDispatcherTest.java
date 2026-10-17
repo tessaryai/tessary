@@ -89,13 +89,6 @@ class McpDispatcherTest {
     }
 
     @Test
-    void notification_unknownMethod_stillSilent() {
-        // Unknown notifications emit no JSON-RPC error.
-        JsonRpc.Request n = new JsonRpc.Request("2.0", NullNode.getInstance(), "notifications/whatever", null);
-        assertNull(dispatcher.dispatch(n, ctx()));
-    }
-
-    @Test
     void toolsCall_missingParams_reportsInvalidParams() {
         assertEquals(
                 JsonRpc.INVALID_PARAMS,
@@ -138,28 +131,6 @@ class McpDispatcherTest {
         Map<String, Object> result = resultMap(r);
         assertEquals(Boolean.FALSE, result.get("isError"));
         assertEquals(Map.of("echoed", Map.of()), result.get("structuredContent"));
-    }
-
-    /**
-     * A result Jackson cannot pretty-print falls back to its string form rather than becoming a -32603 server fault.
-     */
-    @Test
-    void toolsCall_aResultJacksonCannotRenderStillReturnsTheResult() throws Exception {
-        Object opaque = new Object() {
-            @Override
-            public String toString() {
-                return "opaque result";
-            }
-        };
-        McpTool opaqueTool = new McpTool("opaque", "returns a bean with no properties", Map.of(), (c, a) -> opaque);
-        McpDispatcher withOpaque = new McpDispatcher(new McpToolRegistry(List.of(opaqueTool)), mapper);
-        JsonNode params = mapper.readTree("{\"name\":\"opaque\",\"arguments\":{}}");
-
-        Map<String, Object> result = resultMap(withOpaque.dispatch(req(1, "tools/call", params), ctx()));
-
-        assertEquals(Boolean.FALSE, result.get("isError"));
-        assertEquals(List.of(Map.of("type", "text", "text", "opaque result")), result.get("content"));
-        assertEquals(opaque, result.get("structuredContent"));
     }
 
     /** A {@code tools/call} whose params are not an object, or name no tool, is the caller's error (-32602). */

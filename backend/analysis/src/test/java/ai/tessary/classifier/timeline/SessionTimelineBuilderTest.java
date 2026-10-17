@@ -60,11 +60,12 @@ class SessionTimelineBuilderTest {
         assertEquals(
                 json("{\"model\":\"gpt-x\",\"system_prompt\":\"You are support.\",\"new_messages\":[" + Q1 + "],"
                         + "\"output\":{\"text\":null,\"tool_calls\":[" + C1 + "],\"reasoning\":null},"
-                        + "\"settings\":{},\"usage\":{\"input_tokens\":50,\"output_tokens\":10,"
+                        + "\"settings\":{\"temperature\":0.2},\"usage\":{\"input_tokens\":50,\"output_tokens\":10,"
                         + "\"cache_read_tokens\":null,\"cache_write_tokens\":null,\"reasoning_tokens\":null,"
                         + "\"total_tokens\":null}}"),
                 data.get(1),
-                "history counted as new messages, or the system prompt kept among them");
+                "history counted as new messages, the system prompt kept among them, or a request setting dropped"
+                        + " (or the model, or an attribute that is not a request setting, shown as one)");
         assertEquals(json("\"You are billing.\""), data.get(3).get("system_prompt"));
         assertEquals(json(list(user("check refund status for 42"))), data.get(3).get("new_messages"));
         assertEquals(
@@ -337,26 +338,6 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
-    void aPersonWhoSaysTheSameWordsTwiceInOneTurnGivesTwoMessages() {
-        String yes = user("yes");
-        String ask = assistant("Delete all 3 files, ok?");
-        List<TimelineSpan> spans = List.of(
-                span("T", "l1", "llm", null, 0, 100, list(SYS, yes), list(ask)),
-                span("T", "l2", "llm", null, 200, 300, list(SYS, yes, ask, yes), "Deleted."));
-
-        assertEquals(
-                """
-                T/l1#user:0 yes
-                T/l1#reply:0 Delete all 3 files, ok?
-                T/l2#user:0 yes
-                T/l2#reply:0 Deleted.
-                """,
-                messages(SessionTimelineBuilder.build("p1", "s", spans)),
-                "an answer the person gave after a reply of this turn is dropped because an earlier message had its"
-                        + " text");
-    }
-
-    @Test
     void aPersonWhoRepeatsTheOpeningWordsWhileTheAgentRunsGivesTwoMessages() {
         String yes = user("yes");
         String ask = assistant("Delete all 3 files, ok?");
@@ -448,6 +429,8 @@ class SessionTimelineBuilderTest {
                         .callSite("cs-llm")
                         .model("gpt-x")
                         .usage(50L, 10L)
+                        .attributes(
+                                "{\"gen_ai.request.temperature\":0.2,\"gen_ai.request.model\":\"gpt-x\",\"seed\":7}")
                         .build(),
                 rich("tr-a", "a3", "tool", "a1", 210, 300, null, null)
                         .name("execute_tool")
@@ -631,6 +614,7 @@ class SessionTimelineBuilderTest {
         private TimelineSpan.Usage usage = TimelineSpan.Usage.NONE;
         private @Nullable String input;
         private @Nullable String output;
+        private @Nullable String attributes;
         private TimelineSpan.@Nullable Tool tool;
 
         SpanBuilder(String traceId, String spanId, String kind) {
@@ -674,6 +658,11 @@ class SessionTimelineBuilderTest {
             return this;
         }
 
+        SpanBuilder attributes(String v) {
+            this.attributes = v;
+            return this;
+        }
+
         SpanBuilder tool(String toolName, @Nullable String arguments, @Nullable String result) {
             this.tool = new TimelineSpan.Tool(toolName, arguments, result);
             return this;
@@ -696,7 +685,7 @@ class SessionTimelineBuilderTest {
                     usage,
                     input,
                     output,
-                    null,
+                    attributes,
                     tool);
         }
     }

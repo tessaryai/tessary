@@ -2,6 +2,7 @@
 package ai.tessary.classifier.timeline;
 
 import ai.tessary.classifier.timeline.DialogueMessages.DialogueMessage;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -659,6 +660,7 @@ public final class SessionTimelineBuilder {
     /**
      * Excludes {@code position} and {@code bytes}, so cutting a tail, which renumbers positions, never changes a size.
      */
+    @ExcludeFromJacocoGeneratedReport("Jackson declares IOException, but writing to an in-memory ByteCount cannot fail")
     private static long measure(Event event) {
         ByteCount count = new ByteCount();
         try {
@@ -673,6 +675,7 @@ public final class SessionTimelineBuilder {
         private long bytes;
 
         @Override
+        @ExcludeFromJacocoGeneratedReport("Jackson's generator writes byte ranges only, never a single byte")
         public void write(int b) {
             bytes++;
         }

@@ -61,8 +61,8 @@ const BY_MODEL: VitalsData = {
   ...DATA,
   dimension: "model",
   groups: [
-    group("claude-haiku", 100, { cost: { calls: 9000, tokens: 2_500_000 } }),
     group("claude-sonnet", 400, { cost: { calls: 1200, tokens: 800_000 } }),
+    group("claude-haiku", 100, { cost: { calls: 9000, tokens: 2_500_000 } }),
   ],
 };
 
@@ -218,6 +218,13 @@ it("the model table: reads by model, shows LLM spans and tokens instead of laten
     "Tokens",
   ]);
   expect(cells()).toEqual([["claude-sonnet", "$400", "1,200", "800K"], ["claude-haiku", "$100", "9,000", "2.5M"]]);
+  // Bug: a model column sorted by another column's number, or the model names not A to Z.
+  sortBy("Model");
+  expect(column(0)).toEqual(["claude-haiku", "claude-sonnet"]);
+  sortBy("LLM spans");
+  expect(column(2)).toEqual(["9,000", "1,200"]);
+  sortBy("Tokens");
+  expect(column(3)).toEqual(["2.5M", "800K"]);
 
   fireEvent.click(bodyRows()[0]);
   expect(currentLocation()).toBe("/vitals");

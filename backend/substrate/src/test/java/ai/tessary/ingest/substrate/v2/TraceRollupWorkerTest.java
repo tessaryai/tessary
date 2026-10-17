@@ -52,6 +52,17 @@ class TraceRollupWorkerTest {
         assertEquals(new TraceRollupWorker.Pass(3, 1, 1, 1, 1), worker().runOnce());
     }
 
+    /** The schedule runs a pass. The bug is a tick that catches the work along with its failures. */
+    @Test
+    void aTickRunsAPass() {
+        TraceRollupMetrics metrics = new TraceRollupMetrics();
+        when(traces.claimDue(anyInt())).thenReturn(List.of(new TraceV2Repository.Claim("p", "t")));
+        when(traces.recompute("p", "t")).thenReturn(Optional.of(new TraceV2Repository.Recomputed(true, 1)));
+
+        new TraceRollupWorker(traces, metrics, Props.of(SubstrateProperties.class)).tick();
+        assertEquals(1, metrics.settledTraces());
+    }
+
     /**
      * A failed pass is survived and reported by its class alone: a database error can echo span content,
      * and the operations log it goes to leaves the box.

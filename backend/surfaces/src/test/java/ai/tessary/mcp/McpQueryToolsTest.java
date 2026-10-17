@@ -265,16 +265,14 @@ class McpQueryToolsTest {
 
     // ---- arg validation ------------------------------------------------------------------------
 
-    @Test
-    void missingRequiredDatasetIsToolError() throws Exception {
-        String text = errorText(mcp.callTool("query_count", "{}"));
-        assertTrue(text.contains("dataset"), text);
-    }
-
-    @Test
-    void nonObjectFiltersIsToolError() throws Exception {
-        String text = errorText(mcp.callTool("query_count", "{\"dataset\":\"spans\",\"filters\":\"oops\"}"));
-        assertTrue(text.contains("filters"), text);
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', textBlock = """
+        {}                                     | dataset
+        {"dataset":"spans","filters":"oops"}   | filters
+        """)
+    void aMissingOrNonObjectArgumentIsAToolErrorNamingIt(String argsJson, String named) throws Exception {
+        String text = errorText(mcp.callTool("query_count", argsJson));
+        assertTrue(text.contains(named), text);
     }
 
     /**

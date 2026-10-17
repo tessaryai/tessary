@@ -38,16 +38,20 @@ record FrustrationConversationContextIntegrationTest(
         SpanRef flagged = turn(pid, session, base.plusMillis(4_000));
         SpanRef third = turn(pid, session, base.plusMillis(3_000));
         SpanRef second = turn(pid, session, base.plusMillis(2_000));
-        turn(pid, session, base.plusMillis(1_000));
+        SpanRef opener = turn(pid, session, base.plusMillis(1_000));
         turn(pid, other, base.plusMillis(3_500));
 
         Map<String, ConversationContext> context = rates.conversationContext(
-                pid, CHAT, List.of(flagged.traceId()), FrustrationEvidence.CONTEXT_TURNS_BEFORE);
+                pid, CHAT, List.of(flagged.traceId(), opener.traceId()), FrustrationEvidence.CONTEXT_TURNS_BEFORE);
 
         ConversationContext ctx = Objects.requireNonNull(context.get(flagged.traceId()));
         assertEquals(List.of(second.traceId(), third.traceId()), ctx.priorTraceIds());
         assertEquals(session, ctx.sessionId());
         assertTrue(!ctx.priorTraceIds().contains(later.traceId()), "a later turn is never context");
+        assertEquals(
+                List.of(),
+                Objects.requireNonNull(context.get(opener.traceId())).priorTraceIds(),
+                "a conversation's first turn has no prior turns");
     }
 
     /**
@@ -72,19 +76,6 @@ record FrustrationConversationContextIntegrationTest(
                         .get(flagged.traceId()));
 
         assertEquals(List.of(first.traceId()), ctx.priorTraceIds());
-    }
-
-    @Test
-    void aConversationsFirstTurnHasNoPriorTurns() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "fr-context-first").project().id();
-        SpanRef first = turn(pid, SubstrateV2Fixtures.sessionId(), Instant.now());
-
-        ConversationContext ctx =
-                Objects.requireNonNull(rates.conversationContext(pid, CHAT, List.of(first.traceId()), 2)
-                        .get(first.traceId()));
-
-        assertEquals(List.of(), ctx.priorTraceIds());
     }
 
     /**

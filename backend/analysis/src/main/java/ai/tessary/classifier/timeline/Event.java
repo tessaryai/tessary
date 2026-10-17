@@ -43,25 +43,14 @@ public record Event(
     }
 
     Event withBytes(long bytes) {
-        return new Event(
-                id,
-                kind,
-                position,
-                turn,
-                at,
-                callSiteId,
-                traceId,
-                spanId,
-                parentId,
-                parentKind,
-                ancestorKinds,
-                depth,
-                agentId,
-                data,
-                bytes);
+        return copy(position, bytes);
     }
 
     Event withPosition(int position) {
+        return copy(position, bytes);
+    }
+
+    private Event copy(int position, long bytes) {
         return new Event(
                 id,
                 kind,

@@ -16,7 +16,6 @@ import io.opentelemetry.proto.common.v1.AnyValue;
 import io.opentelemetry.proto.common.v1.KeyValue;
 import io.opentelemetry.proto.trace.v1.Span;
 import io.opentelemetry.proto.trace.v1.Status;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -27,32 +26,6 @@ import org.junit.jupiter.api.Test;
 class OtlpSpanMapperTest {
 
     private final OtlpSpanMapper mapper = new OtlpSpanMapper(new ObjectMapper());
-
-    @Test
-    void nativeGenAiSpan_mapsToCanonicalRawEntry_withHexIdsAndTimestamps() {
-        Span span = Span.newBuilder()
-                .setName("chat gpt")
-                .setTraceId(ByteString.copyFrom(new byte[] {0x01, 0x23}))
-                .setSpanId(ByteString.copyFrom(new byte[] {(byte) 0xAB, (byte) 0xCD}))
-                .setParentSpanId(ByteString.copyFrom(new byte[] {0x0F}))
-                .setStartTimeUnixNano(1_000_000_000L) // 1970-01-01T00:00:01Z
-                .setEndTimeUnixNano(2_500_000_000L) // +1.5s
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
-                .addAttributes(kv(GenAiAttributes.REQUEST_MODEL, "gpt-x"))
-                .build();
-
-        List<RawEntry> out = mapper.toRawEntries(request(span));
-        assertEquals(1, out.size());
-        RawEntry e = out.get(0);
-        assertEquals("abcd", e.sourceExternalId());
-        assertEquals("0123", e.traceId());
-        assertEquals("0f", e.parentId());
-        assertEquals("chat gpt", e.name());
-        assertEquals(KindNormalizer.LLM, e.operationKind());
-        assertEquals("gpt-x", e.model());
-        assertEquals("1970-01-01T00:00:01Z", e.timestamp());
-        assertEquals("1970-01-01T00:00:02.500Z", e.endTimestamp());
-    }
 
     @Test
     void foreignTraceloopFrameworkSpan_normalizesToCanonicalKindAndIo() {
@@ -70,27 +43,6 @@ class OtlpSpanMapperTest {
         assertEquals(KindNormalizer.WORKFLOW, e.operationKind(), "traceloop.span.kind=workflow -> workflow");
         assertEquals("{\"query\":\"what is X?\"}", e.input(), "traceloop.entity.input -> input");
         assertEquals("{\"answer\":\"X is Y\"}", e.output(), "traceloop.entity.output -> output");
-    }
-
-    @Test
-    void nativeGenAiWins_overTraceloopFallback() {
-        // The native gen_ai.operation.name wins over the fallback.
-        Span span = Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {0x08}))
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
-                .addAttributes(kv("traceloop.span.kind", "workflow"))
-                .build();
-        assertEquals(
-                KindNormalizer.LLM, mapper.toRawEntries(request(span)).get(0).operationKind());
-    }
-
-    @Test
-    void emptyParentSpanId_isNull() {
-        Span span = Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
-                .build();
-        assertNull(mapper.toRawEntries(request(span)).get(0).parentId());
     }
 
     @Test

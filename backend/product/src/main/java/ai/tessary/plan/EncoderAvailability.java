@@ -82,14 +82,10 @@ public class EncoderAvailability implements HealthIndicator {
         }
     }
 
+    /** Public so a configuration change can take effect without waiting out the interval. */
     @Scheduled(
             fixedDelayString = "${tessary.observer.encoder.probe-interval-ms:60000}",
             initialDelayString = "${tessary.observer.encoder.probe-interval-ms:60000}")
-    public void probeOnSchedule() {
-        refresh();
-    }
-
-    /** Public so a configuration change can take effect without waiting out the interval. */
     public Snapshot refresh() {
         Snapshot before = snapshot;
         Snapshot after = probe();

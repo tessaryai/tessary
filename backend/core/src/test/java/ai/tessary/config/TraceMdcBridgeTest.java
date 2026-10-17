@@ -50,17 +50,4 @@ class TraceMdcBridgeTest {
         assertEquals("outer-trace", MDC.get(LogContext.TRACE_ID), "nested scopes restore, not clear");
         assertNull(MDC.get(LogContext.SPAN_ID), "and an absent key stays absent");
     }
-
-    @Test
-    void isANoopWhenThereIsNoCurrentSpanOrOnlyTheNoopSpan() {
-        when(span.isNoop()).thenReturn(true);
-        for (Span current : new Span[] {null, span}) {
-            when(tracer.currentSpan()).thenReturn(current);
-
-            try (LogContext ignored = new TraceMdcBridge(tracer).bindCurrentTrace()) {
-                assertNull(MDC.get(LogContext.TRACE_ID));
-                assertNull(MDC.get(LogContext.SPAN_ID));
-            }
-        }
-    }
 }

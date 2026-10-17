@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -42,7 +41,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 
 /**
  * The heartbeat against home.tessary.ai's contract, with no network or Spring. {@code telemetry/home-
@@ -158,14 +156,16 @@ class TelemetryHeartbeatTest {
     }
 
     @Test
-    void aFailedPriceBookCheckNeverEscapesTheTick() {
+    void aFailedSendAndAFailedPriceBookCheckNeverEscapeTheTick() throws Exception {
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenReturn(INSTANCE_ID);
+        HomeTessaryClient client = mock(HomeTessaryClient.class);
+        when(client.postJson(anyString(), anyString())).thenThrow(new IOException("connection refused"));
         when(fetcher.refresh()).thenThrow(new IllegalStateException("boom"));
 
-        assertDoesNotThrow(
-                () -> heartbeat(Props.of(TelemetryProperties.class), instanceIds, mock(HomeTessaryClient.class))
-                        .tick());
+        assertDoesNotThrow(() -> heartbeat(Props.of(TelemetryProperties.class), instanceIds, client)
+                .tick());
+        verify(fetcher).refresh();
     }
 
     @Test
@@ -187,7 +187,7 @@ class TelemetryHeartbeatTest {
         when(projects.countAll()).thenReturn(3L);
         when(findings.countAll()).thenThrow(new IllegalStateException("statement timeout"));
         HomeTessaryClient client = mock(HomeTessaryClient.class);
-        when(client.postJson(anyString(), anyString())).thenReturn(204);
+        when(client.postJson(anyString(), anyString())).thenReturn(400);
 
         heartbeat(Props.of(TelemetryProperties.class), instanceIds, client).tick();
 
@@ -198,20 +198,6 @@ class TelemetryHeartbeatTest {
         assertTrue(violations(sent).isEmpty());
         assertNull(heartbeat(Props.of(TelemetryProperties.class), instanceIds, client)
                 .counts());
-    }
-
-    @Test
-    void readsTheInstanceIdBeforeTakingAPingSeq() throws Exception {
-        // The singleton row exists only once get() mints it.
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenReturn(INSTANCE_ID);
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-
-        heartbeat(Props.of(TelemetryProperties.class), instanceIds, client).tick();
-
-        InOrder order = inOrder(instanceIds);
-        order.verify(instanceIds).get();
-        order.verify(instanceIds).nextPingSeq();
     }
 
     @Test

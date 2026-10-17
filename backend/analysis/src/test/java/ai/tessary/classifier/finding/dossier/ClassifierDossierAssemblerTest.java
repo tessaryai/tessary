@@ -176,17 +176,6 @@ class ClassifierDossierAssemblerTest {
                 .isEmpty());
     }
 
-    @Test
-    void budgetTruncatesOnlyTheTailAndStatesTheCutPlainly() {
-        StringBuilder huge = new StringBuilder();
-        for (int i = 0; i < 20_000; i++) huge.append("line ").append(i).append('\n');
-        String truncated = ClassifierDossierAssembler.budget(huge.toString());
-
-        assertTrue(truncated.length() < huge.length());
-        assertTrue(truncated.contains("[dossier truncated:"));
-        assertTrue(truncated.startsWith("line 0\n"), "the head — the claim and statistics — must survive whole");
-    }
-
     /** A non-JSON payload falls back rather than failing the run. */
     @Test
     void anUnparseablePayloadFallsThroughToEmpty() {

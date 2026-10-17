@@ -8,8 +8,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Aggregate line coverage floor (JaCoCo, all modules).
-MIN_LINE_COVERAGE=0.958
+# Aggregate coverage floors (JaCoCo, all modules): every line, and a branch floor.
+MIN_LINE_COVERAGE=1
+MIN_BRANCH_COVERAGE=0.875
 
 mode="${1:-all}"
 [ $# -gt 0 ] && shift
@@ -36,10 +37,13 @@ cd "$ROOT/backend"
 mvn -B -T 2 verify $flags "$@"
 
 [ "$mode" = lint ] && exit 0
-awk -F, -v min="$MIN_LINE_COVERAGE" '
-  NR > 1 { missed += $8; covered += $9 }
+awk -F, -v min="$MIN_LINE_COVERAGE" -v bmin="$MIN_BRANCH_COVERAGE" '
+  NR > 1 { missed += $8; covered += $9; bmissed += $6; bcovered += $7 }
+  NR > 1 && $8 > 0 { printf "check-backend: %s.%s misses %d line(s)\n", $2, $3, $8 }
   END {
     ratio = covered / (missed + covered)
+    bratio = bcovered / (bmissed + bcovered)
     printf "check-backend: aggregate line coverage %.4f (%d of %d), floor %s\n", ratio, covered, missed + covered, min
-    exit ratio < min
+    printf "check-backend: aggregate branch coverage %.4f (%d of %d), floor %s\n", bratio, bcovered, bmissed + bcovered, bmin
+    exit ratio < min || bratio < bmin
   }' app/target/site/jacoco-aggregate/jacoco.csv

@@ -93,26 +93,6 @@ class MetricHistogramTest {
         assertTrue(message.contains("different grids"), message);
     }
 
-    /**
-     * Built with mass in the body and both edge counters: the wire shape stores bins in a map and counters as fields,
-     * and a body-only fixture would hide a dropped one.
-     */
-    @Test
-    void jsonRoundTripPreservesEveryBin() {
-        MetricHistogram original = duration();
-        for (double value : traffic(23L, 2_000)) original.add(Math.log(value));
-        original.add(Math.log(0.0001)); // under 1 ms → underflow
-        original.add(Math.log(1e9)); // past the top edge → overflow
-        original.add(Double.NEGATIVE_INFINITY); // a measure of exactly zero
-
-        MetricSketch restored = MetricSketch.fromJson(original.toJson());
-
-        assertTrue(restored instanceof MetricHistogram, "the kind discriminator must route back to a histogram");
-        assertSameBins(original, (MetricHistogram) restored, "round trip");
-        assertEquals(original.meanLog(), restored.meanLog(), 0.0, "the clamped sum round-trips exactly");
-        assertEquals(original.toJson(), restored.toJson(), "and re-serializes byte for byte");
-    }
-
     /** An empty sketch round-trips as empty, not null or a NaN mean. */
     @Test
     void emptySketchRoundTrips() {

@@ -39,13 +39,20 @@ class MetricBaselineReferenceTest {
     }
 
     @Test
-    void quantiles_fallBackToTheControlWhenThePinIsStale() {
+    void quantiles_fallBackToTheControlWhenThePinIsStaleOrUnreadable() {
         MetricBaselineRow row = row(window(DEAD, 100, 1000).toJson(), control(LIVE, "2026-10-07", 100, 4000));
 
         Quantiles q =
                 MetricBaselineReference.quantiles(row, LIVE, TODAY, Set.of()).orElseThrow();
 
         assertNear(4000, q.p50(), "the control's level, not the dead pin's");
+        MetricBaselineRow unreadable = row("{\"grid\":", control(LIVE, "2026-10-07", 100, 4000));
+        assertNear(
+                4000,
+                MetricBaselineReference.quantiles(unreadable, LIVE, TODAY, Set.of())
+                        .orElseThrow()
+                        .p50(),
+                "an unreadable pin is no pin, not a failed chart");
         assertEquals(
                 Optional.empty(),
                 MetricBaselineReference.quantiles(row, LIVE, TODAY, Set.of("2026-10-07")),

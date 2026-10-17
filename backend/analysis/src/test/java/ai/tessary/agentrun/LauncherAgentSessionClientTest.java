@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.agentrun;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -20,21 +22,22 @@ import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.AgentRunError;
-import ai.tessary.open.errors.ModelConfigError;
+import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.sandbox.AgentSpanTelemetry;
+import ai.tessary.testsupport.LogCapture;
 import ai.tessary.testsupport.Props;
 import ai.tessary.usage.LlmUsageAccountant;
 import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -43,18 +46,17 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link LauncherAgentSessionClient} against a {@link FakeLauncher} on a loopback socket, through the
@@ -102,21 +104,17 @@ class LauncherAgentSessionClientTest {
     LlmUsageAccountant usage;
 
     private FakeLauncher fake;
-    private ListAppender<ILoggingEvent> appender;
-    private Logger logger;
+
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(LauncherAgentSessionClient.class);
 
     @BeforeEach
     void startTheLauncher() throws IOException {
         fake = FakeLauncher.start();
-        logger = (Logger) LoggerFactory.getLogger(LauncherAgentSessionClient.class);
-        appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
     }
 
     @AfterEach
     void stopTheLauncher() throws IOException {
-        logger.detachAppender(appender);
         fake.close();
     }
 
@@ -198,8 +196,10 @@ class LauncherAgentSessionClientTest {
     }
 
     /**
-     * Catches a failed start that keeps a Tessary AI run slot: the credential is freed whatever the
-     * launcher answered, or when nothing listens at all (status 0 here).
+     * Catches a failed start that keeps a Tessary AI run slot, a launcher-side timeout read as some other failure, or
+     * a full launcher read as a broken run ({@code RUN_FAILED}), which a caller would not retry: the credential is
+     * freed whatever the launcher answered (an answer with no session id included), or when nothing listens at all
+     * (status 0 here).
      */
     @ParameterizedTest
     @CsvSource(
@@ -207,7 +207,11 @@ class LauncherAgentSessionClientTest {
             value = {
                 "502 | {\"kind\":\"bad_request\",\"detail\":\"session.js: model must be a non-empty string\"} | RUN_FAILED",
                 "502 | {\"kind\":\"orchestration\"}                                                          | LAUNCHER_UNAVAILABLE",
-                "0   | ''                                                                                 | LAUNCHER_UNAVAILABLE"
+                "502 | {\"kind\":\"timeout\"}                                                                | TIMED_OUT",
+                "0   | ''                                                                                 | LAUNCHER_UNAVAILABLE",
+                "201 | not json                                                                           | BAD_OUTPUT",
+                "201 | {}                                                                                 | BAD_OUTPUT",
+                "429 | {\"error\":\"sandbox session capacity reached\",\"kind\":\"capacity\"}                  | CAPACITY"
             })
     void aStartTheLauncherRefusesOrCannotTakeStillFreesTheCredential(int status, String body, AgentRunError expected)
             throws Exception {
@@ -218,18 +222,6 @@ class LauncherAgentSessionClientTest {
         TessaryException ex = assertThrows(TessaryException.class, () -> client.start(START));
 
         assertEquals(expected, ex.error());
-        verify(credentials).release(START_CRED);
-    }
-
-    /** Catches a full launcher read as a broken run ({@code RUN_FAILED}), which a caller would not retry. */
-    @Test
-    void aLauncherAtItsCapIsCapacity() {
-        aGrokLaneWithItsCredential();
-        fake.answer("POST", "/sessions", 429, "{\"error\":\"sandbox session capacity reached\",\"kind\":\"capacity\"}");
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> client().start(START));
-
-        assertEquals(AgentRunError.CAPACITY, ex.error());
         verify(credentials).release(START_CRED);
     }
 
@@ -246,19 +238,6 @@ class LauncherAgentSessionClientTest {
                 "The agent launcher refused the run: status 404 from " + fake.url()
                         + ", no /sessions route; the launcher image is older than this backend",
                 ex.getMessage());
-    }
-
-    /** Catches a sandbox started with no credential. */
-    @Test
-    void noCredentialStartsNoSandbox() {
-        aGrokLane();
-        when(credentials.resolve(PROJECT, ModelProvider.GROK))
-                .thenThrow(new TessaryException(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.GROK));
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> client().start(START));
-
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, ex.error());
-        assertEquals(List.of(), fake.seen());
     }
 
     /** Catches a run slot claimed for a start that cannot be sent anywhere. */
@@ -280,11 +259,11 @@ class LauncherAgentSessionClientTest {
 
         TessaryException ex = assertThrows(TessaryException.class, () -> client().start(START));
 
-        assertFalse(appender.list.isEmpty(), "the refusal is logged");
+        assertFalse(log.events().isEmpty(), "the refusal is logged");
         List<String> rendered = new java.util.ArrayList<>();
         rendered.add(String.valueOf(ex.getMessage()));
         rendered.add(START.toString());
-        for (ILoggingEvent event : appender.list) {
+        for (ILoggingEvent event : log.events()) {
             rendered.add(event.getFormattedMessage() + " " + event.getKeyValuePairs() + " "
                     + (event.getThrowableProxy() == null
                             ? ""
@@ -378,27 +357,6 @@ class LauncherAgentSessionClientTest {
         assertEquals("text/event-stream", seen.headers().get("accept"));
     }
 
-    /** Catches a reader that buffers the whole body, so the page would see nothing until the session ends. */
-    @Test
-    void eventsArriveWhileTheStreamIsOpen() throws Exception {
-        LauncherAgentSessionClient client = aStartedSession();
-        FakeLauncher.LiveEvents live = fake.liveEvents("/sessions/s-1/events?after=0");
-        live.push(FakeLauncher.frame(1, "text", "{\"delta\":\"Hel\"}"));
-
-        try (Stream<SessionEvent> events = client.events("s-1", 0)) {
-            Iterator<SessionEvent> it = events.iterator();
-            CompletableFuture<SessionEvent> first = new CompletableFuture<>();
-            Thread.ofVirtual().start(() -> first.complete(it.next()));
-
-            assertEquals(new SessionEvent.Text(1, "Hel"), first.get(5, TimeUnit.SECONDS));
-
-            live.push(FakeLauncher.frame(2, "text", "{\"delta\":\"lo\"}"));
-            live.end();
-            assertEquals(new SessionEvent.Text(2, "lo"), it.next());
-            assertFalse(it.hasNext());
-        }
-    }
-
     /** Catches a broken connection reported as a closed session, or thrown at the relay thread. */
     @Test
     void aCutStreamEndsWithoutClosedSoTheCallerResumes() {
@@ -463,12 +421,25 @@ class LauncherAgentSessionClientTest {
                 events);
     }
 
-    /** Catches a truncated frame yielded as an empty delta. */
-    @Test
-    void aFrameThatDoesNotParseIsBadOutput() {
+    static Stream<String> unfitFrames() {
+        return Stream.of(
+                FakeLauncher.frame(1, "text", "{\"delta\":"),
+                FakeLauncher.frame(1, "thinking", "5"),
+                FakeLauncher.frame(1, "text", "{\"delta\":5}"),
+                FakeLauncher.frame(1, "message_end", "{\"usage\":{\"input_tokens\":1},\"reason\":\"crashed\"}"),
+                FakeLauncher.frame(1, "closed", "{\"reason\":\"evicted\"}"),
+                "event: text\ndata: {\"delta\":\"a\"}\n\n");
+    }
+
+    /**
+     * Catches a truncated frame yielded as an empty delta, and a frame with no id, data that is not an object, a field
+     * of the wrong shape or an unknown reason yielded as an event.
+     */
+    @ParameterizedTest
+    @MethodSource("unfitFrames")
+    void aFrameThatDoesNotParseOrFitIsBadOutput(String frame) {
         LauncherAgentSessionClient client = aStartedSession();
-        fake.events(
-                "/sessions/s-1/events?after=0", FakeLauncher.Ending.END, FakeLauncher.frame(1, "text", "{\"delta\":"));
+        fake.events("/sessions/s-1/events?after=0", FakeLauncher.Ending.END, frame);
 
         TessaryException ex = assertThrows(TessaryException.class, () -> read(client, 0));
 
@@ -661,21 +632,6 @@ class LauncherAgentSessionClientTest {
         verifyNoMoreInteractions(usage);
     }
 
-    /** Catches Tessary AI spend booked on the org's own key. */
-    @Test
-    void aPlatformFundedSessionBooksAsPlatformFunded() {
-        LauncherAgentSessionClient client = aStartedSessionWith(new AgenticCredentialResolver.Credential(
-                ModelProvider.GROK, null, null, null, null, null, null, true, "e2b-secret", "start"));
-        fake.events(
-                "/sessions/s-1/events?after=0",
-                FakeLauncher.Ending.END,
-                FakeLauncher.frame(1, "message_end", messageEnd("done")));
-
-        read(client, 0);
-
-        verifyBookedOnce(true);
-    }
-
     /** Catches a stop that loses the reply's spend, or frees the run slot twice. */
     @Test
     void stopFreesTheReplyAndStillBooksItsLastMessageEnd() {
@@ -724,36 +680,83 @@ class LauncherAgentSessionClientTest {
                         "DELETE /sessions/s-1"),
                 fake.seen().stream().map(r -> r.method() + " " + r.path()).toList());
     }
-    /**
-     * Catches a replayed {@code message_end} that frees the newer reply's credential, so a Tessary AI
-     * run slot is over-committed while that reply still runs.
-     */
+
+    /** Catches a launcher fault on cleanup read as done, so a sandbox the launcher still runs is forgotten. */
     @Test
-    void aMessageEndReplayedWhileANewerReplyRunsFreesNothing() {
-        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED, REPLY2_CRED);
-        fake.answer("POST", "/sessions/s-1/messages", 202, null);
-        fake.events(
-                "/sessions/s-1/events?after=0",
-                FakeLauncher.Ending.END,
-                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"),
-                FakeLauncher.frame(2, "message_end", messageEnd("done")));
-        fake.events(
-                "/sessions/s-1/events?after=1",
-                FakeLauncher.Ending.END,
-                FakeLauncher.frame(2, "message_end", messageEnd("done")));
-        assertEquals(AgentSessionClient.SendOutcome.ACCEPTED, client.send("s-1", "one"));
-        read(client, 0);
-        verify(credentials).release(REPLY_CRED);
-        assertEquals(AgentSessionClient.SendOutcome.ACCEPTED, client.send("s-1", "two"));
+    void anAbortOrStopTheLauncherFailsIsThrown() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.answer("POST", "/sessions/s-1/abort", 502, "{\"kind\":\"orchestration\"}");
+        fake.answer("DELETE", "/sessions/s-1", 502, "{\"kind\":\"orchestration\"}");
 
-        read(client, 1);
-
-        verify(credentials, never()).release(REPLY2_CRED);
-        assertEquals(AgentSessionClient.SendOutcome.BUSY, client.send("s-1", "three"));
-        verifyBookedOnce(false);
-        verifyNoMoreInteractions(usage);
+        assertEquals(
+                AgentRunError.LAUNCHER_UNAVAILABLE,
+                assertThrows(TessaryException.class, () -> client.abort("s-1")).error());
+        assertEquals(
+                AgentRunError.LAUNCHER_UNAVAILABLE,
+                assertThrows(TessaryException.class, () -> client.stop("s-1")).error());
     }
 
+    /**
+     * Catches an interrupt swallowed while waiting on the launcher (the silent socket accepts and never answers), an
+     * events read from a dead launcher yielded as an empty stream, and an error body cut short read as a crash.
+     */
+    @Test
+    void anInterruptedCallKeepsTheInterruptAndADeadLauncherIsUnavailable() throws Exception {
+        assertEquals(
+                AgentRunError.LAUNCHER_UNAVAILABLE,
+                assertThrows(
+                                TessaryException.class,
+                                () -> client(closedPortUrl()).events("s-1", 0))
+                        .error());
+        try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            LauncherAgentSessionClient client = client("http://127.0.0.1:" + silent.getLocalPort());
+            for (Runnable call : List.<Runnable>of(() -> client.events("s-1", 0), () -> client.abort("s-1"))) {
+                Thread.currentThread().interrupt();
+                assertEquals(
+                        CommonError.INTERRUPTED,
+                        assertThrows(TessaryException.class, call::run).error());
+                assertTrue(Thread.interrupted(), "the interrupt is kept");
+            }
+        }
+        try (ServerSocket cut = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            Thread.ofVirtual().start(() -> {
+                try (Socket s = cut.accept()) {
+                    s.getInputStream().read(new byte[8192]);
+                    s.getOutputStream().write("HTTP/1.1 500 X\r\nContent-Length: 99\r\n\r\n{".getBytes(UTF_8));
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+            LauncherAgentSessionClient client = client("http://127.0.0.1:" + cut.getLocalPort());
+            assertEquals(
+                    AgentRunError.LAUNCHER_UNAVAILABLE,
+                    assertThrows(TessaryException.class, () -> client.events("s-1", 0))
+                            .error());
+        }
+    }
+
+    /** Catches two messages both sent when the second claims the session between the first's check and its claim. */
+    @Test
+    void aMessageThatLosesTheClaimToAConcurrentOneIsBusyAndFreesItsCredential() {
+        aGrokLane();
+        fake.answer("POST", "/sessions", 201, "{\"session_id\":\"s-1\"}");
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        LauncherAgentSessionClient client = client();
+        List<AgentSessionClient.SendOutcome> concurrent = new java.util.ArrayList<>();
+        when(credentials.resolve(PROJECT, ModelProvider.GROK))
+                .thenReturn(START_CRED)
+                .thenAnswer(i -> {
+                    concurrent.add(client.send("s-1", "first"));
+                    return REPLY2_CRED;
+                })
+                .thenReturn(REPLY_CRED);
+        client.start(START);
+
+        assertEquals(AgentSessionClient.SendOutcome.BUSY, client.send("s-1", "second"));
+        assertEquals(List.of(AgentSessionClient.SendOutcome.ACCEPTED), concurrent);
+        verify(credentials).release(REPLY2_CRED);
+        verify(credentials, never()).release(REPLY_CRED);
+    }
     /**
      * Catches the last reply's spend lost when an abort finds the session already closing: the 404
      * must not drop what the reconnected stream still has to book.
@@ -824,12 +827,10 @@ class LauncherAgentSessionClientTest {
         client.abort("s-1");
         client.stop("s-1");
 
-        Map<String, Object> started = fields(logged("agentsession.started").getFirst());
+        Map<String, Object> started = log.fields("agentsession.started").getFirst();
         assertEquals("9", String.valueOf(started.get("systemPromptBytes")));
         assertEquals("7", String.valueOf(started.get("fileBytes")));
-        List<Map<String, Object>> messages = logged("agentsession.message").stream()
-                .map(LauncherAgentSessionClientTest::fields)
-                .toList();
+        List<Map<String, Object>> messages = log.fields("agentsession.message");
         assertEquals(
                 List.of("ACCEPTED", "BUSY"),
                 messages.stream().map(m -> m.get("outcome")).toList());
@@ -837,14 +838,12 @@ class LauncherAgentSessionClientTest {
                 List.of("6", "5"),
                 messages.stream().map(m -> String.valueOf(m.get("bytes"))).toList());
         assertEquals("s-1", messages.getFirst().get("session"));
-        assertEquals(
-                "aborted", fields(logged("agentsession.aborted").getFirst()).get("outcome"));
-        assertEquals(
-                "stopped", fields(logged("agentsession.stopped").getFirst()).get("outcome"));
+        assertEquals("aborted", log.fields("agentsession.aborted").getFirst().get("outcome"));
+        assertEquals("stopped", log.fields("agentsession.stopped").getFirst().get("outcome"));
     }
 
     private List<ILoggingEvent> logged(String event) {
-        return appender.list.stream()
+        return log.events().stream()
                 .filter(e -> event.equals(fields(e).get("event")))
                 .toList();
     }

@@ -192,6 +192,10 @@ it("creating a project to connect to: creates it under the trimmed name, selects
   });
   await ready();
 
+  // Bug: no way out of naming a new project but to create one.
+  fireEvent.click(button("New project"));
+  fireEvent.click(button("Cancel"));
+  expect(screen.queryByLabelText("New project name", { exact: false })).toBeNull();
   fireEvent.click(button("New project"));
   expect(button("Connect").disabled).toBe(true);
   expect(button("Create").disabled).toBe(true);

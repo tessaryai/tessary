@@ -16,10 +16,14 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 beforeEach(() => api.resetClassifier.mockImplementation(async (id: string) => ({ id })));
 
 describe("ClassifierResetModal", () => {
+  // Bug: no way back from the confirm step, or a reset sent before Continue and the exact name.
   it("sends the reset only after Continue and the exact name typed back", async () => {
     const onClose = vi.fn();
     renderRoute(<ClassifierResetModal classifier={classifier({})} onClose={onClose} />);
 
+    screen.getByText(/calls your provider again for every user turn/);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     screen.getByText(/calls your provider again for every user turn/);
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 

@@ -20,6 +20,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
@@ -69,22 +70,26 @@ class MediaExternalizerTest {
         assertEquals(4, stored.getValue().length);
     }
 
-    @Test
-    void openAiDataUriImageUrl_becomesImageRef() throws Exception {
-        byte[] bytes = {9, 8, 7};
-        String dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes);
-        String json = "[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"" + dataUri
-                + "\"}}]}]";
+    /** The image_url or input_file part is replaced wholesale by a ref node. */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "image/png       | {\"type\":\"image_url\",\"image_url\":{\"url\":\"%s\"}} | image_ref",
+                "application/pdf | {\"type\":\"input_file\",\"file_data\":\"%s\"}         | document_ref"
+            })
+    void anOpenAiDataUriPartBecomesARef(String mediaType, String partTemplate, String refType) throws Exception {
+        String dataUri = "data:" + mediaType + ";base64," + Base64.getEncoder().encodeToString(new byte[] {9, 8, 7});
+        String json = "[{\"role\":\"user\",\"content\":[" + partTemplate.replace("%s", dataUri) + "]}]";
 
         MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
         String out = java.util.Objects.requireNonNull(result.payload());
 
-        // The image_url part is replaced wholesale by an image_ref node.
         var part = M.readTree(out).get(0).path("content").get(0);
-        assertEquals("image_ref", part.path("type").asText());
+        assertEquals(refType, part.path("type").asText());
         assertEquals("media-1", part.path("data").asText());
         assertEquals(List.of("media-1"), result.mediaIds());
-        verify(media).put(eq("p1"), any(), eq("image/png"));
+        verify(media).put(eq("p1"), any(), eq(mediaType));
     }
 
     @Test
@@ -114,22 +119,6 @@ class MediaExternalizerTest {
                 MediaExternalizer.DOCUMENT_TEXT_UNAVAILABLE_MARKER,
                 node.path("text").asText());
         assertFalse(out.contains(b64), "no base64 may survive into the persisted payload");
-        assertEquals(List.of("media-1"), result.mediaIds());
-        verify(media).put(eq("p1"), any(), eq("application/pdf"));
-    }
-
-    @Test
-    void openAiInputFileDataUri_becomesDocumentRef() throws Exception {
-        byte[] notAPdf = {9, 8, 7};
-        String dataUri = "data:application/pdf;base64," + Base64.getEncoder().encodeToString(notAPdf);
-        String json = "[{\"role\":\"user\",\"content\":[{\"type\":\"input_file\",\"file_data\":\"" + dataUri + "\"}]}]";
-
-        MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
-        String out = java.util.Objects.requireNonNull(result.payload());
-
-        var part = M.readTree(out).get(0).path("content").get(0);
-        assertEquals("document_ref", part.path("type").asText());
-        assertEquals("media-1", part.path("data").asText());
         assertEquals(List.of("media-1"), result.mediaIds());
         verify(media).put(eq("p1"), any(), eq("application/pdf"));
     }

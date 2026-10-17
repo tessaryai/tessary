@@ -20,33 +20,26 @@ afterEach(() => {
   caps.on.clear();
 });
 
+const PAGE = "/orgs/acme/projects/default/settings/notifications";
 const gate = () =>
   renderRoute(
     <CapabilityGate capability="alerts_enabled">
       <p>gated page</p>
     </CapabilityGate>,
-    { route: "/orgs/acme/projects/default/settings/notifications" },
+    { route: PAGE },
   );
 
 describe("CapabilityGate", () => {
-  it("shows the page to an org with the capability", () => {
-    caps.on.add("alerts_enabled");
+  it.each([
+    ["shows the page to an org with the capability", false, true, "gated page", PAGE],
+    ["sends an org without it to Triage", false, false, null, "/orgs/acme/projects/default/triage"],
+    ["waits, rather than bouncing, while the capabilities are read", true, false, "Loading…", PAGE],
+  ])("%s", (_, loading, on, shown, location) => {
+    caps.loading = loading;
+    if (on) caps.on.add("alerts_enabled");
     gate();
 
-    expect(screen.getByText("gated page")).toBeTruthy();
-  });
-
-  it("sends an org without it to Triage", () => {
-    gate();
-
-    expect(currentLocation()).toBe("/orgs/acme/projects/default/triage");
-  });
-
-  it("waits, rather than bouncing, while the capabilities are read", () => {
-    caps.loading = true;
-    gate();
-
-    expect(screen.getByText("Loading…")).toBeTruthy();
-    expect(currentLocation()).toBe("/orgs/acme/projects/default/settings/notifications");
+    if (shown) expect(screen.getByText(shown)).toBeTruthy();
+    expect(currentLocation()).toBe(location);
   });
 });

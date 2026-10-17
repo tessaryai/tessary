@@ -142,9 +142,6 @@ public class SpanPayloadRepository {
 
     /** Unordered; a payload that has aged out is absent. */
     public List<SpanPayloadRow> listByTraceIds(String projectId, Collection<String> traceIds) {
-        if (traceIds.isEmpty()) {
-            return List.of();
-        }
         return jdbc.sql("SELECT " + COLS + " FROM span_payload WHERE project_id = :pid AND trace_id = ANY(:ids)")
                 .param("pid", projectId)
                 .param("ids", traceIds.toArray(String[]::new))

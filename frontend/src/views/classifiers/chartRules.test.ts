@@ -5,40 +5,19 @@
  * product brief or a hand calculation.
  */
 import { describe, expect, it } from "vitest";
-import type { ChartCard, ChartCaseSpan, ChartChip, ChartPoint, ChartToolOption, ClassifierMenuItem } from "../../api/types";
+import type { ChartChip, ChartToolOption, ClassifierMenuItem } from "../../api/types";
+import { caseSpan as span, chartCard as card, chartPoint as point } from "../../test/fixtures";
 import {
   armingLine, axisTitle, chipText, countBar, defaultCallSite, defaultTool, headlineOf, lanesOf, laneTooltip, menuStatus,
   pointTooltip, spanLabel,
   type Step,
-  stepPaths, timeAxis, toolGroups, utcDay, xTicks, yAxis,
+  stepPaths, timeAxis, toAxis, toolGroups, utcDay, xTicks, yAxis,
 } from "./chartRules";
 
 const HOUR = 3_600_000;
 
-/** A point from `start_at` to `end_at`, with only the fields its kind uses set. */
-const point = (start_at: string, end_at: string, d: Partial<ChartPoint>): ChartPoint => ({
-  start_at, end_at, open: false, checked: null, flagged: null, n: null, p50: null, p95: null, count: null, total: null,
-  reached: null, ...d,
-});
-
-function card(c: Partial<ChartCard>): ChartCard {
-  return {
-    classifier_id: "c1", classifier_key: "frustration", name: "Frustration", kind: "rate", measure: null,
-    unit: "fraction", learning: null,
-    headline: { value: null, delta: null }, baseline: null, arming: null, points: [],
-    cases: { open_cases: 0, spans: [] }, ...c,
-  };
-}
-
 const rateBaseline = (rate: number) => ({ calls: 1000, failures: 42, rate, pinned: false, p50: null, p95: null });
 const rangeBaseline = (p50: number, p95: number) => ({ calls: null, failures: null, rate: null, pinned: null, p50, p95 });
-
-function span(s: Partial<ChartCaseSpan>): ChartCaseSpan {
-  return {
-    finding_id: "f", case_id: "case", case_reference: "C-1", case_title: "A case", case_state: "open",
-    start_at: "2026-10-01T09:00:00Z", end_at: null, resolution: null, disposition: null, ...s,
-  };
-}
 
 describe("yAxis", () => {
   // Bug: ticks at odd steps (1.95%, 3.9%) that a reader cannot hold, or a top tick below the data.
@@ -187,6 +166,7 @@ describe("headlineOf", () => {
     expect(
       headlineOf(card({ classifier_key: "cost_drift", kind: "range", measure: "cost", unit: "usd", headline: { value: 0.041, delta: -0.004 } })),
     ).toEqual({ value: "$0.041", delta: { text: "−$0.004", tone: "better" }, label: "expensive turns (p95), last 7 days" });
+    expect([toAxis("seconds", 16_500), toAxis("usd", 0.041), toAxis("percent", 0.25)]).toEqual([16.5, 0.041, 25]);
   });
 
   // Bug: "NaN%" for a week with nothing checked.
@@ -385,7 +365,7 @@ describe("tools", () => {
     ]);
   });
 
-  // Bug: a tool with an open case hidden behind the most-called tool.
+  // Bug: a tool with an open case hidden behind the most-called tool, or the first tool taken over the busiest.
   it("opens on a tool with an open case, this call site's first, else on this call site's most-called tool", () => {
     const quietMine = tool("tool:quiet", ["cs-a"], 0, 900);
     const smallMine = tool("tool:small", ["cs-a"], 0, 100);
@@ -396,7 +376,7 @@ describe("tools", () => {
     expect(defaultTool([quietMine, smallMine, caseElsewhere], "cs-a")).toBe("tool:elsewhere");
     expect(defaultTool([quietMine, caseElsewhere, caseMine], "cs-a")).toBe("tool:cased");
     expect(defaultTool([smallMine, quietMine, busyElsewhere], "cs-a")).toBe("tool:quiet");
-    expect(defaultTool([busyElsewhere], "cs-a")).toBe("tool:busy");
+    expect(defaultTool([tool("tool:few", ["cs-b"], 0, 5), busyElsewhere], "cs-a")).toBe("tool:busy");
     expect(defaultTool([], "cs-a")).toBeNull();
   });
 });
@@ -417,6 +397,7 @@ describe("menuStatus", () => {
     expect(menuStatus(item({ status: "off" }))).toBe("Off");
     expect(menuStatus(item({ status: "waiting", waiting_reason: "no_schema" }))).toBe("Waiting for a schema");
     expect(menuStatus(item({ status: "waiting", waiting_reason: "no_provider" }))).toBe("Paused, no provider key");
+    expect(menuStatus(item({ status: "waiting", waiting_reason: null }))).toBe("Waiting");
   });
 });
 

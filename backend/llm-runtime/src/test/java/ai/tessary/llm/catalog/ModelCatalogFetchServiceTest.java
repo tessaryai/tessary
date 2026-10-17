@@ -18,10 +18,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * The corrective brief's own four required cases: cache/TTL, stale-fallback on a failed refetch,
@@ -158,28 +161,6 @@ class ModelCatalogFetchServiceTest {
     }
 
     @Test
-    void oneProvidersFailureDoesNotEmptyAnotherProvidersCache() {
-        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.ANTHROPIC))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.ANTHROPIC)));
-        ScriptedLister openai = new ScriptedLister(List.of(new ModelListingException("vendor down", null)));
-        ScriptedLister anthropic = new ScriptedLister(List.of(OTHER_MODEL));
-        ModelCatalogProperties props = Props.of(ModelCatalogProperties.class, "refresh-interval", Duration.ofHours(1));
-        SecretBox secretBox = mock(SecretBox.class);
-        when(secretBox.open(anyString())).thenReturn("decrypted");
-        ModelCatalogFetchService svc = new ModelCatalogFetchService(
-                repo,
-                secretBox,
-                props,
-                java.util.Map.of(ModelProvider.OPENAI, openai, ModelProvider.ANTHROPIC, anthropic));
-
-        assertEquals(List.of(), svc.refreshingRead(ORG, ModelProvider.OPENAI), "OpenAI is down");
-        assertEquals(OTHER_MODEL, svc.refreshingRead(ORG, ModelProvider.ANTHROPIC), "Anthropic is unaffected");
-    }
-
-    @Test
     void bedrockCacheKeyIsScopedByRegion_twoRegionsFetchIndependently() {
         ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
         // Same org, same provider, but the cred (and therefore the region) differs per read — this
@@ -246,20 +227,32 @@ class ModelCatalogFetchServiceTest {
         assertEquals(1, lister.callCount());
     }
 
-    /** TypeSafe publishes no listing endpoint: the service still offers its one decision model. */
-    @Test
-    void typeSafeOffersItsDecisionModelWithoutAListingCall() {
+    /**
+     * TypeSafe and Bedrock Mantle publish no listing endpoint: the service still offers their fixed lists, so the
+     * picker never comes up empty for them.
+     */
+    static Stream<Arguments> fixedLists() {
+        return Stream.of(
+                Arguments.of(
+                        ModelProvider.TYPESAFE, List.of(new ProviderModel("jev-latest", "Jev (latest)", "TypeSafe"))),
+                Arguments.of(
+                        ModelProvider.BEDROCK_MANTLE,
+                        List.of(
+                                new ProviderModel("openai.gpt-5.6-luna", "GPT-5.6 Luna", "OpenAI"),
+                                new ProviderModel("openai.gpt-5.6-terra", "GPT-5.6 Terra", "OpenAI"))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("fixedLists")
+    void aProviderWithoutAListingEndpointOffersItsFixedModels(ModelProvider provider, List<ProviderModel> expected) {
         ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.TYPESAFE))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.TYPESAFE)));
+        when(repo.findByOrgAndProvider(ORG, provider)).thenReturn(Optional.of(apiKeyCred(provider)));
         SecretBox secretBox = mock(SecretBox.class);
         when(secretBox.open("sealed-key")).thenReturn("ts-key");
         ModelCatalogFetchService svc = new ModelCatalogFetchService(
                 repo, secretBox, Props.of(ModelCatalogProperties.class), new ObjectMapper());
 
-        assertEquals(
-                List.of(new ProviderModel("jev-latest", "Jev (latest)", "TypeSafe")),
-                svc.refreshingRead(ORG, ModelProvider.TYPESAFE));
+        assertEquals(expected, svc.refreshingRead(ORG, provider));
     }
 
     private static ProviderCredential customCred(@Nullable String baseUrl) {

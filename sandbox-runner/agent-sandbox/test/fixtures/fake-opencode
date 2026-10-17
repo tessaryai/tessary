@@ -141,11 +141,13 @@ function startServing(port) {
  * the n-th prompt arrives, before answering), FAKE_OPENCODE_STRAY_IDLE=1 (right after accepting
  * a prompt, publish the previous user message again and a `session.status idle`: the tail of the
  * previous reply, which the binary sends after its idle), FAKE_OPENCODE_DROP_BEFORE_IDLE=1 (on the
- * first reply, end every `/event` response instead of publishing the final idle pair),
+ * first reply, end every `/event` response instead of publishing the final idle pair; `reset`
+ * destroys them instead, as a broken connection does),
  * FAKE_OPENCODE_DROP_BEFORE_USER=1 (on the first reply, end every `/event` response just before
  * publishing the new user message, and play the reply on with no stream open),
  * FAKE_OPENCODE_NEVER_SETTLE=1 (after an abort or an error, stop at the first idle pair: the tool
- * and the message are never settled).
+ * and the message are never settled), FAKE_OPENCODE_FAIL=<route>,... (answer 500 to the session
+ * routes whose path ends in one of `message`, `status`, `abort`).
  */
 function serveSession(port) {
   const script = JSON.parse(fs.readFileSync(process.env.FAKE_OPENCODE_SESSION_SCRIPT, 'utf8'));
@@ -342,9 +344,10 @@ function serveSession(port) {
     }
     playing = false;
     abortPending = false;
-    if (process.env.FAKE_OPENCODE_DROP_BEFORE_IDLE === '1' && !dropped) {
+    const dropBeforeIdle = process.env.FAKE_OPENCODE_DROP_BEFORE_IDLE;
+    if (dropBeforeIdle && !dropped) {
       dropped = true;
-      for (const res of streams) res.end();
+      for (const res of streams) if (dropBeforeIdle === 'reset') res.destroy(); else res.end();
       streams.clear();
       return;
     }
@@ -369,6 +372,10 @@ function serveSession(port) {
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf8');
+      const last = url.pathname.split('/').pop();
+      if ((process.env.FAKE_OPENCODE_FAIL || '').split(',').includes(last)) {
+        return send(500, { name: 'UnknownError', data: { message: `fake ${last} failure` } });
+      }
       if (req.method === 'POST' && url.pathname === '/session') {
         sessionID = 'ses_1';
         return send(200, { id: sessionID, title: 'fake' });

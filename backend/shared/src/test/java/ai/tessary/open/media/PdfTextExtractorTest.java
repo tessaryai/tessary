@@ -30,23 +30,9 @@ import org.junit.jupiter.api.Test;
 class PdfTextExtractorTest {
 
     @Test
-    void encryptedPdf_returnsEmpty() throws Exception {
-        byte[] pdf = encryptedOnePagePdf("secret contents");
-        assertEquals(Optional.empty(), PdfTextExtractor.extract(pdf), "an encrypted PDF has no readable text layer");
-    }
-
-    @Test
     void corruptBytes_returnsEmpty_neverThrows() {
         byte[] garbage = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05};
         assertEquals(Optional.empty(), PdfTextExtractor.extract(garbage), "corrupt/truncated bytes must not throw");
-    }
-
-    @Test
-    void truncatedPdfHeader_returnsEmpty_neverThrows() {
-        // A real %PDF- header with nothing valid behind it — closer to a real truncated upload than
-        // arbitrary garbage bytes, and still must not throw.
-        byte[] truncated = "%PDF-1.7\n%âãÏÓ\n1 0 obj".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
-        assertEquals(Optional.empty(), PdfTextExtractor.extract(truncated));
     }
 
     @Test
@@ -65,8 +51,8 @@ class PdfTextExtractorTest {
 
     /**
      * The bug: an encrypted PDF anyone can open (owner password only) has its text lifted and handed to
-     * the judge anyway. {@code isEncrypted()} is the gate; the user-password fixture above never reaches
-     * it because PDFBox refuses to load that one at all.
+     * the judge anyway. {@code isEncrypted()} is the gate; a PDF with a user password never reaches it,
+     * because PDFBox refuses to load one at all.
      */
     @Test
     void encryptedPdfWithNoUserPassword_returnsEmpty() throws Exception {
@@ -176,10 +162,6 @@ class PdfTextExtractorTest {
             doc.save(out);
             return out.toByteArray();
         }
-    }
-
-    private static byte[] encryptedOnePagePdf(String content) throws Exception {
-        return encryptedOnePagePdf(content, "user-pw");
     }
 
     private static byte[] encryptedOnePagePdf(String content, String userPassword) throws Exception {

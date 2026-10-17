@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,6 +31,8 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -54,20 +57,29 @@ class SessionTimelineServiceTest {
     @Mock
     ToolCallRepository toolCalls;
 
-    @Test
-    void loadTailReadsNoTraceItThenLeavesOut() {
-        stubTraces(List.of(), settled("t3", 3000), settled("t2", 2000), settled("t1", 1000));
+    /** The second row stops mid-page: an unsettled trace read first lets the next page's first trace in, not its second. */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {"false | t3 | 2", "true | t0;t3,t2 | 1"})
+    void loadTailReadsNoTraceItThenLeavesOut(boolean anUnsettledTrace, String expectedPages, int endedReads) {
+        stubTraces(
+                anUnsettledTrace ? List.of(new SessionTrace("t0", null, null, T0.toString(), false, null)) : List.of(),
+                settled("t3", 3000),
+                settled("t2", 2000),
+                settled("t1", 1000));
         SessionTimelineService service = serviceOverToolSpans();
 
         SessionTimeline tail = service.loadTail(PID, SID, 1);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Collection<String>> read = ArgumentCaptor.forClass(Collection.class);
-        verify(spans).listByTraceIds(eq(PID), read.capture(), eq(Integer.MAX_VALUE));
+        verify(spans, atLeastOnce()).listByTraceIds(eq(PID), read.capture(), eq(Integer.MAX_VALUE));
         assertEquals(
-                List.of(List.of("t3")),
-                read.getAllValues().stream().map(List::copyOf).toList(),
+                expectedPages,
+                read.getAllValues().stream().map(page -> String.join(",", page)).collect(Collectors.joining(";")),
                 "a tail that one trace fills reads the spans and payloads of a whole page of traces");
+        verify(traces, times(endedReads)).listEndedSessionTraces(eq(PID), eq(SID), any(), anyInt());
         assertEquals(List.of(), tail.events(), "no event of 1 byte or less exists");
         assertEquals(true, tail.truncated());
     }

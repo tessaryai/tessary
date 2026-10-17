@@ -2,6 +2,9 @@
 package ai.tessary.tenant;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 public record OrgMembership(
@@ -21,5 +24,13 @@ public record OrgMembership(
 
     public boolean isOwner() {
         return OWNER.equals(role);
+    }
+
+    /** The earliest owner, ties broken by id, so a system run is attributed to the same person every time. */
+    public static Optional<String> eldestOwner(List<OrgMembership> memberships) {
+        return memberships.stream()
+                .filter(OrgMembership::isOwner)
+                .min(Comparator.comparing(OrgMembership::createdAt).thenComparing(OrgMembership::principalId))
+                .map(OrgMembership::principalId);
     }
 }

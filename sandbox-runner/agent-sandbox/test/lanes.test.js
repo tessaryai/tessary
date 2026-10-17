@@ -57,7 +57,7 @@ test('the rca lane checks out the requested commit, quarantines agent config, an
   assert.deepEqual(configs[0].permission.edit, { '*': 'deny' }, 'RCA never edits');
 });
 
-test('the rca lane names the commit live at the onset in the prompt, or unknown before the first commit', async () => {
+test('the rca lane names the commit live at the onset in the prompt, or unknown before the first commit or when git cannot say (an onset lookup that fails the whole run)', async () => {
   const dir = tmp('lanes-onset-');
   const commit = (message, date) => {
     execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', message], {
@@ -68,13 +68,13 @@ test('the rca lane names the commit live at the onset in the prompt, or unknown 
   execFileSync('git', ['-C', dir, 'init', '--quiet']);
   const live = commit('live at the onset', '2026-09-01T00:00:00Z');
   const head = commit('after the onset', '2026-09-10T00:00:00Z');
-  const run = (onsetAt) => runLane('rca', {
+  const run = (onsetAt, options) => runLane('rca', {
     clone_url: `file://${dir}`,
     head_sha: head,
     onset_at: onsetAt,
     prompt: 'commit {onset_commit}; again {onset_commit}',
     files: {},
-  });
+  }, options);
   const sent = ({ result }) => {
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout).turns[0].input;
@@ -82,6 +82,14 @@ test('the rca lane names the commit live at the onset in the prompt, or unknown 
 
   assert.match(sent(await run('2026-09-05T00:00:00Z')), new RegExp(`^commit ${live}; again ${live}`));
   assert.match(sent(await run('2026-08-01T00:00:00Z')), /^commit unknown; again unknown/);
+
+  // A git that refuses the onset lookup alone: the run still investigates, with the onset unknown.
+  const shim = tmp('lanes-git-');
+  const realGit = execFileSync('sh', ['-c', 'command -v git']).toString().trim();
+  fs.writeFileSync(path.join(shim, 'git'), `#!/bin/sh\ncase " $* " in *" rev-list "*) echo 'fatal: rev-list refused' >&2; exit 128;; esac\nexec ${realGit} "$@"\n`, { mode: 0o755 });
+  const refused = await run('2026-09-05T00:00:00Z', { pathFor: (bin) => [bin, shim, process.env.PATH].join(path.delimiter) });
+  assert.match(sent(refused), /^commit unknown; again unknown/);
+  assert.match(refused.result.stderr, /onset commit unresolved: git -C failed: fatal: rev-list refused/);
 });
 
 test('the rca lane without a clone_url still investigates, with no repo', async () => {

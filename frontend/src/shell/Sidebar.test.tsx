@@ -79,27 +79,17 @@ describe("the nav rows", () => {
     expect(screen.getByRole("group", { name: "Monitor" })).toBeTruthy();
   });
 
-  it("marks a row active on its page and the pages under it", () => {
-    open("/orgs/acme/projects/default/vitals/detail");
-    expect(isActive("Vitals")).toBe(true);
-    cleanup();
-
-    open("/orgs/acme/projects/default/vitals");
-    expect(isActive("Vitals")).toBe(true);
-    expect(isActive("Settings")).toBe(false);
-  });
-
-  // Bug: a finding page, which Triage links to and whose breadcrumb leads back to Triage, lit Classifiers
-  // because its path sits under classifiers/.
-  it("marks Triage active on a finding page, and Classifiers on a classifier's own pages", () => {
-    open("/orgs/acme/projects/default/classifiers/findings/f-1");
-    expect(isActive("Triage")).toBe(true);
-    expect(isActive("Classifiers")).toBe(false);
-    cleanup();
-
-    open("/orgs/acme/projects/default/classifiers/clf-1");
-    expect(isActive("Classifiers")).toBe(true);
-    expect(isActive("Triage")).toBe(false);
+  // A row is active on its page and the pages under it. Bug: a finding page, which Triage links to and whose
+  // breadcrumb leads back to Triage, lit Classifiers because its path sits under classifiers/.
+  it.each([
+    ["vitals/detail", "Vitals", "Settings"],
+    ["vitals", "Vitals", "Settings"],
+    ["classifiers/findings/f-1", "Triage", "Classifiers"],
+    ["classifiers/clf-1", "Classifiers", "Triage"],
+  ])("on %s, marks %s active and not %s", (path, active, inactive) => {
+    open(`/orgs/acme/projects/default/${path}`);
+    expect(isActive(active)).toBe(true);
+    expect(isActive(inactive)).toBe(false);
   });
 
   it("goes to this project's page for a row, and to Triage from the brand", () => {

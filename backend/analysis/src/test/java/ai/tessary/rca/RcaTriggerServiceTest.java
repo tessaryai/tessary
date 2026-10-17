@@ -77,34 +77,6 @@ class RcaTriggerServiceTest {
     }
 
     /**
-     * A finding an adapter owns gets the owned-causes report, whatever its classifier key would give. The bug is an
-     * owned finding's report filed as a metric movement, whose header reads a severity nobody asserted.
-     */
-    @Test
-    void aFindingAnAdapterOwnsGetsTheOwnedCausesKind() {
-        ownedFindingTriggered();
-
-        verify(reports)
-                .insertPendingIfAbsent(
-                        eq("proj"),
-                        eq("job_1"),
-                        eq("fnd_o"),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        eq("owned-x"),
-                        eq(RcaReportRow.ReportKind.OWNED_CAUSES),
-                        any(Instant.class),
-                        any(Instant.class),
-                        any(Instant.class),
-                        anyDouble(),
-                        anyDouble(),
-                        anyDouble(),
-                        anyString());
-    }
-
-    /**
      * An owned-causes report's header reads the finding's current and baseline rates off its payload, as a
      * frustration report's does. The bug is a header of the asserted severity over zero.
      */

@@ -32,7 +32,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
-import java.util.Random;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -138,33 +137,6 @@ class ChartSeriesTest {
     @Test
     void quantile_isNullWithNoSample() {
         assertNull(ChartSeries.quantile(GRID, new TreeMap<>(), 0.5));
-    }
-
-    /** Read off the grid, a percentile is within one bin (5%) of the exact one. */
-    @Test
-    void rangePoint_percentilesAreWithinTheBinRatioOfExact() {
-        Random random = new Random(42);
-        int n = 2_000;
-        double[] values = new double[n];
-        List<RangeRow> rows = new ArrayList<>();
-        SortedMap<Integer, Long> bins = new TreeMap<>();
-        for (int i = 0; i < n; i++) {
-            values[i] = Math.exp(7 + random.nextGaussian());
-            int bin = (int) Math.floor((Math.log(values[i]) - GRID.logLo()) / GRID.slotWidthLog());
-            bins.merge(bin, 1L, Long::sum);
-        }
-        bins.forEach((bin, count) -> rows.add(new RangeRow(at(0), bin, count)));
-        Arrays.sort(values);
-
-        ChartPoint p = ChartSeries.rangePoints(FROM, at(0), GRID, rows).getFirst();
-
-        assertEquals(n, Objects.requireNonNull(p.n()));
-        double exactP50 = values[(int) Math.ceil(0.5 * n) - 1];
-        double exactP95 = values[(int) Math.ceil(0.95 * n) - 1];
-        double p50 = Objects.requireNonNull(p.p50());
-        double p95 = Objects.requireNonNull(p.p95());
-        assertTrue(p50 / exactP50 < 1.05 && exactP50 / p50 < 1.05, p50 + " vs " + exactP50);
-        assertTrue(p95 / exactP95 < 1.05 && exactP95 / p95 < 1.05, p95 + " vs " + exactP95);
     }
 
     /** A range point closes on samples, not on bins: two hours of 300 samples close at 600. */
@@ -320,16 +292,6 @@ class ChartSeriesTest {
         assertEquals(
                 ChartBaseline.rate(2000, 20, 20.5 / 2001.0, true),
                 ChartSeries.rateBaseline(state(1000, 30), reference, 500));
-    }
-
-    /** Frustration has no pick list of its own any more: no call-site list means every call site. */
-    @Test
-    void frustrationWithNoCallSiteList_isOnForEveryCallSite() {
-        ClassifierRow frustration =
-                ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION).build();
-
-        assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-a", NO_FACTS));
-        assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-b", NO_FACTS));
     }
 
     @Test

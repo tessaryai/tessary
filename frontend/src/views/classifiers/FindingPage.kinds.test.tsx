@@ -281,42 +281,26 @@ describe("the triage verbs in each story's header", () => {
 });
 
 describe("a frustration finding", () => {
-  it("says its sessions were cleared when the case was resolved as a false alarm", async () => {
-    const cleared = { traceId: "t-1", conversationId: "c-1", message: "ugh", cleared: true, contextTraceIds: [] };
+  it.each([
+    ["says its sessions were cleared when the case was resolved as a false alarm", true, /Cleared when the case was resolved as a false alarm/],
+    ["does not call an empty session list cleared", false, "Each flagged message with the turns before it"],
+  ])("%s", async (_, cleared, said) => {
+    const conversations = cleared ? [{ traceId: "t-1", conversationId: "c-1", message: "ugh", cleared, contextTraceIds: [] }] : [];
     api.getBehaviorFinding.mockResolvedValue(
       plain(
         { detector: "frustration" },
         {
           frustration: {
             rate: RATE, arlTarget: 50000, baselineFrustrated: 10, jevThreshold: 0.5, minDecisionInterval: 3600,
-            scorerVersion: "v1",
-            conversations: [cleared],
-            conversationsNextCursor: null,
+            scorerVersion: "v1", conversations, conversationsNextCursor: null,
           } as unknown as FrustrationDetail,
         },
       ),
     );
     renderPage();
 
-    expect(await screen.findByText(/Cleared when the case was resolved as a false alarm/)).toBeTruthy();
+    expect(await screen.findByText(said)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Evidence" })).toBeNull();
-  });
-
-  it("does not call an empty session list cleared", async () => {
-    api.getBehaviorFinding.mockResolvedValue(
-      plain(
-        { detector: "frustration" },
-        {
-          frustration: {
-            rate: RATE, arlTarget: 50000, baselineFrustrated: 10, jevThreshold: 0.5, minDecisionInterval: 3600,
-            scorerVersion: "v1", conversations: [], conversationsNextCursor: null,
-          } as unknown as FrustrationDetail,
-        },
-      ),
-    );
-    renderPage();
-
-    expect(await screen.findByText("Each flagged message with the turns before it")).toBeTruthy();
   });
 
   // Bug: the figure became general and reworded frustration's own pins.
@@ -373,7 +357,8 @@ const owned = (over: Partial<Finding> = {}, detail: ClassifierDetail = CLASSIFIE
   );
 
 describe("a finding with a classifier detail", () => {
-  // Bug: a detailed finding fell through to the generic layout, with no figure and the verbs below the title.
+  // Bug: a detailed finding fell through to the generic layout, with no figure and the verbs below the title, or its
+  // verbs sent nothing.
   it("heads the page with its title and one triage button, and tells the rate in its unit", async () => {
     api.getBehaviorFinding.mockResolvedValue(owned());
     renderPage();
@@ -398,6 +383,8 @@ describe("a finding with a classifier detail", () => {
 
     fireEvent.click(button("Run triage"));
     await waitFor(() => expect(api.analyzeBehaviorFinding).toHaveBeenCalledWith("fnd-1"));
+    fireEvent.click(button("Confirm and open a case"));
+    await waitFor(() => expect(api.resolveBehaviorFinding).toHaveBeenCalledWith("fnd-1", "not_expected"));
   });
 
   // Bug: a ruled finding kept offering verbs that 409, or hid the case its ruling opened.

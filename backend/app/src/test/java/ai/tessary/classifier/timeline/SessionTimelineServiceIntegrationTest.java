@@ -33,6 +33,8 @@ import java.util.stream.IntStream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -269,59 +271,35 @@ class SessionTimelineServiceIntegrationTest {
                 timeline.events().stream().map(Event::position).toList());
     }
 
-    @Test
-    void anIngestedSpanWithNoOperationKindIsAStepWithItsName() {
-        String sessionId = SubstrateV2Fixtures.sessionId();
-        String traceId = "tr-" + UUID.randomUUID();
-        writer.write(
-                pid,
-                List.of(new RawEntry(
-                        "s1",
-                        "load_profile",
-                        "{\"user\":7}",
-                        "{\"plan\":\"pro\"}",
-                        null,
-                        Map.of(GenAiAttributes.SESSION_ID, sessionId),
-                        null,
-                        traceId,
-                        at(0).toString(),
-                        null,
-                        at(40).toString(),
-                        null,
-                        null)));
-
-        SessionTimeline timeline = timelines.load(pid, sessionId);
-
-        assertEquals(
-                List.of("step"),
-                timeline.events().stream().map(Event::kind).toList(),
-                "a span whose producer named no operation is not a step, so a pattern for unknown work cannot name it");
-        assertEquals(
-                json("{\"name\":\"load_profile\",\"input\":{\"user\":7},\"output\":{\"plan\":\"pro\"}}"),
-                data(timeline).get(0));
-    }
-
     /**
-     * Catches a tool event that loses a text result or text arguments: ingest keeps only a JSON object or array in the
-     * tool_call row's result and arguments, so the text is in the span payload and in arguments_raw.
+     * Catches a span whose producer named no operation read as anything but a step, so a pattern for unknown work
+     * cannot name it, and a tool event that loses a text result or text arguments: ingest keeps only a JSON object or
+     * array in the tool_call row's result and arguments, so the text is in the span payload and in arguments_raw.
      */
-    @Test
-    void anIngestedToolThatTakesAndReturnsTextKeepsItsInputAndOutput() {
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', textBlock = """
+        load_profile | {"user":7} | {"plan":"pro"} |      | step | {"name":"load_profile","input":{"user":7},"output":{"plan":"pro"}}
+        find_slot    | friday     | free at 8      | tool | tool | {"name":"find_slot","mcp":false,"status":null,"error_type":null,"input":"friday","output":"free at 8"}
+        """)
+    void anIngestedSpanReachesItsEventAsAStepOrAToolWithItsTextKept(
+            String name, String input, String output, @Nullable String kind, String eventKind, String data) {
         String sessionId = SubstrateV2Fixtures.sessionId();
-        String traceId = "tr-" + UUID.randomUUID();
+        Map<String, Object> attributes = kind == null
+                ? Map.of(GenAiAttributes.SESSION_ID, sessionId)
+                : Map.of(GenAiAttributes.SESSION_ID, sessionId, GenAiAttributes.TOOL_NAME, name);
         writer.write(
                 pid,
                 List.of(new RawEntry(
                         "s1",
-                        "find_slot",
-                        "friday",
-                        "free at 8",
+                        name,
+                        input,
+                        output,
                         null,
-                        Map.of(GenAiAttributes.SESSION_ID, sessionId, GenAiAttributes.TOOL_NAME, "find_slot"),
+                        attributes,
                         null,
-                        traceId,
+                        "tr-" + UUID.randomUUID(),
                         at(0).toString(),
-                        "tool",
+                        kind,
                         at(40).toString(),
                         null,
                         null)));
@@ -329,10 +307,8 @@ class SessionTimelineServiceIntegrationTest {
         SessionTimeline timeline = timelines.load(pid, sessionId);
 
         assertEquals(
-                List.of(json("{\"name\":\"find_slot\",\"mcp\":false,\"status\":null,\"error_type\":null,"
-                        + "\"input\":\"friday\",\"output\":\"free at 8\"}")),
-                data(timeline),
-                "a tool's text arguments and result reach its event");
+                List.of(eventKind), timeline.events().stream().map(Event::kind).toList());
+        assertEquals(List.of(json(data)), data(timeline));
     }
 
     /** Section 5.1 of the CC-01 plan, plus a trace of another session that shares tr-a's thread id. */

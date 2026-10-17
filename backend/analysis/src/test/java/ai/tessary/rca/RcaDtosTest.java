@@ -12,6 +12,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** How a stored report reads back onto the wire. */
 class RcaDtosTest {
@@ -41,10 +43,12 @@ class RcaDtosTest {
 
     /**
      * Catches a metric report written before every kind shared one cause shape reading as having no causes: its
-     * causes were stored as {@code hypotheses}, with {@code rationale} where {@code what_changed} is now.
+     * causes were stored as {@code hypotheses}, with {@code rationale} where {@code what_changed} is now; nor does an
+     * unreadable {@code causes} column hide them.
      */
-    @Test
-    void anOldMetricReportsHypothesesReadAsItsCauses() {
+    @ParameterizedTest
+    @ValueSource(strings = {"[]", "[{\"title\":"})
+    void anOldMetricReportsHypothesesReadAsItsCauses(String causes) {
         RcaReportView view = RcaReportView.of(
                 row(
                         RcaReportRow.ReportKind.METRIC_MOVEMENT,
@@ -52,7 +56,7 @@ class RcaDtosTest {
                         "[]",
                         "[{\"title\":\"New model\",\"confidence\":\"high\",\"rationale\":\"r\","
                                 + "\"evidence_trace_ids\":[\"t1\"]}]",
-                        null),
+                        causes),
                 MAPPER);
 
         assertEquals(

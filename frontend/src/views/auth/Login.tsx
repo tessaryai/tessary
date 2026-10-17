@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { Navigate } from "react-router-dom";
 import { auth } from "../../api/client";
-import { useAuth } from "../../auth/AuthContext";
-import { ApiError } from "../../api/types";
-import { Button, Field, Input, Spinner } from "../../ui";
+import { Button, Field, Input } from "../../ui";
+import { ScreenSpinner, useCredentials } from "./credentials";
 
 /**
  * Outside ProtectedRoute and TenantProvider: the backend's GET /auth/login bounces unauthenticated
@@ -13,36 +10,14 @@ import { Button, Field, Input, Spinner } from "../../ui";
  * `firstRun` goes to /signup; otherwise the email/password form.
  */
 export function Login() {
-  const [params] = useSearchParams();
-  const returnTo = params.get("returnTo") ?? undefined;
+  const { params, returnTo, isAuthenticated, mode, email, setEmail, password, setPassword, submit, error } = useCredentials(
+    (e, p) => auth.login(e, p),
+  );
   const refused = params.get("error") === "signup_refused";
-  const nav = useNavigate();
-  const { isAuthenticated, refetch } = useAuth();
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  if (isAuthenticated) return <Navigate to={returnTo || "/"} replace />;
 
-  const mode = useQuery({ queryKey: ["auth-mode"], queryFn: auth.mode });
-
-  const submit = useMutation({
-    mutationFn: () => auth.login(email, password),
-    onSuccess: async () => {
-      await refetch();
-      nav(returnTo || "/", { replace: true });
-    },
-  });
-
-  if (isAuthenticated) {
-    return <Navigate to={returnTo || "/"} replace />;
-  }
-
-  if (mode.isLoading) {
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <Spinner />
-      </div>
-    );
-  }
+  if (mode.isLoading) return <ScreenSpinner />;
 
   if (mode.data?.redirectFlow && refused) {
     // Under a redirect-flow provider this would bounce back into the provider and the same callback, a loop
@@ -66,19 +41,13 @@ export function Login() {
 
   if (mode.data?.redirectFlow) {
     window.location.replace(auth.loginUrl(returnTo));
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <Spinner />
-      </div>
-    );
+    return <ScreenSpinner />;
   }
 
   if (mode.data?.firstRun) {
     // Covers a typed or bookmarked /login; the backend already sends the app root to /signup.
     return <Navigate to={`/signup${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`} replace />;
   }
-
-  const error = submit.isError ? (submit.error as ApiError).message : null;
 
   return (
     <div className="min-h-screen bg-bg text-fg flex items-center justify-center px-6">

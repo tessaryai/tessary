@@ -18,11 +18,14 @@ import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
+import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.testsupport.Props;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import ai.tessary.usage.LlmUsageAccountant;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.api.OpenTelemetry;
 import java.io.ByteArrayOutputStream;
@@ -105,10 +108,6 @@ class E2bTriageSandboxTest {
     }
 
     /** A launcher error body in server.js's {@code buildErrorBody} shape. */
-    private static String errorBody(String kind, String detail) throws Exception {
-        return MAPPER.writeValueAsString(Map.of("kind", kind, "detail", detail));
-    }
-
     private static String errorBodyWithUsage(String kind, long inputTokens, long outputTokens) throws Exception {
         return MAPPER.writeValueAsString(Map.of(
                 "kind",
@@ -180,18 +179,6 @@ class E2bTriageSandboxTest {
     }
 
     @Test
-    void aTimedOutRunStillReleasesItsCredential() {
-        AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
-        when(resolver.resolve(any(), any())).thenReturn(LEASED);
-        E2bTriageSandbox sandbox = sandbox(resolver, mock(LlmUsageAccountant.class), req -> {
-            throw new HttpTimeoutException("request timed out");
-        });
-
-        assertEquals(Optional.empty(), sandbox.run(request()));
-        verify(resolver, times(1)).release(LEASED);
-    }
-
-    @Test
     void aCredentialThatNeverResolvedReleasesNothing() {
         AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
         when(resolver.resolve(any(), any()))
@@ -251,16 +238,6 @@ class E2bTriageSandboxTest {
         assertEquals(ClassifierError.TRIAGE_RUN_INCOMPLETE, ex.error());
         verify(usage)
                 .recordSandboxRun(eq("proj"), any(), any(), eq(false), eq(120L), eq(40L), eq(0L), eq(0L), any(), any());
-    }
-
-    @Test
-    void anOrchestrationBodyThrowsLauncherUnavailable() throws Exception {
-        E2bTriageSandbox sandbox = sandbox(
-                mock(LlmUsageAccountant.class), respondWith(502, errorBody("orchestration", "docker pull failed")));
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
-
-        assertEquals(ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, ex.error());
     }
 
     @Test
@@ -328,6 +305,32 @@ class E2bTriageSandboxTest {
                         eq(0L),
                         eq(new BigDecimal("0.5")),
                         eq(new LlmUsageAccountant.Subject(E2bTriageSandbox.SUBJECT_KIND, "f1")));
+    }
+
+    /** A pinned TRIAGE lane runs its own provider and model, at that model's rates, not the deployment default's. */
+    @Test
+    void aPinnedLaneSendsItsProviderModelAndRates() throws Exception {
+        ProjectModelSettings settings = mock(ProjectModelSettings.class);
+        when(settings.resolveAgenticModel("proj", ModelLane.TRIAGE))
+                .thenReturn(Optional.of(
+                        new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.GROK, "grok-4.6", "xai/grok-4.6")));
+        StringBuilder posted = new StringBuilder();
+        new E2bTriageSandbox(
+                props(), settings, credentials(), mock(LlmUsageAccountant.class), RATES, OpenTelemetry.noop(), MAPPER) {
+            @Override
+            HttpResponse<String> send(HttpRequest req) {
+                posted.append(ScriptedHttpClient.body(req));
+                return respondWith(200, "{}");
+            }
+        }.run(request());
+
+        JsonNode body = MAPPER.readTree(posted.toString());
+        assertEquals("grok-4.6", body.path("model").asText());
+        assertEquals("GROK", body.path("provider").asText());
+        assertEquals(
+                MAPPER.readTree(MAPPER.writeValueAsString(
+                        RATES.cost("xai/grok-4.6").orElseThrow().toOpencodeCost(MAPPER))),
+                body.path("model_cost"));
     }
 
     /**
