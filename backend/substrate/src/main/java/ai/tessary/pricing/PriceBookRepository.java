@@ -159,18 +159,6 @@ public class PriceBookRepository {
         return Optional.empty();
     }
 
-    /** Shown on the vitals card beside the unpriced count. */
-    public int pricedModelCount() {
-        List<PriceBook> books = currentBooks();
-        if (books.isEmpty()) {
-            return 0;
-        }
-        return jdbc.sql("SELECT count(DISTINCT model_id) FROM model_price WHERE price_book_version IN (:versions)")
-                .param("versions", books.stream().map(PriceBook::version).toList())
-                .query(Integer.class)
-                .single();
-    }
-
     /** This model's rates in one named book, ignoring layering — the audit read for a stamped version. */
     public Optional<ModelRate> rateIn(String priceBookVersion, String modelId) {
         return jdbc.sql("SELECT " + RATE_COLS + " FROM model_price "

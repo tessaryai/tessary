@@ -42,17 +42,15 @@ record PriceBookImporterIntegrationTest(PriceBookImporter importer, PriceBookRep
     }
 
     /**
-     * Before any book is imported (a fresh install, or pricing switched off) nothing is priced, and the
-     * coverage count the vitals card shows is zero rather than a query that cannot be written.
+     * Before any book is imported (a fresh install, or pricing switched off) nothing is priced.
      * Transactional, so the books this context's other tests read come back when it ends.
      */
     @Test
     @org.springframework.transaction.annotation.Transactional
-    void withNoBookInForce_nothingIsPricedAndTheCoverageIsZero() {
+    void withNoBookInForce_nothingIsPriced() {
         jdbc.sql("DELETE FROM price_book").update();
 
         assertEquals(List.of(), books.currentBooks());
-        assertEquals(0, books.pricedModelCount());
         assertTrue(books.rateFor("claude-haiku-4-5").isEmpty(), "unpriced, not free");
     }
 }

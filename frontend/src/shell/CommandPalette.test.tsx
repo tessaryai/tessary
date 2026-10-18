@@ -109,7 +109,7 @@ describe("what it offers", () => {
       expect.stringContaining("Triage"),
       expect.stringContaining("Traces"),
       expect.stringContaining("Classifiers"),
-      expect.stringContaining("Vitals"),
+      expect.stringContaining("Metrics"),
     ]);
     expect(screen.queryByText("Settings · MCP tokens")).toBeNull();
   });
@@ -148,10 +148,10 @@ describe("running a command", () => {
     fireEvent.change(box, { target: { value: "p95" } });
     fireEvent.keyDown(box, { key: "Enter" });
 
-    expect(currentLocation()).toBe(`${BASE}vitals`);
+    expect(currentLocation()).toBe(`${BASE}metrics`);
     expect(screen.queryByRole("dialog")).toBeNull();
     openPalette();
-    expect(labelsIn("Recent")).toEqual([expect.stringContaining("Vitals")]);
+    expect(labelsIn("Recent")).toEqual([expect.stringContaining("Metrics")]);
   });
 
   it("moves the highlight with the arrows, staying inside the list", () => {
@@ -261,10 +261,11 @@ describe("server search", () => {
     renderPalette();
     const box = openPalette();
 
+    // The page's old name, "vitals", stays a keyword so a habit still finds Metrics.
     fireEvent.change(box, { target: { value: "vitals" } });
 
     expect(await screen.findByText("Search is unavailable. Showing matching pages only.")).toBeTruthy();
-    expect(screen.getByText("Vitals")).toBeTruthy();
+    expect(screen.getByText("Metrics")).toBeTruthy();
     expect(screen.getByText("0 results")).toBeTruthy();
   });
 

@@ -19,7 +19,8 @@ code, not the same idea — the window state lives in the same table and the fin
 - **Not a list of errors.** The product does not show every failing tool call. It shows that a rate
   moved, and which *pattern* of failure moved it. A list of 412 individual timeouts is the raw
   material, not the finding.
-- **Not an analytics surface.** There is no tool-error number anywhere else any more — see §8.4.
+- **Not an analytics surface.** The only other tool-error number is Metrics' count over the
+  span-status rule, which judges nothing; see §8.4.
 
 ---
 
@@ -279,9 +280,10 @@ both ends of the range.
 ### 4.5 Not a z-test
 
 The Vitals surface flagged tool errors with a two-proportion pooled z-test at 2.576. That surface is
-gone (§8.4) and the test does not come with it. Significance inflates with sample size while effect
-size does not, so on a busy tool it reports a 0.05pp move as real. §4.4 is the same hazard in the
-CUSUM's own terms, and a threshold calibrated to the tool's own base rate is the answer to both.
+gone (§8.4) and the test did not come with it; Metrics, which replaced it, runs no test at all.
+Significance inflates with sample size while effect size does not, so on a busy tool it reports a
+0.05pp move as real. §4.4 is the same hazard in the CUSUM's own terms, and a threshold calibrated
+to the tool's own base rate is the answer to both.
 
 ### 4.6 One reference, both directions
 
@@ -579,6 +581,12 @@ disagrees about what a failed tool call is either.
 
 It is a breaking change to `GET .../vitals`, whose response loses `tool_errors`. Acceptable at
 design-partner scale, and recorded here so it is a decision rather than a surprise.
+
+**Since 2026-10-18 the surface is Metrics, and it counts tool errors again, narrowly.** Its
+`tool_calls` view has `errored_calls` and `error_rate` over `tool_call.is_error`, rule 1's span-status
+check only, so the narrow §1 definition has a reader again and the figure reads lower than this classifier's
+rate by every failure rules 2 to 4 catch. It is a count over a window with no test, no threshold and no
+baseline; this classifier stays the one judgment. See [metrics.md](./metrics.md).
 
 ---
 

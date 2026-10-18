@@ -200,3 +200,52 @@
   color: var(--color-accent);
   font-weight: 600;
 }
+
+/* ===== METRICS GRID: the classes react-grid-layout and react-resizable emit, re-tokened.
+ * The library's own stylesheets are not imported: they paint the placeholder red and the handle in
+ * rgba black. Positions and transitions are its contract and are kept; every color and duration is ours. */
+
+.react-grid-layout {
+  position: relative;
+  transition: height var(--duration-micro) ease;
+}
+.react-grid-item {
+  transition-property: left, top, width, height;
+  transition-duration: var(--duration-micro);
+  transition-timing-function: ease;
+}
+.react-grid-item.cssTransforms {
+  transition-property: transform, width, height;
+}
+.react-grid-item.resizing,
+.react-grid-item.react-draggable-dragging {
+  transition: none;
+  z-index: 3;
+}
+.react-grid-item.resizing { will-change: width, height; }
+.react-grid-item.react-draggable-dragging { will-change: transform; }
+.react-grid-item.dropping { visibility: hidden; }
+.react-grid-item.react-grid-placeholder {
+  background: var(--color-accent-subtle);
+  border: 1px dashed var(--color-accent-edge);
+  border-radius: var(--radius-card);
+  transition-duration: var(--duration-micro);
+  z-index: 2;
+  user-select: none;
+}
+.react-grid-item.react-grid-placeholder.placeholder-resizing { transition: none; }
+.react-resizable { position: relative; }
+/* The handle is our own element (DashboardGrid's resizeConfig.handleComponent): two diagonal lines, 16 px,
+ * 3 px from the corner, always visible while the grid is in edit mode, as the screens draw it. */
+.react-grid-item > .react-resizable-handle {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  bottom: 3px;
+  right: 3px;
+  cursor: nwse-resize;
+  color: var(--color-muted);
+  display: none;
+}
+.metrics-grid-editing .react-grid-item > .react-resizable-handle { display: block; }
+.react-resizable-hide > .react-resizable-handle { display: none; }

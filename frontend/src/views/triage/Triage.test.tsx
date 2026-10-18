@@ -2,14 +2,15 @@
 /*
  * Triage, the front door. The bugs worth catching: a row that opens another case, a lens that shows
  * the wrong bucket or cannot be left, an empty lens that says nothing, the analysis's summary
- * printed as a certainty, a pulse strip that disagrees with Vitals about spend or latency, and a
+ * printed as a certainty, a pulse strip that disagrees with Metrics about spend or latency, and a
  * findings list that shows a finding already in Cases, drops one that is not, or opens the wrong page.
  */
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BehaviorFinding, Case, TriageView, Vitals } from "../../api/types";
+import type { BehaviorFinding, Case, MetricsQueryRequest, TriageView } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_CASE_DETAIL } from "../../test/groundednessFixtures";
+import { totalResult } from "../../test/metricsFixtures";
 import { Triage } from "./Triage";
 import { api } from "../../test/api";
 
@@ -36,14 +37,18 @@ const triage = (over: Partial<TriageView> = {}): TriageView => ({
   watching: WATCHING,
   ...over,
 });
-const vitals = (usd: number, p95: number | null, spendDelta: number | null, p95Delta: number | null) =>
-  ({
-    total: { cost: { usd, delta_pct_per_turn: spendDelta }, duration: { p95_ms: p95, delta_pct: p95Delta } },
-  }) as unknown as Vitals;
+const pulse = (usd: number | null, p95: number | null, prevUsd: number | null, prevP95: number | null) => ({
+  spend: totalResult("llm_calls", { cost_usd: usd, usd_per_trace: null }, 1, { cost_usd: prevUsd, usd_per_trace: null }),
+  p95: totalResult("traces", { latency_p95_ms: p95 }, 1, { latency_p95_ms: prevP95 }),
+});
+const answerPulse = (current: ReturnType<typeof pulse>) =>
+  api.queryMetrics.mockImplementation((req: MetricsQueryRequest) =>
+    Promise.resolve(req.view === "traces" ? current.p95 : current.spend),
+  );
 
 beforeEach(() => {
   api.getTriage.mockResolvedValue(triage());
-  api.getVitals.mockResolvedValue(vitals(512.4, 4200, 28.4, -6.6));
+  answerPulse(pulse(512.4, 4200, 399.06, 4496.8));
   api.getModelSettings.mockResolvedValue({ configured_providers: ["anthropic"] });
   api.onboarding.mockResolvedValue({ stage: "case" });
   api.listBehaviorFindings.mockResolvedValue({ findings: [] });
@@ -192,21 +197,30 @@ describe("the lenses", () => {
 });
 
 describe("the pulse strip", () => {
-  it("prints spend and latency with their deltas, as Vitals reads them", async () => {
+  // Bug: the strip asks for another window, measure or comparison than the default Spend and p95 tiles, so
+  // Triage and Metrics print different figures for the same week.
+  it("prints spend and latency with their deltas, from the same reads as the Metrics tiles", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-18T09:58:48Z"));
     renderPage();
 
     expect(await screen.findByText("$512")).toBeTruthy();
+    expect(screen.getByText("Metrics 7d")).toBeTruthy();
     expect(screen.getByText("+28%")).toBeTruthy();
     expect(screen.getByText("4.2s")).toBeTruthy();
     expect(screen.getByText("-7%")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open Vitals" }).getAttribute("href")).toBe(
-      "/orgs/acme/projects/default/vitals",
+    expect(screen.getByRole("link", { name: "Open Metrics" }).getAttribute("href")).toBe(
+      "/orgs/acme/projects/default/metrics",
     );
-    expect(api.getVitals).toHaveBeenCalledWith(7);
+    const window = { from: "2026-10-11T10:00:00.000Z", to: "2026-10-18T10:00:00.000Z" };
+    const ask = { dimension: null, filters: null, ...window, granularity: null, top_n: null, compare: "previous_window" };
+    expect(api.queryMetrics).toHaveBeenCalledTimes(2);
+    expect(api.queryMetrics).toHaveBeenCalledWith({ view: "llm_calls", measures: ["cost_usd", "usd_per_trace"], ...ask });
+    expect(api.queryMetrics).toHaveBeenCalledWith({ view: "traces", measures: ["latency_p95_ms"], ...ask });
   });
 
   it("prints a fast p95 in milliseconds and dashes what it has not measured", async () => {
-    api.getVitals.mockResolvedValueOnce(vitals(3, 850, null, 0));
+    answerPulse(pulse(3, 850, null, 850));
     renderPage();
     expect(await screen.findByText("850ms")).toBeTruthy();
     expect(screen.getByText("$3.00")).toBeTruthy();
@@ -214,18 +228,18 @@ describe("the pulse strip", () => {
     expect(screen.getByText("0%")).toBeTruthy();
     cleanup();
 
-    api.getVitals.mockResolvedValueOnce(vitals(3, null, null, null));
+    answerPulse(pulse(3, null, null, null));
     renderPage();
     await screen.findByText("$3.00");
     expect(screen.getAllByText("—")).toHaveLength(3);
   });
 
-  it("draws no strip until the vitals arrive", async () => {
-    api.getVitals.mockReturnValue(pending());
+  it("draws no strip until the metrics arrive", async () => {
+    api.queryMetrics.mockReturnValue(pending());
     renderPage();
     await screen.findByText("Case a");
 
-    expect(screen.queryByText("Vitals 7d")).toBeNull();
+    expect(screen.queryByText("Metrics 7d")).toBeNull();
   });
 });
 

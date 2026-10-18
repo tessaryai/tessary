@@ -123,6 +123,39 @@ Do not describe a flagged answer as a confirmed error. A flag says the model fou
 
 What a person said a closed frustration or groundedness case turned out to be: **Fixed** or **False alarm**. The case page no longer asks for one, so only cases closed before that change carry it, and their closing line still names it.
 
+## Metrics
+
+The page that charts a project’s spend, latency, traces, LLM calls, tool calls and cases over a time window. Metrics counts; it does not judge. A number on Metrics never creates a finding.
+
+Use:
+
+- Open Metrics to see spend by call site over the last 7 days.
+- Metrics leaves unpriced calls out of the spend figure and says how many there were.
+
+Write “Metrics” with a capital M, as the page name. Do not use “analytics,” “Vitals,” or “stats” for it.
+
+## Dashboard
+
+A named set of widgets on the Metrics page. Every project has a built-in default dashboard, which cannot be edited; a person can copy it, or create a new dashboard, and edit that.
+
+Use:
+
+- Duplicate the default dashboard to change its widgets.
+- The dashboard shows the last 30 days.
+
+Do not use “dashboard” for other pages of the product, such as Triage or Traces.
+
+## Widget
+
+One chart on a dashboard: a number, a time series, or a table. A widget is a saved query, so the same query sent to the API returns the same figures.
+
+Use:
+
+- Add a widget that shows p95 latency over time.
+- The widget counts tool calls by tool.
+
+Do not use “chart,” “card,” or “panel” as a synonym for widget in product copy. A widget contains a chart.
+
 ## How the terms relate
 
 1. An **agent** produces a **trace**.
@@ -141,5 +174,7 @@ Use lowercase for these terms in sentences:
 - finding
 - triage
 - case
+- dashboard
+- widget
 
 Capitalize them when required by the Tessary [writing style guide](writing-style-guide.md), such as in a top-level page title.

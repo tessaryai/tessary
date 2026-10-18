@@ -9,16 +9,16 @@ import { preloadRouteChunk, registerRouteChunk } from "./routePreload";
 describe("preloadRouteChunk", () => {
   it("loads the chunk registered for the page's segment, and nothing for a page with none", async () => {
     const traces = vi.fn(async () => ({}));
-    const vitals = vi.fn(async () => ({}));
+    const metrics = vi.fn(async () => ({}));
     registerRouteChunk("preload-traces", traces);
-    registerRouteChunk("preload-vitals", vitals);
+    registerRouteChunk("preload-metrics", metrics);
 
     preloadRouteChunk("/orgs/acme/projects/default/preload-traces/tr-1");
     preloadRouteChunk("/orgs/acme/projects/default");
     preloadRouteChunk("/orgs/acme/projects/default/unregistered");
 
     expect(traces).toHaveBeenCalledTimes(1);
-    expect(vitals).not.toHaveBeenCalled();
+    expect(metrics).not.toHaveBeenCalled();
   });
 
   it("swallows a chunk that fails to load", async () => {

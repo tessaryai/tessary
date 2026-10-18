@@ -49,7 +49,13 @@ import {
   type FlaggedAnswerPage,
   type BehaviorAnalysis,
   type BehaviorFindings,
-  type Vitals,
+  type MetricsCatalog,
+  type MetricsQueryRequest,
+  type MetricsQueryResult,
+  type MetricDashboard,
+  type MetricDashboardList,
+  type MetricDashboardCreateRequest,
+  type MetricDashboardUpdateRequest,
   type BehaviorResolutionAction,
   type SessionDetailView,
   type SessionsPageView,
@@ -383,7 +389,15 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     setClassifierTuning: (id: string, req: SetClassifierTuningRequest) =>
       send<ClassifierTuning>("PUT", `${base}/classifiers/${enc(id)}/tuning`, req),
 
-    getVitals: (days = 7, by = "call_site") => http<Vitals>(`${base}/vitals?days=${days}&by=${enc(by)}`),
+    getMetricsCatalog: () => http<MetricsCatalog>(`${base}/metrics/catalog`),
+    queryMetrics: (req: MetricsQueryRequest) => send<MetricsQueryResult>("POST", `${base}/metrics/query`, req),
+    listMetricDashboards: () => http<MetricDashboardList>(`${base}/metrics/dashboards`),
+    getMetricDashboard: (id: string) => http<MetricDashboard>(`${base}/metrics/dashboards/${enc(id)}`),
+    createMetricDashboard: (body: MetricDashboardCreateRequest) =>
+      send<MetricDashboard>("POST", `${base}/metrics/dashboards`, body),
+    updateMetricDashboard: (id: string, body: MetricDashboardUpdateRequest) =>
+      send<MetricDashboard>("PUT", `${base}/metrics/dashboards/${enc(id)}`, body),
+    deleteMetricDashboard: (id: string) => send<null>("DELETE", `${base}/metrics/dashboards/${enc(id)}`),
 
     /** The row limit is per call site, not sliced across all of them. */
     listBehaviorFindings: (

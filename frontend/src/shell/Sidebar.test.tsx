@@ -43,7 +43,7 @@ vi.mock("./useNavigation", async () => {
           items: [
             { id: "traces", label: "Traces", icon, match: ["sessions"] },
             classifiers,
-            { id: "vitals", label: "Vitals", icon },
+            { id: "metrics", label: "Metrics", icon },
           ],
         },
       ],
@@ -75,15 +75,15 @@ describe("the nav rows", () => {
 
     expect(isActive("Traces")).toBe(true);
     expect(isActive("Triage")).toBe(false);
-    expect(isActive("Vitals")).toBe(false);
+    expect(isActive("Metrics")).toBe(false);
     expect(screen.getByRole("group", { name: "Monitor" })).toBeTruthy();
   });
 
   // A row is active on its page and the pages under it. Bug: a finding page, which Triage links to and whose
   // breadcrumb leads back to Triage, lit Classifiers because its path sits under classifiers/.
   it.each([
-    ["vitals/detail", "Vitals", "Settings"],
-    ["vitals", "Vitals", "Settings"],
+    ["metrics/01JAX", "Metrics", "Settings"],
+    ["metrics", "Metrics", "Settings"],
     ["classifiers/findings/f-1", "Triage", "Classifiers"],
     ["classifiers/clf-1", "Classifiers", "Triage"],
   ])("on %s, marks %s active and not %s", (path, active, inactive) => {
@@ -93,7 +93,7 @@ describe("the nav rows", () => {
   });
 
   it("goes to this project's page for a row, and to Triage from the brand", () => {
-    open("/orgs/acme/projects/default/vitals");
+    open("/orgs/acme/projects/default/metrics");
 
     fireEvent.click(row("Traces"));
     expect(currentLocation()).toBe("/orgs/acme/projects/default/traces");
@@ -169,14 +169,14 @@ describe("the project switcher", () => {
   });
 
   it("goes to another project's Triage, but only closes on the current one", async () => {
-    open("/orgs/acme/projects/default/vitals");
+    open("/orgs/acme/projects/default/metrics");
     await waitFor(() => expect(trigger().textContent).toContain("Default"));
 
     fireEvent.click(trigger());
     const menu = screen.getByText("Projects").parentElement!;
     fireEvent.click(within(menu).getByRole("button", { name: "Default" }));
     expect(screen.queryByText("Projects")).toBeNull();
-    expect(currentLocation()).toBe("/orgs/acme/projects/default/vitals");
+    expect(currentLocation()).toBe("/orgs/acme/projects/default/metrics");
 
     fireEvent.focus(trigger());
     fireEvent.click(within(screen.getByText("Projects").parentElement!).getByRole("button", { name: "Support bot" }));
