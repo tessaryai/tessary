@@ -52,7 +52,7 @@ class MetricsQueryPlannerTest {
         assertEquals(Shape.TOTAL, st.shape());
         assertSql("""
                 SELECT sum(s.total_cost) FILTER (WHERE t.is_settled) AS cost_usd,
-                       count(*) FILTER (WHERE s.cost_source = 'unpriced' AND s.total_tokens IS NOT NULL) AS unpriced_calls,
+                       count(*) FILTER (WHERE t.is_settled AND s.cost_source = 'unpriced' AND s.total_tokens IS NOT NULL) AS unpriced_calls,
                        count(*) FILTER (WHERE NOT t.is_settled) AS unsettled_calls,
                        count(DISTINCT s.trace_id COLLATE "C") FILTER (WHERE t.is_settled AND s.total_cost IS NOT NULL) AS priced_traces,
                        count(*) AS n
@@ -64,20 +64,23 @@ class MetricsQueryPlannerTest {
         assertEquals(Map.of("pid", PID, "from", FROM_AT, "to", TO_AT), st.params());
     }
 
-    /** The bug: a trace join on a plain call count, which turns an index-only span scan into a trace probe per row. */
+    /**
+     * The bug: an llm_calls count that skips the trace join and so counts calls in traces still settling, or a join
+     * on a tool_calls count that has no settled reading at all.
+     */
     @Test
-    @DisplayName("the trace join appears only when a settled measure is asked")
-    void theTraceJoinAppearsOnlyWhenASettledMeasureIsAsked() {
-        MetricsStatement calls = plan(req("llm_calls", List.of("calls")));
-        assertFalse(calls.sql().contains("JOIN trace"), calls.sql());
+    @DisplayName("an llm_calls count joins trace and gates on is_settled, and a tool_calls count does not join")
+    void anLlmCallsCountJoinsTraceAndAToolCallsCountDoesNot() {
         assertSql("""
-                SELECT count(*) FILTER (WHERE s.total_tokens IS NOT NULL) AS calls, count(*) AS n
+                SELECT count(*) FILTER (WHERE t.is_settled AND s.total_tokens IS NOT NULL) AS calls, count(*) AS n
                   FROM span s
+                  JOIN trace t ON t.project_id = s.project_id AND t.id = s.trace_id
                  WHERE s.project_id = :pid AND s.kind = 'llm' AND NOT s.is_deleted
                    AND s.started_at >= :from AND s.started_at < :to
-                """, calls);
+                """, plan(req("llm_calls", List.of("calls"))));
 
-        assertTrue(plan(req("llm_calls", List.of("calls", "tokens"))).sql().contains("JOIN trace t"));
+        MetricsStatement tools = plan(req("tool_calls", List.of("calls")));
+        assertFalse(tools.sql().contains("JOIN trace"), tools.sql());
     }
 
     /** The bug: three sorts for one latency family, or no lateral join so the root's interval is unreadable. */
@@ -163,8 +166,7 @@ class MetricsQueryPlannerTest {
     void theCteCarriesOnlyTheJoinsItsRankingMeasureNeeds() {
         MetricsStatement byCalls =
                 plan(req("llm_calls", List.of("calls", "cost_usd")).dimension("call_site"));
-        assertFalse(cte(byCalls).contains("JOIN trace"), cte(byCalls));
-        assertTrue(outer(byCalls).contains("JOIN trace t"), outer(byCalls));
+        assertTrue(cte(byCalls).contains("JOIN trace t"), "a settled count ranks through the join: " + cte(byCalls));
 
         MetricsStatement bySpend =
                 plan(req("llm_calls", List.of("cost_usd", "calls")).dimension("call_site"));
@@ -238,8 +240,8 @@ class MetricsQueryPlannerTest {
                         + " CASE WHEN r.rn <= :topN THEN r.k ELSE '__other__' END AS k,"
                         + " LEAST(r.rn, :topNPlusOne) AS rank,"
                         + " sum(s.total_cost) FILTER (WHERE t.is_settled) AS cost_usd,"
-                        + " count(*) FILTER (WHERE s.cost_source = 'unpriced' AND s.total_tokens IS NOT NULL) AS"
-                        + " unpriced_calls,"
+                        + " count(*) FILTER (WHERE t.is_settled AND s.cost_source = 'unpriced' AND s.total_tokens IS"
+                        + " NOT NULL) AS unpriced_calls,"
                         + " count(*) FILTER (WHERE NOT t.is_settled) AS unsettled_calls,"
                         + " count(DISTINCT s.trace_id COLLATE \"C\") FILTER (WHERE t.is_settled AND s.total_cost IS NOT"
                         + " NULL) AS priced_traces,"
@@ -325,10 +327,18 @@ class MetricsQueryPlannerTest {
     @Test
     @DisplayName("columns follow the asked measures, then companions in encounter order, one per alias")
     void columnsFollowAskedThenCompanionOrder() {
-        MetricsStatement st = plan(req("tool_calls", List.of("latency_p99_ms", "error_rate", "latency_p50_ms")));
+        MetricsStatement st = plan(req("traces", List.of("latency_p99_ms", "usd_per_trace", "latency_p50_ms")));
 
         assertEquals(
-                List.of("latency_q", "error_rate", "latency_n", "errored_calls"),
+                List.of(
+                        "latency_q",
+                        "usd_per_trace",
+                        "latency_n",
+                        "unterminated_traces",
+                        "rootless_traces",
+                        "unpriced_traces",
+                        "unsettled_traces",
+                        "priced_traces"),
                 st.columns().stream().map(Column::alias).toList());
         assertEquals(
                 List.of("latency_p99_ms", "latency_p50_ms"),
@@ -337,9 +347,9 @@ class MetricsQueryPlannerTest {
                         .toList());
         String sql = collapse(st.sql());
         assertTrue(
-                sql.indexOf(" AS latency_q,") < sql.indexOf(" AS error_rate,")
-                        && sql.indexOf(" AS error_rate,") < sql.indexOf(" AS latency_n,")
-                        && sql.indexOf(" AS latency_n,") < sql.indexOf(" AS errored_calls,"),
+                sql.indexOf(" AS latency_q,") < sql.indexOf(" AS usd_per_trace,")
+                        && sql.indexOf(" AS usd_per_trace,") < sql.indexOf(" AS latency_n,")
+                        && sql.indexOf(" AS rootless_traces,") < sql.indexOf(" AS unpriced_traces,"),
                 sql);
     }
 

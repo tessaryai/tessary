@@ -297,7 +297,7 @@ export type TriageCitation = S["Citation"];
 
 // ---- Metrics (catalog, query, dashboards) ----
 /** Read-only aggregates: nothing is detected or escalated, which keeps them out of Layer 2. */
-export type MetricsUnit = "count" | "usd" | "ms" | "tokens" | "ratio";
+export type MetricsUnit = "count" | "usd" | "ms" | "tokens";
 export type MetricsGapFill = "zero" | "none";
 export type MetricsChart = "number" | "timeseries" | "table";
 export type MetricsGranularity = "auto" | "hour" | "day" | "week";
@@ -318,8 +318,7 @@ export type MetricsQueryRequest = Omit<
 export type MetricsWindow = Omit<S["MetricsWindow"], "granularity"> & {
   granularity: "hour" | "day" | "week" | null;
 };
-/** The generator drops the null a map value can carry: a `none` gap-fill measure is null where it has no value. */
-export type MetricsRow = Omit<S["MetricsRow"], "values"> & { values: Record<string, number | null> };
+export type MetricsRow = S["MetricsRow"];
 export type MetricsTopN = S["MetricsTopN"];
 export type MetricsQueryResult = Omit<S["MetricsQueryResult"], "window" | "rows" | "previous_rows"> & {
   window: MetricsWindow;

@@ -19,7 +19,7 @@ public final class MetricsQueryDtos {
             @NotBlank String view,
             @NotNull List<String> measures,
             @Nullable String dimension,
-            @Nullable List<@Valid MetricsFilter> filters,
+            @Nullable List<@NotNull @Valid MetricsFilter> filters,
             @NotBlank String from,
             @NotBlank String to,
             @Nullable String granularity,
@@ -50,7 +50,7 @@ public final class MetricsQueryDtos {
             /** Base rows in the group; 0 on a filled bucket. */
             long n,
             /** Asked measures plus companions. A LinkedHashMap, because a value may be null. */
-            Map<String, Double> values) {}
+            Map<String, @Nullable Double> values) {}
 
     public record MetricsTopN(
             int shown, @JsonProperty("total_keys") long totalKeys) {}

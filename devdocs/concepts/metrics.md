@@ -110,8 +110,7 @@ Measures, with the companions the server appends whenever the measure is asked:
 | `llm_calls` | `calls`, `spending_traces` | count | |
 | `llm_calls` | `tokens` | tokens | `unsettled_calls` |
 | `llm_calls` | `cost_usd`, `usd_per_trace` | usd | `unpriced_calls`, `unsettled_calls`, `priced_traces` |
-| `tool_calls` | `calls`, `errored_calls`, `retries` | count | |
-| `tool_calls` | `error_rate` | ratio | `errored_calls` |
+| `tool_calls` | `calls`, `retries` | count | |
 | `tool_calls` | `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` | ms | `latency_n` |
 | `cases` | `cases`, `open_cases`, `resolved_cases` | count | |
 
@@ -131,10 +130,12 @@ so a new widget gets it without asking.
    not free. `sum()` never sees a zero for it, and `unpriced_calls` (or `unpriced_traces`) travels
    beside every dollar measure. The page prints "14 unpriced calls not in this figure" under the
    number and a footer that names the total.
-2. **Sums wait for the trace to settle.** Cost and token sums count settled traces only, through
-   `FILTER (WHERE t.is_settled)` on the aggregate rather than a statement `WHERE`, so one scan
-   gives the gated sum and the ungated count. `unsettled_calls` and `unsettled_traces` say how many
-   are still arriving. A bucket whose traces are all unsettled reads 0, as an empty bucket does,
+2. **Sums wait for the trace to settle.** Cost sums, and every `llm_calls` figure, count settled
+   traces only, through `FILTER (WHERE t.is_settled)` on the aggregate rather than a statement
+   `WHERE`, so one scan gives the gated figures and the ungated count. `unsettled_calls` and
+   `unsettled_traces` say how many are still arriving, and a call in a trace still settling counts
+   in `unsettled_calls` and nowhere else, so "across N LLM calls" counts the calls the token sum
+   holds. A bucket whose traces are all unsettled reads 0, as an empty bucket does,
    and the companion says why. The settle protocol is in
    [substrate-model.md](./substrate-model.md).
 3. **Tokens are counted on LLM spans only.** The `traces` view has no token measure, because a
@@ -170,16 +171,18 @@ so a new widget gets it without asking.
 
 Three caveats follow from the sources and are not bugs:
 
+- **The two views put spend under different call sites.** `llm_calls` keys each call by the LLM
+  span's own `call_site_id`; `traces` keys a trace's whole cost by the trace's `call_site_id`. On a
+  trace whose LLM spans carry another call site than its root, "Spend by call site" and the "By
+  call site" table disagree for the same call site. Each view's description says whose call site
+  it uses.
+
 - **The `traces` view and the Traces filter count call sites differently.** The view groups a trace
   by its own `call_site_id`; the Traces list's call-site filter matches a trace when any of its spans
   carries the call site. The Traces count can be higher, by the traces whose only tagged span is not
   the trace's own.
 - **A tool call with no start time falls outside every window.** `tool_call.started_at` is the
   clock, and the view's description says so.
-- **The `tool_calls` error count is the narrow one.** `errored_calls` and `error_rate` read
-  `tool_call.is_error`, the span-status rule. The Tool error classifier also counts a declared error
-  in the result, an `error.type` attribute and a recorded exception, so its rate reads higher. The
-  classifier is the judgment; see [tool-error.md](./tool-error.md) §8.4.
 
 The `cases` view reads a text clock. `eval_case.opened_at` is ISO-8601 text, so the window bounds
 are bound as text with nine fractional digits, which sorts exactly against the values
@@ -258,7 +261,8 @@ the URL.
 ## The grid
 
 A dashboard lays out on 12 columns with Langfuse-style integer placements on each widget:
-`x` from 0 to 11, `y` from 0, `w` from 3 to 12 with `x + w` at most 12, and `h` from 2 to 8 rows.
+`x` from 0 to 11, `y` from 0 with `y + h` at most 96 (twelve widgets of the tallest height), `w` from 3
+to 12 with `x + w` at most 12, and `h` from 2 to 8 rows.
 The validator refuses a placement outside the grid and any two widgets that overlap. A row is 72 px
 with a 16 px gap, so a widget of `h` rows is `72h + 16(h - 1)` px tall: 160 px at h2, 248 px at
 h3, 424 px at h5.
@@ -268,7 +272,9 @@ chunk). Its stylesheets are not imported; `src/index.css` re-tokens the classes 
 color enters. In edit mode, a widget moves by its title bar and resizes from its bottom-right
 corner, and vertical compaction closes every gap a drag leaves, which is why a stored layout never
 overlaps. For the keyboard, each widget's menu offers "Move earlier" and "Move later", which swap
-its placement with its neighbour in reading order (by `y`, then `x`) and compact. Resize has no
+the widget with its neighbour in reading order (by `y`, then `x`). The widgets before the pair keep
+their places; the pair and every widget after it are placed again in the new order, each at the
+first place after the one before it that compaction leaves alone, so the swap always shows. Resize has no
 keyboard path in v1. Below the `lg` breakpoint the grid stacks every widget full width in reading
 order, read only.
 
@@ -285,14 +291,15 @@ Three palettes ship, each with six series colors and an `other` color, defined o
 
 - `tessary`, the default: the Tessary v2 chart ramp.
 - `colorblind` ("Colorblind safe"): Okabe and Ito's set without its dimmest blue and without black.
-- `greyscale`: grey steps only, where dash and stroke width tell series apart.
+- `greyscale`: grey steps only. On a line chart each rank draws its own dash pattern in every
+  palette, so lines stay apart here too; a bar chart leans on the legend and the tooltip.
 
 Each person picks one in Settings > Organization > Appearance. The choice is stored per browser in
 `localStorage` as `tessary.prefs.chartPalette`; `ChartPaletteProvider` writes it to `<html>` as
 `data-chart-palette`, and that attribute re-points the `--color-series-1..6` and
 `--color-series-other` tokens a chart reads. A component never names a palette token. Every value
 clears 3:1 against `--color-surface`, the card a chart sits on. The "Other" series is always
-dashed, so it reads as the fold in every palette. The values and contrast ratios are in
+dashed, as a line or as a bar's outline at full strength, so it reads as the fold in every palette. The values and contrast ratios are in
 `frontend/DESIGN_SYSTEM.md` § *Charts*.
 
 ## Time range, filter and links
@@ -318,11 +325,19 @@ A table row or tile links where the figure can be inspected:
 ## What changed from Vitals
 
 The Vitals page showed four totals and two tables over 7 or 30 days. Metrics' default dashboard
-covers the same figures, and four of them read differently on purpose:
+covers the same figures, and seven of them read differently on purpose:
 
 - **Latency reads lower.** Vitals measured the trace envelope; Metrics measures the root span's
   own interval (rule 4), about 10 percent lower at p95.
 - **Spend per trace divides by priced traces** (rule 6), not by every trace with token usage.
+- **The Traces count holds every trace.** Vitals counted traces whose root had ended, so its "N did
+  not finish" traces were outside the count; the Traces tile and the table's Traces column now count
+  them too, and the note under the tile names them.
+- **The table's spend follows the trace's call site.** Vitals split spend by each LLM span's call
+  site; the "By call site" table reads the `traces` view, so a trace's whole cost goes to its own
+  call site (the first caveat above). "Spend by call site" still splits by the span's.
+- **The Triage pulse strip's Spend delta is on total spend** over the previous window, where Vitals
+  showed the change in spend per trace.
 - **No `flagged` and no tool-error column.** Judgment belongs to the classifiers; the tool-error
   number left in August ([tool-error.md](./tool-error.md) §8.4).
 - **Four range presets and a custom window** replace the 7/30 toggle, and the priced-model count

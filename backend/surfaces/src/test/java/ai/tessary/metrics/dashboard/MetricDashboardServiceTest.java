@@ -195,6 +195,24 @@ class MetricDashboardServiceTest {
                 () -> service.update(PID, "01A", new MetricDashboardUpdateRequest("Beta", null, ONE_TILE), true));
     }
 
+    /** The bug: a stored dashboard named "Default" sits next to the built-in and the switcher shows two pills alike. */
+    @Test
+    @DisplayName("the built-in's name is taken on create and update, trimmed")
+    void theBuiltInNameIsTakenOnCreateAndUpdate() {
+        assertCode(
+                MetricsError.DUPLICATE_NAME,
+                "A dashboard named 'Default' already exists in this project",
+                () -> service.create(PID, "u", new MetricDashboardCreateRequest("Default", null, null, null), true));
+
+        when(repo.find(PID, "01A")).thenReturn(Optional.of(row("01A", "Alpha", ONE_TILE)));
+        assertCode(
+                MetricsError.DUPLICATE_NAME,
+                "A dashboard named ' Default ' already exists in this project",
+                () -> service.update(PID, "01A", new MetricDashboardUpdateRequest(" Default ", null, ONE_TILE), true));
+        verify(repo, never()).insert(any());
+        verify(repo, never()).update(any());
+    }
+
     /** The bug: the built-in edited or deleted (it has no row), or a missing id answered 200. */
     @Test
     @DisplayName("update and delete of default are 409, and of an unknown id are 404")

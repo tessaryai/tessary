@@ -24,8 +24,7 @@ public record MetricsMeasure(
         COUNT,
         USD,
         MS,
-        TOKENS,
-        RATIO;
+        TOKENS;
 
         public String wire() {
             return name().toLowerCase(Locale.ROOT);

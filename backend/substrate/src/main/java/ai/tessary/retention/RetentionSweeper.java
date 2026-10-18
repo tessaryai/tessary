@@ -41,7 +41,9 @@ public class RetentionSweeper {
         this.props = props;
     }
 
-    @Scheduled(fixedDelayString = "${tessary.retention.interval-ms:3600000}", initialDelayString = "60000")
+    @Scheduled(
+            fixedDelayString = "${tessary.retention.interval-ms:3600000}",
+            initialDelayString = "${tessary.retention.initial-delay-ms:60000}")
     public void sweep() {
         if (!props.enabled()) return;
         Instant started = Instant.now();

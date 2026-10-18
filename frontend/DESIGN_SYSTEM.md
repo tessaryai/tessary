@@ -170,8 +170,10 @@ or a dot.
 The palette values are defined once, as `--color-chart-<palette>-N` in `tokens.css`, outside
 the `@theme` block so no `bg-series-*` utility exists. A component never names a palette
 token directly (the Appearance picker's swatches are the one exception, because they show
-every palette at once); it reads `--color-series-N`, and the dash pattern and stroke width
-are the second channel, so a chart still reads in greyscale.
+every palette at once); it reads `--color-series-N`. On a line chart each rank also draws its
+own dash pattern (rank 1 solid), the second channel, so the chart still reads in greyscale; the
+legend swatch repeats it. A bar chart has no second channel and leans on the legend and the
+tooltip. The "Other" fold is a dashed line, or a dashed outline on a bar chart.
 
 ### Brand values that are not tokens
 

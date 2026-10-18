@@ -21,7 +21,15 @@ const CASES = widget({
 });
 
 const tile = (w: MetricWidgetDefinition, result: MetricsQueryResult, window: Window = WINDOW_7D) => (
-  <NumberWidget key={w.id} widget={w} view={viewOf(METRICS_CATALOG, w.view)} result={result} window={window} basePath={BASE} />
+  <NumberWidget
+    key={w.id}
+    widget={w}
+    view={viewOf(METRICS_CATALOG, w.view)}
+    result={result}
+    window={window}
+    basePath={BASE}
+    editing={false}
+  />
 );
 
 function renderTile(w: MetricWidgetDefinition, result: MetricsQueryResult, window: Window = WINDOW_7D) {
@@ -123,6 +131,23 @@ describe("NumberWidget", () => {
     expect(screen.getAllByRole("link").map((l) => l.textContent)).toEqual(["12"]);
     fireEvent.click(screen.getByRole("link", { name: "12" }));
     expect(currentLocation()).toBe(`${BASE}/triage`);
+  });
+
+  // Bug: in edit mode the cases figure still links to Triage, so one click leaves the page and drops the draft.
+  it("theCasesFigureIsPlainTextInEditMode", () => {
+    renderRoute(
+      <NumberWidget
+        widget={CASES}
+        view={viewOf(METRICS_CATALOG, "cases")}
+        result={totalResult("cases", { cases: 12, open_cases: 3 }, 12)}
+        window={WINDOW_7D}
+        basePath={BASE}
+        editing
+      />,
+      { route: `${BASE}/metrics` },
+    );
+    expect(screen.getByText("12")).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   // Bug: a measure the catalog no longer lists crashes the tile instead of printing its wire name.

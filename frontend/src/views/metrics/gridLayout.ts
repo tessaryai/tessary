@@ -51,7 +51,32 @@ export function readingOrder(widgets: MetricWidgetDefinition[]): MetricWidgetDef
   return [...widgets].sort((a, b) => a.y - b.y || a.x - b.x || a.id.localeCompare(b.id));
 }
 
-/** Each widget keeps its size and takes the neighbour's position; compaction then settles any overlap. */
+const overlaps = (a: Placement, b: Placement) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/** Vertical compaction leaves a widget where it is when it sits on row 0 or on a widget in one of its columns. */
+const resting = (p: Placement, placed: Placement[]) =>
+  p.y === 0 || placed.some((o) => o.y + o.h === p.y && o.x < p.x + p.w && p.x < o.x + o.w);
+
+/**
+ * The first place after `after` in reading order where `w` fits beside `placed` and compaction leaves it. The search
+ * ends by the row under the widget that ends lowest: there `w` rests on that widget and overlaps nothing.
+ */
+function nextPlace(w: Placement, after: Placement | null, placed: Placement[]): Placement {
+  for (let y = after?.y ?? 0; ; y++) {
+    for (let x = 0; x + w.w <= COLUMNS; x++) {
+      if (after && y === after.y && x <= after.x) continue;
+      const p = { x, y, w: w.w, h: w.h };
+      if (resting(p, placed) && !placed.some((o) => overlaps(o, p))) return p;
+    }
+  }
+}
+
+/**
+ * Swaps the widget with its neighbour in reading order. The widgets before the pair keep their places; the pair and
+ * every widget after it are placed again in the new order, each at the first place after the one before it, so the
+ * swap always shows and the layout is one compaction leaves alone.
+ */
 export function moveWidget(
   widgets: MetricWidgetDefinition[],
   id: string,
@@ -59,14 +84,22 @@ export function moveWidget(
 ): MetricWidgetDefinition[] {
   const order = readingOrder(widgets);
   const at = order.findIndex((w) => w.id === id);
-  const other = order[dir === "earlier" ? at - 1 : at + 1];
-  if (!other) return widgets;
-  const me = order[at];
-  const swapped = widgets.map((w) => {
-    const to = w.id === id ? other : w.id === other.id ? me : null;
-    return to ? { ...w, x: Math.min(to.x, COLUMNS - w.w), y: to.y } : w;
+  const first = dir === "earlier" ? at - 1 : at;
+  if (first < 0 || first + 1 >= order.length) return widgets;
+  const kept = order.slice(0, first);
+  const next = [order[first + 1], order[first], ...order.slice(first + 2)];
+  const placed: Placement[] = [...kept];
+  const moved = new Map<string, Placement>();
+  let after: Placement | null = kept.at(-1) ?? null;
+  for (const w of next) {
+    after = nextPlace(w, after, placed);
+    placed.push(after);
+    moved.set(w.id, after);
+  }
+  return widgets.map((w) => {
+    const p = moved.get(w.id);
+    return p ? { ...w, ...p } : w;
   });
-  return compactWidgets(swapped);
 }
 
 export function placementForNew(widgets: MetricWidgetDefinition[], chart: MetricsChart): Placement {

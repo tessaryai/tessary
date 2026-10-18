@@ -84,7 +84,7 @@ function Row({
 const PALETTE_NOTES: Record<ChartPalette, string> = {
   tessary: "Hue for chart series. The default.",
   colorblind: "Series stay apart for the common kinds of color blindness.",
-  greyscale: "Grey steps only. Line dashes and widths tell series apart.",
+  greyscale: "Grey steps only. Each line's dash pattern tells series apart.",
 };
 
 const SERIES = [1, 2, 3, 4, 5, 6];

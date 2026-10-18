@@ -302,7 +302,7 @@
 
   /* The grey ramp: grey-50, grey-300 and grey-500, then three steps between grey-500 and grey-600,
    * which is "other" (the darkest step above 3:1; grey-700 is 1.57:1 and cannot carry a series).
-   * Dash and width tell neighbouring series apart. */
+   * On a line chart each rank's dash pattern tells neighbouring series apart. */
   --color-chart-greyscale-1: var(--primitive-grey-50);
   --color-chart-greyscale-2: var(--primitive-grey-300);
   --color-chart-greyscale-3: var(--primitive-grey-500);

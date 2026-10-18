@@ -12,6 +12,7 @@ import io.swagger.v3.core.converter.ModelConverter;
 import io.swagger.v3.core.converter.ModelConverterContextImpl;
 import io.swagger.v3.oas.models.media.Schema;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -41,6 +42,8 @@ class JSpecifyNullabilityConverterTest {
     record Sparse(String id, @Nullable String note) {}
 
     record WidgetRequest(String name, @Nullable String note) {}
+
+    record Gauge(Map<String, @Nullable Double> values, Map<String, Double> totals, List<String> tags) {}
 
     private static @Nullable Schema<?> resolve(Class<?> type, Schema<?> fromChain, ModelConverterContextImpl context) {
         ModelConverter downstream = (t, c, chain) -> fromChain;
@@ -110,6 +113,25 @@ class JSpecifyNullabilityConverterTest {
         assertEquals(Set.of("string", "null"), prop(sparse, "note").getTypes());
         assertNull(request.getRequired());
         assertEquals(Set.of("string", "null"), prop(request, "note").getTypes());
+    }
+
+    /**
+     * A map whose values the server sends as null typed with non-null values, so a generated client reads a gap as a
+     * number; or a map of non-null values, or a list, widened with it.
+     */
+    @Test
+    void aMapWithNullableValues_acceptsNullValues() {
+        Schema<?> gauge = new Schema<>();
+        gauge.addProperty("values", new Schema<>().additionalProperties(new Schema<>().types(Set.of("number"))));
+        gauge.addProperty("totals", new Schema<>().additionalProperties(new Schema<>().types(Set.of("number"))));
+        gauge.addProperty("tags", new Schema<>().items(string()));
+
+        resolve(Gauge.class, gauge, new ModelConverterContextImpl(List.of()));
+
+        assertEquals(
+                Set.of("number", "null"), ((Schema<?>) prop(gauge, "values").getAdditionalProperties()).getTypes());
+        assertEquals(Set.of("number"), ((Schema<?>) prop(gauge, "totals").getAdditionalProperties()).getTypes());
+        assertEquals(Set.of("string"), prop(gauge, "tags").getItems().getTypes());
     }
 
     /**

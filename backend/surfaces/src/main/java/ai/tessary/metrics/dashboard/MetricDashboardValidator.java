@@ -22,6 +22,9 @@ public final class MetricDashboardValidator {
     public static final int MIN_W = 3;
     public static final int MIN_H = 2;
     public static final int MAX_H = 8;
+    /** Twelve widgets of the tallest height stacked; a compacted grid never reaches past it. */
+    public static final int MAX_ROWS = MetricsQueryValidator.MAX_WIDGETS * MAX_H;
+
     public static final int MAX_TITLE = 80;
     static final Pattern ID = Pattern.compile("[a-z0-9-]{1,40}");
     static final String DUMMY_FROM = "2026-01-01T00:00:00Z";
@@ -54,17 +57,24 @@ public final class MetricDashboardValidator {
     }
 
     private static void check(MetricWidgetDefinition w, List<MetricWidgetDefinition> seen) {
-        if (!ID.matcher(w.id()).matches()) refuse(w, "id must be 1 to 40 lowercase letters, digits or dashes");
+        if (!ID.matcher(w.id()).matches()) throw refused(w, "id must be 1 to 40 lowercase letters, digits or dashes");
         for (MetricWidgetDefinition other : seen) {
-            if (other.id().equals(w.id())) refuse(w, "id is used twice");
+            if (other.id().equals(w.id())) throw refused(w, "id is used twice");
         }
         String title = w.title();
-        if (title != null && title.length() > MAX_TITLE) refuse(w, "title is longer than 80 characters");
-        if (w.x() < 0 || w.y() < 0 || w.w() < MIN_W || w.x() + w.w() > COLUMNS || w.h() < MIN_H || w.h() > MAX_H) {
-            refuse(w, "placement is outside the 12-column grid");
+        if (title != null && title.length() > MAX_TITLE) throw refused(w, "title is longer than 80 characters");
+        if (w.w() < MIN_W
+                || w.w() > COLUMNS
+                || w.h() < MIN_H
+                || w.h() > MAX_H
+                || w.x() < 0
+                || w.x() > COLUMNS - w.w()
+                || w.y() < 0
+                || w.y() > MAX_ROWS - w.h()) {
+            throw refused(w, "placement is outside the 12-column grid");
         }
         for (MetricWidgetDefinition other : seen) {
-            if (overlap(w, other)) refuse(w, "overlaps widget '" + other.id() + "'");
+            if (overlap(w, other)) throw refused(w, "overlaps widget '" + other.id() + "'");
         }
         checkChart(w);
         try {
@@ -80,14 +90,14 @@ public final class MetricDashboardValidator {
         switch (w.chart()) {
             case "number" -> {
                 if (measures < 1 || measures > 2 || dimension || w.topN() != null) {
-                    refuse(w, "a number has one or two measures and no dimension");
+                    throw refused(w, "a number has one or two measures and no dimension");
                 }
             }
             case "timeseries" -> {
                 if (measures != 1
                         || !topNWithin(w.topN(), MetricsQueryValidator.MAX_TOP_N_WITH_AXIS)
                         || w.compare() != null) {
-                    refuse(w, "a time series has one measure, top_n up to 5 and no compare");
+                    throw refused(w, "a time series has one measure, top_n up to 5 and no compare");
                 }
             }
             case "table" -> {
@@ -96,10 +106,10 @@ public final class MetricDashboardValidator {
                         || !dimension
                         || !topNWithin(w.topN(), MetricsQueryValidator.MAX_TOP_N)
                         || w.compare() != null) {
-                    refuse(w, "a table has 1 to 4 measures, a dimension and top_n up to 100");
+                    throw refused(w, "a table has 1 to 4 measures, a dimension and top_n up to 100");
                 }
             }
-            default -> refuse(w, "chart must be number, timeseries or table");
+            default -> throw refused(w, "chart must be number, timeseries or table");
         }
     }
 
@@ -111,7 +121,7 @@ public final class MetricDashboardValidator {
         return a.x() < b.x() + b.w() && b.x() < a.x() + a.w() && a.y() < b.y() + b.h() && b.y() < a.y() + a.h();
     }
 
-    private static void refuse(MetricWidgetDefinition w, String reason) {
-        throw new TessaryException(MetricsError.INVALID_WIDGET, w.id(), reason);
+    private static TessaryException refused(MetricWidgetDefinition w, String reason) {
+        return new TessaryException(MetricsError.INVALID_WIDGET, w.id(), reason);
     }
 }

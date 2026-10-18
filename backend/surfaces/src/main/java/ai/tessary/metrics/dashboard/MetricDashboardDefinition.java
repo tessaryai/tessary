@@ -22,7 +22,7 @@ public record MetricDashboardDefinition(
         @JsonProperty("default_range") @NotNull @Pattern(regexp = "24h|7d|30d|90d")
         String defaultRange,
 
-        @NotNull @Valid List<MetricWidgetDefinition> widgets) {
+        @NotNull @Valid List<@NotNull @Valid MetricWidgetDefinition> widgets) {
 
     public static final int VERSION = 1;
 
@@ -40,7 +40,7 @@ public record MetricDashboardDefinition(
             @NotNull List<String> measures,
             @Nullable String dimension,
             /** Null means none. */
-            @Nullable List<@Valid MetricsFilter> filters,
+            @Nullable List<@NotNull @Valid MetricsFilter> filters,
             @JsonProperty("top_n") @Nullable Integer topN,
             @Nullable @Pattern(regexp = "previous_window") String compare,
             int x,

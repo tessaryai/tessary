@@ -7,7 +7,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { seriesResult, WINDOW_7D } from "../../../test/metricsFixtures";
-import { seriesOf } from "../metricsRules";
+import { seriesOf, timeTicks } from "../metricsRules";
 import type { MetricsUnit } from "../wire";
 import { TimeSeriesChart } from "./TimeSeriesChart";
 
@@ -60,8 +60,9 @@ function renderChart(props: { title?: string; unit?: MetricsUnit; series?: Retur
 }
 
 describe("TimeSeriesChart", () => {
-  // Bug: the legend loses the server's rank order, draws the fold before a named key, or draws it as a solid dot.
-  it("namesTheChartAndListsTheLegendInRankOrderWithOtherDashed", () => {
+  // Bug: the legend loses the server's rank order or draws the fold before a named key; or every ranked line is the
+  // same solid stroke, so in greyscale series 3 to 6 cannot be told apart by line or by legend swatch.
+  it("namesTheChartAndGivesEachRankItsOwnDashInTheLinesAndTheLegend", () => {
     const chart = renderChart({});
 
     expect(chart.getAttribute("aria-label")).toBe(
@@ -69,13 +70,42 @@ describe("TimeSeriesChart", () => {
     );
     const items = within(screen.getByRole("list", { name: "Legend" })).getAllByRole("listitem");
     expect(items.map((i) => i.textContent)).toEqual(KEYS.map((k) => k.label));
-    const marker = (item: HTMLElement) => item.firstElementChild!.firstElementChild as HTMLElement;
-    expect(marker(items[0]).style.background).toBe("var(--color-series-1)");
-    expect(marker(items[4]).style.background).toBe("var(--color-series-5)");
-    expect(marker(items[5]).style.borderTop).toBe("2px dashed var(--color-series-other)");
+    const swatch = (item: HTMLElement) => item.querySelector("line")!;
+    const lines = [...chart.querySelectorAll("g > path:first-child")];
+    expect(lines.map((l) => l.getAttribute("stroke"))).toEqual([1, 2, 3, 4, 5].map((r) => `var(--color-series-${r})`)
+      .concat("var(--color-series-other)"));
+    const dashes = lines.map((l) => l.getAttribute("stroke-dasharray"));
+    expect(new Set(dashes).size).toBe(6);
+    expect(dashes[0]).toBeNull();
+    expect(items.map((i) => swatch(i).getAttribute("stroke-dasharray"))).toEqual(dashes);
+    expect(items.map((i) => swatch(i).getAttribute("stroke"))).toEqual(lines.map((l) => l.getAttribute("stroke")));
     expect(within(chart).getByText("Oct 11")).toBeTruthy();
     expect(within(chart).getByText("Oct 18")).toBeTruthy();
     expect(within(chart).getByText("$3.00")).toBeTruthy();
+  });
+
+  // Bug: a legend that wraps to a second line pushes its last items past the card's bottom edge, which clips them; or
+  // the plot stays short after the legend goes away (the editor switching to one series).
+  it("aWrappedLegendTakesItsSecondLineFromThePlot", () => {
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(40);
+    const props = { title: "Spend", unit: "usd" as const, window: WINDOW_7D, granularity: "day" as const, height: 316, bars: false };
+    const { rerender } = render(<TimeSeriesChart {...props} series={sixSeries()} />);
+    const chart = () => screen.getByRole("group", { name: /^Spend/ });
+
+    expect(chart().getAttribute("viewBox")).toBe("0 0 520 294");
+    rerender(<TimeSeriesChart {...props} series={singleSeries()} />);
+    expect(chart().getAttribute("viewBox")).toBe("0 0 520 316");
+  });
+
+  // Bug: a 90-day window labels every week along a 464 px plot, so the dates print on top of each other.
+  it("aLongWindowLabelsEveryOtherWeekWhereEveryWeekWouldCollide", () => {
+    const window = { from: "2026-07-20T10:00:00Z", to: "2026-10-18T10:00:00Z" };
+    const weeks = timeTicks(window, "week").map((t) => t.label);
+    render(<TimeSeriesChart title="p95" unit="ms" window={window} granularity="week" series={[]} height={316} bars={false} />);
+    const chart = screen.getByRole("group", { name: /^p95/ });
+
+    expect(weeks).toHaveLength(12);
+    expect(weeks.filter((w) => within(chart).queryByText(w) != null)).toEqual(weeks.filter((_, i) => i % 2 === 0));
   });
 
   // Bug: a lone p95 line carries a legend that names the measure the title already names.
@@ -158,8 +188,16 @@ describe("TimeSeriesChart", () => {
       "calls",
       "LLM calls",
     );
-    expect(renderChart({ title: "LLM calls by call site", unit: "count", series: counts, bars: true })
-      .getAttribute("aria-roledescription")).toBe("bar chart");
+    const bars = renderChart({ title: "LLM calls by call site", unit: "count", series: counts, bars: true });
+    expect(bars.getAttribute("aria-roledescription")).toBe("bar chart");
+    // Bug: the fold drawn at half opacity, under the 3:1 a series value must clear on the card.
+    const other = [...bars.querySelectorAll("rect[stroke]")];
+    expect(other).toHaveLength(2);
+    for (const r of other) {
+      expect(r.getAttribute("fill")).toBe("none");
+      expect(r.getAttribute("stroke")).toBe("var(--color-series-other)");
+      expect(r.getAttribute("fill-opacity")).toBeNull();
+    }
     expect(renderChart({ title: "Traces over time", unit: "count", series: singleSeries("traces", 30, 41), bars: true })
       .getAttribute("aria-roledescription")).toBe("bar chart");
     expect(renderChart({ title: "Spend by call site" }).getAttribute("aria-roledescription")).toBe("line chart");

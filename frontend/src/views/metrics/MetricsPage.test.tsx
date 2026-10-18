@@ -7,6 +7,7 @@
  * BUSY read retried forever or never.
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Link } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import { api } from "../../test/api";
@@ -232,8 +233,19 @@ describe("reading", () => {
     api.getMetricsCatalog.mockRejectedValue(new ApiError(500, { code: "INTERNAL", message: "Catalog failed" }));
     renderPage();
     expect(await screen.findByText(/List failed$/)).toBeTruthy();
-    expect(await screen.findByText(/Catalog failed$/)).toBeTruthy();
+    expect((await screen.findAllByText(/Catalog failed$/)).length).toBeGreaterThan(0);
     expect(api.queryMetrics).not.toHaveBeenCalled();
+  });
+
+  // Bug: with the catalog refused every widget announces "Loading" forever beside the catalog's error.
+  it("aFailedCatalogPutsEveryWidgetInItsError", async () => {
+    api.getMetricsCatalog.mockRejectedValue(new ApiError(500, { code: "INTERNAL", message: "Catalog failed" }));
+    renderPage(`${BASE}/metrics/01JCOST`);
+    expect(await screen.findAllByText(/Catalog failed$/)).toHaveLength(3);
+    await waitFor(() => expect(screen.queryAllByRole("status", { name: /^Loading/ })).toHaveLength(0));
+    for (const name of ["A", "B"]) {
+      expect(within(screen.getByRole("region", { name })).getByRole("alert").textContent).toBe("INTERNAL: Catalog failed");
+    }
   });
 
   // Bug: the loading state nests two live regions or shows nothing.
@@ -389,6 +401,44 @@ describe("editing", () => {
     );
     await waitFor(() => expect(currentLocation()).toBe(`${BASE}/metrics/01JNEW?range=30d`));
     expect(screen.queryByRole("group", { name: "Edit dashboard" })).toBeNull();
+  });
+
+  // Bug: the draft outlives a change of dashboard (Back, a sidebar link), so the next dashboard shows the last one's
+  // widgets and Done writes them over it.
+  it("anotherDashboardWhileEditingDropsTheDraftAndNeverWritesIt", async () => {
+    renderRoute(
+      <>
+        <MetricsPage />
+        <Link to={`${BASE}/metrics`}>Leave</Link>
+      </>,
+      { route: `${BASE}/metrics/01JCOST`, parent: "/orgs/:orgSlug/projects/:projectSlug", path: "metrics/:dashboardId?" },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    menuItem("B", "Remove");
+
+    fireEvent.click(screen.getByRole("link", { name: "Leave" }));
+    expect(await screen.findByRole("region", { name: "By model" })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Edit dashboard" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+    expect(regions()).toHaveLength(9);
+    expect(api.updateMetricDashboard).not.toHaveBeenCalled();
+  });
+
+  // Bug: the window narrows below lg while editing, Done, Cancel and the toolbar vanish, and the switcher stays
+  // disabled, so nothing on the page leaves edit mode.
+  it("narrowingBelowLgWhileEditingLeavesEditMode", async () => {
+    let onChange: (e: { matches: boolean }) => void = () => {};
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      media, matches: true, addEventListener: (_: string, f: typeof onChange) => (onChange = f), removeEventListener: () => {},
+    }));
+    renderPage(`${BASE}/metrics/01JCOST`);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    menuItem("B", "Remove");
+    expect((pill("Default") as HTMLButtonElement).disabled).toBe(true);
+
+    act(() => onChange({ matches: false }));
+    expect((pill("Default") as HTMLButtonElement).disabled).toBe(false);
+    expect(regions()).toEqual(["A", "B"]);
   });
 
   // Bug: Cancel keeps the draft, so a removed widget stays gone.

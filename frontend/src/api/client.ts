@@ -390,7 +390,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       send<ClassifierTuning>("PUT", `${base}/classifiers/${enc(id)}/tuning`, req),
 
     getMetricsCatalog: () => http<MetricsCatalog>(`${base}/metrics/catalog`),
-    queryMetrics: (req: MetricsQueryRequest) => send<MetricsQueryResult>("POST", `${base}/metrics/query`, req),
+    queryMetrics: (req: MetricsQueryRequest, signal?: AbortSignal) =>
+      http<MetricsQueryResult>(`${base}/metrics/query`, { method: "POST", body: JSON.stringify(req), signal }),
     listMetricDashboards: () => http<MetricDashboardList>(`${base}/metrics/dashboards`),
     getMetricDashboard: (id: string) => http<MetricDashboard>(`${base}/metrics/dashboards/${enc(id)}`),
     createMetricDashboard: (body: MetricDashboardCreateRequest) =>

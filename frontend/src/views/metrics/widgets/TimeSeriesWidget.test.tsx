@@ -35,7 +35,9 @@ const keyed = (granularity: "hour" | "day" | "week" = "day") =>
 const folded = (): MetricsQueryResult => ({ ...keyed(), top_n: { shown: 5, total_keys: 12 } });
 
 function renderBody(w: MetricWidgetDefinition, result: MetricsQueryResult) {
-  render(<TimeSeriesWidget widget={w} view={viewOf(METRICS_CATALOG, w.view)} result={result} window={WINDOW_7D} basePath={BASE} />);
+  render(
+    <TimeSeriesWidget widget={w} view={viewOf(METRICS_CATALOG, w.view)} result={result} window={WINDOW_7D} basePath={BASE} editing={false} />,
+  );
 }
 
 const chartHeight = (name: RegExp) => screen.getByRole("group", { name }).getAttribute("viewBox")!.split(" ")[3];

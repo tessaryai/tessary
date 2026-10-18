@@ -72,7 +72,10 @@ class MetricDashboardValidatorTest {
         assertRefused("a", "title is longer than 80 characters", W.number("a").title("t".repeat(81)));
     }
 
-    /** The bug: a widget that hangs off the 12-column grid, or one too small to draw, reaches the grid. */
+    /**
+     * The bug: a widget that hangs off the 12-column grid, or one too small to draw, reaches the grid; or an x, w or y
+     * near Integer.MAX_VALUE wraps x + w or y + h negative and is stored overlapping its neighbours.
+     */
     @ParameterizedTest
     @CsvSource({
         "12, 0, 3, 2",
@@ -83,8 +86,12 @@ class MetricDashboardValidatorTest {
         "0, 0, 3, 1",
         "0, 0, 3, 9",
         "0, -1, 3, 2",
+        "1, 0, 2147483647, 2",
+        "2147483647, 0, 3, 2",
+        "0, 2147483647, 3, 2",
+        "0, 89, 3, 8",
     })
-    @DisplayName("placements stay inside the 12-column grid with width 3 to 12 and height 2 to 8")
+    @DisplayName("placements stay inside the 12-column grid and its 96 rows, with width 3 to 12 and height 2 to 8")
     void placementsStayInsideTheGrid(int x, int y, int w, int h) {
         assertRefused(
                 "a", "placement is outside the 12-column grid", W.number("a").at(x, y, w, h));
@@ -98,6 +105,8 @@ class MetricDashboardValidatorTest {
                 def(W.number("a").at(9, 0, 3, 2).build())));
         assertDoesNotThrow(() -> MetricDashboardValidator.validate(
                 def(W.number("a").at(0, 40, 12, 8).build())));
+        assertDoesNotThrow(() -> MetricDashboardValidator.validate(
+                def(W.number("a").at(0, 88, 12, 8).build())));
     }
 
     /** The bug: widgets drawn over each other, or neighbours that share an edge, in either array order, refused. */

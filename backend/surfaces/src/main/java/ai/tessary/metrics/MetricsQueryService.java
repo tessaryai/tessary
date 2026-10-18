@@ -184,8 +184,8 @@ public class MetricsQueryService {
             @Nullable String key,
             @Nullable String label,
             long n,
-            Map<String, Double> raw) {
-        Map<String, Double> values = new LinkedHashMap<>();
+            Map<String, @Nullable Double> raw) {
+        Map<String, @Nullable Double> values = new LinkedHashMap<>();
         for (MetricsMeasure m : q.all()) {
             Double v = raw.get(m.wire());
             values.put(m.wire(), v == null && m.gapFill() == GapFill.ZERO ? Double.valueOf(0.0) : v);

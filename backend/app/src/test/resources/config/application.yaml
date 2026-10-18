@@ -3,14 +3,17 @@
 # Spring context.
 #
 # Parks the background timers that act on test data while a test is still seeding it. A test that
-# needs one calls it directly (ClassifierWorker#tick, TraceRollupWorker#runOnce, TraceRollupReaper#sweepOnce,
-# EncoderAvailability#refresh). Left on a timer, the classifier heartbeat swept a test's project mid-seed and
-# advanced the cursor the test then read, the rollup worker claimed due traces globally, and the reaper re-armed
-# traces a fixture had claimed but not yet recomputed, so they never settled.
+# needs one calls it directly (ClassifierWorker#tick, ClassifierCatalogWorker#tick, TraceRollupWorker#runOnce,
+# TraceRollupReaper#sweepOnce, EncoderAvailability#refresh, RetentionSweeper#sweep). Left on a timer, the classifier
+# heartbeat swept a test's project mid-seed and advanced the cursor the test then read, the catalog reconcile
+# re-seeded built-ins a test had just deleted to own the list, the rollup worker claimed due traces globally, and the
+# reaper re-armed traces a fixture had claimed but not yet recomputed, so they never settled. The retention
+# sweeper's first pass, a minute in, deletes any row a test seeds at a fixed date past the 90-day TTL.
 tessary:
   classifier:
     heartbeat-ms: 86400000
     initial-delay-ms: 86400000
+    catalog-resync-ms: 86400000
   ingest:
     substrate:
       rollup-interval-ms: 86400000
@@ -18,6 +21,8 @@ tessary:
   observer:
     encoder:
       probe-interval-ms: 86400000
+  retention:
+    initial-delay-ms: 86400000
 # The Kafka client logs every rebootstrap at INFO.
 logging:
   level:

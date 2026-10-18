@@ -4,7 +4,7 @@
  * writes in one PUT (or, on the built-in dashboard, as the definition of a copy). Every navigation builds an absolute
  * path from the project base: a relative one resolves against /metrics/:dashboardId and nests the segment.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayoutGrid, X } from "lucide-react";
@@ -58,10 +58,15 @@ function LoadingTiles() {
   );
 }
 
+/** Keyed by the dashboard id, so a draft, an open editor or a modal never outlives the dashboard it was made on. */
 export function MetricsPage() {
+  const id = useParams().dashboardId ?? DEFAULT_ID;
+  return <DashboardPage key={id} id={id} />;
+}
+
+function DashboardPage({ id }: { id: string }) {
   const { orgSlug, projectSlug, api } = useTenant();
   const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
-  const id = useParams().dashboardId ?? DEFAULT_ID;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const qc = useQueryClient();
@@ -80,6 +85,14 @@ export function MetricsPage() {
   const [modal, setModal] = useState<ModalState>(null);
   const addRef = useRef<HTMLButtonElement>(null);
 
+  // Below lg the toolbar, Done and Cancel are gone, so edit mode cannot be left from the page; it ends here instead.
+  useEffect(() => {
+    if (lg) return;
+    setEditing(false);
+    setDraft(null);
+    setEditor(null);
+  }, [lg]);
+
   const range = parseRange(params, dashboard?.definition.default_range ?? "7d");
   // A preset's end moves once an hour, so reading the clock each render keeps every query key stable in between.
   const window = resolveWindow(range, Date.now());
@@ -87,7 +100,6 @@ export function MetricsPage() {
   const widgets = draft?.widgets ?? dashboard?.definition.widgets ?? [];
   const canManage = dashboard?.can_manage ?? listQ.data?.can_manage ?? false;
   const canEdit = canManage && lg && dashboard != null;
-  const showEditing = editing && lg;
   const atCap = widgets.length >= MAX_WIDGETS;
 
   // Gated on the catalog: without it no call-site filter attaches, and every key changes once it arrives.
@@ -209,6 +221,7 @@ export function MetricsPage() {
   };
 
   const stateOf = (i: number): WidgetState => {
+    if (catalogQ.isError) return { status: "error", error: catalogQ.error, onRetry: () => void catalogQ.refetch() };
     const r = reads[i];
     if (r.isPending) return { status: "loading" };
     if (r.isError) return { status: "error", error: r.error, onRetry: () => void r.refetch() };
@@ -227,7 +240,7 @@ export function MetricsPage() {
           <>
             <RangeControl range={range} onChange={setRange} />
             {canEdit &&
-              (showEditing ? (
+              (editing ? (
                 <Button variant="primary" loading={update.isPending} onClick={() => done(dashboard, draft!)}>
                   Done
                 </Button>
@@ -255,7 +268,7 @@ export function MetricsPage() {
         />
       )}
 
-      {showEditing && (
+      {editing && (
         <div
           role="group"
           aria-label="Edit dashboard"
@@ -327,7 +340,7 @@ export function MetricsPage() {
       ) : (
         <DashboardGrid
           widgets={widgets}
-          editing={showEditing}
+          editing={editing}
           stacked={!lg}
           renderWidget={(w, menu) => (
             <WidgetCard
@@ -337,7 +350,7 @@ export function MetricsPage() {
               window={window}
               basePath={basePath}
               callSite={callSite}
-              editing={showEditing}
+              editing={editing}
               menu={menu}
             />
           )}

@@ -9,11 +9,13 @@ import io.swagger.v3.core.converter.ModelConverterContext;
 import io.swagger.v3.core.converter.ModelConverters;
 import io.swagger.v3.oas.models.media.Schema;
 import jakarta.annotation.PostConstruct;
+import java.lang.reflect.AnnotatedParameterizedType;
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -82,6 +84,9 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
             if (nullable) {
                 makeNullable(prop);
             }
+            if (hasNullableMapValues(rc)) {
+                makeNullable((Schema<?>) prop.getAdditionalProperties());
+            }
         }
         if (!required.isEmpty()) {
             target.setRequired(required);
@@ -124,6 +129,13 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         return hasNullable(rc.getAnnotatedType().getAnnotations())
                 || hasNullable(rc.getAnnotations())
                 || hasNullable(rc.getAccessor().getAnnotatedReturnType().getAnnotations());
+    }
+
+    /** {@code Map<String, @Nullable V>}: the values schema is {@code additionalProperties}. */
+    private static boolean hasNullableMapValues(RecordComponent rc) {
+        return Map.class.isAssignableFrom(rc.getType())
+                && rc.getAnnotatedType() instanceof AnnotatedParameterizedType p
+                && hasNullable(p.getAnnotatedActualTypeArguments()[1].getAnnotations());
     }
 
     private static boolean hasNullable(java.lang.annotation.Annotation[] annotations) {

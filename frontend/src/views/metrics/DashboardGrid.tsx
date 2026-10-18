@@ -28,52 +28,50 @@ function resizeCorner(axis: ResizeHandleAxis, ref: Ref<HTMLElement>) {
   );
 }
 
-export function DashboardGrid({
-  widgets,
-  editing,
-  stacked,
-  renderWidget,
-  onPlacements,
-  onEdit,
-  onRemove,
-}: {
+type GridProps = {
   widgets: MetricWidgetDefinition[];
   editing: boolean;
-  /** True below lg: a single read-only column in reading order. */
-  stacked: boolean;
   renderWidget: (w: MetricWidgetDefinition, menu: ReactNode | undefined) => ReactElement;
   /** Edit mode only: a drag, a resize, a move, or mount-time compaction. */
   onPlacements: (next: MetricWidgetDefinition[]) => void;
   onEdit: (id: string) => void;
   onRemove: (id: string) => void;
-}) {
-  const [boxRef, width] = useWidth();
+};
 
+export function DashboardGrid({
+  stacked,
+  ...grid
+}: GridProps & {
+  /** True below lg: a single read-only column in reading order. */
+  stacked: boolean;
+}) {
   if (stacked) {
     return (
       <div className="flex flex-col gap-4">
-        {readingOrder(widgets).map((w) => (
-          <div key={w.id}>{renderWidget(w, undefined)}</div>
+        {readingOrder(grid.widgets).map((w) => (
+          <div key={w.id}>{grid.renderWidget(w, undefined)}</div>
         ))}
       </div>
     );
   }
+  return <Grid {...grid} />;
+}
 
-  const order = readingOrder(widgets).map((w) => w.id);
-  const menuFor = (w: MetricWidgetDefinition, title: string) => {
-    const at = order.indexOf(w.id);
-    return (
-      <WidgetMenu
-        title={title}
-        canEarlier={at > 0}
-        canLater={at < order.length - 1}
-        onEdit={() => onEdit(w.id)}
-        onEarlier={() => onPlacements(moveWidget(widgets, w.id, "earlier"))}
-        onLater={() => onPlacements(moveWidget(widgets, w.id, "later"))}
-        onRemove={() => onRemove(w.id)}
-      />
-    );
-  };
+/** Its own component, so the width hook mounts with the box it measures whenever the page crosses lg. */
+function Grid({ widgets, editing, renderWidget, onPlacements, onEdit, onRemove }: GridProps) {
+  const [boxRef, width] = useWidth();
+  const ordered = readingOrder(widgets);
+  const menuFor = (w: MetricWidgetDefinition, at: number) => (
+    <WidgetMenu
+      title={w.title ?? w.id}
+      canEarlier={at > 0}
+      canLater={at < ordered.length - 1}
+      onEdit={() => onEdit(w.id)}
+      onEarlier={() => onPlacements(moveWidget(widgets, w.id, "earlier"))}
+      onLater={() => onPlacements(moveWidget(widgets, w.id, "later"))}
+      onRemove={() => onRemove(w.id)}
+    />
+  );
 
   const onLayoutChange = (layout: Layout) => {
     const next = fromLayout(widgets, layout);
@@ -92,9 +90,10 @@ export function DashboardGrid({
         onLayoutChange={onLayoutChange}
         className={cn("metrics-grid", editing && "metrics-grid-editing")}
       >
-        {widgets.map((w) => (
+        {/* Children in reading order, so Tab and a screen reader follow the layout on screen, not the stored array. */}
+        {ordered.map((w, at) => (
           <div key={w.id} className="min-w-0">
-            {renderWidget(w, editing ? menuFor(w, w.title ?? w.id) : undefined)}
+            {renderWidget(w, editing ? menuFor(w, at) : undefined)}
           </div>
         ))}
       </GridLayout>

@@ -9,7 +9,7 @@ import type { MetricsQueryRequest } from "./wire";
 /** The server admits three metrics reads per project at once; four in flight keeps one queued there, not six. */
 export const MAX_IN_FLIGHT = 4;
 
-/** FIFO: a settled read, kept or refused, starts the next one. */
+/** FIFO: a settled read, kept or refused, starts the next one; an aborted read still waiting leaves without running. */
 export class Limiter {
   private running = 0;
   private queue: (() => void)[] = [];
@@ -24,9 +24,10 @@ export class Limiter {
     return this.queue.length;
   }
 
-  run<T>(work: () => Promise<T>): Promise<T> {
+  run<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const start = () => {
+        signal?.removeEventListener("abort", leave);
         this.running++;
         work()
           .then(resolve, reject)
@@ -35,8 +36,16 @@ export class Limiter {
             this.queue.shift()?.();
           });
       };
-      if (this.running < this.max) start();
-      else this.queue.push(start);
+      const leave = () => {
+        this.queue = this.queue.filter((q) => q !== start);
+        reject(signal!.reason);
+      };
+      if (this.running < this.max) {
+        start();
+      } else {
+        this.queue.push(start);
+        signal?.addEventListener("abort", leave, { once: true });
+      }
     });
   }
 
@@ -63,7 +72,7 @@ export const isBusy = (err: unknown) => (err as ApiError | undefined)?.code === 
 export const widgetQuery = (api: ProjectApi, req: MetricsQueryRequest) =>
   queryOptions({
     queryKey: ["metrics", "query", api.base, req],
-    queryFn: () => widgetLimiter.run(() => api.queryMetrics(req)),
+    queryFn: ({ signal }) => widgetLimiter.run(() => api.queryMetrics(req, signal), signal),
     placeholderData: keepPreviousData,
     retry: (count: number, err: unknown) => count < 1 && isBusy(err),
     retryDelay: 1500,

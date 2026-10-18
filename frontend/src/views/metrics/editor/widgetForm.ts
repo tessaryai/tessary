@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lowerFirst, measureOf, viewOf } from "../metricsRules";
-import type { MetricsCatalog, MetricsCatalogView, MetricsChart, MetricWidgetDefinition } from "../wire";
+import type { MetricsCatalog, MetricsCatalogView, MetricsChart, MetricsFilter, MetricWidgetDefinition } from "../wire";
 
 export type WidgetDraft = {
   title: string;
@@ -11,6 +11,8 @@ export type WidgetDraft = {
   dimension: string | null;
   topN: number | null;
   compare: boolean;
+  /** The editor has no filter control; a widget's stored filters ride through an edit unchanged. */
+  filters: MetricsFilter[] | null;
 };
 
 export const MAX_TITLE = 80;
@@ -20,7 +22,7 @@ export function emptyDraft(catalog: MetricsCatalog): WidgetDraft {
   const view = catalog.views[0];
   return {
     title: "", chart: "number", view: view.name, measures: [view.measures[0].name], note: null, dimension: null,
-    topN: null, compare: false,
+    topN: null, compare: false, filters: [],
   };
 }
 
@@ -35,6 +37,7 @@ export function draftOf(w: MetricWidgetDefinition): WidgetDraft {
     dimension: w.dimension,
     topN: w.top_n,
     compare: w.compare != null,
+    filters: w.filters,
   };
 }
 
@@ -72,6 +75,8 @@ export function validateDraft(d: WidgetDraft, catalog: MetricsCatalog): string |
   if (!view) return "Pick a view.";
   const asked = d.note == null ? d.measures : [...d.measures, d.note];
   if (d.measures.length === 0 || asked.some((m) => !measureOf(view, m))) return "Pick a measure.";
+  if (new Set(d.measures).size !== d.measures.length) return "Pick each measure once.";
+  if (d.note === d.measures[0]) return "Pick a note other than the measure.";
   if (d.chart === "number" && d.measures.length !== 1) return "A number takes one measure.";
   if (d.chart === "timeseries" && d.measures.length !== 1) return "A time series takes one measure.";
   if (d.chart === "table" && d.measures.length > 4) return "A table takes 1 to 4 measures.";
@@ -122,7 +127,7 @@ export function widgetOf(
     view: d.view,
     measures: d.chart === "number" && d.note != null ? [d.measures[0], d.note] : d.measures,
     dimension: d.dimension,
-    filters: [],
+    filters: d.filters,
     top_n: d.topN,
     compare: d.compare ? "previous_window" : null,
     ...placement,

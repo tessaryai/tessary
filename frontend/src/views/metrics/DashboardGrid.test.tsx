@@ -5,6 +5,7 @@
  * widget menu. The placement arithmetic itself is tested in gridLayout.test.ts.
  */
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { METRICS_CATALOG, widget, WINDOW_7D } from "../../test/metricsFixtures";
 import { DashboardGrid } from "./DashboardGrid";
@@ -29,7 +30,16 @@ const GAPPED = [
 
 function renderGrid(widgets: MetricWidgetDefinition[], over: { editing?: boolean; stacked?: boolean } = {}) {
   const handlers = { onPlacements: vi.fn(), onEdit: vi.fn(), onRemove: vi.fn() };
-  render(
+  const view = render(grid(widgets, over, handlers));
+  return { ...handlers, rerender: (next: { editing?: boolean; stacked?: boolean }) => view.rerender(grid(widgets, next, handlers)) };
+}
+
+function grid(
+  widgets: MetricWidgetDefinition[],
+  over: { editing?: boolean; stacked?: boolean },
+  handlers: { onPlacements: () => void; onEdit: () => void; onRemove: () => void },
+): ReactNode {
+  return (
     <DashboardGrid
       widgets={widgets}
       editing={over.editing ?? false}
@@ -47,9 +57,8 @@ function renderGrid(widgets: MetricWidgetDefinition[], over: { editing?: boolean
         />
       )}
       {...handlers}
-    />,
+    />
   );
-  return handlers;
 }
 
 const titles = () => screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"));
@@ -64,6 +73,19 @@ describe("DashboardGrid", () => {
     expect(screen.queryByRole("button", { name: /actions$/ })).toBeNull();
     expect(screen.getByRole("region", { name: "A" }).closest(".react-grid-layout")).toBeNull();
     expect(onPlacements).not.toHaveBeenCalled();
+  });
+
+  // Bug: a page first drawn below lg, or that crosses lg while open, keeps the grid at the 520 px fallback width
+  // because the width hook measured no box on its first render and never looks again.
+  it("aGridFirstDrawnStackedTakesTheBoxWidthOnceUnstacked", () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+    const { rerender } = renderGrid(COMPACT, { stacked: true });
+
+    rerender({ stacked: false });
+
+    // (1000 - 11 gaps of 16) / 12 columns = 68.67 px; four of them and three gaps is 322.67 px.
+    const item = screen.getByRole("region", { name: "A" }).parentElement!;
+    expect(item.style.width).toBe("323px");
   });
 
   // Bug: a viewer's visit rewrites a stored dashboard's placements, or shows edit chrome.
@@ -123,11 +145,12 @@ describe("DashboardGrid", () => {
     expect(onEdit).toHaveBeenCalledTimes(1);
   });
 
-  // Bug: a widget dropped from the grid, or rendered under another widget's title.
-  it("passesTheWidgetsInOrderWithTheirTitlesAsSections", () => {
+  // Bug: the grid's children follow the stored array, so after a drag or a move the Tab and screen-reader order no
+  // longer match the layout on screen; or a widget dropped, or rendered under another widget's title.
+  it("rendersTheWidgetsInReadingOrderWithTheirTitlesAsSections", () => {
     renderGrid([COMPACT[3], COMPACT[0], COMPACT[2], COMPACT[1]], { editing: true });
 
-    expect(titles()).toEqual(["D", "A", "C", "B"]);
+    expect(titles()).toEqual(["A", "B", "C", "D"]);
     for (const t of ["A", "B", "C", "D"]) {
       expect(within(screen.getByRole("region", { name: t })).getByRole("button", { name: `${t} actions` })).toBeTruthy();
     }

@@ -27,7 +27,7 @@ const TRACES_VIEW: MetricsCatalogView = {
   name: "traces",
   label: "Traces",
   description:
-    "One row per trace. Latency is the root span's own interval. Spend and per-trace spend count settled traces only.",
+    "One row per trace, under the trace's own call site. Latency is the root span's own interval. Spend and per-trace spend count settled traces only.",
   dimensions: [
     dim("call_site", "Call site"), dim("name", "Trace name", true), dim("user", "User", true),
     dim("session", "Session", true), dim("outcome", "Outcome"),
@@ -52,7 +52,8 @@ const TRACES_VIEW: MetricsCatalogView = {
 const LLM_CALLS_VIEW: MetricsCatalogView = {
   name: "llm_calls",
   label: "LLM calls",
-  description: "One row per LLM span. Container spans are excluded, so a subtree total is never summed twice.",
+  description:
+    "One row per LLM span, under the span's own call site. Container spans are excluded, so a subtree total is never summed twice. A call in a trace still settling counts in no figure but Calls in traces still settling.",
   dimensions: [dim("call_site", "Call site"), dim("model", "Model"), dim("cost_source", "Cost source")],
   measures: [
     measure("calls", "LLM calls", "count", "zero"),
@@ -73,8 +74,6 @@ const TOOL_CALLS_VIEW: MetricsCatalogView = {
   dimensions: [dim("tool", "Tool"), dim("error_type", "Error type"), dim("scope", "Scope"), dim("tool_type", "Tool type")],
   measures: [
     measure("calls", "Tool calls", "count", "zero"),
-    measure("errored_calls", "Errored calls", "count", "zero"),
-    measure("error_rate", "Error rate", "ratio", "none", ["errored_calls"]),
     measure("retries", "Retries", "count", "zero"),
     measure("latency_p50_ms", "Median latency", "ms", "none", ["latency_n"]),
     measure("latency_p95_ms", "p95 latency", "ms", "none", ["latency_n"]),

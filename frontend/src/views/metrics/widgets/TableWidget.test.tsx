@@ -46,8 +46,16 @@ const models = (): MetricsQueryResult =>
     { key: "gpt-4o", label: "gpt-4o", n: 2208, values: { cost_usd: 4.31, calls: 2208, tokens: 1_100_000, unpriced_calls: 14 } },
   ]);
 
-const body = (w: MetricWidgetDefinition, result: MetricsQueryResult) => (
-  <TableWidget key={w.id} widget={w} view={viewOf(METRICS_CATALOG, w.view)} result={result} window={WINDOW_7D} basePath={BASE} />
+const body = (w: MetricWidgetDefinition, result: MetricsQueryResult, editing = false) => (
+  <TableWidget
+    key={w.id}
+    widget={w}
+    view={viewOf(METRICS_CATALOG, w.view)}
+    result={result}
+    window={WINDOW_7D}
+    basePath={BASE}
+    editing={editing}
+  />
 );
 
 const renderTable = (w: MetricWidgetDefinition, result: MetricsQueryResult) =>
@@ -181,6 +189,16 @@ describe("TableWidget", () => {
 
     fireEvent.keyDown(screen.getByRole("row", { name: "Open traces for summarize" }), { key: "Enter" });
     expect(currentLocation()).toBe(`${BASE}/traces?call_site=summarize&${RANGE}`);
+  });
+
+  // Bug: in edit mode a row still opens Traces, so a click meant for the card leaves the page and drops the draft.
+  it("rowsDoNotOpenAnythingInEditMode", () => {
+    renderRoute(body(BY_CALL_SITE, callSites(), true), { route: `${BASE}/metrics` });
+    expect(screen.queryByRole("row", { name: /^Open traces/ })).toBeNull();
+    expect(bodyRows().every((r) => r.getAttribute("tabindex") == null)).toBe(true);
+    fireEvent.click(bodyRows()[0]);
+    fireEvent.keyDown(bodyRows()[0], { key: "Enter" });
+    expect(currentLocation()).toBe(`${BASE}/metrics`);
   });
 
   // Bug: Space or a click on a call-site row does nothing; a cases row opens Traces, which has no cases.

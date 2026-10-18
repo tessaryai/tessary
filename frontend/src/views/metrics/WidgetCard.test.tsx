@@ -93,11 +93,24 @@ describe("WidgetCard", () => {
     expect(busyRetry).toHaveBeenCalledTimes(1);
   });
 
-  // Bug: an empty window draws "$0.00" or an empty axis instead of saying nothing ran.
-  it("emptyResultSaysNothingRan", () => {
-    renderCards(card(SPEND, ready(EMPTY_METRICS_RESULT)));
-    expect(within(region("Spend")).getByText("Nothing ran in this window.")).toBeTruthy();
-    expect(screen.queryByText("$0.00")).toBeNull();
+  // Bug: an empty window draws an empty axis or an empty table instead of saying nothing ran.
+  it("anEmptyChartOrTableSaysNothingRan", () => {
+    const chart = widget({ id: "chart", title: "Spend over time", chart: "timeseries" });
+    const table = widget({ id: "table", title: "By model", chart: "table", dimension: "model" });
+    renderCards(card(chart, ready(EMPTY_METRICS_RESULT)), card(table, ready(EMPTY_METRICS_RESULT)));
+    expect(within(region("Spend over time")).getByText("Nothing ran in this window.")).toBeTruthy();
+    expect(within(region("By model")).getByText("Nothing ran in this window.")).toBeTruthy();
+  });
+
+  // Bug: a number tile over an empty window says "Nothing ran" and hides the 0 and its delta, so cases dropping from
+  // 5 to none reads as no news.
+  it("anEmptyNumberShowsZeroAndItsDelta", () => {
+    const cases = widget({ id: "cases", title: "Cases opened", view: "cases", measures: ["cases"], compare: "previous_window" });
+    renderCards(card(cases, ready(totalResult("cases", { cases: 0 }, 0, { cases: 5 }))));
+    expect(within(region("Cases opened")).getByText("0")).toBeTruthy();
+    expect(within(region("Cases opened")).getByLabelText("Change from the previous window").textContent)
+      .toBe("-5 vs previous 7 days");
+    expect(screen.queryByText("Nothing ran in this window.")).toBeNull();
   });
 
   // Bug: a widget rendered by the wrong body, or a chart and a table that both draw as numbers.
@@ -146,6 +159,16 @@ describe("WidgetCard", () => {
     expect(within(region("Tool calls")).getByText("Not filtered by call site")).toBeTruthy();
     expect(within(region("Spend")).queryByText("Not filtered by call site")).toBeNull();
     expect(within(region("Unfiltered")).queryByText("Not filtered by call site")).toBeNull();
+  });
+
+  // Bug: in edit mode a call-site table still says "Select a row to open its traces" while its rows open nothing.
+  it("aTableOffersNoRowLinksInEditMode", () => {
+    const table = widget({ id: "table", title: "By call site", chart: "table", view: "traces", measures: ["traces"], dimension: "call_site" });
+    const result = tableResult("traces", "call_site", [{ key: "chat", label: "chat", n: 3, values: { traces: 3 } }]);
+    renderCards(card(table, ready(result)), card({ ...table, id: "edit", title: "Editing" }, ready(result), { editing: true }));
+    expect(within(region("By call site")).getByText("Select a row to open its traces")).toBeTruthy();
+    expect(within(region("Editing")).queryByText("Select a row to open its traces")).toBeNull();
+    expect(within(region("Editing")).queryByRole("row", { name: "Open traces for chat" })).toBeNull();
   });
 
   // Bug: edit mode gives no handle to drag by and no menu; read mode shows a grip that does nothing.

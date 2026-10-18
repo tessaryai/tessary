@@ -9,9 +9,10 @@ import { toAxis } from "../../classifiers/chartRules";
 import { Legend } from "../../components/chart/Legend";
 import { nearestPoint } from "../../components/chart/nearestPoint";
 import { Tooltip } from "../../components/chart/Tooltip";
+import { useHeight } from "../../components/chart/useHeight";
 import { useWidth } from "../../components/chart/useWidth";
 import {
-  axisTicks, axisUnit, bucketLabel, formatValue, HOUR_MS, type Series, seriesColour, seriesPaths, timeTicks,
+  axisTicks, axisUnit, bucketLabel, formatValue, HOUR_MS, type Series, seriesColour, seriesDash, seriesPaths, placeTicks, timeTicks,
   type Window,
 } from "../metricsRules";
 import type { MetricsUnit } from "../wire";
@@ -21,8 +22,8 @@ const MR = 8;
 const MT = 10;
 /** The x-axis band under the plot: tick marks and their labels. */
 const AXIS_BAND = 22;
-/** About half the width of a day label ("Oct 11"); a tick label that would overflow the edge is anchored to it. */
-const TICK_HALF = 22;
+/** The one legend line chartHeightFor budgets; each further line the legend wraps to comes out of the plot. */
+const LEGEND_LINE = 18;
 const BUCKET_MS = { hour: HOUR_MS, day: 24 * HOUR_MS, week: 7 * 24 * HOUR_MS };
 
 type Granularity = "hour" | "day" | "week";
@@ -35,7 +36,7 @@ export function TimeSeriesChart({
   window,
   granularity,
   series,
-  height,
+  height: cardHeight,
   bars,
 }: {
   title: string;
@@ -50,6 +51,8 @@ export function TimeSeriesChart({
   // Only a keyboard reader hears the buckets: a mouse moving over the chart would otherwise talk over everything.
   const [keyboard, setKeyboard] = useState(false);
   const [boxRef, W] = useWidth();
+  const [legendRef, legendHeight] = useHeight<HTMLUListElement>();
+  const height = cardHeight - Math.max(0, legendHeight - LEGEND_LINE);
   const liveId = useId();
 
   const from = Date.parse(window.from);
@@ -69,7 +72,7 @@ export function TimeSeriesChart({
   const buckets = series[0]?.points.map((p) => p.at) ?? [];
   const n = buckets.length;
   const spans = buckets.map((at) => ({ a: x(at), b: x(at + bucketMs) }));
-  const ticks = timeTicks(window, granularity);
+  const ticks = placeTicks(timeTicks(window, granularity), x, ML - 6, W);
 
   const shown = hover != null && hover < n ? hover : null;
   const hoverX = shown == null ? null : (spans[shown].a + spans[shown].b) / 2;
@@ -145,18 +148,14 @@ export function TimeSeriesChart({
               </text>
             </g>
           ))}
-          {ticks.map((t) => {
-            const px = x(t.at);
-            const anchor = px + TICK_HALF > W ? "end" : px - TICK_HALF < ML - 6 ? "start" : "middle";
-            return (
-              <g key={t.at}>
-                <line x1={px} x2={px} y1={PB} y2={PB + 4} stroke="var(--color-chart-grid)" strokeWidth={1} />
-                <text x={px} y={height - 4} textAnchor={anchor} fill="var(--color-muted)" className="font-mono text-small">
-                  {t.label}
-                </text>
-              </g>
-            );
-          })}
+          {ticks.map((t) => (
+            <g key={t.at}>
+              <line x1={t.px} x2={t.px} y1={PB} y2={PB + 4} stroke="var(--color-chart-grid)" strokeWidth={1} />
+              <text x={t.px} y={height - 4} textAnchor={t.anchor} fill="var(--color-muted)" className="font-mono text-small">
+                {t.label}
+              </text>
+            </g>
+          ))}
 
           {bars
             ? series.map((s, k) =>
@@ -171,8 +170,10 @@ export function TimeSeriesChart({
                       width={slot.w}
                       height={Math.max(0, y(0) - y(p.v))}
                       rx={Math.min(2, slot.w / 3)}
-                      fill={seriesColour(s)}
-                      fillOpacity={s.other ? 0.5 : undefined}
+                      // The fold is a dashed outline at full strength: half a fill would fall under 3:1 on the card.
+                      fill={s.other ? "none" : seriesColour(s)}
+                      stroke={s.other ? seriesColour(s) : undefined}
+                      strokeDasharray={s.other ? seriesDash(s) : undefined}
                     />
                   );
                 }),
@@ -188,7 +189,7 @@ export function TimeSeriesChart({
                       fill="none"
                       stroke={stroke}
                       strokeWidth={width}
-                      strokeDasharray={s.other ? "4 3" : undefined}
+                      strokeDasharray={seriesDash(s) || undefined}
                       strokeLinejoin="round"
                     />
                     <path d={paths.dashed} fill="none" stroke={stroke} strokeWidth={width} strokeDasharray="3 3" />
@@ -232,7 +233,14 @@ export function TimeSeriesChart({
       </div>
       {series.length > 1 && (
         <Legend
-          items={series.map((s) => ({ key: String(s.key), label: s.label, colour: seriesColour(s), dashed: s.other }))}
+          ref={legendRef}
+          items={series.map((s) => ({
+            key: String(s.key),
+            label: s.label,
+            colour: seriesColour(s),
+            dashed: s.other,
+            dash: bars ? undefined : seriesDash(s),
+          }))}
         />
       )}
     </div>

@@ -18,8 +18,8 @@ public enum MetricsView {
     TRACES(
             "traces",
             "Traces",
-            "One row per trace. Latency is the root span's own interval. Spend and per-trace spend count settled traces"
-                    + " only.",
+            "One row per trace, under the trace's own call site. Latency is the root span's own interval. Spend and"
+                    + " per-trace spend count settled traces only.",
             "trace t",
             "t.project_id = :pid AND t.is_deleted IS NOT TRUE",
             "t.started_at",
@@ -126,7 +126,9 @@ public enum MetricsView {
     LLM_CALLS(
             "llm_calls",
             "LLM calls",
-            "One row per LLM span. Container spans are excluded, so a subtree total is never summed twice.",
+            "One row per LLM span, under the span's own call site. Container spans are excluded, so a subtree total is"
+                    + " never summed twice. A call in a trace still settling counts in no figure but Calls in traces still"
+                    + " settling.",
             "span s",
             "s.project_id = :pid AND s.kind = 'llm' AND NOT s.is_deleted",
             "s.started_at",
@@ -139,11 +141,11 @@ public enum MetricsView {
                     measure(
                             "calls",
                             "LLM calls",
-                            "count(*) FILTER (WHERE s.total_tokens IS NOT NULL)",
+                            "count(*) FILTER (WHERE t.is_settled AND s.total_tokens IS NOT NULL)",
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
-                            false),
+                            true),
                     measure(
                             "tokens",
                             "Tokens",
@@ -179,11 +181,12 @@ public enum MetricsView {
                     measure(
                             "unpriced_calls",
                             "Unpriced calls",
-                            "count(*) FILTER (WHERE s.cost_source = 'unpriced' AND s.total_tokens IS NOT NULL)",
+                            "count(*) FILTER (WHERE t.is_settled AND s.cost_source = 'unpriced' AND s.total_tokens IS"
+                                    + " NOT NULL)",
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
-                            false),
+                            true),
                     measure(
                             "unsettled_calls",
                             "Calls in traces still settling",
@@ -204,11 +207,12 @@ public enum MetricsView {
                     measure(
                             "spending_traces",
                             "Traces with token usage",
-                            "count(DISTINCT s.trace_id COLLATE \"C\") FILTER (WHERE s.total_tokens IS NOT NULL)",
+                            "count(DISTINCT s.trace_id COLLATE \"C\") FILTER (WHERE t.is_settled AND s.total_tokens IS"
+                                    + " NOT NULL)",
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
-                            false))),
+                            true))),
 
     TOOL_CALLS(
             "tool_calls",
@@ -225,23 +229,6 @@ public enum MetricsView {
                     dimension("tool_type", "Tool type", unattributed("tc.tool_type"), false)),
             List.of(
                     measure("calls", "Tool calls", "count(*)", Unit.COUNT, GapFill.ZERO, false, false),
-                    measure(
-                            "errored_calls",
-                            "Errored calls",
-                            "count(*) FILTER (WHERE tc.is_error)",
-                            Unit.COUNT,
-                            GapFill.ZERO,
-                            false,
-                            false),
-                    measure(
-                            "error_rate",
-                            "Error rate",
-                            "(count(*) FILTER (WHERE tc.is_error))::float8 / NULLIF(count(*), 0)",
-                            Unit.RATIO,
-                            GapFill.NONE,
-                            false,
-                            false,
-                            "errored_calls"),
                     measure(
                             "retries",
                             "Retries",

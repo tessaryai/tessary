@@ -14,10 +14,11 @@ import {
 
 const draft = (over: Partial<WidgetDraft> = {}): WidgetDraft => ({
   title: "", chart: "number", view: "llm_calls", measures: ["cost_usd"], note: null, dimension: null, topN: null,
-  compare: false, ...over,
+  compare: false, filters: [], ...over,
 });
 
 const viewNamed = (name: string) => METRICS_CATALOG.views.find((v) => v.name === name);
+const model = { field: "model", op: "in" as const, values: ["gpt-5"] };
 
 describe("emptyDraft and draftOf", () => {
   // Bug: a new widget opens on a view or measure the catalog does not list, so the first save is refused.
@@ -43,6 +44,9 @@ describe("emptyDraft and draftOf", () => {
       { id: "b", chart: "table", view: "traces", measures: ["cost_usd", "traces"], dimension: "call_site", top_n: 20 },
       draft({ chart: "table", view: "traces", measures: ["cost_usd", "traces"], dimension: "call_site", topN: 20 }),
     ],
+    // Bug: filters stored through the API dropped on an edit, so a title change silently widens the widget's query.
+    ["stored filters", { id: "f", filters: [model] }, draft({ filters: [model] })],
+    ["stored null filters", { id: "f", filters: null }, draft({ filters: null })],
   ])("draftOfSplitsANumberIntoMeasureAndNote (%s)", (_name, stored, expected) => {
     expect(draftOf(widget(stored))).toEqual(expected);
   });
@@ -150,6 +154,13 @@ describe("validateDraft", () => {
       draft({ chart: "table", view: "traces", measures: ["traces", "errored_traces", "cost_usd", "usd_per_trace", "latency_n"] }),
       "A table takes 1 to 4 measures.",
     ],
+    // Bug: a table with one measure twice, duplicate columns and React keys; or a note that repeats the figure.
+    [
+      "table repeating a measure",
+      draft({ chart: "table", measures: ["cost_usd", "calls", "cost_usd"], topN: 500 }),
+      "Pick each measure once.",
+    ],
+    ["number whose note is its measure", draft({ note: "cost_usd", title: long }), "Pick a note other than the measure."],
     ["table without a dimension", draft({ chart: "table", topN: 500 }), "A table needs a dimension."],
     ["time series top 6", draft({ chart: "timeseries", topN: 6, title: long }), "Top N is 1 to 5 on a time series."],
     ["time series top 0", draft({ chart: "timeseries", topN: 0 }), "Top N is 1 to 5 on a time series."],
@@ -221,6 +232,7 @@ describe("widgetOf", () => {
       { id: "w1", measures: ["cost_usd", "usd_per_trace"], compare: "previous_window", ...at },
     ],
     ["number without a note", draft({ title: "Spend" }), { id: "w1", title: "Spend", ...at }],
+    ["stored filters kept", draft({ filters: [model] }), { id: "w1", filters: [model], ...at }],
     [
       "table",
       draft({ chart: "table", measures: ["cost_usd", "calls"], dimension: "model", topN: 20 }),

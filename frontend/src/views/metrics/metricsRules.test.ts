@@ -12,7 +12,7 @@ import {
   axisTicks, axisUnit, barsFor, bucketLabel, chartHeightFor, companionNotes, copyName, deltaText, emptyResult,
   filteredByCallSite, formatValue, hasDimension, lowerFirst, measureOf, nextHour, noteText, parseRange, RANGE_PRESETS,
   rangeLabel, rangeNoun, rangeParams, type RangeState, resolveWindow, type Series, seriesColour, seriesOf, seriesPaths,
-  timeTicks, unpricedOf, unpricedTotal, validateWindow, viewOf, widgetRequest,
+  placeTicks, thinTicks, timeTicks, unpricedOf, unpricedTotal, validateWindow, viewOf, widgetRequest,
 } from "./metricsRules";
 import type { MetricsCatalogMeasure, MetricsQueryResult, MetricsUnit } from "./wire";
 
@@ -67,7 +67,10 @@ describe("URL range state", () => {
     ["range=24h", { kind: "preset", key: "24h" }],
     ["range=90d", { kind: "preset", key: "90d" }],
     ["range=1y", { kind: "preset", key: "30d" }],
-    ["range=custom&from=2026-10-01T09:00:00Z&to=2026-10-03T09:00:00Z", custom("2026-10-01T09:00:00Z", "2026-10-03T09:00:00Z")],
+    ["range=custom&from=2026-10-01T09:00:00Z&to=2026-10-03T09:00:00Z", custom("2026-10-01T09:00:00.000Z", "2026-10-03T09:00:00.000Z")],
+    // Bug: a date-only or offset pair passes Date.parse, reaches the server as typed, and Instant.parse refuses it.
+    ["range=custom&from=2026-10-01&to=2026-10-08", custom("2026-10-01T00:00:00.000Z", "2026-10-08T00:00:00.000Z")],
+    ["range=custom&from=2026-10-01T11:30:00%2B02:00&to=2026-10-02T09:30:00Z", custom("2026-10-01T09:30:00.000Z", "2026-10-02T09:30:00.000Z")],
     ["range=custom&from=2026-10-03T09:00:00Z&to=2026-10-01T09:00:00Z", { kind: "preset", key: "30d" }],
     ["range=custom&from=2026-06-01T00:00:00Z&to=2026-10-01T00:00:00Z", { kind: "preset", key: "30d" }],
     ["range=custom&from=&to=2026-10-03T09:00:00Z", { kind: "preset", key: "30d" }],
@@ -82,7 +85,7 @@ describe("URL range state", () => {
   it.each<RangeState>([
     { kind: "preset", key: "24h" },
     { kind: "preset", key: "90d" },
-    custom("2026-10-01T09:00:00Z", "2026-10-03T09:00:00Z"),
+    custom("2026-10-01T09:00:00.000Z", "2026-10-03T09:00:00.000Z"),
   ])("rangeParamsRoundTripThroughParseRange (%o)", (range) => {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(rangeParams(range))) if (v != null) params.set(k, v);
@@ -103,7 +106,7 @@ describe("URL range state", () => {
     ["soon", "2026-10-03T09:00:00Z", { error: "Pick a start and an end." }],
     ["2026-10-03T09:00:00Z", "2026-10-03T09:00:00Z", { error: "The start must be before the end." }],
     ["2026-10-03T09:00:00Z", "2026-07-01T09:00:00Z", { error: "The start must be before the end." }],
-    ["2026-07-20T10:00:00Z", "2026-10-18T10:00:00Z", { window: { from: "2026-07-20T10:00:00Z", to: "2026-10-18T10:00:00Z" } }],
+    ["2026-07-20T10:00:00Z", "2026-10-18T10:00:00Z", { window: { from: "2026-07-20T10:00:00.000Z", to: "2026-10-18T10:00:00.000Z" } }],
     ["2026-07-20T09:59:00Z", "2026-10-18T10:00:00Z", { error: "Pick a window of 90 days or less." }],
   ])("validateWindowMessagesInOrder (%s, %s)", (from, to, result) => {
     expect(validateWindow(from, to)).toEqual(result);
@@ -134,6 +137,7 @@ describe("URL range state", () => {
 describe("widgetRequest", () => {
   const callSite = { field: "call_site", op: "in" as const, values: ["chat"] };
   const model = { field: "model", op: "in" as const, values: ["gpt-5"] };
+  const three = ["a", "b", "c"].map((m) => ({ field: "model", op: "in" as const, values: [m] }));
 
   // Bug: a call-site filter on a view without that dimension, which the server refuses with UNKNOWN_FILTER_FIELD;
   // stored filters dropped; an empty list sent as []; granularity on a number.
@@ -174,6 +178,14 @@ describe("widgetRequest", () => {
       { view: "traces", measures: ["traces"], dimension: "call_site", filters: null, granularity: null, top_n: 20, compare: null },
     ],
     [
+      // Bug: a widget stored with three filters gains a fourth and the server refuses it with TOO_MANY_FILTERS.
+      "a widget at the filter limit is not narrowed",
+      { id: "ts", chart: "timeseries", filters: three },
+      "chat",
+      "llm_calls",
+      { view: "llm_calls", measures: ["cost_usd"], dimension: null, filters: three, granularity: "auto", top_n: null, compare: null },
+    ],
+    [
       "the catalog has not loaded",
       { id: "s" },
       "chat",
@@ -193,6 +205,13 @@ describe("widgetRequest", () => {
     ["llm_calls", "traces", false],
   ])("filteredByCallSite (widget %s, catalog view %s)", (widgetView, viewName, filtered) => {
     expect(filteredByCallSite(widget({ id: "w", view: widgetView }), viewName ? view(viewName) : undefined)).toBe(filtered);
+  });
+
+  // Bug: a widget at the three-filter limit says nothing while the call-site chip does not narrow it.
+  it("aWidgetAtTheFilterLimitIsNotFilteredByCallSite", () => {
+    const at = (n: number) => widget({ id: "w", filters: three.slice(0, n) });
+    expect(filteredByCallSite(at(2), view("llm_calls"))).toBe(true);
+    expect(filteredByCallSite(at(3), view("llm_calls"))).toBe(false);
   });
 
   // Bug: a lookup that throws while the catalog is still loading, so the page crashes on first paint.
@@ -223,8 +242,6 @@ describe("formatting", () => {
     ["tokens", 1_200_000, "1.2M"],
     ["tokens", 12_400, "12.4K"],
     ["tokens", 950, "950"],
-    ["ratio", 0.123, "12.3%"],
-    ["ratio", 0, "0.0%"],
     ["count", 1930, "1,930"],
     ["count", 0, "0"],
   ])("formatValuePerUnit (%s %s)", (unit, v, text) => {
@@ -242,7 +259,6 @@ describe("formatting", () => {
     [99.8, 100, "usd", "0%"],
     [1284, 1000, "ms", "+28%"],
     [5, 0, "ms", "—"],
-    [0.2, 0.1, "ratio", "+100%"],
     [0, 5, "tokens", "-100%"],
     [12, 10, "count", "+2"],
     [10, 12, "count", "-2"],
@@ -316,7 +332,7 @@ describe("companionNotes", () => {
       ],
     ],
     ["traces skips its own note measure", "traces", { unterminated_traces: 2 }, 50, ["traces", "unterminated_traces"], []],
-    ["tool_calls has none", "tool_calls", { errored_calls: 5, latency_n: 9 }, 10, [], []],
+    ["tool_calls has none", "tool_calls", { retries: 5, latency_n: 9 }, 10, [], []],
     ["cases has none", "cases", { open_cases: 3 }, 10, [], []],
   ])("companionNotesPerViewOnlyAboveZeroAndSkipTheWidgetsOwnMeasures (%s)", (_name, viewName, values, n, skip, lines) => {
     expect(companionNotes(viewName, values, n, skip)).toEqual(lines);
@@ -466,6 +482,31 @@ describe("time axis", () => {
     expect(labels(from, to, unit)).toEqual(expected);
   });
 
+  // Bug: a tick for every week of a 90-day window, or every 6 hours of a 3-day one, prints its labels on top of each
+  // other on a half-width chart.
+  it.each<[number, number, number[]]>([
+    [7, 464, [0, 1, 2, 3, 4, 5, 6]],
+    [8, 416, [0, 1, 2, 3, 4, 5, 6, 7]],
+    [9, 416, [0, 2, 4, 6, 8]],
+    [13, 464, [0, 2, 4, 6, 8, 10, 12]],
+    [13, 300, [0, 3, 6, 9, 12]],
+    [0, 464, []],
+  ])("thinTicksKeepsLabelsAtLeastASlotApart (%i ticks over %i px)", (n, width, kept) => {
+    expect(thinTicks([...Array(n).keys()], width)).toEqual(kept);
+  });
+
+  // Bug: a label at either end of the axis is pulled inward to stay on the card and then prints against its
+  // neighbour ("Oct 16Oct 18"); or a label in the middle is moved.
+  it.each<[string, number[], number, number, [number, string][]]>([
+    ["both ends crowd", [48, 114, 180, 246, 312, 378, 444, 510], 42, 520,
+      [[48, "start"], [180, "middle"], [246, "middle"], [312, "middle"], [378, "middle"], [510, "end"]]],
+    ["room to spare", [100, 200, 300, 400], 42, 520, [[100, "middle"], [200, "middle"], [300, "middle"], [400, "middle"]]],
+    ["two ticks keep both", [48, 90], 42, 150, [[48, "start"], [90, "middle"]]],
+  ])("placeTicksAnchorsTheEndsAndDropsTheNeighbourTheyWouldTouch (%s)", (_, ats, left, right, expected) => {
+    const placed = placeTicks(ats.map((at) => ({ at, label: String(at) })), (t) => t, left, right);
+    expect(placed.map((t) => [t.px, t.anchor])).toEqual(expected);
+  });
+
   // Bug: a tick labelled 12:00 drawn at the window start instead of at noon.
   it("bucketLabelAndTimeTicksPerUnit (tick positions)", () => {
     expect(timeTicks({ from: "2026-10-17T10:00:00Z", to: "2026-10-17T13:00:00Z" }, "hour")).toEqual([
@@ -475,13 +516,11 @@ describe("time axis", () => {
 });
 
 describe("value axis", () => {
-  // Bug: a seconds ladder built from milliseconds ("5000s"), a percent ladder from a 0..1 ratio, dollars without cents.
+  // Bug: a seconds ladder built from milliseconds ("5000s"), or dollars without cents.
   it.each<[MetricsUnit, number, number, string[]]>([
     ["ms", 6000, 6, ["0s", "2s", "4s", "6s"]],
     ["ms", 8120, 10, ["0s", "5s", "10s"]],
     ["ms", 1200, 1.5, ["0s", "0.5s", "1s", "1.5s"]],
-    ["ratio", 0.3, 30, ["0%", "10%", "20%", "30%"]],
-    ["ratio", 0.009, 1, ["0%", "0.5%", "1%"]],
     ["usd", 1.42, 1.5, ["$0.00", "$0.50", "$1.00", "$1.50"]],
     ["usd", 0.0036, 0.004, ["$0.000", "$0.001", "$0.002", "$0.003", "$0.004"]],
     ["tokens", 3_400_000, 4_000_000, ["0", "1M", "2M", "3M", "4M"]],
@@ -492,13 +531,12 @@ describe("value axis", () => {
     expect(axis.ticks.map((t) => t.label)).toEqual(expected);
   });
 
-  // Bug: tokens or ratios drawn as bars, or counts as lines.
+  // Bug: tokens drawn as bars, or counts as lines.
   it.each<[MetricsUnit, boolean, string]>([
     ["count", true, "count"],
     ["tokens", false, "count"],
     ["usd", false, "usd"],
     ["ms", false, "seconds"],
-    ["ratio", false, "percent"],
   ])("countUnitsDrawBarsAndMapToTheirAxis (%s)", (unit, bars, axis) => {
     expect(barsFor(unit)).toBe(bars);
     expect(axisUnit(unit)).toBe(axis);

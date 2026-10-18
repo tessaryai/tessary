@@ -4,10 +4,10 @@
  * resize, a mount-time compaction or a keyboard move writes back onto the dashboard the server validates.
  */
 import { describe, expect, it } from "vitest";
-import { widget } from "../../test/metricsFixtures";
+import { DEFAULT_DASHBOARD, widget } from "../../test/metricsFixtures";
 import {
   clampPlacement, compactWidgets, fromLayout, GRID_MARGIN, moveWidget, placementForNew, placementsEqual, readingOrder,
-  ROW_HEIGHT, toLayout,
+  type Placement, ROW_HEIGHT, toLayout,
 } from "./gridLayout";
 
 const place = (id: string, x: number, y: number, w: number, h: number) => widget({ id, x, y, w, h });
@@ -102,6 +102,31 @@ describe("gridLayout", () => {
 
     expect(moveWidget(row, "a", "earlier")).toBe(row);
     expect(moveWidget(row, "c", "later")).toBe(row);
+  });
+
+  // Bug: on the default dashboard "Move later" on p95 latency and "Move earlier" on Tokens leave the widget where it was
+  // in reading order and open a hole, because a swap across rows of different widths overlaps and compaction undoes it.
+  it("everyEnabledMoveOnTheDefaultDashboardSwapsTheNeighboursAndStaysCompact", () => {
+    const ws = DEFAULT_DASHBOARD.definition.widgets;
+    const before = readingOrder(ws).map((w) => w.id);
+    const overlap = (a: Placement, b: Placement) =>
+      a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    for (const [i, id] of before.entries()) {
+      for (const dir of ["earlier", "later"] as const) {
+        const j = dir === "earlier" ? i - 1 : i + 1;
+        if (j < 0 || j >= before.length) continue;
+        const moved = moveWidget(ws, id, dir);
+        const expected = [...before];
+        [expected[i], expected[j]] = [expected[j], expected[i]];
+        expect(readingOrder(moved).map((w) => w.id), `${id} ${dir}`).toEqual(expected);
+        expect(placements(compactWidgets(moved)), `${id} ${dir} is compact`).toEqual(placements(moved));
+        for (const a of moved) {
+          expect(a.x + a.w, `${a.id} inside the grid`).toBeLessThanOrEqual(12);
+          for (const b of moved) if (a !== b) expect(overlap(a, b), `${a.id} over ${b.id}`).toBe(false);
+        }
+        expect(moved.map((w) => w.id)).toEqual(ws.map((w) => w.id));
+      }
+    }
   });
 
   // Bug: a new table saved at a tile's size, or a new widget dropped over an existing one.

@@ -57,6 +57,7 @@ public class MetricDashboardService {
 
     public MetricDashboard create(
             String projectId, @Nullable String userId, MetricDashboardCreateRequest req, boolean canManage) {
+        refuseBuiltInName(req.name());
         MetricDashboardDefinition def = sourceOf(projectId, req);
         MetricDashboardValidator.validate(def);
         if (repo.count(projectId) >= MetricsQueryValidator.MAX_DASHBOARDS) {
@@ -76,6 +77,7 @@ public class MetricDashboardService {
     public MetricDashboard update(String projectId, String id, MetricDashboardUpdateRequest req, boolean canManage) {
         if (DefaultDashboard.ID.equals(id)) throw new TessaryException(MetricsError.BUILT_IN_READ_ONLY);
         MetricDashboardRow existing = stored(projectId, id);
+        refuseBuiltInName(req.name());
         MetricDashboardValidator.validate(req.definition());
         MetricDashboardRow row = new MetricDashboardRow(
                 existing.id(),
@@ -97,6 +99,11 @@ public class MetricDashboardService {
     public void delete(String projectId, String id) {
         if (DefaultDashboard.ID.equals(id)) throw new TessaryException(MetricsError.BUILT_IN_READ_ONLY);
         if (!repo.delete(projectId, id)) throw new TessaryException(MetricsError.DASHBOARD_NOT_FOUND, id);
+    }
+
+    /** The built-in has no row, so the unique index cannot see that a stored "Default" would sit beside it. */
+    private static void refuseBuiltInName(String name) {
+        if (DefaultDashboard.NAME.equals(name.strip())) throw new TessaryException(MetricsError.DUPLICATE_NAME, name);
     }
 
     private MetricDashboardDefinition sourceOf(String projectId, MetricDashboardCreateRequest req) {

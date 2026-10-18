@@ -110,20 +110,52 @@ class MetricsQueryServiceTest {
                         1,
                         4,
                         0,
-                        vals("latency_p95_ms", 800.0, "error_rate", 0.25, "latency_n", 4.0, "errored_calls", 1.0)),
+                        vals(
+                                "latency_p95_ms",
+                                800.0,
+                                "usd_per_trace",
+                                0.5,
+                                "latency_n",
+                                4.0,
+                                "unterminated_traces",
+                                0.0,
+                                "rootless_traces",
+                                0.0,
+                                "unpriced_traces",
+                                0.0,
+                                "unsettled_traces",
+                                0.0,
+                                "priced_traces",
+                                4.0)),
                 raw(
                         at("2026-10-13T00:00:00Z"),
                         null,
                         1,
                         2,
                         0,
-                        vals("latency_p95_ms", 300.0, "error_rate", 0.0, "latency_n", 2.0, "errored_calls", 0.0))));
+                        vals(
+                                "latency_p95_ms",
+                                300.0,
+                                "usd_per_trace",
+                                0.25,
+                                "latency_n",
+                                2.0,
+                                "unterminated_traces",
+                                0.0,
+                                "rootless_traces",
+                                0.0,
+                                "unpriced_traces",
+                                0.0,
+                                "unsettled_traces",
+                                0.0,
+                                "priced_traces",
+                                2.0))));
 
         MetricsQueryResult r = service.query(
                 PID,
                 new MetricsQueryRequest(
-                        "tool_calls",
-                        List.of("latency_p95_ms", "error_rate"),
+                        "traces",
+                        List.of("latency_p95_ms", "usd_per_trace"),
                         null,
                         null,
                         "2026-10-11T00:00:00Z",
@@ -143,12 +175,20 @@ class MetricsQueryServiceTest {
                                 vals(
                                         "latency_p95_ms",
                                         800.0,
-                                        "error_rate",
-                                        0.25,
+                                        "usd_per_trace",
+                                        0.5,
                                         "latency_n",
                                         4.0,
-                                        "errored_calls",
-                                        1.0)),
+                                        "unterminated_traces",
+                                        0.0,
+                                        "rootless_traces",
+                                        0.0,
+                                        "unpriced_traces",
+                                        0.0,
+                                        "unsettled_traces",
+                                        0.0,
+                                        "priced_traces",
+                                        4.0)),
                         new MetricsRow(
                                 "2026-10-12T00:00:00Z",
                                 null,
@@ -157,11 +197,19 @@ class MetricsQueryServiceTest {
                                 vals(
                                         "latency_p95_ms",
                                         null,
-                                        "error_rate",
+                                        "usd_per_trace",
                                         null,
                                         "latency_n",
                                         0.0,
-                                        "errored_calls",
+                                        "unterminated_traces",
+                                        0.0,
+                                        "rootless_traces",
+                                        0.0,
+                                        "unpriced_traces",
+                                        0.0,
+                                        "unsettled_traces",
+                                        0.0,
+                                        "priced_traces",
                                         0.0)),
                         new MetricsRow(
                                 "2026-10-13T00:00:00Z",
@@ -171,12 +219,20 @@ class MetricsQueryServiceTest {
                                 vals(
                                         "latency_p95_ms",
                                         300.0,
-                                        "error_rate",
-                                        0.0,
+                                        "usd_per_trace",
+                                        0.25,
                                         "latency_n",
                                         2.0,
-                                        "errored_calls",
-                                        0.0))),
+                                        "unterminated_traces",
+                                        0.0,
+                                        "rootless_traces",
+                                        0.0,
+                                        "unpriced_traces",
+                                        0.0,
+                                        "unsettled_traces",
+                                        0.0,
+                                        "priced_traces",
+                                        2.0))),
                 r.rows());
     }
 
@@ -400,7 +456,6 @@ class MetricsQueryServiceTest {
         assertEquals("ms", traces.measures().get(7).unit());
         assertEquals("count", traces.measures().get(0).unit());
         assertEquals("tokens", llm.measures().get(1).unit());
-        assertEquals("ratio", c.views().get(2).measures().get(2).unit());
         assertEquals(List.of("auto", "hour", "day", "week"), c.granularities());
         assertEquals(new MetricsCatalogLimits(90, 14, 5, 100, 4, 3, 50, 12, 20), c.limits());
     }

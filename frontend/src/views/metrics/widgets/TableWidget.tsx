@@ -55,7 +55,7 @@ function subLine(measure: string, row: MetricsRow): string | null {
   return null;
 }
 
-export function TableWidget({ widget, view, result, window, basePath }: WidgetBodyProps) {
+export function TableWidget({ widget, view, result, window, basePath, editing }: WidgetBodyProps) {
   const navigate = useNavigate();
   const [sort, setSort] = useState<Sort>({ key: widget.measures[0], dir: "desc" });
   const [showAll, setShowAll] = useState(false);
@@ -139,7 +139,9 @@ export function TableWidget({ widget, view, result, window, basePath }: WidgetBo
             </TR>
           )}
           {rows.map((row) => {
-            const href = metricsLink({ basePath, view: widget.view, dimension: widget.dimension, key: row.key, window });
+            const href = editing
+              ? null
+              : metricsLink({ basePath, view: widget.view, dimension: widget.dimension, key: row.key, window });
             const open = () => {
               if (href) navigate(href);
             };

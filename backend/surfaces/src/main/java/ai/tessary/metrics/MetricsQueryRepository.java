@@ -32,7 +32,7 @@ public class MetricsQueryRepository {
             long rank,
             long n,
             long totalKeys,
-            Map<String, Double> values) {}
+            Map<String, @Nullable Double> values) {}
 
     public record Result(List<Raw> rows, @Nullable List<Raw> previousRows) {}
 
@@ -62,7 +62,7 @@ public class MetricsQueryRepository {
         Instant bucket =
                 st.shape().hasAxis() ? rs.getObject("bkt", OffsetDateTime.class).toInstant() : null;
         boolean grouped = st.shape().hasDimension();
-        Map<String, Double> values = new LinkedHashMap<>();
+        Map<String, @Nullable Double> values = new LinkedHashMap<>();
         for (Column c : st.columns()) {
             if (c.array()) {
                 Array a = rs.getArray(c.alias());

@@ -126,6 +126,27 @@ record MetricsQueryIntegrationTest(
         assertEquals(0.0, traces.get("priced_traces"));
     }
 
+    /**
+     * The bug: a call in a trace still settling counted in calls and unpriced calls while tokens and spend leave it
+     * out, so the Spend tile names it twice and "across N LLM calls" counts calls the token sum does not hold.
+     */
+    @Test
+    @DisplayName("a call in an unsettled trace is in the unsettled count only")
+    void aCallInAnUnsettledTraceIsInTheUnsettledCountOnly() {
+        String pid = project("metrics-unsettled-unpriced");
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanRow span = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", RAN, RAN.plusSeconds(2));
+        fx.withUsage(span, 500L, 500L);
+
+        Map<String, Double> v = number(pid, "llm_calls", "cost_usd", "calls", "spending_traces");
+
+        assertEquals(1.0, v.get("unsettled_calls"));
+        assertEquals(0.0, v.get("unpriced_calls"));
+        assertEquals(0.0, v.get("calls"));
+        assertEquals(0.0, v.get("spending_traces"));
+        assertEquals(0.0, number(pid, "llm_calls", "unpriced_calls").get("unpriced_calls"), "asked alone too");
+    }
+
     /** The bug: latency read as the trace's envelope, so an async child that outlives the turn inflates p95. */
     @Test
     @DisplayName("a child that ends after the root does not move p95")
@@ -351,10 +372,10 @@ record MetricsQueryIntegrationTest(
                         + " are out");
     }
 
-    /** The bug: the error rate or the latency family read from the wrong column or with a fake zero sample. */
+    /** The bug: retries or the latency family read from the wrong column or with a fake zero sample. */
     @Test
-    @DisplayName("tool calls report their error rate, retries and latency family")
-    void toolCallsErrorRateAndLatencyFamily() {
+    @DisplayName("tool calls report their retries and latency family")
+    void toolCallsRetriesAndLatencyFamily() {
         String pid = project("metrics-tools");
         long[] latencies = {100, 200, 300, 400};
         int[] retries = {1, 0, 2, 0};
@@ -373,10 +394,8 @@ record MetricsQueryIntegrationTest(
         SpanRef noLatency = fx.spanSeed(pid).kind("tool").at(RAN).writeRef();
         fx.toolCall(pid, noLatency, "fetch", null, RAN);
 
-        Map<String, Double> v = number(pid, "tool_calls", "error_rate", "latency_p50_ms", "latency_p95_ms", "retries");
+        Map<String, Double> v = number(pid, "tool_calls", "latency_p50_ms", "latency_p95_ms", "retries");
 
-        assertEquals(0.2, num(v.get("error_rate")), 1e-9, "one errored call of five");
-        assertEquals(1.0, v.get("errored_calls"));
         assertEquals(250.0, num(v.get("latency_p50_ms")), 1e-9);
         assertEquals(385.0, num(v.get("latency_p95_ms")), 1e-9, "300 + 0.85 x 100: the call with no latency is out");
         assertEquals(4.0, v.get("latency_n"));
@@ -600,6 +619,7 @@ record MetricsQueryIntegrationTest(
                 "user-1", null, setup.org().id(), setup.project().id(), "member", "tok-1", scope);
     }
 
+    /** One LLM call, its trace settled, so every llm_calls figure counts it. */
     private void llmCall(String pid, String traceId, @Nullable String callSiteId, String model, Instant at) {
         fx.spanSeed(pid)
                 .traceId(traceId)
@@ -609,6 +629,7 @@ record MetricsQueryIntegrationTest(
                 .at(at)
                 .usage(10L, 5L)
                 .write();
+        assertTrue(fx.rollup(pid, traceId));
     }
 
     private void caseRow(String pid, long seq, String detector, String openedAt) {

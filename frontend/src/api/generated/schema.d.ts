@@ -3368,7 +3368,7 @@ export interface components {
             /** Format: int64 */
             n: number;
             values: {
-                [key: string]: number;
+                [key: string]: number | null;
             };
         };
         MetricsTopN: {

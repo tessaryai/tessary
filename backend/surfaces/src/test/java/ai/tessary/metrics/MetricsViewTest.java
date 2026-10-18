@@ -69,15 +69,7 @@ class MetricsViewTest {
                         "priced_traces",
                         "spending_traces"),
                 "tool_calls",
-                List.of(
-                        "calls",
-                        "errored_calls",
-                        "error_rate",
-                        "retries",
-                        "latency_p50_ms",
-                        "latency_p95_ms",
-                        "latency_p99_ms",
-                        "latency_n"),
+                List.of("calls", "retries", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms", "latency_n"),
                 "cases",
                 List.of("cases", "open_cases", "resolved_cases"));
         assertEquals(
@@ -130,17 +122,23 @@ class MetricsViewTest {
                 flagged(true));
     }
 
-    /** The bug: a trace join on a plain call count, or a settled sum with no trace to read is_settled from. */
+    /**
+     * The bug: an llm_calls figure with no trace to read is_settled from, so a call in a trace still settling counts
+     * in one figure and not in the one beside it; or a trace join on a view that has no trace_id to join on.
+     */
     @Test
-    @DisplayName("only the five settled measures of llm_calls need the trace join")
-    void needsTraceIsTrueOnlyForTheFiveSettledMeasuresOfLlmCalls() {
+    @DisplayName("every llm_calls measure needs the trace join, and no other view's does")
+    void needsTraceIsTrueForEveryLlmCallsMeasureOnly() {
         assertEquals(
                 Set.of(
+                        "llm_calls.calls",
                         "llm_calls.tokens",
                         "llm_calls.cost_usd",
                         "llm_calls.usd_per_trace",
+                        "llm_calls.unpriced_calls",
                         "llm_calls.unsettled_calls",
-                        "llm_calls.priced_traces"),
+                        "llm_calls.priced_traces",
+                        "llm_calls.spending_traces"),
                 flagged(false));
     }
 

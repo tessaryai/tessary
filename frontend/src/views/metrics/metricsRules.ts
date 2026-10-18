@@ -12,6 +12,8 @@ export const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 /** Mirrors catalog.limits.max_window_days; the URL is parsed before the catalog loads. */
 export const MAX_WINDOW_DAYS = 90;
+/** Mirrors catalog.limits.max_filters: a widget already at it cannot take the page's call-site filter. */
+export const MAX_FILTERS = 3;
 /** Grid row height and vertical gap in px; gridLayout.ts reads them from here so Triage never loads the grid library. */
 export const ROW_HEIGHT = 72;
 export const GRID_MARGIN_Y = 16;
@@ -45,7 +47,8 @@ export function validateWindow(from: string | null, to: string | null): { window
   if (Number.isNaN(start) || Number.isNaN(end)) return { error: "Pick a start and an end." };
   if (start >= end) return { error: "The start must be before the end." };
   if (end - start > MAX_WINDOW_DAYS * DAY_MS) return { error: "Pick a window of 90 days or less." };
-  return { window: { from: from!, to: to! } };
+  // Canonical instants: the server's Instant.parse refuses a date-only, zone-less or offset value that Date.parse reads.
+  return { window: { from: new Date(start).toISOString(), to: new Date(end).toISOString() } };
 }
 
 export function parseRange(params: URLSearchParams, fallback: MetricsPreset): RangeState {
@@ -94,7 +97,7 @@ export function hasDimension(view: MetricsCatalogView | undefined, name: string)
 }
 
 export function filteredByCallSite(w: MetricWidgetDefinition, view: MetricsCatalogView | undefined): boolean {
-  return view?.name === w.view && hasDimension(view, "call_site");
+  return view?.name === w.view && hasDimension(view, "call_site") && (w.filters?.length ?? 0) < MAX_FILTERS;
 }
 
 export function widgetRequest(
@@ -126,8 +129,7 @@ export function formatValue(unit: MetricsUnit, v: number | null | undefined): st
   if (unit === "count") return count(v);
   if (unit === "tokens") return COMPACT.format(v);
   if (unit === "usd") return v >= 1 ? usd(v) : v === 0 ? "$0.00" : `$${v.toFixed(3)}`;
-  if (unit === "ms") return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`;
-  return `${(v * 100).toFixed(1)}%`;
+  return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`;
 }
 
 const signed = (d: number, text: string) => (d > 0 ? `+${text}` : text);
@@ -236,6 +238,15 @@ export function seriesColour(s: Series): string {
   return s.other ? "var(--color-series-other)" : `var(--color-series-${Math.min(s.rank, 6)})`;
 }
 
+/** A line's second channel after hue: rank 1 solid, then one dash pattern per rank, so a chart reads in greyscale. */
+const RANK_DASH = ["", "8 4", "2 3", "8 3 2 3", "14 4", "2 3 2 3 8 3"];
+const OTHER_DASH = "4 3";
+
+/** The dash pattern for a series' line and legend swatch; "" is solid. */
+export function seriesDash(s: Series): string {
+  return s.other ? OTHER_DASH : RANK_DASH[Math.min(s.rank, 6) - 1];
+}
+
 /**
  * stepPaths joins steps that start within an hour of the last one, which at hour granularity draws through a missing
  * bucket, so each run of non-null buckets is drawn on its own.
@@ -298,6 +309,44 @@ export function timeTicks(window: Window, unit: "hour" | "day" | "week" | null):
   return ticks;
 }
 
+/** "Oct 11" is about 44 px of mono small type; thinning keeps 8 px between two labels, and closer than 4 they touch. */
+const TICK_HALF_PX = 22;
+const TICK_SLOT_PX = 2 * TICK_HALF_PX + 8;
+const TICK_TOUCH_PX = 4;
+
+/** Every k-th tick, the smallest k that gives each kept label a slot of the plot's width. */
+export function thinTicks<T>(ticks: T[], plotWidth: number): T[] {
+  const every = Math.ceil((ticks.length * TICK_SLOT_PX) / plotWidth);
+  return ticks.filter((_, i) => i % every === 0);
+}
+
+export type PlacedTick = { at: number; label: string; px: number; anchor: "start" | "middle" | "end" };
+
+const tickLeft = (t: PlacedTick) =>
+  t.anchor === "start" ? t.px : t.anchor === "end" ? t.px - 2 * TICK_HALF_PX : t.px - TICK_HALF_PX;
+const touching = (a: PlacedTick, b: PlacedTick) => tickLeft(a) + 2 * TICK_HALF_PX + TICK_TOUCH_PX > tickLeft(b);
+
+/**
+ * The thinned ticks between the axis ends `left` and `right`: a label that would cross an end is anchored to it, which
+ * pulls it inward, and the neighbour it would then touch is dropped so the end of the window keeps its label.
+ */
+export function placeTicks(
+  ticks: { at: number; label: string }[],
+  x: (t: number) => number,
+  left: number,
+  right: number,
+): PlacedTick[] {
+  const placed: PlacedTick[] = thinTicks(ticks, right - left).map((t) => {
+    const px = x(t.at);
+    const anchor = px + TICK_HALF_PX > right ? "end" : px - TICK_HALF_PX < left ? "start" : "middle";
+    return { ...t, px, anchor };
+  });
+  const n = placed.length;
+  if (n > 2 && placed[n - 1].anchor === "end" && touching(placed[n - 2], placed[n - 1])) placed.splice(n - 2, 1);
+  if (placed.length > 2 && placed[0].anchor === "start" && touching(placed[0], placed[1])) placed.splice(1, 1);
+  return placed;
+}
+
 export function barsFor(unit: MetricsUnit): boolean {
   return unit === "count";
 }
@@ -305,7 +354,6 @@ export function barsFor(unit: MetricsUnit): boolean {
 export function axisUnit(unit: MetricsUnit): AxisUnit {
   if (unit === "usd") return "usd";
   if (unit === "ms") return "seconds";
-  if (unit === "ratio") return "percent";
   return "count";
 }
 
@@ -319,7 +367,6 @@ export function axisTicks(unit: MetricsUnit, max: number): { top: number; ticks:
   const relabel = (value: number, label: string) => {
     if (unit === "usd") return `$${value.toFixed(usdDecimals)}`;
     if (unit === "ms") return `${value}s`;
-    if (unit === "ratio") return `${value}%`;
     if (unit === "tokens") return COMPACT.format(value);
     return label;
   };

@@ -33,9 +33,9 @@ function RetryNote({ error, onRetry }: { error: ApiError; onRetry: () => void })
   );
 }
 
-function captionOf(widget: MetricWidgetDefinition, result: MetricsQueryResult): string | undefined {
+function captionOf(widget: MetricWidgetDefinition, result: MetricsQueryResult, editing: boolean): string | undefined {
   if (widget.chart === "timeseries") return timeSeriesCaption(result);
-  if (widget.chart === "table") return tableCaption(widget);
+  if (widget.chart === "table" && !editing) return tableCaption(widget);
   return undefined;
 }
 
@@ -63,7 +63,7 @@ export function WidgetCard({
   sub?: string;
 }) {
   const title = widget.title ?? autoTitleOf(widget, view);
-  const caption = sub ?? (state.status === "ready" && view ? captionOf(widget, state.result) : undefined);
+  const caption = sub ?? (state.status === "ready" && view ? captionOf(widget, state.result, editing) : undefined);
   const stale = state.status === "ready" && state.stale;
   const code = state.status === "error" ? (state.error as ApiError | null)?.code : undefined;
   const Body = BODY[widget.chart];
@@ -110,10 +110,17 @@ export function WidgetCard({
         {state.status === "ready" &&
           (view === undefined ? (
             <ErrorNote error={`No metrics view named '${widget.view}'`} />
-          ) : emptyResult(state.result) ? (
+          ) : widget.chart !== "number" && emptyResult(state.result) ? (
             <p className="text-small text-muted">Nothing ran in this window.</p>
           ) : (
-            <Body widget={widget} view={view} result={state.result} window={window} basePath={basePath} />
+            <Body
+              widget={widget}
+              view={view}
+              result={state.result}
+              window={window}
+              basePath={basePath}
+              editing={editing}
+            />
           ))}
       </div>
     </section>

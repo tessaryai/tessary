@@ -80,6 +80,29 @@ describe("Limiter", () => {
     expect(limiter.active).toBe(0);
   });
 
+  // Bug: a read whose window was superseded stays queued, never runs to no purpose, and holds the current reads back.
+  it("anAbortedQueuedReadLeavesTheQueueUnrunAndRejects", async () => {
+    const limiter = new Limiter(1);
+    const first = deferred();
+    const running = new AbortController();
+    const kept = limiter.run(() => first.promise, running.signal);
+    const stale = vi.fn(() => Promise.resolve("stale"));
+    const queued = new AbortController();
+    const dropped = limiter.run(stale, queued.signal);
+    const next = limiter.run(() => Promise.resolve("next"));
+    expect(limiter.waiting).toBe(2);
+
+    queued.abort();
+    await expect(dropped).rejects.toMatchObject({ name: "AbortError" });
+    expect(limiter.waiting).toBe(1);
+    running.abort();
+    first.resolve("a");
+    await expect(kept).resolves.toBe("a");
+    await expect(next).resolves.toBe("next");
+    expect(stale).not.toHaveBeenCalled();
+    expect([limiter.active, limiter.waiting]).toEqual([0, 0]);
+  });
+
   // Bug: a test that leaves four reads pending freezes every later read in its file.
   it("resetDropsTheQueueAndTheActiveCount", async () => {
     const limiter = new Limiter(1);
@@ -116,8 +139,10 @@ describe("query factories", () => {
 
     const result = { view: "llm_calls" };
     api.queryMetrics.mockResolvedValue(result);
-    await expect((q.queryFn as () => Promise<unknown>)()).resolves.toBe(result);
-    expect(api.queryMetrics).toHaveBeenCalledWith(req);
+    // Bug: the query's signal ignored, so a superseded read is neither dropped from the queue nor aborted in flight.
+    const signal = new AbortController().signal;
+    await expect((q.queryFn as (ctx: { signal: AbortSignal }) => Promise<unknown>)({ signal })).resolves.toBe(result);
+    expect(api.queryMetrics).toHaveBeenCalledWith(req, signal);
   });
 
   // Bug: a project switch serves the last project's catalog or dashboards from the cache.
