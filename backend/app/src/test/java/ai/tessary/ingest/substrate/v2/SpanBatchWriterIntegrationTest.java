@@ -277,6 +277,7 @@ class SpanBatchWriterIntegrationTest {
 
         assertEquals(1, isolated.write(pid, batch), "one writable row of four");
         assertEquals(3, isolated.droppedSpans(), "no id, no start time, and an id that is not an identifier");
+        assertEquals(1, isolated.writtenSpans(), "the throughput line counts spans written, not spans offered");
         assertEquals(1, spans.listByTrace(pid, traceId).size(), "a poison row costs only itself");
     }
 
@@ -296,9 +297,36 @@ class SpanBatchWriterIntegrationTest {
 
         assertEquals(2, isolated.write(pid, batch), "the ordinary span and the leap-second one");
         assertEquals(3, isolated.droppedSpans(), "the oversized input, the oversized session id, the unreadable start");
+        assertEquals(2, isolated.writtenSpans());
         assertEquals(
                 "2026-08-12T23:59:59Z",
                 spans.findById(pid, traceId, "leap").orElseThrow().startedAt());
+    }
+
+    @Test
+    @DisplayName("only a tool span whose arguments or result are not JSON counts as unparseable")
+    void unparseableToolPayloadsAreCountedPerToolSpan() {
+        String traceId = traceId("unparseable");
+        // Its own side tables, so the counters are this test's: test classes run concurrently on one context.
+        SpanBatchWriter isolated = newWriter(traces, new SpanSideTables(mapper));
+        String truncatedArgs = "{\"command\":\"ls\"";
+        String truncatedResult = "{\"stdout\":\"file.txt\"";
+
+        isolated.write(
+                pid,
+                List.of(
+                        payloadSpan(
+                                "clean-tool",
+                                traceId,
+                                KindNormalizer.TOOL,
+                                "{\"command\":\"ls\"}",
+                                "{\"stdout\":\"a\"}"),
+                        payloadSpan("broken-tool", traceId, KindNormalizer.TOOL, truncatedArgs, truncatedResult),
+                        payloadSpan("broken-llm", traceId, KindNormalizer.LLM, truncatedArgs, truncatedResult)));
+
+        assertEquals(3, isolated.writtenSpans());
+        assertEquals(1, isolated.unparseableToolArgs(), "the broken tool's arguments; an LLM span has none");
+        assertEquals(1, isolated.unparseableToolResults(), "the broken tool's result; an LLM span has none");
     }
 
     @Test
@@ -577,6 +605,10 @@ class SpanBatchWriterIntegrationTest {
      * a bean override (which would cost a Spring context).
      */
     private SpanBatchWriter newWriter(TraceV2Repository tracesRepo) {
+        return newWriter(tracesRepo, sideTables);
+    }
+
+    private SpanBatchWriter newWriter(TraceV2Repository tracesRepo, SpanSideTables tables) {
         return new SpanBatchWriter(
                 sessions,
                 tracesRepo,
@@ -584,7 +616,7 @@ class SpanBatchWriterIntegrationTest {
                 payloads,
                 toolCalls,
                 retrievedDocs,
-                sideTables,
+                tables,
                 pricer,
                 mediaExternalizer,
                 mediaRefs,
@@ -802,5 +834,22 @@ class SpanBatchWriterIntegrationTest {
                 raw.endTimestamp(),
                 raw.inputMessagesJson(),
                 raw.outputMessagesJson());
+    }
+
+    private RawEntry payloadSpan(String spanId, String traceId, String kind, String input, String output) {
+        return new RawEntry(
+                spanId,
+                spanId,
+                input,
+                output,
+                null,
+                Map.of(),
+                null,
+                traceId,
+                t0.toString(),
+                kind,
+                t0.toString(),
+                null,
+                null);
     }
 }
