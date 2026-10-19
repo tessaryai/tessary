@@ -19,16 +19,16 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: "u-me" } }) }));
 
 const triage = (over: Partial<CapabilityOverrideView> = {}): CapabilityOverrideView => ({
-  capability: "triage_automatic_enabled", enabled: false, default_enabled: false, has_override: false, ...over,
+  capability: "triage_automatic_enabled", enabled: false, default_enabled: false, has_override: false, licensed: true, ...over,
 });
 const prompts = (over: Partial<CapabilityOverrideView> = {}): CapabilityOverrideView => ({
-  capability: "prompt_management_enabled", enabled: true, default_enabled: true, has_override: false, ...over,
+  capability: "prompt_management_enabled", enabled: true, default_enabled: true, has_override: false, licensed: true, ...over,
 });
 
 beforeEach(() => {
   session.role = "owner";
   auth.listCapabilityOverrides.mockResolvedValue([
-    { capability: "rca_enabled", enabled: true, default_enabled: true, has_override: false },
+    { capability: "rca_enabled", enabled: true, default_enabled: true, has_override: false, licensed: true },
     triage(),
     prompts(),
   ]);

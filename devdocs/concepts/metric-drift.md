@@ -16,7 +16,7 @@ guessed threshold.
   detector whose every firing needs a human to explain it away.
 - **Not a threshold alarm.** "Alert when p95 > 10s" requires someone to know what 10s means for
   a call site they have never read. The bar is the population's own recent past.
-- **Not an analytics surface.** Vitals already answers "what are my numbers". This answers
+- **Not an analytics surface.** Metrics already answers "what are my numbers". This answers
   "did they move, when, and by how much", and stays silent otherwise.
 
 What it *is*: two classifiers, four measures between them, each comparing a bucket's recent
@@ -85,8 +85,8 @@ has enough to compare. A rare tool gets watched on a slower clock. This is behav
 sequence model and wrong here: the pile is a mixture of everything the instrumentation missed,
 so its distribution moves whenever the mix moves.
 
-Instead, report its **size** as a coverage number in `vitals/` — "18% of traces aren't
-attributed" is the actionable fact, and instrumenting those paths closes the blind spot
+Instead, report its **size** as a coverage number: Metrics shows it as the `Unattributed` call site
+of any widget broken down by call site. "18% of traces aren't attributed" is the actionable fact, and instrumenting those paths closes the blind spot
 permanently in a way that watching a mixture never would.
 
 ---
@@ -105,8 +105,8 @@ The state of play today, so the guard is written knowingly rather than discovere
   from the span end time). Nothing about this program is blocked.
 - **The pre-computed rollups are not.** `trace` / `observation` / `context` all carry
   `latency_ms`, `total_cost`, `total_tokens`, `error_count`, and `StructuralEnricher` passes
-  literal `null` for them at the write site. `VitalsRepository` says the same, verified against
-  production. The traces UI shows real cost because `TracesController` computes it in the query,
+  literal `null` for them at the write site. The former `VitalsRepository` said the same, verified
+  against production. The traces UI shows real cost because `TracesController` computes it in the query,
   not because the column holds it.
 
 So: **one accessor, `MetricSource`, that prefers the column and derives when it is null.** Not a
@@ -128,14 +128,14 @@ derivation — whoever fills the rollups has to get these right too:
   production, that min/max envelope inflated p95 by ~10% versus the root span, because async
   children outlive their parent. The root span encloses its children and is what Jaeger, Tempo and
   Datadog report.
-- **Root spans carry no model.** `VitalsRepository` documents a bug from exactly this: bucketing
-  cost by the span's own call site while counting turns by root span mixes two populations. Cost is
+- **Root spans carry no model.** The former `VitalsRepository` documented a bug from exactly this:
+  bucketing cost by the span's own call site while counting turns by root span mixes two populations. Cost is
   summed from llm leaves; the bucket key still comes from the trace's call site (§2.1).
   Never try to read a model off the root.
 
 **Unfinished traces are counted, not dropped.** `ended_at IS NULL` on a root span means the turn
-never completed. Vitals counts these as their own population rather than silently excluding them,
-and so must this: excluding them removes precisely the traffic a duration detector most wants to
+never completed. Metrics counts these as their own population (`unterminated_traces`) rather than
+silently excluding them, and so must this: excluding them removes precisely the traffic a duration detector most wants to
 see, and does it invisibly.
 
 ### 3.1 Two classifiers, four measures
@@ -181,7 +181,7 @@ explains itself: input / output / cache-read / cache-write.
 
 Three hard requirements:
 
-1. **Read the disjoint buckets `IngestPricer` carves at ingest (`vitals/TokenUsage`), never the raw `observation.usage` blob.**
+1. **Read the disjoint buckets `IngestPricer` carves at ingest (`pricing/TokenUsage`), never the raw `observation.usage` blob.**
    `StructuralEnricher` normalizes every provider onto one `gen_ai.usage.*` vocabulary, so an
    OpenAI generation arrives wearing Anthropic key names while still carrying OpenAI's
    cache-*inclusive* input count. Trusting the spelling already billed OpenAI cache reads twice.
@@ -198,7 +198,7 @@ Three hard requirements:
 Also: a model with **no rate in the price book is unpriced, not free**. Since cost is summed from
 leaves (§3.0), the NULL to respect is a missing price-book entry, not a NULL column. An
 unpriced trace leaves the distribution rather than joining it at $0 — the posture `verdict.n`
-already takes, and the counterpart to vitals counting unpriced calls rather than reading them as
+already takes, and the counterpart to Metrics counting unpriced calls rather than reading them as
 free.
 
 **And that abstention strands history.** This is the abstention cursor rewind bug in a new place: the sweep's keyset
@@ -301,8 +301,9 @@ observe → settle → fold into current window → close window → compare ×2
                                           current becomes prev
 ```
 
-- **Settle — and it does not apply uniformly.** `vitals/` already worked this out and the split is
-  load-bearing:
+- **Settle — and it does not apply uniformly.** Metrics makes the same split (its cost and token
+  sums count settled traces only; its latency reads the root span without waiting for the settle),
+  and the split is load-bearing:
   - **Cost and the token buckets SUM over a trace's spans**, so they need every span to have
     arrived. Window them on `trace_settle_seconds`. Measuring early reads as cheap, which would
     surface as a permanent drift toward cheaper whenever ingest lags.

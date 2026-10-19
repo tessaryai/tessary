@@ -4,17 +4,18 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import type { Case, Vitals } from "../../api/types";
+import type { Case, MetricsQueryResult } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, PageHeader, Section, TableSkeleton } from "../../ui";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, timeAgo } from "./bits";
-import { usd } from "../../lib/usd";
 import { PipelineEmpty } from "./PipelineEmpty";
 import { needsSetupScreen, resolveState } from "./emptyState";
 import { OpenFindings } from "./OpenFindings";
 import { useOnboarding } from "../onboarding/useOnboarding";
 import { useCapabilities } from "../../capabilities/useCapabilities";
 import { casesQuery } from "../../shell/shellQueries";
+import { pulseQueries } from "../metrics/metricsQueries";
+import { deltaText, formatValue } from "../metrics/metricsRules";
 
 type Lens = "open" | "resolved";
 
@@ -24,8 +25,10 @@ export function Triage() {
   const navigate = useNavigate();
 
   const triageQ = useQuery(casesQuery(api));
-  // The pulse strip is deterministic vitals, never judged and never paged.
-  const vitalsQ = useQuery({ queryKey: ["vitals", "triage", api.base], queryFn: () => api.getVitals(7) });
+  // The pulse strip is counted, never judged and never paged.
+  const pulse = pulseQueries(api, Date.now());
+  const spendQ = useQuery(pulse.spend);
+  const p95Q = useQuery(pulse.p95);
   const onboarding = useOnboarding();
   /*
    * Whether the org holds a provider key, from `model-settings`: the providers list is gated on
@@ -104,7 +107,7 @@ export function Triage() {
 
       {/* Pulse strip — renders in BOTH states. */}
       <div className="pt-7 px-10 pb-8">
-        {vitalsQ.data && <PulseStrip vitals={vitalsQ.data} vitalsTo={`${basePath}/vitals`} />}
+        {spendQ.data && p95Q.data && <PulseStrip spend={spendQ.data} p95={p95Q.data} metricsTo={`${basePath}/metrics`} />}
       </div>
     </>
   );
@@ -160,23 +163,15 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
 
 /* ------------------------------------------------------------ pulse strip */
 
-function pct(value: number | null | undefined): string {
-  if (value == null) return "—";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${Math.round(value)}%`;
-}
-
-function ms(value: number | null | undefined): string {
-  if (value == null) return "—";
-  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`;
-}
-
-/** Deterministic vitals with their deltas, from the same `/vitals` read as the Vitals page. */
-function PulseStrip({ vitals, vitalsTo }: { vitals: Vitals; vitalsTo: string }) {
-  const t = vitals.total;
+/** The default Metrics dashboard's Spend and p95 tiles with their previous-window deltas, from the same reads. */
+function PulseStrip({ spend, p95, metricsTo }: { spend: MetricsQueryResult; p95: MetricsQueryResult; metricsTo: string }) {
+  const spendNow = spend.rows[0].values.cost_usd;
+  const spendBefore = spend.previous_rows?.[0].values.cost_usd;
+  const p95Now = p95.rows[0].values.latency_p95_ms;
+  const p95Before = p95.previous_rows?.[0].values.latency_p95_ms;
   const entries = [
-    { label: "Spend", value: usd(t.cost.usd), delta: pct(t.cost.delta_pct_per_turn) },
-    { label: "p95 latency", value: ms(t.duration.p95_ms), delta: pct(t.duration.delta_pct) },
+    { label: "Spend", value: formatValue("usd", spendNow), delta: deltaText(spendNow, spendBefore, "usd") },
+    { label: "p95 latency", value: formatValue("ms", p95Now), delta: deltaText(p95Now, p95Before, "ms") },
   ];
 
   return (
@@ -187,7 +182,7 @@ function PulseStrip({ vitals, vitalsTo }: { vitals: Vitals; vitalsTo: string }) 
       style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-card)" }}
     >
       <span className="font-mono uppercase text-subtle text-label" style={{ whiteSpace: "nowrap" }}>
-        Vitals 7d
+        Metrics 7d
       </span>
       {entries.map((p, i) => (
         // Not wrapping itself: the separator belongs to the metric after it.
@@ -212,11 +207,11 @@ function PulseStrip({ vitals, vitalsTo }: { vitals: Vitals; vitalsTo: string }) 
         </span>
       ))}
       <Link
-        to={vitalsTo}
+        to={metricsTo}
         className="text-link hover:bg-hover transition-colors py-1 px-2 text-small"
         style={{ marginLeft: "auto", borderRadius: "var(--radius-control)", whiteSpace: "nowrap" }}
       >
-        Open Vitals
+        Open Metrics
       </Link>
     </div>
   );

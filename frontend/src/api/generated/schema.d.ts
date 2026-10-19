@@ -1076,6 +1076,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/metrics/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["MetricsController_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/metrics/dashboards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["MetricDashboardController_list"];
+        put?: never;
+        post: operations["MetricDashboardController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/metrics/dashboards/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["MetricDashboardController_get"];
+        put: operations["MetricDashboardController_update"];
+        post?: never;
+        delete: operations["MetricDashboardController_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/metrics/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["MetricsController_query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/model-settings": {
         parameters: {
             query?: never;
@@ -1550,22 +1614,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["OrganizationController_unarchiveProject"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/vitals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["VitalsController_vitals"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2294,6 +2342,22 @@ export interface components {
             data?: components["schemas"]["MemberView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseMetricDashboard: {
+            data?: components["schemas"]["MetricDashboard"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseMetricDashboardList: {
+            data?: components["schemas"]["MetricDashboardList"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseMetricsCatalog: {
+            data?: components["schemas"]["MetricsCatalog"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseMetricsQueryResult: {
+            data?: components["schemas"]["MetricsQueryResult"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseModelSettingsView: {
             data?: components["schemas"]["ModelSettingsView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2436,10 +2500,6 @@ export interface components {
         };
         ApiResponseView: {
             data?: components["schemas"]["View"] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
-        ApiResponseVitals: {
-            data?: components["schemas"]["Vitals"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseVoid: {
@@ -2940,21 +3000,6 @@ export interface components {
             /** Format: int32 */
             retainDays: number;
         };
-        Cost: {
-            baseline_usd: number | null;
-            /** Format: int64 */
-            calls: number;
-            /** Format: double */
-            delta_pct_per_turn: number | null;
-            flagged: boolean;
-            /** Format: int64 */
-            tokens: number;
-            /** Format: int64 */
-            unpriced_calls: number;
-            usd: number;
-            /** Format: double */
-            usd_per_turn: number | null;
-        };
         CountRequest: {
             dataset: string;
             filters?: {
@@ -3032,21 +3077,6 @@ export interface components {
             name: string;
             span_id: string | null;
             trace_id: string;
-        };
-        Duration: {
-            /** Format: int64 */
-            baseline_p95_ms: number | null;
-            /** Format: double */
-            delta_pct: number | null;
-            flagged: boolean;
-            /** Format: int64 */
-            p50_ms: number | null;
-            /** Format: int64 */
-            p95_ms: number | null;
-            /** Format: int64 */
-            turns: number;
-            /** Format: int64 */
-            unterminated: number;
         };
         EntityDiffView: {
             /** Format: int32 */
@@ -3285,13 +3315,6 @@ export interface components {
             setup_ref: string;
             state: string;
         };
-        Group: {
-            cost: components["schemas"]["Cost"];
-            duration: components["schemas"]["Duration"];
-            flagged: boolean;
-            key: string | null;
-            label: string | null;
-        };
         GroupView: {
             description: string;
             /** @enum {string} */
@@ -3476,6 +3499,162 @@ export interface components {
             /** Format: double */
             w1_floor: number;
         };
+        MetricDashboard: {
+            built_in: boolean;
+            can_manage: boolean;
+            created_at: string | null;
+            created_by: string | null;
+            definition: components["schemas"]["MetricDashboardDefinition"];
+            description: string;
+            id: string;
+            name: string;
+            updated_at: string | null;
+        };
+        MetricDashboardCreateRequest: {
+            clone_of?: string | null;
+            definition?: components["schemas"]["MetricDashboardDefinition"] | null;
+            description?: string | null;
+            name: string;
+        };
+        MetricDashboardDefinition: {
+            default_range: string;
+            /** Format: int32 */
+            version: number;
+            widgets: components["schemas"]["MetricWidgetDefinition"][];
+        };
+        MetricDashboardList: {
+            can_manage: boolean;
+            dashboards: components["schemas"]["MetricDashboardSummary"][];
+        };
+        MetricDashboardSummary: {
+            built_in: boolean;
+            description: string;
+            id: string;
+            name: string;
+            updated_at: string | null;
+            /** Format: int32 */
+            widget_count: number;
+        };
+        MetricDashboardUpdateRequest: {
+            definition?: components["schemas"]["MetricDashboardDefinition"] | null;
+            description?: string | null;
+            name: string;
+        };
+        MetricWidgetDefinition: {
+            chart: string;
+            compare: string | null;
+            dimension: string | null;
+            filters: components["schemas"]["MetricsFilter"][] | null;
+            /** Format: int32 */
+            h: number;
+            id: string;
+            measures: string[];
+            title: string | null;
+            /** Format: int32 */
+            top_n: number | null;
+            view: string;
+            /** Format: int32 */
+            w: number;
+            /** Format: int32 */
+            x: number;
+            /** Format: int32 */
+            y: number;
+        };
+        MetricsCatalog: {
+            granularities: string[];
+            limits: components["schemas"]["MetricsCatalogLimits"];
+            views: components["schemas"]["MetricsCatalogView"][];
+        };
+        MetricsCatalogDimension: {
+            high_cardinality: boolean;
+            label: string;
+            name: string;
+        };
+        MetricsCatalogLimits: {
+            /** Format: int32 */
+            max_dashboards: number;
+            /** Format: int32 */
+            max_filter_values: number;
+            /** Format: int32 */
+            max_filters: number;
+            /** Format: int32 */
+            max_hour_window_days: number;
+            /** Format: int32 */
+            max_measures: number;
+            /** Format: int32 */
+            max_top_n: number;
+            /** Format: int32 */
+            max_top_n_with_axis: number;
+            /** Format: int32 */
+            max_widgets: number;
+            /** Format: int32 */
+            max_window_days: number;
+        };
+        MetricsCatalogMeasure: {
+            companions: string[];
+            gap_fill: string;
+            label: string;
+            name: string;
+            unit: string;
+        };
+        MetricsCatalogView: {
+            description: string;
+            dimensions: components["schemas"]["MetricsCatalogDimension"][];
+            label: string;
+            measures: components["schemas"]["MetricsCatalogMeasure"][];
+            name: string;
+        };
+        MetricsFilter: {
+            field: string;
+            op: string;
+            values: string[];
+        };
+        MetricsQueryRequest: {
+            compare?: string | null;
+            dimension?: string | null;
+            filters?: components["schemas"]["MetricsFilter"][] | null;
+            from: string;
+            granularity?: string | null;
+            measures: string[];
+            to: string;
+            /** Format: int32 */
+            top_n?: number | null;
+            view: string;
+        };
+        MetricsQueryResult: {
+            dimension: string | null;
+            /** Format: int64 */
+            elapsed_ms: number;
+            previous_rows: components["schemas"]["MetricsRow"][] | null;
+            rows: components["schemas"]["MetricsRow"][];
+            top_n: components["schemas"]["MetricsTopN"] | null;
+            truncated: boolean;
+            view: string;
+            window: components["schemas"]["MetricsWindow"];
+        };
+        MetricsRow: {
+            bucket: string | null;
+            key: string | null;
+            label: string | null;
+            /** Format: int64 */
+            n: number;
+            values: {
+                [key: string]: number | null;
+            };
+        };
+        MetricsTopN: {
+            /** Format: int32 */
+            shown: number;
+            /** Format: int64 */
+            total_keys: number;
+        };
+        MetricsWindow: {
+            /** Format: int32 */
+            buckets: number;
+            from: string;
+            granularity: string | null;
+            to: string;
+        };
         ModelDescriptor: {
             agentic: boolean;
             display_name: string;
@@ -3561,6 +3740,7 @@ export interface components {
             default_enabled: boolean;
             enabled: boolean;
             has_override: boolean;
+            licensed: boolean;
         };
         Pack: {
             content_digest: string | null;
@@ -4604,14 +4784,6 @@ export interface components {
             provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             updated_at: string;
         };
-        Vitals: {
-            dimension: string;
-            groups: components["schemas"]["Group"][];
-            /** Format: int32 */
-            priced_models: number;
-            total: components["schemas"]["Group"];
-            window: components["schemas"]["Window"];
-        };
         WatchingView: {
             /** Format: int64 */
             call_sites: number;
@@ -4623,14 +4795,6 @@ export interface components {
             traces_last_day: number;
             /** Format: int64 */
             traces_total: number | null;
-        };
-        Window: {
-            baseline_from: string;
-            baseline_to: string;
-            /** Format: int32 */
-            days: number;
-            from: string;
-            to: string;
         };
         Words: {
             figureNote: string;
@@ -6836,6 +7000,196 @@ export interface operations {
             };
         };
     };
+    MetricsController_catalog: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMetricsCatalog"];
+                };
+            };
+        };
+    };
+    MetricDashboardController_list: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMetricDashboardList"];
+                };
+            };
+        };
+    };
+    MetricDashboardController_create: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricDashboardCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMetricDashboard"];
+                };
+            };
+        };
+    };
+    MetricDashboardController_get: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMetricDashboard"];
+                };
+            };
+        };
+    };
+    MetricDashboardController_update: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricDashboardUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMetricDashboard"];
+                };
+            };
+        };
+    };
+    MetricDashboardController_delete: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    MetricsController_query: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricsQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMetricsQueryResult"];
+                };
+            };
+        };
+    };
     ProjectModelSettingController_get: {
         parameters: {
             query: {
@@ -7928,33 +8282,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProject"];
-                };
-            };
-        };
-    };
-    VitalsController_vitals: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-                days?: number;
-                by?: string;
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVitals"];
                 };
             };
         };

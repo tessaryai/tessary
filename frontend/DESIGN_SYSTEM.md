@@ -13,7 +13,8 @@ without fatigue: a near-black floor, an achromatic grey ramp for everything
 structural *and* everything interactive, and exactly three hues, each with one
 job. Red is error, green is success, blue is info and warning. **All three are
 status only, used sparingly.** None of them is an accent. Nothing else in the
-UI carries hue, and brand pink never leaves the logo.
+UI carries hue, except the series of a chart (Charts, below), and brand pink never
+leaves the logo.
 
 **The accent is grey.** The primary button, active nav and selection all come
 from the top of the grey ramp, so no hue ever means "clickable". That is what
@@ -137,14 +138,42 @@ Because warning and info share a hue, a warning must carry a distinguishing icon
 or wording; the color alone won't do it. Since no hue is a control, a filled
 blue chip reads as status, the same as a red or green one.
 
-### Data-viz / charts
+### Charts
 
-Chart chrome reuses the border color so the hand-drawn finding charts sit in
-the same language.
+Chart chrome reuses the border color so the hand-drawn finding charts and the Metrics
+charts sit in the same language. Series color is the one exception to "hues are status
+only": a Metrics chart draws up to six ranked series plus an "other" fold, and a reader
+has to tell them apart at a glance, which an achromatic ramp cannot do past three lines.
+The exception is narrow by construction: series tokens are read only inside a chart's SVG
+and its legend; red, green and blue keep their status meaning everywhere else, a table or
+a number tile never takes a series color, and no series value equals a status hue.
 
-| Token | Value | Usage |
-|---|---|---|
-| `--color-chart-grid` | `#3C3C3C` | gridlines (= border) |
+Three palettes ship. Each user picks one in Settings > Organization > Appearance, stored in
+`localStorage` as `tessary.prefs.chartPalette`; `ChartPaletteProvider` (`src/ui/chartPalette.tsx`)
+stamps the choice on `<html>` as `data-chart-palette`, and that attribute re-points the seven
+`--color-series-*` tokens a chart reads. Every value clears 3:1 against `--color-surface`
+(`#1B1B1B`), the card background a chart sits on, which is the non-text threshold for a line
+or a dot.
+
+| Token | Usage |
+|---|---|
+| `--color-chart-grid` | gridlines (= border) |
+| `--color-series-1` to `--color-series-6` | the ranked series of one chart, in rank order |
+| `--color-series-other` | the server-side "Other (N more)" fold; always drawn dashed |
+
+| Palette | 1 | 2 | 3 | 4 | 5 | 6 | other |
+|---|---|---|---|---|---|---|---|
+| `tessary` (default; the Tessary v2 chart ramp) | `#CFAFFF` 9.2:1 | `#C9690C` 4.5:1 | `#0097AC` 4.9:1 | `#F1B047` 9.1:1 | `#35D8CA` 9.7:1 | `#AF64BB` 4.4:1 | grey-500 6.6:1 |
+| `colorblind` (Okabe and Ito) | `#56B4E9` 7.5:1 | `#E69F00` 7.7:1 | `#009E73` 5.0:1 | `#F0E442` 13.0:1 | `#CC79A7` 5.6:1 | `#D55E00` 4.5:1 | grey-500 6.6:1 |
+| `greyscale` | grey-50 15.1:1 | grey-300 10.3:1 | grey-500 6.6:1 | `#8F8F8F` 5.3:1 | `#818181` 4.4:1 | `#767676` 3.8:1 | grey-600 3.4:1 |
+
+The palette values are defined once, as `--color-chart-<palette>-N` in `tokens.css`, outside
+the `@theme` block so no `bg-series-*` utility exists. A component never names a palette
+token directly (the Appearance picker's swatches are the one exception, because they show
+every palette at once); it reads `--color-series-N`. On a line chart each rank also draws its
+own dash pattern (rank 1 solid), the second channel, so the chart still reads in greyscale; the
+legend swatch repeats it. A bar chart has no second channel and leans on the legend and the
+tooltip. The "Other" fold is a dashed line, or a dashed outline on a bar chart.
 
 ### Brand values that are not tokens
 
@@ -240,7 +269,7 @@ wrong, and that is a change to `tokens.css`, not a local override.
 | code-block | `font-mono text-code` | `0.8125rem` / 1.6 | 400 | `text-fg-secondary` | on `bg-surface` |
 | id | `font-mono text-small text-muted` | `0.75rem` / 1.5 | 400 | `text-muted` | trace/span IDs, hashes, timestamps, paths, versions |
 | numeric | `font-mono text-body leading-normal tabular-nums text-right` | `0.875rem` / 1.5 (compact `0.75rem`) | 400 | `text-fg-secondary` | right-aligned, tabular |
-| metric | `text-metric tabular-nums` | `2.25rem` / 1.1 | 600 | `text-fg` | hero stat-tile number, `-0.02em`; sans, not mono |
+| metric | `text-metric tabular-nums` | `2.25rem` / 1.1 | 600 | `text-fg` | hero stat-tile number, `-0.02em`; mono on stat tiles (Metrics, the Triage pulse strip), sans elsewhere |
 | table-cell | `text-body` + density leading | `0.875rem` / 1.5 (compact `0.75rem` / 1.35) | 400 | `text-fg-secondary` | primary-key column: `text-fg`; leading comes from `--density-row-leading` |
 | column-header | `text-column-header text-muted` | `0.75rem` / 1.5 | 500 | `text-muted` | sentence case, not tracked, not uppercase |
 
@@ -334,7 +363,7 @@ with a new palette, not a re-skin of this one.
    blue. Red, green and blue otherwise denote failure, success and info/warning,
    sparingly, and never mark something as interactive. Use `accent-subtle` /
    `accent-edge` for low-emphasis accent treatments. Body text is never a status
-   hue.
+   hue. Chart series are the documented exception; see Charts.
 4. **Status hues are not text colors by default.** Red only as large-or-bold
    text; otherwise grey text plus a colored icon.
 5. **Step elevation one level at a time.** `bg` → `surface` → `raised` →

@@ -62,7 +62,9 @@ public class CapabilityController {
             String capability,
             boolean enabled,
             @JsonProperty("default_enabled") boolean defaultEnabled,
-            @JsonProperty("has_override") boolean hasOverride) {}
+            @JsonProperty("has_override") boolean hasOverride,
+            /** False when the deployment's license lists it off: shown locked, and an override is refused. */
+            boolean licensed) {}
 
     public record SetOverrideRequest(boolean enabled) {}
 
@@ -93,7 +95,8 @@ public class CapabilityController {
                     capability.wire(),
                     resolved.isEnabled(capability),
                     capabilities.defaultFor(capability),
-                    stored.containsKey(capability.wire())));
+                    stored.containsKey(capability.wire()),
+                    capabilities.licensed(capability)));
         }
         return ApiResponse.ok(out);
     }
@@ -107,6 +110,9 @@ public class CapabilityController {
         var r = resolver.requireOrg(ctx, orgSlug);
         r.require(Permission.CAPABILITIES_MANAGE, "change a capability");
         Capability capability = requireKnown(key);
+        if (!capabilities.licensed(capability)) {
+            throw new TessaryException(CapabilityError.LICENSED, capability.wire());
+        }
         overrides.upsert(r.org().id(), capability.wire(), body.enabled());
         invalidate(r.org().id());
         log.info("org {} set capability {}={}", r.org().id(), capability.wire(), body.enabled());
@@ -141,6 +147,7 @@ public class CapabilityController {
                 capability.wire(),
                 capabilities.isEnabled(orgId, capability),
                 capabilities.defaultFor(capability),
-                stored.containsKey(capability.wire()));
+                stored.containsKey(capability.wire()),
+                capabilities.licensed(capability));
     }
 }

@@ -11,11 +11,11 @@ said it twice.
 
 ```
 app          TessaryApplication, application.yaml, integration tests, ArchitectureRulesTest
-surfaces     query, search, mcp, metering, billing, telemetry
+surfaces     query, search, mcp, metering, metrics, billing, telemetry
 analysis     classifier, rca, cases, alert, onboarding, prompt, promptlib
 llm-runtime  llm (incl. llm/decisions, llm/chat), sandbox   (the ONLY module declaring a provider SDK or AWS client)
 product      pipeline, plan
-substrate    storage, ingest, redaction, retention, pricing, sources, traces, git, usage, vitals
+substrate    storage, ingest, redaction, retention, pricing, sources, traces, git, usage
 tenancy      tenant, auth, edition, featureflags, version            (declares bcrypt)
 core         web, model, apidoc, ops, crypto, db, config, telemetry, llmspi
              + the Liquibase changelog and the schema-column generator that reads it
@@ -44,6 +44,10 @@ counts it sends come from `tenancy` (projects), `analysis` (findings, cases) and
 platform LLM spend, and `billing` is now a thin read over it — since self-serve billing was deleted, the surviving
 `BillingController` imports only `metering` and `tenancy`. A meter is a *consumer* of the thing it measures, never
 a platform primitive underneath it.
+
+**`metrics` is in `surfaces`.** It reads; it records nothing. Its `cases` view counts `eval_case`,
+which `analysis` owns, so it has to sit above `analysis`, and `surfaces/pom.xml` already depends on
+it. `query` and `metering` are the precedent for a read API over tables owned lower down.
 
 **`llm` splits into `llm-spi` (L0) and `llm-runtime` (L4).** `storage` needs
 the `llmspi` vocabulary (`ModelLane`), a pure enum, for usage/pricing
@@ -164,9 +168,9 @@ cannot silently opt out of them.
 Both were unstatable while the backend was one module, and are now compile errors rather than
 conventions:
 
-- **A record of consumption sits with the record, not above it.** `usage` and `vitals` are in
-  `substrate` beside the other stores. They measure what was consumed; putting them higher would
-  make `analysis` import sideways to write them.
+- **A record of consumption sits with the record, not above it.** `usage` is in `substrate` beside
+  the other stores. It records what was consumed; putting it higher would make `analysis` import
+  sideways to write it.
 - **No module above `llm-runtime` declares a PROVIDER SDK.** The AWS `bedrock` client is declared
   there and nowhere else, so a provider swap cannot reach a caller above.
 

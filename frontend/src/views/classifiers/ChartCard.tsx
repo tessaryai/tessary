@@ -11,7 +11,7 @@
  * The chart's coordinates are CSS pixels: the SVG takes its width from the card, measured, so its tick text is the
  * small type size at every card width instead of scaling with it.
  */
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ChartCard as Card, ChartPoint, ClassifierCharts } from "../../api/types";
 import { Badge, cn } from "../../ui";
@@ -33,8 +33,10 @@ import {
   xTicks,
   yAxis,
 } from "./chartRules";
+import { nearestPoint } from "../components/chart/nearestPoint";
+import { Tooltip } from "../components/chart/Tooltip";
+import { useWidth } from "../components/chart/useWidth";
 
-const FALLBACK_W = 520;
 const ML = 48;
 const MR = 8;
 const MT = 10;
@@ -49,37 +51,6 @@ const LANE_MID = (k: number) => LANE_Y(k) + 3;
 const STRIP_TEXT = "absolute -translate-y-1/2 text-small leading-none whitespace-nowrap";
 
 const rateOf = (p: ChartPoint): number | null => (p.checked ? (p.flagged ?? 0) / p.checked : null);
-
-function useWidth() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(FALLBACK_W);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const read = () => {
-      if (el.clientWidth > 0) setWidth(el.clientWidth);
-    };
-    read();
-    const observer = new ResizeObserver(read);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width] as const;
-}
-
-/** The index of the point whose span holds `px`, else the one nearest it. */
-function nearestPoint(spans: { a: number; b: number }[], px: number): number | null {
-  let best: number | null = null;
-  let gap = Infinity;
-  spans.forEach(({ a, b }, i) => {
-    const d = px < a ? a - px : px > b ? px - b : 0;
-    if (d < gap) {
-      gap = d;
-      best = i;
-    }
-  });
-  return best;
-}
 
 export function ChartCard({
   card,
@@ -483,20 +454,3 @@ function LineLabel({ x, y, children }: { x: number; y: number; children: string 
     </text>
   );
 }
-
-function Tooltip({ left, top, transform, lines }: { left: number; top: string; transform: string; lines: string[] }) {
-  return (
-    <div
-      role="tooltip"
-      className="absolute z-10 pointer-events-none flex flex-col rounded-card bg-overlay border border-border px-2.5 py-2 whitespace-nowrap text-small tabular-nums"
-      style={{ left: `${left}%`, top, transform, boxShadow: "var(--shadow-md)" }}
-    >
-      {lines.map((line, i) => (
-        <span key={i} className={i === 0 ? "text-fg" : "text-muted"}>
-          {line}
-        </span>
-      ))}
-    </div>
-  );
-}
-

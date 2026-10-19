@@ -33,7 +33,7 @@ public class MetricSourceRepository {
 
     /**
      * Duration is the root span's own interval, never an envelope (so not {@code trace.latency_ms}): async children can
-     * outlive their parent. The root pick matches {@code VitalsRepository}'s {@code DISTINCT ON}. An unterminated root
+     * outlive their parent. The root pick matches {@code MetricsSql.ROOT_LATERAL}. An unterminated root
      * is flagged, not dropped. LEFT LATERAL keeps one row per trace even before its spans land.
      */
     public List<TurnFacts> turnFacts(String projectId, List<String> traceIds) {

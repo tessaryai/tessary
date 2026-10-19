@@ -295,10 +295,63 @@ export type BehaviorFinding = Omit<
 /** `stdout` is set only for a check-script citation: what running it printed. */
 export type TriageCitation = S["Citation"];
 
-// ---- Vitals (cost / turn latency, per call site) ----
+// ---- Metrics (catalog, query, dashboards) ----
 /** Read-only aggregates: nothing is detected or escalated, which keeps them out of Layer 2. */
-export type Vitals = S["Vitals"];
-export type VitalsGroup = S["Group"];
+export type MetricsUnit = "count" | "usd" | "ms" | "tokens";
+export type MetricsGapFill = "zero" | "none";
+export type MetricsChart = "number" | "timeseries" | "table";
+export type MetricsGranularity = "auto" | "hour" | "day" | "week";
+export type MetricsPreset = "24h" | "7d" | "30d" | "90d";
+export type MetricsCompare = "previous_window";
+
+export type MetricsFilter = Omit<S["MetricsFilter"], "op"> & { op: "in" | "not_in" };
+export type MetricsQueryRequest = Omit<
+  S["MetricsQueryRequest"],
+  "dimension" | "filters" | "granularity" | "top_n" | "compare"
+> & {
+  dimension: string | null;
+  filters: MetricsFilter[] | null;
+  granularity: MetricsGranularity | null;
+  top_n: number | null;
+  compare: MetricsCompare | null;
+};
+export type MetricsWindow = Omit<S["MetricsWindow"], "granularity"> & {
+  granularity: "hour" | "day" | "week" | null;
+};
+export type MetricsRow = S["MetricsRow"];
+export type MetricsTopN = S["MetricsTopN"];
+export type MetricsQueryResult = Omit<S["MetricsQueryResult"], "window" | "rows" | "previous_rows"> & {
+  window: MetricsWindow;
+  rows: MetricsRow[];
+  previous_rows: MetricsRow[] | null;
+};
+export type MetricsCatalogDimension = S["MetricsCatalogDimension"];
+export type MetricsCatalogMeasure = Omit<S["MetricsCatalogMeasure"], "unit" | "gap_fill"> & {
+  unit: MetricsUnit;
+  gap_fill: MetricsGapFill;
+};
+export type MetricsCatalogView = Omit<S["MetricsCatalogView"], "measures"> & { measures: MetricsCatalogMeasure[] };
+export type MetricsCatalogLimits = S["MetricsCatalogLimits"];
+export type MetricsCatalog = Omit<S["MetricsCatalog"], "views"> & { views: MetricsCatalogView[] };
+export type MetricWidgetDefinition = Omit<S["MetricWidgetDefinition"], "chart" | "compare" | "filters"> & {
+  chart: MetricsChart;
+  compare: MetricsCompare | null;
+  filters: MetricsFilter[] | null;
+};
+export type MetricDashboardDefinition = Omit<S["MetricDashboardDefinition"], "default_range" | "widgets"> & {
+  default_range: MetricsPreset;
+  widgets: MetricWidgetDefinition[];
+};
+export type MetricDashboardSummary = S["MetricDashboardSummary"];
+export type MetricDashboardList = S["MetricDashboardList"];
+export type MetricDashboard = Omit<S["MetricDashboard"], "definition"> & { definition: MetricDashboardDefinition };
+export type MetricDashboardCreateRequest = Omit<S["MetricDashboardCreateRequest"], "definition"> & {
+  definition?: MetricDashboardDefinition | null;
+};
+/** Without a definition the server keeps the stored one, so a rename cannot overwrite widgets saved elsewhere. */
+export type MetricDashboardUpdateRequest = Omit<S["MetricDashboardUpdateRequest"], "definition"> & {
+  definition?: MetricDashboardDefinition | null;
+};
 
 // ---- Cases ----
 /**

@@ -167,8 +167,10 @@ record SubstrateWriteIntegrationTest(
         batch.addAll(conversation("conv-1", "tr-1", 2));
         batch.addAll(conversation("conv-1", "tr-2", 1));
         batch.addAll(conversation("conv-2", "tr-3", 0));
+        long enqueuedBefore = writer.enqueuedBatches();
 
         writer.enqueue(pid, batch);
+        assertEquals(enqueuedBefore + 1, writer.enqueuedBatches(), "one accepted batch of six spans counts once");
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "writer drained");
 
         assertEquals(2, count("session", pid), "one session per provider session key");
@@ -214,6 +216,7 @@ record SubstrateWriteIntegrationTest(
 
         // A replayed batch dedupes on the producer's keys.
         writer.enqueue(pid, batch);
+        assertEquals(enqueuedBefore + 2, writer.enqueuedBatches(), "a replay is accepted, so it counts too");
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "writer drained replay");
         assertEquals(2, count("session", pid));
         assertEquals(3, count("trace", pid));

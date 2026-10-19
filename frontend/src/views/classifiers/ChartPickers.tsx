@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import type { ClassifierMenuItem } from "../../api/types";
 import { Button, ErrorNote, Input, LoadingRow, cn } from "../../ui";
+import { closeOnFocusOut, itemsOf } from "../../ui/menuKeys";
 import { useDropdown } from "../../ui/useDropdown";
 import { menuStatus } from "./chartRules";
 
@@ -12,18 +13,6 @@ export type PickerGroup = { label?: string; options: PickerOption[] };
 
 const PANEL =
   "absolute right-0 top-full mt-1 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-card bg-overlay border border-border-strong py-1";
-
-function itemsOf(panel: HTMLElement | null, role: string): HTMLElement[] {
-  return panel ? Array.from(panel.querySelectorAll<HTMLElement>(`[role="${role}"]`)) : [];
-}
-
-/** Focus that goes nowhere is left to outside-click handling, so a click on a non-focusable option lands. */
-function closeOnFocusOut(container: React.RefObject<HTMLElement | null>, close: () => void) {
-  return (e: React.FocusEvent) => {
-    const next = e.relatedTarget as Node | null;
-    if (next && container.current && !container.current.contains(next)) close();
-  };
-}
 
 export function ScopePicker({
   label,

@@ -841,7 +841,7 @@ CREATE INDEX ix_span_name_trgm         ON span USING gin (name gin_trgm_ops);
 CREATE INDEX ix_span_llm_usage         ON span (project_id, started_at)
                                           INCLUDE (call_site_id, provided_model_name, trace_id,
                                                    total_tokens, total_cost, cost_source)
-                                          WHERE kind = 'llm' AND NOT is_deleted;  -- 0042, vitals spend
+                                          WHERE kind = 'llm' AND NOT is_deleted;  -- 0042, Metrics llm_calls
 CREATE INDEX ix_span_untagged          ON span (project_id)
                                           WHERE call_site_id IS NULL;  -- 0044, substrate status
 

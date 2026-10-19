@@ -36,6 +36,7 @@ public class ErrorCatalog {
             DecisionError.class,
             RetentionError.class,
             AgentRunError.class,
+            MetricsError.class,
             PromptsError.class,
             PlaygroundError.class);
 

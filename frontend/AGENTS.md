@@ -59,7 +59,7 @@ Two consequences worth knowing before you reach for a workaround:
   on the client while the read is in flight (the browser has no defaults of its own). There is no
   frontend flag client and no plan logic.
 - `views/` — surfaces, mostly one directory per IA surface (`triage/`, `traces/`,
-  `classifiers/`, `vitals/`, `Settings/`). `graders/`, `review/`, `datasets/`,
+  `classifiers/`, `metrics/`, `Settings/`). `graders/`, `review/`, `datasets/`,
   `runs/`, `synth/` and `reposync/` were deleted along with the whole Calibrate nav group; their old
   paths fall through to the project catch-all at the bottom of `App.tsx`, which lands on Triage. `views/traceLinker.ts` builds
   trace, span and classifier hrefs; `views/classifiers/useListPaging.ts` (infinite scroll across filter switches)

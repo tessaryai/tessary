@@ -80,8 +80,18 @@
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/classifiers/:classifierId"
   },
   {
-    "path": "vitals",
+    "path": "metrics",
     "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/metrics"
+  },
+  {
+    "path": "metrics/:dashboardId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/metrics/:dashboardId"
+  },
+  {
+    "path": "vitals",
+    "kind": "redirect",
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/vitals"
   },
   {

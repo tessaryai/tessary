@@ -123,9 +123,10 @@ shared fingerprint unless the properties are the point of the test.
 
 The `app` module runs its tests in two surefire forks (`forkCount` 2, `reuseForks`), and each fork
 keeps its own context cache, so a fingerprint used on both sides boots once per fork. The shared
-`src/test/resources/config/application.yaml` parks the classifier heartbeat and the rollup reaper
-for every context, because a timer firing mid-seed changes what a test reads. A test that needs
-either one calls it directly.
+`src/test/resources/config/application.yaml` parks the classifier heartbeat, the catalog
+reconcile, the rollup reaper and the retention sweeper for every context, because a timer firing
+mid-seed changes what a test reads and a retention sweep deletes rows seeded at a fixed date. A test
+that needs one calls it directly.
 
 It also means **adding a slice is linear in distinct contexts, not in test count**: a second
 product area that reuses the shared fingerprint is nearly free; one that brings its own

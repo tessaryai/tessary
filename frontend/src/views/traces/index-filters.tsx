@@ -110,8 +110,8 @@ function parseRange(params: URLSearchParams): TraceTimeRange {
 }
 
 /**
- * The filter bar's state, in the URL. Deep links from Vitals (`?call_site=`) and Classifiers (`?status=`)
- * use the same params, so they show as chips.
+ * The filter bar's state, in the URL. Deep links from Metrics (`?call_site=`, `?call_site_scope=none`, `?range=custom`)
+ * and Classifiers (`?status=`) use the same params, so they show as chips.
  */
 export function useTraceQueryState(): {
   state: TraceQueryState;
