@@ -12,8 +12,8 @@ importers:
         specifier: 1.18.30
         version: 1.18.30
       e2b:
-        specifier: ^2.55.0
-        version: 2.55.0
+        specifier: ^2.56.0
+        version: 2.56.0
       undici:
         specifier: ^6.29.1
         version: 6.29.1
@@ -41,9 +41,9 @@ packages:
     peerDependencies:
       '@bufbuild/protobuf': ^2.7.0
 
-  '@e2b/dockerfile-utils@0.1.0':
-    resolution: {integrity: sha512-JBiWrLHESy6E08PTGLf0RlE0BCKyi5+Et6TzX8pQOz3GRl/B89EnR3PZaIvp15QgD8STMY92D9KEHQqrOdWRKQ==}
-    engines: {node: '>=20.18.1 <21 || >=22'}
+  '@e2b/dockerfile-utils@0.1.1':
+    resolution: {integrity: sha512-eDmlWRMrJNzSUbBOf6Y/qTChd1Ys/o3YY8PK6tRQmwkV2u7z3ZS2cak/YJB07odHMT/Z6HJKoUElR/b0N6bHUw==}
+    engines: {node: '>=22'}
 
   '@esbuild/aix-ppc64@0.28.2':
     resolution: {integrity: sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ==}
@@ -236,9 +236,9 @@ packages:
     engines: {node: '>=12'}
     hasBin: true
 
-  e2b@2.55.0:
-    resolution: {integrity: sha512-viC7GLHMPqzilndlKgNXWN0ebMV8fpbI1IfDlPd+GHuNcJIcUCXKyr5HAxjcC5sDMym3rrbyUyUQ+zQVAU9oGA==}
-    engines: {node: '>=20.18.1 <21 || >=22'}
+  e2b@2.56.0:
+    resolution: {integrity: sha512-67vAYTERArdKrPujKnAVZuiIKLFX3vQT2gh1+TFphwEmYcXfU2iGKraRxpwn9qWIdUPFVym+KOo+QFhnySWYNQ==}
+    engines: {node: '>=22.19.0'}
 
   esbuild@0.28.2:
     resolution: {integrity: sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==}
@@ -311,12 +311,8 @@ packages:
     resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
     engines: {node: '>=18.17'}
 
-  undici@7.30.0:
-    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
-    engines: {node: '>=20.18.1'}
-
-  undici@8.11.2:
-    resolution: {integrity: sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ==}
+  undici@8.12.2:
+    resolution: {integrity: sha512-XtuDWVdqTLr3NAxm2ly9/hU6kUsJOgGh1RASzMBbsw6aWCOaQzHdW+QQDfdERjfJ2V5vL5pRPa4RetO9UfivDg==}
     engines: {node: '>=22.19.0'}
 
   which@2.0.2:
@@ -341,7 +337,7 @@ snapshots:
     dependencies:
       '@bufbuild/protobuf': 2.16.0
 
-  '@e2b/dockerfile-utils@0.1.0': {}
+  '@e2b/dockerfile-utils@0.1.1': {}
 
   '@esbuild/aix-ppc64@0.28.2':
     optional: true
@@ -449,21 +445,19 @@ snapshots:
 
   dotenv@18.0.8: {}
 
-  e2b@2.55.0:
+  e2b@2.56.0:
     dependencies:
       '@bufbuild/protobuf': 2.16.0
       '@connectrpc/connect': 2.2.0(@bufbuild/protobuf@2.16.0)
       '@connectrpc/connect-web': 2.2.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0))
-      '@e2b/dockerfile-utils': 0.1.0
+      '@e2b/dockerfile-utils': 0.1.1
       chalk: 5.6.2
       compare-versions: 6.1.1
       glob: 13.0.6
       openapi-fetch: 0.17.0
       platform: 1.3.6
       tar: 7.5.22
-      undici: 7.30.0
-    optionalDependencies:
-      undici8: undici@8.11.2
+      undici: 8.12.2
 
   esbuild@0.28.2:
     optionalDependencies:
@@ -554,10 +548,7 @@ snapshots:
 
   undici@6.29.1: {}
 
-  undici@7.30.0: {}
-
-  undici@8.11.2:
-    optional: true
+  undici@8.12.2: {}
 
   which@2.0.2:
     dependencies:
