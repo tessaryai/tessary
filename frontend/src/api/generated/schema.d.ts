@@ -3290,6 +3290,7 @@ export interface components {
             default_enabled: boolean;
             enabled: boolean;
             has_override: boolean;
+            licensed: boolean;
         };
         Pack: {
             content_digest: string | null;

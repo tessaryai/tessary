@@ -116,10 +116,10 @@ record CapabilityFlagLayerTest(
                 .setOverride(owner, slug, "api_access_enabled", new SetOverrideRequest(false))
                 .data();
 
-        assertEquals(new OverrideView("api_access_enabled", false, true, true), set);
+        assertEquals(new OverrideView("api_access_enabled", false, true, true, true), set);
         assertFalse(controller.capabilities(owner, slug).data().capabilities().get("api_access_enabled"));
         assertEquals(
-                new OverrideView("api_access_enabled", false, true, true),
+                new OverrideView("api_access_enabled", false, true, true, true),
                 controller.overrides(owner, slug).data().stream()
                         .filter(v -> v.capability().equals("api_access_enabled"))
                         .findFirst()
@@ -128,7 +128,7 @@ record CapabilityFlagLayerTest(
         OverrideView cleared =
                 controller.clearOverride(owner, slug, "api_access_enabled").data();
 
-        assertEquals(new OverrideView("api_access_enabled", true, true, false), cleared);
+        assertEquals(new OverrideView("api_access_enabled", true, true, false, true), cleared);
         assertTrue(controller.capabilities(owner, slug).data().capabilities().get("api_access_enabled"));
     }
 

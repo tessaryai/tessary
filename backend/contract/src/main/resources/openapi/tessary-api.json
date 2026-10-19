@@ -6766,13 +6766,17 @@
           },
           "has_override" : {
             "type" : "boolean"
+          },
+          "licensed" : {
+            "type" : "boolean"
           }
         },
         "required" : [
           "capability",
           "default_enabled",
           "enabled",
-          "has_override"
+          "has_override",
+          "licensed"
         ],
         "type" : "object"
       },
