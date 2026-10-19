@@ -196,8 +196,8 @@ backend's scan root is `ai.tessary`, so a bean in any other package is invisible
 scan, and the open build can never take a Maven dependency on an extension in order to see it. Boot's
 auto-configuration import is keyed on the **classpath** rather than on a package name or a build
 dependency — Boot reads that file out of every jar it can see — so neither side has to name the other.
-The paid overlay does not use this path: its packages are `ai.tessary.paid.*`, inside the scan
-root, so the host's component scan finds them once the overlay jars are on the classpath.
+An extension whose packages sit under `ai.tessary` does not need this path: it is inside the scan
+root, so the host's component scan finds it once its jar is on the classpath.
 
 `java.util.ServiceLoader` was considered and rejected. There is no `ServiceLoader` use and no
 `META-INF/services` directory anywhere in this backend, so it would be a second discovery mechanism
@@ -223,8 +223,8 @@ ambiguous.
 
 ## 4. Packaging
 
-For a paid module: one Maven module per feature, package
-`ai.tessary.paid.*`, parent `ai.tessary.paid:tessary-paid`. A new dependency is pinned with a
+For a first-party module built outside this reactor: one Maven module per feature, in a package
+under `ai.tessary` so the host's component scan finds it. A new dependency is pinned with a
 literal `<version>` element, never a `<*.version>` property — properties are allowed only in
 `backend/pom.xml` (`scripts/check-module-hygiene.sh`). A dependency the Spring Boot BOM manages
 takes no version at all.
@@ -358,8 +358,7 @@ and holds it.
    so it runs strictly after the open one, applying a changelog that creates your table — then
    register a `@Bean DetectionTable(yourKind, yourTable, Grain.SPAN|TRACE)` (§2) so
    `DetectionTableRegistry` includes it in the stitched union the writer, the retention sweep and
-   every reader use. The paid overlay's `PaidLiquibaseConfig` (`tessary-paid/db`) is a worked
-   example of the Liquibase half.
+   every reader use.
 
 **Where it runs.** On the classpath of **your own** backend — see §1. Build the platform, then launch
 it with your jar alongside:
