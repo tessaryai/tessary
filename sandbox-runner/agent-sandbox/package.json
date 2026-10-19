@@ -10,7 +10,7 @@
   "packageManager": "pnpm@11.15.1",
   "dependencies": {
     "@opencode-ai/sdk": "1.18.30",
-    "e2b": "^2.55.0",
+    "e2b": "^2.56.0",
     "undici": "^6.29.1"
   },
   "devDependencies": {
