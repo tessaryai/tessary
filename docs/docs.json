@@ -27,7 +27,7 @@
         "group": "Get started",
         "pages": [
           "index",
-          "open-edition"
+          "editions"
         ]
       },
       {
@@ -69,7 +69,8 @@
         "group": "Classifiers",
         "pages": [
           "classifiers/frustration",
-          "classifiers/groundedness"
+          "classifiers/groundedness",
+          "classifiers/custom"
         ]
       },
       {
@@ -102,6 +103,12 @@
       }
     ]
   },
+  "redirects": [
+    {
+      "source": "/open-edition",
+      "destination": "/editions"
+    }
+  ],
   "navbar": {
     "links": [
       {

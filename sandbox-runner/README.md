@@ -217,6 +217,7 @@ checks the body in this order, each a `bad_request` with this `detail`:
 | `credential`, as on the one-shot routes | `session.js: missing or invalid credential (<why>)` |
 | `model` non-empty string | `session.js: model must be a non-empty string` |
 | `idle_timeout_ms` positive integer | `session.js: idle_timeout_ms must be a positive integer` |
+| `idle_timeout_ms` at most 24 hours | `session.js: idle_timeout_ms must be at most 86400000` |
 | an `egress_secret` credential on docker | `session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)` |
 | `system_prompt` non-empty string | `session.js: system_prompt must be a non-empty string` |
 | `files`, if present, an object of strings | `session.js: files must map relative paths to strings` |

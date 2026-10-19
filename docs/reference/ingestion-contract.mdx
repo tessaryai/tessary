@@ -222,7 +222,7 @@ Ad-hoc alias spellings of canonical fields are never read either. `sessionId`, `
 | Single span payload | `8,000,000` characters | The whole span is dropped rather than clipped |
 | Live buffer pressure | The ingest buffer's byte budget, `64 MiB` by default; the receiver refuses above 80% of it. See [Ingest buffer](/self-hosting/configuration#ingest-buffer) | The request is refused with `503` and a `Retry-After` header, before the body is decoded. Stock exporters retry a `503`, so a shed costs latency rather than data |
 
-On Tessary Cloud, three more limits apply to the whole organization. The values are on the [pricing page](https://tessary.ai/pricing). Each refusal rejects the whole export request, and the JSON error body carries the code in `meta.error.code`.
+On Tessary Cloud, three more limits apply to the whole organization. The values are on the [pricing page](https://tessary.ai/#pricing). Each refusal rejects the whole export request, and the JSON error body carries the code in `meta.error.code`.
 
 | Limit | Response | Error code and message |
 | --- | --- | --- |

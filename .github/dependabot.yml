@@ -9,31 +9,39 @@ version: 2
 # The uv trees use the `uv` ecosystem, not `pip`: this repo has no requirements*.txt or
 # setup.py, and `uv` reads pyproject.toml + uv.lock directly.
 #
-# Weekly, Mondays, to keep PR review noise predictable.
+# Weekly, Fridays, to keep PR review noise predictable.
 updates:
   - package-ecosystem: maven
     directory: /backend
     schedule:
       interval: weekly
-      day: monday
+      day: friday
+    groups:
+      # Core and plugin move together: a core bump alone fails SpotBugs on a missing BCEL class.
+      spotbugs:
+        patterns: ["com.github.spotbugs:*"]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
-      day: monday
+      day: friday
+    groups:
+      # react-dom refuses to load beside a react of any other version.
+      react:
+        patterns: ["react", "react-dom"]
 
   - package-ecosystem: npm
     directory: /sandbox-runner/launcher
     schedule:
       interval: weekly
-      day: monday
+      day: friday
 
   - package-ecosystem: npm
     directory: /sandbox-runner/agent-sandbox
     schedule:
       interval: weekly
-      day: monday
+      day: friday
     ignore:
       # Both of these mirror install lines baked into the E2B runtime image (template.ts and
       # Dockerfile) and must move together with them, which a manifest-only PR can't do:
@@ -48,10 +56,10 @@ updates:
     directory: /classifiers
     schedule:
       interval: weekly
-      day: monday
+      day: friday
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-      day: monday
+      day: friday

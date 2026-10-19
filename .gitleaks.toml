@@ -57,10 +57,6 @@ description = "Javadoc names the PEM header it parses; no key material"
 paths = ['''^backend/substrate/src/main/java/ai/tessary/git/github/GithubTokenService\.java$''']
 
 [[allowlists]]
-description = "fixture PEM blocks exercising the PKCS#1 and PKCS#8 parsers; throwaway keys generated for the test"
-paths = ['''^backend/substrate/src/test/java/ai/tessary/git/github/GithubTokenServiceKeyTest\.java$''']
-
-[[allowlists]]
 description = "placeholder local JDBC URL with no credential in it"
 paths = ['''^\.env\.example$''']
 
@@ -109,7 +105,7 @@ description = "one FAKE AWS-format key sent through OTLP ingest to prove redacti
 paths = ['''^backend/app/src/test/java/ai/tessary/classifier/SecretLeakRedactionSeamIntegrationTest\.java$''']
 
 [[allowlists]]
-description = "gitleaks' own rule definitions, vendored by scripts/sync-gitleaks.sh: regex and keyword sources for credential formats, no literal key"
+description = "gitleaks' own rule definitions, vendored by scripts/sync-gitleaks.sh: regex and keyword sources for credential formats, plus the upstream allowlist of publicly known example keys; no Tessary credential"
 paths = ['''^backend/substrate/src/main/resources/redaction/gitleaks\-rules\.json$''']
 
 [[allowlists]]

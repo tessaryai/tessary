@@ -47,7 +47,7 @@ The provider credential travels with the run request and reaches the agent as en
 
 Each project keeps traces and detections for a set number of days. An hourly sweep deletes anything older.
 
-Tessary Cloud sets a maximum retention period, and no project can keep data longer than that. The number is on the [pricing page](https://tessary.ai/pricing). You can shorten it for one project under **Settings → Data retention**: for **Traces**, **Detections**, or both, turn on **Override for this project**, enter **Days to keep**, and select **Save**. Changing retention requires the owner or admin role.
+Tessary Cloud sets a maximum retention period, and no project can keep data longer than that. The number is on the [pricing page](https://tessary.ai/#pricing). You can shorten it for one project under **Settings → Data retention**: for **Traces**, **Detections**, or both, turn on **Override for this project**, enter **Days to keep**, and select **Save**. Changing retention requires the owner or admin role.
 
 Tessary refuses a value above the maximum with `Retention of <days> days is above the <maximum>-day ceiling for this project`. It also refuses `0`, which would mean keeping data forever, with `Retention of forever is above the <maximum>-day ceiling for this project`.
 

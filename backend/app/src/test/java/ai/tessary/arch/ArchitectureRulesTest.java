@@ -209,7 +209,7 @@ public class ArchitectureRulesTest {
             .should()
             .callMethodWhere(target(nameMatching("recordHumanRuling|closeByCase"))
                     .and(target(owner(nameMatching(".*FindingRepository")))))
-            .because("resolving a finding is a human decision (tessary-paid/classifiers/behavior_drift/PROGRAM.md §9); "
+            .because("resolving a finding is a human decision; "
                     + "an automatic 'expected' from a single exemplar would blind the detector permanently");
 
     // ---- catalog parity (custom conditions) ----
