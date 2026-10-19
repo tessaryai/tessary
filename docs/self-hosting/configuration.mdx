@@ -217,6 +217,7 @@ The complete set of destinations a self-hosted instance may reach, and when. Any
 | Destination | When | Why it is permitted |
 | --- | --- | --- |
 | `home.tessary.ai` | Once at backend start and every 6 hours, only while `TESSARY_TELEMETRY_ENABLED` is `true` | The heartbeat and the price book check above. Off, the name is never even resolved. |
+| `home.tessary.ai` (paid, licensed installs only) | Hourly, regardless of `TESSARY_TELEMETRY_ENABLED` | A paid self-hosted install under a license pulls its signed license check-in document. The open edition never makes this call; the paid overlay's README documents it. |
 | `docker.io` | `docker compose pull`, before the stack runs; and once more at the first analysis, for the agent image the sandbox runner pulls lazily unless you pull it first | The published images. The check pulls or builds them before its observation window opens, so a pull during operation is a failure; the agent image is the one exception, named here because the check's walk stops before the first analysis. |
 | Nothing from the bundled Redpanda | Only with `--profile kafka` | Redpanda's metrics reporter (`enable_metrics_reporter`, the one setting that phones home) is off in the flags the profile starts it with. |
 | `acme-v02.api.letsencrypt.org` | Only when `SITE_DOMAIN` names a real host | Caddy's certificate issuance. Unset, Caddy serves plain HTTP and contacts nobody. |
