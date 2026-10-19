@@ -1655,6 +1655,19 @@ if (BACKEND === 'docker' && !SANDBOX_WORK_VOLUME) {
   process.exit(1);
 }
 
+// The lane and session scripts this file runs ship in the template of the same release, so a template pinned to another one
+// fails every run. Only two release numbers are compared: a local build (dev) or a floating tag (latest) is not checked.
+const RELEASE = /^\d+\.\d+\.\d+$/;
+const launcherRelease = (() => {
+  try { return fs.readFileSync(path.join(__dirname, 'IMAGE_VERSION'), 'utf8').trim(); } catch { return ''; }
+})();
+const templateRelease = ANALYZER_TEMPLATE.slice(ANALYZER_TEMPLATE.lastIndexOf(':') + 1);
+if (BACKEND === 'e2b' && RELEASE.test(launcherRelease) && RELEASE.test(templateRelease) && templateRelease !== launcherRelease) {
+  console.error(`error: E2B_ANALYZER_TEMPLATE=${ANALYZER_TEMPLATE} is not this launcher's release ${launcherRelease}.`);
+  console.error('       Unset it so docker-compose.yml takes the template from TESSARY_VERSION, or pin it to the same release.');
+  process.exit(1);
+}
+
 if (require.main === module && BACKEND === 'docker') {
   ensureSandboxNetwork()
     .then(joinSandboxNetwork)
