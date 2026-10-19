@@ -16,6 +16,7 @@
 
 /* =============================================================================
  * LAYER 1 — PRIMITIVES (raw values; never referenced by a component)
+ * Chart palette values live in the Chart palettes block below, not here: they are component tokens with no semantic alias.
  * ============================================================================= */
 
 :root {
@@ -271,4 +272,71 @@
   --density-cell-py: 0.3125rem;  /* ~py-1.5 */
   --density-cell-px: 0.625rem;   /* ~px-2.5 */
   --density-row-leading: 1.35;
+}
+
+:root {
+  /* --- Chart palettes (charts only) ---
+   * The one place a hue carries data instead of status. Metrics charts draw up to six ranked series
+   * plus an "other" fold; a series line, bar, legend dot or hover marker reads --color-series-N, and
+   * nothing outside an SVG chart or its legend may. Three palettes; the user picks one in Settings >
+   * Organization > Appearance (localStorage tessary.prefs.chartPalette) and ChartPaletteProvider
+   * stamps it on <html> as data-chart-palette. Every value clears 3:1 on --color-surface (#1B1B1B),
+   * the card background a chart sits on; the ratios are in frontend/DESIGN_SYSTEM.md, Charts. */
+  /* The Tessary v2 design system's chart-series-1..6 ramp. */
+  --color-chart-tessary-1: #CFAFFF;
+  --color-chart-tessary-2: #C9690C;
+  --color-chart-tessary-3: #0097AC;
+  --color-chart-tessary-4: #F1B047;
+  --color-chart-tessary-5: #35D8CA;
+  --color-chart-tessary-6: #AF64BB;
+  --color-chart-tessary-other: var(--primitive-grey-500);
+
+  /* Okabe and Ito's colorblind-safe set, minus its dark blue (3.3:1 here) and black. */
+  --color-chart-colorblind-1: #56B4E9;
+  --color-chart-colorblind-2: #E69F00;
+  --color-chart-colorblind-3: #009E73;
+  --color-chart-colorblind-4: #F0E442;
+  --color-chart-colorblind-5: #CC79A7;
+  --color-chart-colorblind-6: #D55E00;
+  --color-chart-colorblind-other: var(--primitive-grey-500);
+
+  /* The grey ramp: grey-50, grey-300 and grey-500, then three steps between grey-500 and grey-600,
+   * which is "other" (the darkest step above 3:1; grey-700 is 1.57:1 and cannot carry a series).
+   * On a line chart each rank's dash pattern tells neighbouring series apart. */
+  --color-chart-greyscale-1: var(--primitive-grey-50);
+  --color-chart-greyscale-2: var(--primitive-grey-300);
+  --color-chart-greyscale-3: var(--primitive-grey-500);
+  --color-chart-greyscale-4: #8F8F8F;
+  --color-chart-greyscale-5: #818181;
+  --color-chart-greyscale-6: #767676;
+  --color-chart-greyscale-other: var(--primitive-grey-600);
+
+  /* What a chart reads. Default is the tessary palette; the attribute blocks below re-point them. */
+  --color-series-1: var(--color-chart-tessary-1);
+  --color-series-2: var(--color-chart-tessary-2);
+  --color-series-3: var(--color-chart-tessary-3);
+  --color-series-4: var(--color-chart-tessary-4);
+  --color-series-5: var(--color-chart-tessary-5);
+  --color-series-6: var(--color-chart-tessary-6);
+  --color-series-other: var(--color-chart-tessary-other);
+}
+
+[data-chart-palette="colorblind"] {
+  --color-series-1: var(--color-chart-colorblind-1);
+  --color-series-2: var(--color-chart-colorblind-2);
+  --color-series-3: var(--color-chart-colorblind-3);
+  --color-series-4: var(--color-chart-colorblind-4);
+  --color-series-5: var(--color-chart-colorblind-5);
+  --color-series-6: var(--color-chart-colorblind-6);
+  --color-series-other: var(--color-chart-colorblind-other);
+}
+
+[data-chart-palette="greyscale"] {
+  --color-series-1: var(--color-chart-greyscale-1);
+  --color-series-2: var(--color-chart-greyscale-2);
+  --color-series-3: var(--color-chart-greyscale-3);
+  --color-series-4: var(--color-chart-greyscale-4);
+  --color-series-5: var(--color-chart-greyscale-5);
+  --color-series-6: var(--color-chart-greyscale-6);
+  --color-series-other: var(--color-chart-greyscale-other);
 }

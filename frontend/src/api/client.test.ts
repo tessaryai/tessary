@@ -66,3 +66,20 @@ it("the classifier chart reads: name the scope and the range as the controller r
     "/api/orgs/acme/projects/default/classifiers/charts?tool=tool%3Asearch+docs&days=28",
   ]);
 });
+
+// Bug: a superseded metrics read keeps running on the server because the fetch never sees the query's abort signal.
+it("projectApi.queryMetrics: posts the request and hands fetch the abort signal", async () => {
+  vi.stubGlobal("fetch", fetchMock);
+  const api = projectApi("acme", "default");
+  const signal = new AbortController().signal;
+  const req = {
+    view: "traces", measures: ["traces"], dimension: null, filters: null, from: "2026-10-11T00:00:00Z",
+    to: "2026-10-18T00:00:00Z", granularity: null, top_n: null, compare: null,
+  };
+
+  await api.queryMetrics(req, signal);
+
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("/api/orgs/acme/projects/default/metrics/query");
+  expect(init).toMatchObject({ method: "POST", body: JSON.stringify(req), signal });
+});

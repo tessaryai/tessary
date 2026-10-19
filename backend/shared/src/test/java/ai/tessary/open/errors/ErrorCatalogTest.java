@@ -97,7 +97,8 @@ class ErrorCatalogTest {
                         AuthError.class,
                         DecisionError.class,
                         RetentionError.class,
-                        AgentRunError.class)
+                        AgentRunError.class,
+                        MetricsError.class)
                 .flatMap(c -> Arrays.stream(c.getEnumConstants()));
     }
 

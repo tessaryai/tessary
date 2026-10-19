@@ -59,7 +59,7 @@ const ClassifierConfigurePage = named(
   "ClassifierConfigurePage",
 );
 const FindingPage = named(() => import("./views/classifiers/FindingPage"), "FindingPage");
-const Vitals = named(() => import("./views/vitals/Vitals"), "Vitals", "vitals");
+const MetricsPage = named(() => import("./views/metrics/MetricsPage"), "MetricsPage", "metrics");
 
 const Sources = named(() => import("./views/Sources"), "Sources");
 const Concepts = named(() => import("./views/Concepts"), "Concepts");
@@ -212,8 +212,11 @@ function ProjectShell() {
         <Route path="classifiers/findings/:findingId" element={<FindingPage />} />
         {/* One classifier: switch, status, call sites, tuning, detections, reset. Static paths above outrank it. */}
         <Route path="classifiers/:classifierId" element={<ClassifierConfigurePage />} />
-        {/* The Triage pulse strip's full-size page. Amber only, never red. */}
-        <Route path="vitals" element={<Vitals />} />
+        {/* The Triage pulse strip's full-size page: dashboards of counted spend, latency, traces and cases. */}
+        <Route path="metrics" element={<MetricsPage />} />
+        <Route path="metrics/:dashboardId" element={<MetricsPage />} />
+        {/* Renamed from "vitals": redirect old bookmarks. */}
+        <Route path="vitals" element={<Navigate to="../metrics" replace />} />
 
         <Route path="rca/:reportId" element={<RcaReport />} />
         <Route path="concepts" element={<Concepts />} />

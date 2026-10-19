@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // vitest setupFiles entry. Stubs browser globals jsdom lacks that views call on mount: IntersectionObserver
 // (TracesIndex), ResizeObserver (detail-chat), and Element.scrollIntoView (CommandPalette, under every tenant route).
-// matchMedia has no users, so it is not stubbed. Node also defines its own globalThis localStorage, which without
+// matchMedia is not stubbed: useMediaQuery (src/ui/useMediaQuery.ts) reads its absence as the desktop layout, and its
+// own test stubs it. Node also defines its own globalThis localStorage, which without
 // --localstorage-file silently returns undefined, and jsdom's assignment loses to it. DensityProvider reads
 // localStorage on first render, so both storages get an in-memory polyfill.
 import { afterEach, vi } from "vitest";

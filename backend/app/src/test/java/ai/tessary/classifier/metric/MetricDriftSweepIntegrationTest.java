@@ -21,13 +21,13 @@ import ai.tessary.classifier.metric.MetricBaselineRow.State;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
+import ai.tessary.pricing.TokenUsage;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
-import ai.tessary.vitals.TokenUsage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -716,7 +716,7 @@ record MetricDriftSweepIntegrationTest(
 
     /**
      * {@code count} turns, each an agent root with one priced llm leaf. The model sits on the leaf, never the root:
-     * bucketing cost by the root's model is the bug {@code VitalsRepository} documents.
+     * cost must bucket by the leaf's model, not the root's.
      */
     private void seedCostTurns(
             String projectId, int fromIndex, int count, String model, TokenUsage usage, boolean reportsCacheWrite) {

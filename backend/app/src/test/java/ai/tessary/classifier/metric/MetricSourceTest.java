@@ -125,7 +125,7 @@ record MetricSourceTest(
 
         // One measure abstaining never takes the others down.
         assertEquals(1500.0, present(turn.measurement(Measure.TURN_DURATION)).value(), 1.0);
-        // Token buckets still read: volume is known where price is not, as vitals counts unpriced calls.
+        // Token buckets still read: volume is known where price is not, as Metrics counts unpriced calls.
         assertEquals(1500000.0, present(turn.measurement(Measure.TOK_INPUT)).value(), 0.0);
     }
 

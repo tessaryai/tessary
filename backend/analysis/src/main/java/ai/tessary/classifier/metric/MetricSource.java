@@ -9,7 +9,7 @@ import ai.tessary.classifier.substrate.ActionSymbol;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository.TraceHead;
 import ai.tessary.pricing.ModelResolver;
-import ai.tessary.vitals.TokenUsage;
+import ai.tessary.pricing.TokenUsage;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumMap;

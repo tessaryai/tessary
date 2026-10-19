@@ -9,6 +9,7 @@ import "@fontsource-variable/space-grotesk";
 import App from "./App";
 import { ThemeProvider } from "./ui/ThemeContext";
 import { DensityProvider } from "./ui/density";
+import { ChartPaletteProvider } from "./ui/chartPalette";
 import { prefetchProjectShell } from "./shell/shellQueries";
 import { preloadRouteChunk } from "./lib/routePreload";
 import "./index.css";
@@ -32,9 +33,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <DensityProvider className="contents">
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
+          <ChartPaletteProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </ChartPaletteProvider>
         </DensityProvider>
       </ThemeProvider>
     </QueryClientProvider>

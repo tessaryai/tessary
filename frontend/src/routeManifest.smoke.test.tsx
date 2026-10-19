@@ -19,11 +19,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import App from "./App";
 import { auth as mockedAuth } from "./api/client";
 import { ThemeProvider } from "./ui/ThemeContext";
 import { DensityProvider } from "./ui/density";
+import { ChartPaletteProvider } from "./ui/chartPalette";
 import { ApiError } from "./api/types";
 import type {
   BehaviorFindingDetail,
@@ -34,6 +35,7 @@ import type {
   EvidenceSpanPage,
   MalformedOutputDetail,
   MalformedOutputPage,
+  MetricsQueryRequest,
   RcaReport,
 } from "./api/types";
 import type { components } from "./api/generated/schema";
@@ -46,6 +48,13 @@ import {
   GROUNDEDNESS_FINDING_DETAIL,
   GROUNDEDNESS_REPORT,
 } from "./test/groundednessFixtures";
+import {
+  DASHBOARD_LIST,
+  DEFAULT_DASHBOARD,
+  EMPTY_METRICS_RESULT,
+  METRICS_CATALOG,
+  resultFor,
+} from "./test/metricsFixtures";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
@@ -224,19 +233,6 @@ const EMPTY_TRIAGE = {
 };
 const EMPTY = () => Promise.resolve([]);
 
-/**
- * The full `Vitals` shape: a partial fixture once passed only because the suite stopped before PulseStrip read
- * `total.cost`.
- */
-const EMPTY_GROUP = { cost: { usd: 0, delta_pct_per_turn: null, baseline_usd: null, calls: 0, unpriced_calls: 0, tokens: 0, flagged: false }, duration: { p50_ms: 0, p95_ms: 0, delta_pct: null, baseline_p95_ms: null, turns: 0, flagged: false }, flagged: false, key: null, label: null };
-const EMPTY_VITALS = {
-  dimension: "call_site",
-  groups: [] as unknown[],
-  priced_models: 0,
-  total: EMPTY_GROUP,
-  window: { from: "2026-01-01T00:00:00Z", to: "2026-01-08T00:00:00Z", days: 7, baseline_from: "2025-12-25T00:00:00Z", baseline_to: "2026-01-01T00:00:00Z" },
-};
-
 /** `useOnboarding` reads `.stage` without `?.`. */
 const EMPTY_ONBOARDING = {
   stage: "watching" as const,
@@ -276,12 +272,13 @@ const EMPTY_CHART_SCOPES = { days: 28, call_sites: [] as unknown[], tools: [] as
 
 /**
  * Applied to every tenant route. ShellChrome's nav badge reads getTriage; CapabilityGate briefly mounts Triage
- * (getVitals, onboarding, listBehaviorFindings) while its read loads; ProjectShell reads substrateStatus before anything mounts. Unmocked,
+ * (queryMetrics, onboarding, listBehaviorFindings) while its read loads; ProjectShell reads substrateStatus before anything mounts. Unmocked,
  * each logs "data cannot be undefined".
  */
 const SHELL_CHROME_OVERRIDES: Record<string, () => Promise<unknown>> = {
   getTriage: () => Promise.resolve(EMPTY_TRIAGE),
-  getVitals: () => Promise.resolve(EMPTY_VITALS),
+  // PulseStrip reads `rows[0]`, so this is the empty window's one total row, never `rows: []`.
+  queryMetrics: () => Promise.resolve(EMPTY_METRICS_RESULT),
   onboarding: () => Promise.resolve(EMPTY_ONBOARDING),
   substrateStatus: () => Promise.resolve(CONNECTED_SUBSTRATE_STATUS),
   // Triage reads `configured_providers` during that same transient mount.
@@ -327,8 +324,18 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   "classifiers/findings/:findingId": {
     getBehaviorFinding: () => Promise.resolve(GROUNDEDNESS_FINDING_DETAIL),
   },
-  vitals: {
-    getVitals: () => Promise.resolve(EMPTY_VITALS),
+  metrics: {
+    getMetricsCatalog: () => Promise.resolve(METRICS_CATALOG),
+    listMetricDashboards: () => Promise.resolve(DASHBOARD_LIST),
+    getMetricDashboard: () => Promise.resolve(DEFAULT_DASHBOARD),
+    queryMetrics: () => Promise.resolve(EMPTY_METRICS_RESULT),
+  },
+  // No dashboard has the fake id: the page's not-found state. The list and catalog still load.
+  "metrics/:dashboardId": {
+    getMetricsCatalog: () => Promise.resolve(METRICS_CATALOG),
+    listMetricDashboards: () => Promise.resolve(DASHBOARD_LIST),
+    getMetricDashboard: NOT_FOUND("dashboard"),
+    queryMetrics: () => Promise.resolve(EMPTY_METRICS_RESULT),
   },
   // Legacy `/pipeline/*` still resolves to a view (triage), so it needs triage's queries.
   "pipeline/*": {
@@ -735,11 +742,25 @@ const DETAIL_FIXTURES: {
     overrides: { getRcaReport: resolved(FINISHED_RCA) },
     heading: /RCA \(root-cause analysis\): extract\.order/,
   },
+  {
+    name: "the default dashboard with data in every widget",
+    path: "metrics",
+    overrides: { queryMetrics: (req?: unknown) => Promise.resolve(resultFor(req as MetricsQueryRequest)) },
+    heading: /^Metrics$/,
+  },
 ];
 
 // ---- rendering ----------------------------------------------------------------------------------
 
+/** The router's path after the last render; it draws nothing, so a mount still waits for the view's own text. */
+let renderedPath = "";
+function LocationProbe() {
+  renderedPath = useLocation().pathname;
+  return null;
+}
+
 function renderApp(url: string) {
+  renderedPath = "";
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   });
@@ -747,9 +768,12 @@ function renderApp(url: string) {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <DensityProvider className="contents">
-          <MemoryRouter initialEntries={[url]}>
-            <App />
-          </MemoryRouter>
+          <ChartPaletteProvider>
+            <MemoryRouter initialEntries={[url]}>
+              <App />
+              <LocationProbe />
+            </MemoryRouter>
+          </ChartPaletteProvider>
         </DensityProvider>
       </ThemeProvider>
     </QueryClientProvider>,
@@ -945,5 +969,13 @@ describe("app entry redirects", () => {
 
     await waitFor(() => expect(container.textContent).toContain("Connect your traces"));
     expect(container.querySelector('button[aria-haspopup="menu"]')).toBeNull();
+  });
+
+  // Bug: a bookmark to the page's old name lands on Triage through the catch-all, or loops, instead of on Metrics.
+  it("sends the page's old address to Metrics", async () => {
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...VIEW_OVERRIDES.metrics };
+    renderApp(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/vitals"));
+
+    await waitFor(() => expect(renderedPath).toBe(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/metrics")));
   });
 });

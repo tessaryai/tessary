@@ -283,11 +283,11 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 | module | holds |
 |---|---|
 | `app` | `TessaryApplication`, `application.yaml`, every `@SpringBootTest` integration test |
-| `surfaces` | `query`, `search`, `mcp`, `slack` (the wire surface only), `metering`, `billing`, `telemetry` (the heartbeat orchestrator half — see `core`'s `telemetry` below) |
+| `surfaces` | `query`, `search`, `mcp`, `slack` (the wire surface only), `metering`, `metrics`, `billing`, `telemetry` (the heartbeat orchestrator half — see `core`'s `telemetry` below) |
 | `analysis` | `classifier`, `onboarding`, `rca`, `cases`, `alert`, `prompt`, `agentrun` |
 | `llm-runtime` | `llm`, `sandbox` (agent-span telemetry only) — the only module that declares a model-provider SDK |
 | `product` | `pipeline`, `plan` |
-| `substrate` | `storage`, `ingest`, `redaction`, `retention`, `pricing`, `sources`, `traces`, `git`, `usage`, `vitals` |
+| `substrate` | `storage`, `ingest`, `redaction`, `retention`, `pricing`, `sources`, `traces`, `git`, `usage` |
 | `tenancy` | `tenant`, `auth`, `edition`, `featureflags`, `version` |
 | `core` | `web`, `model`, `apidoc`, `ops`, `crypto`, `db`, `config`, `telemetry` (the transport/config/instance-id half — see `surfaces`'s `telemetry` above), `llmspi`, the Liquibase changelog, the schema-column generator |
 | `test-support` | `TestPostgres` + its context initializer, the `ScriptedHttpClient` and `LoopbackHttpStub` HTTP doubles; test scope in `app`, `substrate`, `product` and `analysis` |
@@ -324,6 +324,7 @@ holds. A package appears in exactly one module.
 | `llmspi/` | `core` | the provider-agnostic model seam — `ModelLane`, `LaneGroup` (`TextEmbedder` sat here too, until it was removed with the rest of the vector substrate). Everything above `llm-runtime` reaches a model through these types and never sees a vendor class. There is no per-lane default model: `llm/LanePriority` (in `llm-runtime`, since it names `ModelProvider`) orders the providers each lane reaches and the models it offers on each, and the org's configured credentials pick from that. Rates are NOT here — they are rows, in `substrate`'s `pricing/`. | — |
 | `mcp/` | `surfaces` | Model Context Protocol server (Streamable HTTP). | [auth-and-mcp.md](./auth-and-mcp.md) |
 | `metering/` | `surfaces` | usage metering: rollup worker + validated read API, plus the per-call `llm_call` ledger (token buckets + cost per lane) the org LLM-usage read aggregates. | `/v1/usage` |
+| `metrics/` | `surfaces` | the Metrics page and its API: one aggregate query over four catalog views (`traces`, `llm_calls`, `tool_calls`, `cases`) with fixed measures and the companions that say what a figure leaves out, and project dashboards of saved queries (`metric_dashboard`, plus the built-in `default` held in code). A query runs read-only under a statement timeout and a three-permit gate, so it cannot starve the shared pool. | [metrics.md](../concepts/metrics.md), `/api/orgs/{orgSlug}/projects/{projectSlug}/metrics` |
 | `model/` | `core` | the pure record graph mirroring the plugin's bundle schema (`Pipeline`, `CallSite`, `Chain`, `FailureMode`, `TaxonomyNode`,… | — |
 | `onboarding/` | `analysis` | the ladder from no ingest key to first case, as an ordered `OnboardingStage` (not_connected → listening → fitting → watching → finding → case) rather than independent booleans, so the surface says one thing at a time and never walks backwards. | `/api/orgs/{orgSlug}/projects/{projectSlug}/onboarding` |
 | `ops/` | `core` | repository-only persistence for operational entities (no controller/service):… | — |
@@ -333,7 +334,7 @@ holds. A package appears in exactly one module.
 | `rca/` | `analysis` | root-cause analysis: pressed on a case, reads the finding's CLAIM (never any triage ruling — the context firewall) and its evidence over MCP → a summary, grounded causes + ruled-out checks. | [The three analysis layers](#the-three-analysis-layers-and-the-firewall-between-two-of-them) |
 | `redaction/` | `substrate` | PII redaction: rule authoring/testing + write-path guard (`RedactionService.redactBatch` called by the `SubstrateWriter` drainer, immediately before the write). | [pii-redaction.md](../concepts/pii-redaction.md) |
 | `retention/` | `substrate` | Retention enforcement: `RetentionResolver` (platform default TTL, overridden by a `retention_policy` row, both replaced by the `FixedRetention` seam when another build fixes a project's retention), `RetentionSweeper` (the bounded hourly delete), and `RetentionController` (Settings → Data retention: reads the resolver, writes the override rows, refuses writes while retention is fixed; `RETENTION_MANAGE` to write). One resolver, so the sweep and the customer-facing answer cannot differ. | [ingest-runbook.md](../guides/ingest-runbook.md) |
-| `pricing/` | `substrate` | Model identity + versioned rates: `PriceBookImporter` (idempotent boot + daily import of the checked-in snapshots into `price_book`/`model_price`), `ModelResolver` (reported model name → `model.id`, exact → region-strip → vendor-strip), `PriceBookRepository`. The manual override book layers over the vendored LiteLLM one. | — |
+| `pricing/` | `substrate` | Model identity + versioned rates: `PriceBookImporter` (idempotent boot + daily import of the checked-in snapshots into `price_book`/`model_price`), `ModelResolver` (reported model name → `model.id`, exact → region-strip → vendor-strip), `PriceBookRepository`, and `TokenUsage`, the four disjoint token buckets `IngestPricer` carves at ingest, which metric drift's cost decomposition reads. The manual override book layers over the vendored LiteLLM one. | — |
 | `prompt/` | `evaluation` | prompt prose read from `prompt-craft/<purpose>/` on the classpath; the resource-owning module ships its own. Only prose lives there, never composition logic. | [prompt-craft.md](./prompt-craft.md) |
 | `sandbox/` | `llm-runtime` | `AgentSpanTelemetry` and nothing else: the Langfuse-shaped generation stamping every agentic lane emits through. The out-of-process grader-JS runner SPI (`SandboxRunner` + its E2B/Lambda implementations) was removed along with grading. | — |
 | `search/` | `surfaces` | global ⌘K search: one tenant-scoped full-text read over a project's content entities, feeding the command palette. | `/api/orgs/{orgSlug}/projects/{projectSlug}/search` |
@@ -345,5 +346,4 @@ holds. A package appears in exactly one module.
 | `traces/` | `substrate` | read-side trace explorer over the substrate. | — |
 | `usage/` | `substrate` | the metered record of consumption — rollups and the per-call LLM ledger. The grading spend ceiling and its breaker were removed along with grading; nothing here caps anything now. | — |
 | `version/` | `tenancy` | project versions (one row per commit SHA), materialized when a pipeline import names a commit. | — |
-| `vitals/` | `substrate` | token and cost accounting over observed spans — `TokenUsage` (the app prices from `pricing/`). | — |
 | `web/` | `core` | shared HTTP plumbing ONLY: `ApiResponse` envelope, `ResponseMeta`, `ErrorBody`, `GlobalExceptionHandler`. | — |

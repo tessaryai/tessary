@@ -16,6 +16,8 @@ export default defineConfig({
           if (/[\\/]node_modules[\\/](react-markdown|remark-|rehype-|micromark|mdast-|hast-|unist-|unified|vfile)/.test(id))
             return "vendor-markdown";
           if (/[\\/]node_modules[\\/]@uiw[\\/]react-json-view/.test(id)) return "vendor-jsonview";
+          if (/[\\/]node_modules[\\/](react-grid-layout|react-draggable|react-resizable|resize-observer-polyfill|fast-equals)[\\/]/.test(id))
+            return "vendor-grid";
           return undefined;
         },
       },
