@@ -1212,7 +1212,9 @@ async function readSessionEvents(s) {
 function armIdle(s) {
   clearIdle(s);
   if (s.state !== 'live' || s.replyOpen || s.sending) return;
-  s.idleTimer = setTimeout(() => closeSession(s, 'idle'), s.idleTimeoutMs);
+  // parseSessionStart already rejects more; clamped again here so the bound sits next to the timer.
+  const ms = s.idleTimeoutMs > SESSION_MAX_IDLE_MS ? SESSION_MAX_IDLE_MS : s.idleTimeoutMs;
+  s.idleTimer = setTimeout(() => closeSession(s, 'idle'), ms);
 }
 
 function clearIdle(s) {
