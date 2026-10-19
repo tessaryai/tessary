@@ -1,15 +1,31 @@
 ---
-title: "Cloud and Self-Hosted"
-description: "How Tessary Cloud and the self-hosted open edition differ, which classifiers run out of the box on each, what needs configuring, and where the product's boundaries are today."
+title: "Editions"
+description: "The two Tessary editions, Open Source and Paid: what each includes and how each runs, how Tessary Cloud and self-hosting differ, which classifiers run out of the box, what needs configuring, and where the product's boundaries are today."
 ---
 
-Tessary runs two ways. Tessary Cloud is the hosted service: Tessary runs it, and you sign up at [app.tessary.ai](https://app.tessary.ai). The open edition is the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE), and it is the build you get when you self-host.
+Tessary comes in two editions. Open Source is free: you self-host it, or you use Tessary Cloud, the hosted service. Paid adds custom classifiers, higher limits, longer retention, and support over a dedicated Slack channel, and you self-host it or use managed hosting.
+
+## Compare the editions
+
+| | Open Source | Paid |
+| --- | --- | --- |
+| Hosting | Self-host the code in the [tessary repository](https://github.com/tessaryai/tessary), or sign up for Tessary Cloud at [app.tessary.ai](https://app.tessary.ai). | Self-host it, or use managed hosting: a dedicated instance that Tessary runs for you. |
+| Price | Free. Self-hosting is free under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE), and Tessary Cloud is free with no payment method. | Priced per customer. |
+| Built-in classifiers | Included. See [Classifiers available out of the box](#classifiers-available-out-of-the-box). | Included. |
+| Custom classifiers | Not available. | Included. You describe a failure specific to your agent in plain words, and an agent builds a classifier for it from your real production traces. See [Custom classifiers](/classifiers/custom). |
+| Cases, triage, and root-cause analysis | Included. | Included. |
+| Limits and retention | Self-hosted, Tessary sets no trace or storage limit, and you configure retention. On Tessary Cloud, the numbers are on the [pricing page](https://tessary.ai/#pricing). | Higher limits and longer retention than Tessary Cloud. |
+| Support | [GitHub issues](https://github.com/tessaryai/tessary/issues) and [Discussions](https://github.com/tessaryai/tessary/discussions). | A dedicated Slack channel. |
+
+[Talk to us about the Paid edition](https://calendar.notion.so/meet/akhil-varma/demo) to get its price for your team. The [pricing section](https://tessary.ai/#pricing) of the website compares the two editions.
+
+## How Tessary Cloud and self-hosting differ
+
+The Open Source edition runs two ways. Tessary Cloud is the hosted service: Tessary runs it, and you sign up at [app.tessary.ai](https://app.tessary.ai). The open edition is the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE), and it is the build you get when you self-host.
 
 Every stage of the pipeline runs on both. Traces arrive over the OTLP (OpenTelemetry Protocol) endpoint, classifiers evaluate them and create findings, triage validates findings into cases (a high-confidence secret leak and a frustration finding open their case without it), and an agentic RCA (root-cause analysis) run investigates a case. What differs is who runs the stack, what pays for the model work, and what is switched on from the start.
 
 Tessary Cloud's usage limits and model credit are not part of the repository. The pages under Tessary Cloud document how they behave.
-
-## How Tessary Cloud and self-hosting differ
 
 | | Tessary Cloud | Self-hosted open edition |
 | --- | --- | --- |
@@ -42,6 +58,8 @@ On Tessary Cloud, [`groundedness`](/classifiers/groundedness) is also on from th
 The three drift classifiers compare a call site against its own history, so each one needs a stretch of your traffic before it can report anything. A new project sits at the `fitting` milestone until they have it. [Classifiers and findings](/concepts/classifiers-and-findings) covers what fitting a baseline means and what a finding records.
 
 Each of these is switchable per project under **Classifiers**.
+
+These are the built-in classifiers. [Custom classifiers](/classifiers/custom), which you build for failures specific to your own agent, are available only in the Paid edition.
 
 ## Capabilities that require configuration
 

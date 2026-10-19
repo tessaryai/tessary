@@ -1,0 +1,68 @@
+---
+title: "Custom Classifiers"
+description: "Build a classifier for a failure specific to your agent: describe it in plain words, and an agent builds it with you from your real production traces. Available in the Paid edition."
+---
+
+A custom classifier watches for a failure that belongs to your agent rather than to agents in general. You describe the failure in plain words, and an authoring agent builds the classifier with you from your real production traces. Before it goes live, it is calibrated: you get an agreement score, measured on examples it was not tuned on, before it opens a single finding.
+
+<Note>
+  Custom classifiers are available only in the Paid edition. They are not on Tessary Cloud or in the Open Source edition. [Talk to us about the Paid edition](https://calendar.notion.so/meet/akhil-varma/demo), or compare the editions in the [pricing section](https://tessary.ai/#pricing) of the website.
+</Note>
+
+## What a custom classifier is for
+
+The built-in classifiers watch for failures any agent can have: drift in duration or cost, tool errors, leaked secrets, malformed output, frustrated users, and answers their documents don't support. Many failures only make sense for one agent. A support agent promises a refund that the policy doesn't allow. A booking agent confirms a reservation before it checks availability. A coding agent edits files outside the directory it was asked to work in. No built-in classifier knows what your agent is supposed to do, so none of them can catch these.
+
+A custom classifier covers that kind of failure. Once it runs, its findings go through the same triage, root-cause analysis, and cases as a built-in classifier's.
+
+## How you build one
+
+You build a custom classifier in a conversation with the authoring agent. The agent does the work, and you decide.
+
+1. **Describe the failure.** Open **Classifiers**, select **New classifier**, and tell the agent in plain words what goes wrong.
+2. **Agree on how it works.** The agent reads your project's real production traces and proposes the classifier in three parts:
+   - **When it runs**: the moments in a session worth checking, for example every reply that follows a request for a refund.
+   - **What it reads**: the part of the session the check needs, for example the customer's request and the agent's reply.
+   - **How it judges**: the question asked about each match, and the answer that flags it.
+
+   The agent tries each part on your recent sessions and checks it with you before it moves on. Nothing is final until you agree.
+3. **Calibrate it.** The agent collects examples of matches from your traces, and each example gets a label. You can review any label and correct it, and your label wins. The classifier is tuned on part of the examples and measured on the rest, which it was not tuned on. The result is an agreement score: the share of those held-out examples on which the classifier agrees with the label. Calibration shows its estimated cost before it starts, and runs only when you agree.
+4. **Choose when to open a finding.** On the **Alerts** step, choose one of two ways:
+   - By default, Tessary learns each call site's normal share of flagged matches and opens a finding when that share changes.
+   - Alternatively, you choose a fixed share and a number of recent matches, and Tessary opens a finding when the share of flagged matches among them goes past it.
+
+   Either way, you choose whether a rise or a drop is the problem.
+5. **Create it.** Select **Create classifier**. The classifier is turned on as soon as it is created, on every call site.
+
+A flagged match is not a finding on its own. A finding opens only on the change you chose in step 4, so the classifier reports a pattern rather than every individual flag.
+
+## What it needs
+
+- The Paid edition, self-hosted or on managed hosting.
+- A model provider key, stored under **Settings** then **Providers**. Each match the classifier judges is one model call on your own key, so the cost grows with the number of matches.
+- Traces that carry a session ID. A custom classifier reads a session as a whole, so it does not judge a trace with no session ID.
+
+## Once it runs
+
+The classifier judges every session that matches it, as new traces arrive. To spend less, limit it to the call sites where the failure can happen, the same way as any other classifier. See [Run a classifier on some call sites](/concepts/classifiers-and-findings#run-a-classifier-on-some-call-sites).
+
+When it opens a finding, the finding goes through triage like a built-in classifier's. A positive ruling opens a case, or adds the finding to the case already open for the same cause, and an RCA (root-cause analysis) run investigates the case. The finding and case pages list the flagged messages, so you can read each match the classifier flagged.
+
+To change a classifier, edit it with the authoring agent. A change to when it runs, what it reads, or how it judges is a new version of the classifier. The new version is calibrated again before it replaces the old one, and it learns its normal share of flagged matches from the start.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Classifiers and findings" icon="magnifying-glass-chart" href="/concepts/classifiers-and-findings">
+    What a classifier is, which ones are built in, and what a finding records.
+  </Card>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases">
+    How triage turns a finding into a case, and the states a case moves through.
+  </Card>
+  <Card title="Editions" icon="box-open" href="/editions">
+    What the Open Source and Paid editions each include, and how each one runs.
+  </Card>
+  <Card title="Root-cause analysis" icon="magnifying-glass" href="/concepts/root-cause-analysis">
+    What the RCA run is given, and what its report returns.
+  </Card>
+</CardGroup>
