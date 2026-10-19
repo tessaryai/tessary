@@ -39,7 +39,7 @@ A flagged match is not a finding on its own. A finding opens only on the change 
 ## What it needs
 
 - The Paid edition, self-hosted or on managed hosting.
-- A model provider key, stored under **Settings** then **Providers**. Each match the classifier judges is one model call on your own key, so the cost grows with the number of matches.
+- An OpenRouter or TypeSafe key, the same keys [`frustration`](/classifiers/frustration) uses, stored under **Settings** then **Providers**. Each match the classifier judges is one model call on your own key, so the cost grows with the number of matches.
 - Traces that carry a session ID. A custom classifier reads a session as a whole, so it does not judge a trace with no session ID.
 
 ## Once it runs
