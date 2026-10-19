@@ -7,19 +7,11 @@
 # pnpm-lock.yaml in any Dockerfile that installs this package, or the overrides below vanish silently.
 
 overrides:
-  # js-yaml: NOT overridden, and this is the record of why. @redocly/openapi-core, reached
-  # through openapi-typescript, pins js-yaml 4.3.0; <4.3.1 has quadratic CPU consumption resolving
-  # `!!omap` (GHSA-2v37-7h3g-55p8, high). Forcing `js-yaml: '>=4.3.1'` here was TRIED and REVERTED:
-  # 4.3.1 changed the exported type registry, and redocly's lib/js-yaml/index.js dies at import with
-  # `Cannot read properties of undefined (reading 'merge')`, which takes the whole spec -> types
-  # codegen with it. openapi-typescript is already at its newest in-range version, so there is no
-  # upstream bump to take either.
-  #
-  # Carried deliberately because the advisory is unreachable here, and by a wider margin than
-  # "build-time only" suggests: openapi-typescript is a devDependency, so it never reaches the
-  # browser bundle at all -- and `generate:api` feeds it tessary-api.json, a checked-in JSON file.
-  # The `!!omap` path this advisory is about parses no YAML in this repo, from any source, ever.
-  # Revisit when redocly moves off 4.3.0.
+  # @redocly/openapi-core, reached through openapi-typescript, pins js-yaml 4.3.0, which has two
+  # high-severity CPU advisories (GHSA-2v37-7h3g-55p8, fixed in 4.3.1; the merge-key limit, fixed in
+  # 4.3.2). 4.3.1 broke redocly at import (`reading 'merge'`) and was reverted; 4.3.2 imports cleanly
+  # and `generate:api` emits an identical schema.d.ts. Drop this when redocly moves off 4.3.0.
+  "@redocly/openapi-core>js-yaml": 4.3.2
   # openapi-typescript@7.x declares peer typescript@^5.x; this project is on typescript 6. The codegen
   # only uses the TS compiler API to emit .d.ts and works fine on TS 6, so force its peer to ours —
   # otherwise pnpm's autoInstallPeers quietly resolves a second, TS 5 copy for it to run against.
