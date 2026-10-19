@@ -16,12 +16,20 @@ updates:
     schedule:
       interval: weekly
       day: friday
+    groups:
+      # Core and plugin move together: a core bump alone fails SpotBugs on a missing BCEL class.
+      spotbugs:
+        patterns: ["com.github.spotbugs:*"]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
       day: friday
+    groups:
+      # react-dom refuses to load beside a react of any other version.
+      react:
+        patterns: ["react", "react-dom"]
 
   - package-ecosystem: npm
     directory: /sandbox-runner/launcher
