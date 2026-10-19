@@ -24,6 +24,7 @@ public enum MetricsView {
             "t.project_id = :pid AND t.is_deleted IS NOT TRUE",
             "t.started_at",
             false,
+            List.of(),
             List.of(
                     dimension("call_site", "Call site", unattributed("t.call_site_id"), false),
                     dimension("name", "Trace name", unattributed("t.name"), true),
@@ -133,6 +134,7 @@ public enum MetricsView {
             "s.project_id = :pid AND s.kind = 'llm' AND NOT s.is_deleted",
             "s.started_at",
             false,
+            List.of("s.trace_id", "s.total_tokens", "s.total_cost", "s.cost_source"),
             List.of(
                     dimension("call_site", "Call site", unattributed("s.call_site_id"), false),
                     dimension("model", "Model", unattributed("s.provided_model_name"), false),
@@ -222,6 +224,7 @@ public enum MetricsView {
             "tc.project_id = :pid AND tc.is_deleted IS NOT TRUE",
             "tc.started_at",
             false,
+            List.of(),
             List.of(
                     dimension("tool", "Tool", collate(MetricsSql.TOOL_CALL_NAME), false),
                     dimension("error_type", "Error type", collate("COALESCE(tc.error_type, 'none')"), false),
@@ -257,6 +260,7 @@ public enum MetricsView {
             "c.project_id = :pid",
             "c.opened_at",
             true,
+            List.of(),
             List.of(
                     dimension("detector", "Detector", collate("c.detector"), false),
                     dimension("call_site", "Call site", unattributed("c.call_site_id"), false),
@@ -289,6 +293,7 @@ public enum MetricsView {
     private final String gate;
     private final String clock;
     private final boolean textClock;
+    private final List<String> carried;
     private final List<MetricsDimension> dimensions;
     private final List<MetricsMeasure> measures;
 
@@ -300,6 +305,7 @@ public enum MetricsView {
             String gate,
             String clock,
             boolean textClock,
+            List<String> carried,
             List<MetricsDimension> dimensions,
             List<MetricsMeasure> measures) {
         this.wire = wire;
@@ -309,6 +315,7 @@ public enum MetricsView {
         this.gate = gate;
         this.clock = clock;
         this.textClock = textClock;
+        this.carried = carried;
         this.dimensions = dimensions;
         this.measures = measures;
     }
@@ -343,6 +350,14 @@ public enum MetricsView {
     /** True for cases only: its clock is ISO-8601 text, so its bounds bind as {@link MetricsSql#TEXT_CLOCK} text. */
     public boolean textClock() {
         return textClock;
+    }
+
+    /**
+     * The span columns a trace-joined measure may read, so a dimensioned query can carry them through its base CTE.
+     * Empty on a view with no trace-joined measure.
+     */
+    public List<String> carried() {
+        return carried;
     }
 
     public List<MetricsDimension> dimensions() {

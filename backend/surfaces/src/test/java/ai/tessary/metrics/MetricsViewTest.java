@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -140,6 +141,29 @@ class MetricsViewTest {
                         "llm_calls.priced_traces",
                         "llm_calls.spending_traces"),
                 flagged(false));
+    }
+
+    /**
+     * The bug: a trace-joined measure that reads a span column the dimensioned query's base CTE does not carry, or a
+     * trace column other than is_settled, so every table and by-key chart naming it fails with an unknown column.
+     */
+    @Test
+    @DisplayName("a trace-joined measure reads only carried span columns and t.is_settled")
+    void aTraceJoinedMeasureReadsOnlyCarriedColumns() {
+        Pattern column = Pattern.compile("\\b[st]\\.[a-z_]+");
+        for (MetricsView view : MetricsView.values()) {
+            for (MetricsMeasure m : view.measures()) {
+                if (!m.needsTrace()) continue;
+                Matcher read = column.matcher(m.sql());
+                while (read.find()) {
+                    String c = read.group();
+                    assertTrue(
+                            c.equals(MetricsSql.SETTLED) || view.carried().contains(c),
+                            view.wire() + "." + m.wire() + " reads " + c + ", which its base CTE does not carry");
+                }
+            }
+            assertTrue(view.carried().stream().allMatch(c -> c.startsWith("s.")), view.wire() + " " + view.carried());
+        }
     }
 
     /** The bug: container spans summed beside their children, so every subtree total counts twice. */

@@ -429,9 +429,12 @@ record MetricsQueryIntegrationTest(
                 r.rows().stream().map(MetricsRow::label).toList());
     }
 
-    /** The bug: a span column read that the covering index does not hold, so a week's window reads the heap. */
+    /**
+     * The bug: a span column read that the covering index does not hold, so a week's window reads the heap; or a
+     * second read of span for the ranking, which probes trace once more per call.
+     */
     @Test
-    @DisplayName("the llm_calls statement is served by ix_span_llm_usage")
+    @DisplayName("the llm_calls statement is served by ix_span_llm_usage, once")
     void theLlmCallsStatementIsServedByIxSpanLlmUsage() {
         String pid = project("metrics-llm-index");
         for (int i = 0; i < 20; i++) llmCall(pid, SubstrateV2Fixtures.traceId(), "cs-" + (i % 3), "gpt-4o", RAN);
@@ -467,9 +470,9 @@ record MetricsQueryIntegrationTest(
 
         String plan = explain(st);
 
-        assertTrue(plan.contains("Index Only Scan using ix_span_llm_usage on span s "), plan);
-        assertTrue(
-                plan.contains("Index Only Scan using ix_span_llm_usage on span s_1 "), "the ranking CTE too:\n" + plan);
+        assertTrue(plan.contains("Index Only Scan using ix_span_llm_usage on span "), plan);
+        assertEquals(
+                1, plan.split(" on span ", -1).length - 1, "span is read once, for the ranking and the sums:\n" + plan);
     }
 
     /** The bug: a root pick spelled differently from ix_span_root, so every trace reads its spans from the heap. */

@@ -158,7 +158,11 @@ so a new widget gets it without asking.
    gap.
 8. **The top N plus everything else adds up.** With a dimension, keys past `top_n` fold into one
    `__other__` group in SQL, so every measure of the fold, percentiles included, is exact, and
-   `top_n.total_keys` says how many keys there were. The fold is labelled "Other (N more)".
+   `top_n.total_keys` says how many keys there were. The fold is labelled "Other (N more)". The
+   statement ranks its keys in a `ranked` CTE and then aggregates the rows again under that rank.
+   On `llm_calls`, whose every measure joins `trace`, it first reads `span` joined to `trace` once
+   into a materialized `base` CTE of the group key and the columns the measures read, and both the
+   ranking and the aggregate read `base`. The other views read their base table twice.
 9. **NULL group keys have a name.** Every column-backed dimension is
    `COALESCE(<column>, '__unattributed__') COLLATE "C"` (or its own fallback, such as `none` for
    `error_type` and `unresolved` for `resolution`), so a filter on `__unattributed__` matches the

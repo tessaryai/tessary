@@ -231,10 +231,14 @@ class MetricsQueryPlannerTest {
                 + " AND s.started_at >= :from AND s.started_at < :to"
                 + " AND COALESCE(s.provided_model_name, '__unattributed__') COLLATE \"C\" = ANY(:f0)";
         String join = " JOIN trace t ON t.project_id = s.project_id AND t.id = s.trace_id";
+        String base = " FROM base s CROSS JOIN LATERAL (SELECT s.is_settled) t";
         assertSql(
-                "WITH ranked AS ( SELECT " + cs + " AS k, row_number() OVER (ORDER BY sum(s.total_cost) FILTER (WHERE"
-                        + " t.is_settled) DESC NULLS LAST, " + cs + " ASC) AS rn"
-                        + " FROM span s" + join + where
+                "WITH base AS MATERIALIZED ( SELECT " + cs + " AS k, s.started_at, s.trace_id, s.total_tokens,"
+                        + " s.total_cost, s.cost_source, t.is_settled"
+                        + " FROM span s" + join + where + "),"
+                        + " ranked AS ( SELECT k, row_number() OVER (ORDER BY sum(s.total_cost) FILTER (WHERE"
+                        + " t.is_settled) DESC NULLS LAST, k ASC) AS rn"
+                        + base
                         + " GROUP BY 1)"
                         + " SELECT date_trunc(:unit::text, s.started_at, 'UTC') AS bkt,"
                         + " CASE WHEN r.rn <= :topN THEN r.k ELSE '__other__' END AS k,"
@@ -247,9 +251,8 @@ class MetricsQueryPlannerTest {
                         + " NULL) AS priced_traces,"
                         + " count(*) AS n,"
                         + " (SELECT count(*) FROM ranked) AS total_keys"
-                        + " FROM span s" + join
-                        + " JOIN ranked r ON r.k = " + cs
-                        + where
+                        + base
+                        + " JOIN ranked r ON r.k = s.k"
                         + " GROUP BY 1, 2, 3"
                         + " ORDER BY 1, 3",
                 st);
@@ -257,6 +260,48 @@ class MetricsQueryPlannerTest {
         assertArrayEquals(new String[] {"gpt-4o", "claude-sonnet-4"}, (String[]) rest.remove("f0"));
         assertEquals(
                 Map.of("pid", PID, "from", FROM_AT, "to", TO_AT, "unit", "day", "topN", 5, "topNPlusOne", 6), rest);
+    }
+
+    /**
+     * The bug: the double scan returns. A dimensioned llm_calls query that reads span and probes trace once to rank
+     * and again to aggregate took 2.3 s for By model over 400k calls, most of it in per-row trace probes.
+     */
+    @Test
+    @DisplayName("a dimensioned llm_calls query joins trace once and ranks and aggregates from that one read")
+    void aDimensionedLlmCallsQueryJoinsTraceOnce() {
+        MetricsStatement table = plan(req("llm_calls", List.of("calls")).dimension("model"));
+        String model = "COALESCE(s.provided_model_name, '__unattributed__') COLLATE \"C\"";
+        String base = " FROM base s CROSS JOIN LATERAL (SELECT s.is_settled) t";
+        assertSql(
+                "WITH base AS MATERIALIZED ( SELECT " + model + " AS k, s.total_tokens, t.is_settled"
+                        + " FROM span s JOIN trace t ON t.project_id = s.project_id AND t.id = s.trace_id"
+                        + " WHERE s.project_id = :pid AND s.kind = 'llm' AND NOT s.is_deleted"
+                        + " AND s.started_at >= :from AND s.started_at < :to),"
+                        + " ranked AS ( SELECT k, row_number() OVER (ORDER BY count(*) FILTER (WHERE t.is_settled AND"
+                        + " s.total_tokens IS NOT NULL) DESC NULLS LAST, k ASC) AS rn"
+                        + base
+                        + " GROUP BY 1)"
+                        + " SELECT CASE WHEN r.rn <= :topN THEN r.k ELSE '__other__' END AS k,"
+                        + " LEAST(r.rn, :topNPlusOne) AS rank,"
+                        + " count(*) FILTER (WHERE t.is_settled AND s.total_tokens IS NOT NULL) AS calls,"
+                        + " count(*) AS n,"
+                        + " (SELECT count(*) FROM ranked) AS total_keys"
+                        + base
+                        + " JOIN ranked r ON r.k = s.k"
+                        + " GROUP BY 1, 2"
+                        + " ORDER BY 2",
+                table);
+
+        MetricsStatement series = plan(req("llm_calls", List.of("cost_usd", "calls", "tokens"))
+                .dimension("call_site")
+                .granularity("day")
+                .topN(5));
+        for (MetricsStatement st : List.of(table, series)) {
+            String sql = collapse(st.sql());
+            assertEquals(1, occurrences(sql, "FROM span s"), sql);
+            assertEquals(1, occurrences(sql, "JOIN trace t"), sql);
+            assertEquals(1, occurrences(sql, " WHERE "), "the filters run once, inside base: " + sql);
+        }
     }
 
     /** The bug: not_in read as in, which shows exactly the rows the user asked to hide. */
@@ -364,6 +409,12 @@ class MetricsQueryPlannerTest {
 
     private static String collapse(String sql) {
         return sql.replaceAll("\\s+", " ").trim();
+    }
+
+    private static int occurrences(String sql, String fragment) {
+        int n = 0;
+        for (int i = sql.indexOf(fragment); i >= 0; i = sql.indexOf(fragment, i + 1)) n++;
+        return n;
     }
 
     private static String cte(MetricsStatement st) {
