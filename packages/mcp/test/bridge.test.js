@@ -128,6 +128,8 @@ test("resolveConfig prefers explicit flags over env vars and errors when neither
     resolveConfig([], { TESSARY_ORIGIN: "http://localhost:8000/", TESSARY_TOKEN: "tsy_a_env" }),
     { origin: "http://localhost:8000", token: "tsy_a_env" },
   );
+  assert.equal(resolveConfig(["--origin", "http://localhost:8000///", "--token", "t"], {}).origin, "http://localhost:8000");
+  assert.throws(() => resolveConfig(["--origin", "///", "--token", "t"], {}), /missing origin/);
   assert.throws(() => resolveConfig([], {}), /missing origin/);
   assert.throws(() => resolveConfig(["--origin", "http://localhost:8000"], {}), /missing token/);
 });

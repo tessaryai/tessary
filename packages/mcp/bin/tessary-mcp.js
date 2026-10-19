@@ -21,7 +21,9 @@ function parseArgs(argv) {
 
 function resolveConfig(argv, env) {
   const args = parseArgs(argv);
-  const origin = (args.origin || env.TESSARY_ORIGIN || "").replace(/\/+$/, "");
+  let origin = args.origin || env.TESSARY_ORIGIN || "";
+  // A loop, not /\/+$/: that regex backtracks quadratically on a long run of slashes followed by text.
+  while (origin.endsWith("/")) origin = origin.slice(0, -1);
   const token = args.token || env.TESSARY_TOKEN;
   if (!origin) {
     throw new Error("missing origin. Pass --origin <url> or set TESSARY_ORIGIN.");
