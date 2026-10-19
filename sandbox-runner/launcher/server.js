@@ -1054,6 +1054,8 @@ function newSessionRecord({ lane, idleTimeoutMs, createdAt }) {
 // session.js's own checks, repeated so a bad session.json spends no sandbox; the two images share no code.
 const SESSION_SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 const SESSION_MAX_TOOL_CALLS = 1000;
+// Node fires a setTimeout longer than 2^31-1 ms at once, so a huge idle timeout would close a session at birth.
+const SESSION_MAX_IDLE_MS = 24 * 60 * 60 * 1000;
 
 // Only these five fields reach session.json; the credential reaches the sandbox through its env alone.
 function parseSessionStart(rawBody) {
@@ -1063,6 +1065,7 @@ function parseSessionStart(rawBody) {
   requireCredential(body.credential, SESSION_SCRIPT);
   if (typeof body.model !== 'string' || !body.model) bad('model must be a non-empty string');
   if (!Number.isSafeInteger(body.idle_timeout_ms) || body.idle_timeout_ms <= 0) bad('idle_timeout_ms must be a positive integer');
+  if (body.idle_timeout_ms > SESSION_MAX_IDLE_MS) bad(`idle_timeout_ms must be at most ${SESSION_MAX_IDLE_MS}`);
   if (body.credential.egress_secret && BACKEND !== 'e2b') bad(`an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
   if (typeof body.system_prompt !== 'string' || !body.system_prompt) bad('system_prompt must be a non-empty string');
   const files = body.files === undefined ? {} : body.files;
@@ -1209,7 +1212,9 @@ async function readSessionEvents(s) {
 function armIdle(s) {
   clearIdle(s);
   if (s.state !== 'live' || s.replyOpen || s.sending) return;
-  s.idleTimer = setTimeout(() => closeSession(s, 'idle'), s.idleTimeoutMs);
+  // parseSessionStart already rejects more; clamped again here so the bound sits next to the timer.
+  const ms = s.idleTimeoutMs > SESSION_MAX_IDLE_MS ? SESSION_MAX_IDLE_MS : s.idleTimeoutMs;
+  s.idleTimer = setTimeout(() => closeSession(s, 'idle'), ms);
 }
 
 function clearIdle(s) {
