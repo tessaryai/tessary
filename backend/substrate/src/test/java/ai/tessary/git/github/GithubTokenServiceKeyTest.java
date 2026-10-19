@@ -41,7 +41,7 @@ class GithubTokenServiceKeyTest {
     }
 
     private static String pem(String label, byte[] der) {
-        String body = Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(der);
+        String body = Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(der);
         return "-----BEGIN " + label + "-----\n" + body + "\n-----END " + label + "-----\n";
     }
 
