@@ -231,6 +231,7 @@ test('POST /sessions refuses a bad body before any sandbox is spent (a caller er
       [{ idle_timeout_ms: 0 }, 'session.js: idle_timeout_ms must be a positive integer'],
       [{ idle_timeout_ms: 1.5 }, 'session.js: idle_timeout_ms must be a positive integer'],
       [{ idle_timeout_ms: '60000' }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ idle_timeout_ms: 86400001 }, 'session.js: idle_timeout_ms must be at most 86400000'],
       [{ credential: { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic' } }, 'session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)'],
       [{ system_prompt: undefined }, 'session.js: system_prompt must be a non-empty string'],
       [{ system_prompt: '' }, 'session.js: system_prompt must be a non-empty string'],
