@@ -85,7 +85,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // && !isPublicActuatorPath.
         boolean guardedActuator = AuthFilter.isActuatorPath(path) && !AuthFilter.isPublicActuatorPath(path);
         boolean credentialRoute = isCredentialRoute(path, req.getMethod());
-        return !(path.startsWith("/api/") || path.startsWith("/mcp") || guardedActuator || credentialRoute);
+        // A prompt write carries up to 200 KB under an ADMIN key, so it gets the principal bucket; reads stay exempt
+        // like /v1/query, guarded by the SDK cache.
+        boolean promptWrite = path.startsWith("/v1/prompts") && !"GET".equals(req.getMethod());
+        return !(path.startsWith("/api/")
+                || path.startsWith("/mcp")
+                || guardedActuator
+                || credentialRoute
+                || promptWrite);
     }
 
     @Override

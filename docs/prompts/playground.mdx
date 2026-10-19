@@ -1,0 +1,99 @@
+---
+title: "Prompt Playground"
+description: "Run one prompt version against a model on your organization's own provider key, edit the template and settings first, and save the edit as a new version."
+---
+
+The playground runs one prompt version once against a model, so you can read the answer before you move a deployment label to that version. It runs on your organization's own provider key, and it never changes the version it starts from.
+
+## Run a version
+
+<Steps>
+  <Step title="Open the playground">
+    On the **Prompts** page, open a prompt, select a version, and select the **Playground** tab.
+
+    The template, the settings, and one field for each variable start from the selected version.
+  </Step>
+  <Step title="Pick a provider and model">
+    **Provider** lists the providers your organization has a key for that can run the playground. **Model** lists that provider's chat models.
+  </Step>
+  <Step title="Fill in the variables">
+    Enter a value for each variable. For each placeholder, enter a JSON array of messages, such as `[{"role": "user", "content": "Hi"}]`.
+
+    Optionally, edit the template or the settings for this run.
+  </Step>
+  <Step title="Select Run">
+    <Check>The result shows the answer, then the finish reason, the input and output tokens, the latency, the cost, and where the cost came from.</Check>
+  </Step>
+</Steps>
+
+## What a run sends
+
+The playground fills the variables into the template as it appears in the editor, then sends the result as chat messages:
+
+- A text prompt becomes one `user` message.
+- A chat prompt keeps its messages in order, and each placeholder is replaced by the messages you entered for it. A placeholder left empty, or holding anything other than a JSON array, is left out of the run, and the playground says so under the variables.
+- A variable you never fill stays in the text as written, for example `{{tone}}`.
+
+A run forwards four settings, prefilled from the version's config, where either `max_tokens` or `maxTokens` and either `top_p` or `topP` is read:
+
+| Setting | Config key sent | Accepted values |
+| --- | --- | --- |
+| Temperature | `temperature` | From 0 to 2 |
+| Max tokens | `max_tokens` | A whole number from 1 to the server's ceiling, 4,096 unless your deployment changes it |
+| Top p | `top_p` | Above 0, at most 1 |
+| Stop sequences | `stop` | Up to 4, each at most 64 characters, separated by commas |
+
+An empty setting is not sent, and the provider uses its own default. Other config keys, such as `response_format` or `seed`, are not forwarded; the playground lists them under the settings.
+
+## Providers
+
+The playground runs on OpenAI, Anthropic, OpenRouter, Moonshot, Gemini, GLM, Grok, and Custom keys. A Custom run uses the custom model name saved with the key. Bedrock, Bedrock Mantle, and TypeSafe keys cannot run it; TypeSafe serves decision models, not chat.
+
+With no key the playground can use, the tab asks you to add one under **Settings** then **Providers**.
+
+Running needs permission to manage the organization, which a viewer does not have.
+
+## Cost and records
+
+A run uses your organization's provider key and counts toward its model spend. The cost comes from one of three places:
+
+- **OpenRouter**: the cost OpenRouter reports for the call.
+- **Price book**: Tessary's price list for the model, for every other provider.
+- **Unpriced**: neither has a figure, so the run counts with no cost.
+
+A run is not recorded as a trace and does not count on the prompt's **Usage** tab.
+
+## Save an edit as a new version
+
+Select **Save as new version** to open the new version editor with the template as you edited it. Its config is the version's config with the four settings written over it in the snake_case spelling; other keys stay as they were. Choose deployment labels and a commit message there, then select **Create version**.
+
+## Errors
+
+| Error | Cause |
+| --- | --- |
+| `MODEL_CONFIG.MISSING_CREDENTIALS` | The organization has no key for the chosen provider. The playground links to **Settings** then **Providers**. |
+| `PLAYGROUND.PROVIDER_REJECTED` | The provider refused the key. |
+| `PLAYGROUND.PROVIDER_NO_CREDIT` | The key has no credit left with the provider. |
+| `PLAYGROUND.REQUEST_REFUSED` | The provider refused the request, for example a model name it does not serve. The message quotes the provider's reason. |
+| `PLAYGROUND.TIMEOUT` | The provider did not answer within the timeout, 60 seconds unless your deployment changes it. The run is not retried, so select **Run** again. |
+| `PLAYGROUND.PROVIDER_UNAVAILABLE` | The provider could not be reached, or kept answering with a server error. |
+| `PLAYGROUND.MALFORMED_RESPONSE` | The provider answered with something the playground could not read. |
+| `PLAYGROUND.BUSY` | Too many runs are in flight at once. Try again in a moment. |
+
+## Not supported yet
+
+- **Bedrock and Bedrock Mantle.** They sign requests with AWS credentials on APIs other than the chat APIs the playground speaks.
+- **Streaming.** A run is one call that returns when the provider finishes, so the answer appears all at once.
+- **Tools.** A run sends only messages and the four settings, so the model cannot call tools.
+- **Structured output.** `response_format` is not forwarded, so the model answers in free text.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Prompts" icon="file-lines" href="/prompts/overview">
+    Prompt versions, deployment labels, and how promote and rollback work.
+  </Card>
+  <Card title="Prompt SDKs" icon="code" href="/prompts/sdk">
+    Fetch and compile a prompt from Python or TypeScript.
+  </Card>
+</CardGroup>

@@ -19,6 +19,7 @@ Tessary Cloud's usage limits and model credit are not part of the repository. Th
 | Triage | Started by hand: select **Run triage** on a finding. Automatic triage is not available. | Started by hand, or automatically once an owner or admin turns automatic triage on. It starts off. |
 | `groundedness` | On by default, with nothing to set up. | Off by default. Its model needs a Mac with Apple silicon or a GPU instance on AWS. |
 | `frustration` | Off by default. Needs your own OpenRouter or TypeSafe key. | The same. |
+| [Prompt management](/prompts/overview) | On by default. An owner or admin can turn it off per organization under **Settings → Features**. | The same. |
 | Trace ingestion | OTLP over HTTP at `https://app.tessary.ai/v1/traces`. gRPC is not available. | OTLP over HTTP at your instance's origin. gRPC is opt-in. |
 | Retention | Capped by the plan at the period on the [pricing page](https://tessary.ai/pricing). A project can keep data for less, not more. | Configurable per install and per project, including keeping data forever. See [Data retention](/self-hosting/configuration#data-retention). |
 | Limits | A monthly trace limit, a stored-data cap, and a rate limit, with the numbers on the [pricing page](https://tessary.ai/pricing). At the trace limit or the stored-data cap, new traces are rejected with an explicit error rather than sampled. See [Usage and credit](/cloud/usage-and-credit). | No trace or storage limit set by Tessary. Your infrastructure sets the ceiling. |

@@ -60,6 +60,8 @@ const ClassifierConfigurePage = named(
 );
 const FindingPage = named(() => import("./views/classifiers/FindingPage"), "FindingPage");
 const Vitals = named(() => import("./views/vitals/Vitals"), "Vitals", "vitals");
+const PromptsPage = named(() => import("./views/prompts/PromptsPage"), "PromptsPage", "prompts");
+const PromptDetailPage = named(() => import("./views/prompts/PromptDetailPage"), "PromptDetailPage");
 
 const Sources = named(() => import("./views/Sources"), "Sources");
 const Concepts = named(() => import("./views/Concepts"), "Concepts");
@@ -214,6 +216,15 @@ function ProjectShell() {
         <Route path="classifiers/:classifierId" element={<ClassifierConfigurePage />} />
         {/* The Triage pulse strip's full-size page. Amber only, never red. */}
         <Route path="vitals" element={<Vitals />} />
+        {/* The prompt id, not the name, so a name with a / never meets the router. */}
+        <Route
+          path="prompts"
+          element={<CapabilityGate capability="prompt_management_enabled"><PromptsPage /></CapabilityGate>}
+        />
+        <Route
+          path="prompts/:promptId"
+          element={<CapabilityGate capability="prompt_management_enabled"><PromptDetailPage /></CapabilityGate>}
+        />
 
         <Route path="rca/:reportId" element={<RcaReport />} />
         <Route path="concepts" element={<Concepts />} />

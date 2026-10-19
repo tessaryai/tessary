@@ -22,6 +22,11 @@ import ai.tessary.model.CallSite;
 import ai.tessary.model.FailureMode;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pipeline.PipelineService;
+import ai.tessary.plan.Capability;
+import ai.tessary.plan.CapabilityService;
+import ai.tessary.promptlib.PromptDtos;
+import ai.tessary.promptlib.PromptService;
+import ai.tessary.promptlib.PromptService.PromptListQuery;
 import ai.tessary.query.QueryDataset;
 import ai.tessary.query.QueryDtos.CountRequest;
 import ai.tessary.query.QueryDtos.CountView;
@@ -104,6 +109,8 @@ public class McpToolRegistry {
     private final TraceDetectionRepository detections;
     private final FindingService behaviorDrift;
     private final CaseService cases;
+    private final PromptService prompts;
+    private final CapabilityService capabilities;
 
     private final Map<String, McpTool> tools = new LinkedHashMap<>();
 
@@ -118,7 +125,9 @@ public class McpToolRegistry {
             SessionReadService sessions,
             FindingService behaviorDrift,
             CaseService cases,
-            TraceDetectionRepository detections) {
+            TraceDetectionRepository detections,
+            PromptService prompts,
+            CapabilityService capabilities) {
         this.detections = detections;
         this.pipelineService = pipelineService;
         this.projects = projects;
@@ -129,6 +138,8 @@ public class McpToolRegistry {
         this.sessions = sessions;
         this.behaviorDrift = behaviorDrift;
         this.cases = cases;
+        this.prompts = prompts;
+        this.capabilities = capabilities;
         register();
     }
 
@@ -148,6 +159,8 @@ public class McpToolRegistry {
         this.detections = null;
         this.behaviorDrift = null;
         this.cases = null;
+        this.prompts = null;
+        this.capabilities = null;
         for (McpTool t : toolset) tools.put(t.name(), t);
     }
 
@@ -221,6 +234,7 @@ public class McpToolRegistry {
         registerQueryTools();
         registerSubstrateListTools();
         registerTraceReadTools();
+        registerPromptTools();
         registerClassifierFindingTools();
     }
 
@@ -580,6 +594,42 @@ public class McpToolRegistry {
                                 "fields", payloadFieldsField()),
                         List.of("trace_id")),
                 (ctx, args) -> getTrace(ctx, requireStr(args, "trace_id"), payloadsRequested(args))));
+    }
+
+    /**
+     * {@code list_prompts} and {@code get_prompt}, through the same {@link PromptService} as the Prompts page. Listed
+     * for every org; each call checks {@code PROMPT_MANAGEMENT}, because {@code /mcp} has no org path the capability
+     * interceptor could read.
+     */
+    private void registerPromptTools() {
+        add(new McpTool(
+                "list_prompts",
+                "List the managed prompts of this project: name, type, tags, latest version, labels and when each last"
+                        + " changed. Filter by folder (a name prefix before a slash) or by a deployment label such as"
+                        + " production. Returns at most 100, newest change first; narrow with folder when the project"
+                        + " has more.",
+                schema(
+                        Map.of(
+                                "folder",
+                                strField("Optional. Keep prompts whose name starts with this folder path, e.g."
+                                        + " team/billing."),
+                                "label",
+                                strField("Optional. Keep prompts that carry this deployment label on some version.")),
+                        List.of()),
+                this::listPrompts));
+
+        add(new McpTool(
+                "get_prompt",
+                "Fetch one version of a managed prompt with its body, config, labels and commit message. Pick the"
+                        + " version by number or by label; with neither, the production label is read. Pass exactly"
+                        + " one of version and label.",
+                schema(
+                        Map.of(
+                                "name", strField("The prompt name, folders included, e.g. team/billing/summarize."),
+                                "version", intField("Optional. A version number."),
+                                "label", strField("Optional. A deployment label, or latest for the newest version.")),
+                        List.of("name")),
+                this::getPrompt));
     }
 
     /**
@@ -1168,6 +1218,40 @@ public class McpToolRegistry {
         }
     }
 
+    private PromptDtos.PromptPage listPrompts(TenantContext ctx, Map<String, Object> args) {
+        Project project = requirePromptAccess(ctx);
+        PromptListQuery q = PromptListQuery.forMcp(strArg(args, "folder"), strArg(args, "label"));
+        return PromptDtos.PromptPage.from(prompts.list(project.id(), q));
+    }
+
+    /** With neither version nor label, {@link PromptService#resolve} reads {@code production}. */
+    private PromptDtos.PromptVersionView getPrompt(TenantContext ctx, Map<String, Object> args) {
+        Project project = requirePromptAccess(ctx);
+        String name = requireStr(args, "name");
+        Integer version = intArg(args, "version");
+        String label = strArg(args, "label");
+        if (version != null && label != null) throw new McpTool.ToolException("pass version or label, not both");
+        try {
+            PromptService.ResolvedVersion resolved = prompts.resolve(project.id(), name, version, label);
+            return PromptDtos.PromptVersionView.from(
+                    resolved, prompts.authors(List.of(resolved.version().createdBy())));
+        } catch (TessaryException e) {
+            throw toolError(e);
+        }
+    }
+
+    private Project requirePromptAccess(TenantContext ctx) {
+        Project project = requireProject(ctx);
+        String orgId = ctx.orgId();
+        if (orgId == null) throw new McpTool.ToolException("no organization bound to this token");
+        try {
+            capabilities.require(orgId, Capability.PROMPT_MANAGEMENT);
+        } catch (TessaryException e) {
+            throw toolError(e);
+        }
+        return project;
+    }
+
     /** A {@link McpTool.ToolException} the LLM can correct, not a {@code -32603} internal error. */
     private static McpTool.ToolException toolError(TessaryException e) {
         return new McpTool.ToolException(Objects.requireNonNull(e.getMessage()), e);
@@ -1189,6 +1273,8 @@ public class McpToolRegistry {
                 range == null ? null : range.to(),
                 strArg(args, "status"),
                 strArg(args, "q"),
+                null,
+                null,
                 null);
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
         TracePageCodec.Key before = TracePageCodec.decode(strArg(args, "cursor"));

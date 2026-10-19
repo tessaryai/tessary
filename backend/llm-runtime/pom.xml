@@ -14,7 +14,7 @@
     <artifactId>llm-runtime</artifactId>
     <description>
         The only module that talks to a model provider or runs untrusted code: the model settings and
-        catalog, the decision-model client, and the E2B sandbox telemetry.
+        catalog, the decision-model and chat clients, and the E2B sandbox telemetry.
 
         The provider SDKs (the AWS clients) are declared here and NOWHERE else, so
         adding, replacing or removing a provider is a change to one module. Everything above reaches

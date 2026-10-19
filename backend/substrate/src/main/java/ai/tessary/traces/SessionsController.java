@@ -54,12 +54,24 @@ public class SessionsController {
             @RequestParam(required = false) @Nullable String toTimestamp,
             @RequestParam(required = false) @Nullable String status,
             @RequestParam(required = false) @Nullable String q,
-            @RequestParam(required = false) @Nullable String detectedBy) {
+            @RequestParam(required = false) @Nullable String detectedBy,
+            @RequestParam(required = false) @Nullable String promptName,
+            @RequestParam(required = false) @Nullable String promptVersion) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view sessions");
         boolean includeTotals = "totals".equals(include);
         var filter = new TraceV2Repository.TraceQuery(
-                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
+                model,
+                kind,
+                callSite,
+                hasCallSite,
+                fromTimestamp,
+                toTimestamp,
+                status,
+                q,
+                detectedBy,
+                promptName,
+                promptVersion);
         return ApiResponse.ok(sessions.page(
                 r.project().id(),
                 TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT),
@@ -83,11 +95,23 @@ public class SessionsController {
             @RequestParam(required = false) @Nullable String toTimestamp,
             @RequestParam(required = false) @Nullable String status,
             @RequestParam(required = false) @Nullable String q,
-            @RequestParam(required = false) @Nullable String detectedBy) {
+            @RequestParam(required = false) @Nullable String detectedBy,
+            @RequestParam(required = false) @Nullable String promptName,
+            @RequestParam(required = false) @Nullable String promptVersion) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view a session");
         var filter = new TraceV2Repository.TraceQuery(
-                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
+                model,
+                kind,
+                callSite,
+                hasCallSite,
+                fromTimestamp,
+                toTimestamp,
+                status,
+                q,
+                detectedBy,
+                promptName,
+                promptVersion);
         return ApiResponse.ok(sessions.detail(r.project().id(), sessionId, filter)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found")));
     }

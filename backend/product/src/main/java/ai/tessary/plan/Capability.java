@@ -44,7 +44,10 @@ public enum Capability {
     MALFORMED_OUTPUT("malformed_output_enabled"),
 
     /** Off by default because the escalation it drives is uncapped: automatic is an opt-in an org takes knowingly. */
-    TRIAGE_AUTOMATIC("triage_automatic_enabled");
+    TRIAGE_AUTOMATIC("triage_automatic_enabled"),
+
+    /** On by default. Gates the Prompts page, /v1/prompts, the two prompt MCP tools, and the playground. */
+    PROMPT_MANAGEMENT("prompt_management_enabled");
 
     private final String wire;
 

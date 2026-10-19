@@ -147,8 +147,12 @@ of grading before the migration history was squashed into the current `0000-base
   on TypeSafe read the versioned `price_book` tables through `pricing/ModelResolver` +
   `pricing/PlatformCallPricer`. A sandbox run is billed at the cost OpenCode computes from
   models.dev's rates (`llm/ModelsDevRates`), because that is the catalog the agent itself prices
-  from. A call to OpenRouter books OpenRouter's reported cost. Do not start a fourth, and never
-  price one call from two of them.
+  from. A call to OpenRouter books OpenRouter's reported cost. A prompt-playground chat call
+  (`llm/chat/`) uses the same two: its caller prices it from the book through
+  `pricing/PlatformCallPricer` on `ModelCatalog.pricingId(provider, model)` and stamps
+  `price_book_version`, or, when the target is billed by OpenRouter, books OpenRouter's reported
+  `usage.cost`; a missing figure is unpriced. Do not start a fourth, and never price one call from
+  two of them.
 - **`git/` is an integration layer with no closed loop above it.** It owns the `GitProvider`
   SPI and token/app plumbing. The
   `observer/` slice that consumed it — the push-triggered drift worker, the `DriftAnalyzer` SPI, the
@@ -284,7 +288,7 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 |---|---|
 | `app` | `TessaryApplication`, `application.yaml`, every `@SpringBootTest` integration test |
 | `surfaces` | `query`, `search`, `mcp`, `slack` (the wire surface only), `metering`, `billing`, `telemetry` (the heartbeat orchestrator half — see `core`'s `telemetry` below) |
-| `analysis` | `classifier`, `onboarding`, `rca`, `cases`, `alert`, `prompt`, `agentrun` |
+| `analysis` | `classifier`, `onboarding`, `rca`, `cases`, `alert`, `prompt`, `promptlib`, `agentrun` |
 | `llm-runtime` | `llm`, `sandbox` (agent-span telemetry only) — the only module that declares a model-provider SDK |
 | `product` | `pipeline`, `plan` |
 | `substrate` | `storage`, `ingest`, `redaction`, `retention`, `pricing`, `sources`, `traces`, `git`, `usage`, `vitals` |
@@ -321,6 +325,7 @@ holds. A package appears in exactly one module.
 | `ingest/` | `substrate` | normalizing raw trace data on the write path. | `/v1/traces` |
 | `llm/` | `llm-runtime` | LLM provider/model configuration (see *Hard rules*): `ProviderCredential{,Controller,Repository}`,… | — |
 | `llm/decisions/` | `llm-runtime` | hosted decision-model calls (TypeSafe's Jev, direct or over OpenRouter): `DecisionClient`, `JevDecisionClient` (retry, GenAI span, book pricing under `typesafe/<id>`, `llm_call` row), `DecisionProviderResolver` (project to the decision lane's provider and model, then the org's key for it). Not chat completions: they never go through `ChatModel`. | — |
+| `llm/chat/` | `llm-runtime` | one person-triggered chat call on the org's own provider key, for the prompt playground: `ChatClient`, `HttpChatClient` (OpenAI chat completions and Anthropic Messages codecs, retry with `Retry-After`, no retry on a timeout, response read through `BoundedBody`), `ChatProviderResolver` (org credential to `ChatTarget`: missing key, CUSTOM model name, `UrlGuard` on the endpoint, secret key), `ChatProperties` (`tessary.playground.*`). It prices and books nothing itself; the caller does both. | — |
 | `llmspi/` | `core` | the provider-agnostic model seam — `ModelLane`, `LaneGroup` (`TextEmbedder` sat here too, until it was removed with the rest of the vector substrate). Everything above `llm-runtime` reaches a model through these types and never sees a vendor class. There is no per-lane default model: `llm/LanePriority` (in `llm-runtime`, since it names `ModelProvider`) orders the providers each lane reaches and the models it offers on each, and the org's configured credentials pick from that. Rates are NOT here — they are rows, in `substrate`'s `pricing/`. | — |
 | `mcp/` | `surfaces` | Model Context Protocol server (Streamable HTTP). | [auth-and-mcp.md](./auth-and-mcp.md) |
 | `metering/` | `surfaces` | usage metering: rollup worker + validated read API, plus the per-call `llm_call` ledger (token buckets + cost per lane) the org LLM-usage read aggregates. | `/v1/usage` |
@@ -334,7 +339,8 @@ holds. A package appears in exactly one module.
 | `redaction/` | `substrate` | PII redaction: rule authoring/testing + write-path guard (`RedactionService.redactBatch` called by the `SubstrateWriter` drainer, immediately before the write). | [pii-redaction.md](../concepts/pii-redaction.md) |
 | `retention/` | `substrate` | Retention enforcement: `RetentionResolver` (platform default TTL, overridden by a `retention_policy` row, both replaced by the `FixedRetention` seam when another build fixes a project's retention), `RetentionSweeper` (the bounded hourly delete), and `RetentionController` (Settings → Data retention: reads the resolver, writes the override rows, refuses writes while retention is fixed; `RETENTION_MANAGE` to write). One resolver, so the sweep and the customer-facing answer cannot differ. | [ingest-runbook.md](../guides/ingest-runbook.md) |
 | `pricing/` | `substrate` | Model identity + versioned rates: `PriceBookImporter` (idempotent boot + daily import of the checked-in snapshots into `price_book`/`model_price`), `ModelResolver` (reported model name → `model.id`, exact → region-strip → vendor-strip), `PriceBookRepository`. The manual override book layers over the vendored LiteLLM one. | — |
-| `prompt/` | `evaluation` | prompt prose read from `prompt-craft/<purpose>/` on the classpath; the resource-owning module ships its own. Only prose lives there, never composition logic. | [prompt-craft.md](./prompt-craft.md) |
+| `prompt/` | `analysis` | prompt prose read from `prompt-craft/<purpose>/` on the classpath; the resource-owning module ships its own. Only prose lives there, never composition logic. | [prompt-craft.md](./prompt-craft.md) |
+| `promptlib/` | `analysis` | managed prompts behind the `PROMPT_MANAGEMENT` capability: `PromptService` (a name per project, immutable numbered versions, deployment labels; `latest` is derived from `MAX(version)`, never stored; every version and label write locks the prompt row first), `PromptRepository`, `PromptBody` and `PromptNames` (the body, name, label, tag and variable rules), `PromptController` (the Prompts page), `PromptPublicController` (`/v1/prompts`, a common prompt API shape in camelCase), `PromptUsageController` and `PromptUsageRepository` (calls per version from the linked llm spans), and the playground: `PlaygroundController` and `PlaygroundService` (one chat call through `llm/chat/` on the org's own key, priced, booked in `llm_call` under lane `playground`, no message content on its span). Not `prompt/`, which reads the platform's own prompt prose. | [prompt-management.md](./prompt-management.md) |
 | `sandbox/` | `llm-runtime` | `AgentSpanTelemetry` and nothing else: the Langfuse-shaped generation stamping every agentic lane emits through. The out-of-process grader-JS runner SPI (`SandboxRunner` + its E2B/Lambda implementations) was removed along with grading. | — |
 | `search/` | `surfaces` | global ⌘K search: one tenant-scoped full-text read over a project's content entities, feeding the command palette. | `/api/orgs/{orgSlug}/projects/{projectSlug}/search` |
 | `slack/` | *(not in this tree)* | The PLATFORM half of Slack — workspace→project routing (`slack_install`), the `Capability.SLACK` gate, what to reply to an `@mention`, and the channel post — is not part of this tree. With no implementation on the classpath, the endpoint does not exist and `AuthFilter` does not bypass its path either — "not bypassed and not served." | `POST /internal/slack/mention` (adapter callback, not in this tree) |

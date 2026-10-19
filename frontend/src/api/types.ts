@@ -314,3 +314,41 @@ export type AlertRule = S["AlertRuleView"];
 export type UpsertAlertRule = S["UpsertAlertRuleRequest"];
 export type AlertChannel = S["ChannelView"];
 export type CreateAlertChannel = S["UpsertChannelRequest"];
+
+// ---- Prompts (prompts, versions, deployment labels, usage, playground) ----
+export type PromptType = "text" | "chat";
+/** Stored as `{role, content}`; the server also accepts `type: "message"` or `type: "chatmessage"` on input. */
+export type PromptChatMessage = { role: string; content: string };
+/** Takes a list of messages when the prompt is compiled; it holds no variables. */
+export type PromptPlaceholder = { type: "placeholder"; name: string };
+export type PromptChatBody = (PromptChatMessage | PromptPlaceholder)[];
+/** A JSON string for a text prompt, an array for a chat prompt; the schema types it as free-form JSON. */
+export type PromptBody = string | PromptChatBody;
+/** Free-form keys, stored as given. */
+export type PromptConfig = Record<string, unknown>;
+
+export type LabelRef = S["LabelRef"];
+export type PromptSummary = S["PromptSummary"];
+export type PromptPage = S["PromptPage"];
+/** `labels` includes `latest` on the highest version. */
+export type VersionSummary = S["VersionSummary"];
+/** `versions` is newest first. */
+export type PromptDetail = S["PromptDetail"];
+export type PromptVersionView = Omit<S["PromptVersionView"], "body" | "config"> & { body: PromptBody; config: PromptConfig };
+export type CreatePromptRequest = Omit<S["CreatePromptRequest"], "body" | "config"> & {
+  body: PromptBody;
+  config?: PromptConfig | null;
+};
+export type CreateVersionRequest = Omit<S["CreateVersionRequest"], "body" | "config"> & {
+  body: PromptBody;
+  config?: PromptConfig | null;
+};
+export type DeleteResponse = S["DeleteResponse"];
+export type FolderDeleteResponse = S["FolderDeleteResponse"];
+export type PromptUsageSummary = S["PromptUsageSummary"];
+/** `version` is the string a span sent, null when it sent none. */
+export type VersionUsage = S["VersionUsage"];
+/** `unknown_versions`: version strings spans sent that this prompt does not have. */
+export type PromptUsage = S["PromptUsage"];
+export type PlaygroundRunRequest = S["PlaygroundRunRequest"];
+export type PlaygroundRunView = S["PlaygroundRunView"];

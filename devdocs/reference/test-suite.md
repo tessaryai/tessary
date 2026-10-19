@@ -19,7 +19,8 @@ rg -l '@SpringBootTest' backend/app/src/test --glob '*Test.java' | wc -l
 ```
 
 Also gated (not in those counts): ArchUnit under `app/src/test/.../arch/`,
-`packages/mcp` `node --test` (the `mcp-bridge` row), and live ITs (`*LiveIT.java`).
+`packages/mcp` `node --test` (the `mcp-bridge` row), `packages/sdk-python` pytest (the `sdk-python` row),
+`packages/sdk-ts` `node --test` (the `sdk-ts` row), and live ITs (`*LiveIT.java`).
 `JevDecisionClientLiveIT` (the frustration classifier's decision call) is one of those live ITs: it
 skips unless `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, runs each gateway only with its own
 key, and is run from `backend/` with `mvn test -pl llm-runtime -Dtest=JevDecisionClientLiveIT`.
@@ -32,12 +33,16 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (16 checks): backend `mvn verify`, frontend, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, classifier-quality-doc, blob-links, module-hygiene, license-headers, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact. The manifest in `scripts/check.sh` is the authoritative list: 16 RUN rows of the 21 scripts it declares. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header. `docs-links`, `connect-route`, `selfhost-health`, `required-inputs` and `readme-front-door` were deleted under it, so they have no row there | yes |
+| `task check` | The full gate (19 checks): backend `mvn verify`, frontend, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, sdk-python, sdk-ts, prompt-regex, classifier-quality-doc, blob-links, module-hygiene, license-headers, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact. The manifest in `scripts/check.sh` is the authoritative list: 19 RUN rows of the 24 scripts it declares. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header. `docs-links`, `connect-route`, `selfhost-health`, `required-inputs` and `readme-front-door` were deleted under it, so they have no row there | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
+| `task check -- promptlib` | spotless, compile, every test in `ai.tessary.promptlib.**`: five unit classes in `analysis` (`PromptNamesTest`, `PromptBodyTest`, `PromptServiceTest`, `PromptPublicControllerRaceTest`, `PlaygroundServiceTest`) and nine integration classes in `app` (`PromptRepositoryTest`, `PromptControllerTest`, `PromptPublicControllerTest` and `PromptUsageControllerTest` on the shared default context; `PlaygroundControllerTest` on its own, since it replaces `ChatClient` with a `@MockitoBean`; `PromptControllerMvcTest`, `PromptPublicControllerMvcTest`, `PromptUsageControllerMvcTest` and `PlaygroundControllerMvcTest` on `AuthEnforcedContext`), so three Spring contexts. The MCP prompt tools, the ingest link and `llm/chat/` are tested in the `mcp`, `ingest` and `llm` slices | yes |
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, plus repo-wide license-headers/price-book-contract/compose-artifact | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
+| `task sdk-python:check` | `scripts/check-sdk-python.sh`: `uv sync --locked`, then pytest over `packages/sdk-python` against a scripted local HTTP server at 100% line and branch coverage. A missing `uv` skips with a reason locally and fails when `CI` is set | no |
+| `task sdk-ts:check` | `scripts/check-sdk-ts.sh`: `pnpm install --frozen-lockfile` in `packages/sdk-ts`, `tsc --noEmit` over src and tests, a build into a temp dir that must emit `index.js` and `index.d.ts`, then `node --test` on the `.ts` sources at 100% line, branch and function coverage of `src/`. Node below 24 skips with a reason locally and fails when `CI` is set | no |
+| `task check:prompt-regex` | `scripts/check-prompt-variable-regex.sh`: reads the prompt variable regex from `PromptNames.java`, the frontend's `promptCompile.ts` and both SDKs, undoes Java's string escapes, and fails when the four differ | no |
 | `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh)` | The same pipeline on the EXPORT CANDIDATE | yes |
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
@@ -185,7 +190,7 @@ instrumented — there's nothing to measure.
 ## The schema-column generator
 
 `backend/core/tools/schemagen/SchemaColumnGenerator.java` runs at `generate-sources` on every Maven
-invocation and emits 61 interfaces of column constants for the open reactor. It
+invocation and emits 65 interfaces of column constants for the open reactor. It
 writes a file **only when the content
 changed**. Writing unconditionally reset every generated file's mtime, which invalidated the
 compiler's staleness check and forced a full recompile every time. Measured A/B on a

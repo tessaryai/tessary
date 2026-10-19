@@ -1140,6 +1140,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptController_list"];
+        put?: never;
+        post: operations["PromptController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["PromptController_deleteFolder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/playground/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["PlaygroundController_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/usage/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptUsageController_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/{promptId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptController_get"];
+        put?: never;
+        post?: never;
+        delete: operations["PromptController_delete"];
+        options?: never;
+        head?: never;
+        patch: operations["PromptController_updateTags"];
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/{promptId}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptUsageController_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/{promptId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["PromptController_createVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/{promptId}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptController_getVersion"];
+        put?: never;
+        post?: never;
+        delete: operations["PromptController_deleteVersion"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/{promptId}/versions/{version}/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["PromptController_setLabels"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/rca/{id}": {
         parameters: {
             query?: never;
@@ -1732,6 +1876,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptPublicController_list"];
+        put?: never;
+        post: operations["PromptPublicController_create"];
+        delete: operations["PromptPublicController_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/prompts/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptPublicController_fetch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/prompts/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["PromptPublicController_updateLabels"];
+        trace?: never;
+    };
     "/v1/query/count": {
         parameters: {
             query?: never;
@@ -1980,6 +2172,10 @@ export interface components {
             data?: components["schemas"]["FlaggedAnswerPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseFolderDeleteResponse: {
+            data?: components["schemas"]["FolderDeleteResponse"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseFrustratedSessionPage: {
             data?: components["schemas"]["FrustratedSessionPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2118,6 +2314,10 @@ export interface components {
             data?: components["schemas"]["PipelineEnvelope"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponsePlaygroundRunView: {
+            data?: components["schemas"]["PlaygroundRunView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponsePollResponse: {
             data?: components["schemas"]["PollResponse"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2128,6 +2328,34 @@ export interface components {
         };
         ApiResponseProject: {
             data?: components["schemas"]["Project"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponsePromptDetail: {
+            data?: components["schemas"]["PromptDetail"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponsePromptList: {
+            data?: components["schemas"]["PromptList"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponsePromptPage: {
+            data?: components["schemas"]["PromptPage"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponsePromptUsage: {
+            data?: components["schemas"]["PromptUsage"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponsePromptUsageSummary: {
+            data?: components["schemas"]["PromptUsageSummary"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponsePromptVersionView: {
+            data?: components["schemas"]["PromptVersionView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponsePublicPrompt: {
+            data?: components["schemas"]["PublicPrompt"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseRcaReportView: {
@@ -2745,6 +2973,18 @@ export interface components {
             description?: string;
             name: string;
         };
+        CreatePromptRequest: {
+            body: unknown;
+            commit_message?: string | null;
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            labels?: string[] | null;
+            name: string;
+            tags?: string[] | null;
+            /** @enum {string} */
+            type: "text" | "chat";
+        };
         CreateRequest: {
             name: string;
             scope: string;
@@ -2756,6 +2996,14 @@ export interface components {
             };
             name: string;
             provider: string;
+        };
+        CreateVersionRequest: {
+            body: unknown;
+            commit_message?: string | null;
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            labels?: string[] | null;
         };
         CredentialListView: {
             credentials: components["schemas"]["View"][];
@@ -2966,6 +3214,10 @@ export interface components {
             /** Format: int32 */
             start: number;
         };
+        FolderDeleteResponse: {
+            /** Format: int32 */
+            deleted_count: number;
+        };
         FrustratedConversationView: {
             callSiteId: string | null;
             cleared: boolean;
@@ -3093,6 +3345,11 @@ export interface components {
             name: string;
         };
         JsonNode: unknown;
+        LabelRef: {
+            label: string;
+            /** Format: int32 */
+            version: number;
+        };
         LaneView: {
             automatic: boolean;
             description: string;
@@ -3109,6 +3366,16 @@ export interface components {
             learned: number;
             /** Format: int64 */
             needed: number;
+        };
+        ListMeta: {
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int64 */
+            totalItems: number;
+            /** Format: int64 */
+            totalPages: number;
         };
         LlmUsageCellView: {
             bucket_start: string;
@@ -3188,6 +3455,10 @@ export interface components {
             email: string;
             role: string;
             user_id: string;
+        };
+        Message: {
+            content: string;
+            role: string;
         };
         MetricBaselineView: {
             bucket_key: string;
@@ -3352,6 +3623,35 @@ export interface components {
             supports_base_url: boolean;
             used_by: string[];
         };
+        PlaygroundRunRequest: {
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            messages: components["schemas"]["Message"][];
+            model: string;
+            prompt_ref?: components["schemas"]["PromptRef"] | null;
+            /** @enum {string} */
+            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
+        };
+        PlaygroundRunView: {
+            /** Format: int32 */
+            cache_read_tokens: number | null;
+            /** Format: int32 */
+            cache_write_tokens: number | null;
+            content: string;
+            cost_usd: number | null;
+            finish_reason: string | null;
+            /** Format: int32 */
+            input_tokens: number | null;
+            /** Format: int64 */
+            latency_ms: number;
+            model: string;
+            /** Format: int32 */
+            output_tokens: number | null;
+            price_source: string;
+            /** @enum {string} */
+            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
+        };
         PolicyView: {
             /** Format: int64 */
             cadence_seconds: number;
@@ -3417,12 +3717,134 @@ export interface components {
             project_id: string;
             updated_at: string;
         };
+        PromptCalls: {
+            /** Format: int64 */
+            calls: number;
+            name: string;
+        };
+        PromptDetail: {
+            created_at: string;
+            id: string;
+            labels: components["schemas"]["LabelRef"][];
+            /** Format: int32 */
+            latest_version: number;
+            name: string;
+            tags: string[];
+            /** @enum {string} */
+            type: "text" | "chat";
+            updated_at: string;
+            versions: components["schemas"]["VersionSummary"][];
+        };
+        PromptList: {
+            data: components["schemas"]["PromptMeta"][];
+            meta: components["schemas"]["ListMeta"];
+        };
+        PromptMeta: {
+            labels: string[];
+            lastConfig: {
+                [key: string]: unknown;
+            };
+            lastUpdatedAt: string;
+            name: string;
+            tags: string[];
+            /** @enum {string} */
+            type: "text" | "chat";
+            versions: number[];
+        };
+        PromptPage: {
+            items: components["schemas"]["PromptSummary"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int64 */
+            total: number;
+        };
+        PromptRef: {
+            prompt_id: string;
+            /** Format: int32 */
+            version: number;
+        };
+        PromptSummary: {
+            id: string;
+            labels: components["schemas"]["LabelRef"][];
+            /** Format: int32 */
+            latest_version: number;
+            name: string;
+            tags: string[];
+            /** @enum {string} */
+            type: "text" | "chat";
+            updated_at: string;
+            /** Format: int32 */
+            version_count: number;
+        };
+        PromptUsage: {
+            /** Format: int32 */
+            days: number;
+            unknown_versions: string[];
+            versions: components["schemas"]["VersionUsage"][];
+        };
+        PromptUsageSummary: {
+            /** Format: int32 */
+            days: number;
+            items: components["schemas"]["PromptCalls"][];
+        };
+        PromptVersionView: {
+            body: unknown;
+            commit_message: string | null;
+            config: {
+                [key: string]: unknown;
+            };
+            created_at: string;
+            created_by: string;
+            created_by_label: string;
+            /** @enum {string} */
+            created_via: "ui" | "api";
+            id: string;
+            labels: string[];
+            name: string;
+            prompt_id: string;
+            /** @enum {string} */
+            type: "text" | "chat";
+            /** Format: int32 */
+            version: number;
+        };
         ProviderOptionView: {
             default_model_key: string;
             label: string;
             model_keys: string[];
             /** @enum {string} */
             provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
+        };
+        PublicCreatePromptRequest: {
+            commitMessage?: string | null;
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            labels?: string[] | null;
+            name: string;
+            prompt: unknown;
+            tags?: string[] | null;
+            /** @enum {string|null} */
+            type?: "text" | "chat" | null;
+        };
+        PublicPrompt: {
+            commitMessage: string | null;
+            config: {
+                [key: string]: unknown;
+            };
+            createdAt: string;
+            id: string;
+            isActive: boolean;
+            labels: string[];
+            name: string;
+            prompt: unknown;
+            tags: string[];
+            /** @enum {string} */
+            type: "text" | "chat";
+            updatedAt: string;
+            /** Format: int32 */
+            version: number;
         };
         RateDetail: {
             bucketKey: string;
@@ -3726,6 +4148,9 @@ export interface components {
         SetEnabledRequest: {
             enabled: boolean;
         };
+        SetLabelsRequest: {
+            labels: string[];
+        };
         SetLaneModelRequest: {
             model_key: string;
         };
@@ -3842,6 +4267,8 @@ export interface components {
             path: string | null;
             payload_available: boolean;
             price_book_version: string | null;
+            prompt_name: string | null;
+            prompt_version: string | null;
             /** Format: int64 */
             reasoning_tokens: number | null;
             retrieval_documents: components["schemas"]["RetrievalDocumentView"][];
@@ -4045,6 +4472,12 @@ export interface components {
             /** Format: int32 */
             window_target_count: number;
         };
+        UpdateLabelsRequest: {
+            name: string;
+            newLabels: string[];
+            /** Format: int32 */
+            version: number;
+        };
         UpdateMemberRequest: {
             role: string;
         };
@@ -4056,6 +4489,9 @@ export interface components {
             description?: string;
             name: string;
             settings?: string;
+        };
+        UpdateTagsRequest: {
+            tags: string[];
         };
         UpsertAlertRuleRequest: {
             basis?: string | null;
@@ -4121,6 +4557,38 @@ export interface components {
             evidence: string;
             role: string;
             surface: string;
+        };
+        VersionSummary: {
+            commit_message: string | null;
+            created_at: string;
+            created_by: string;
+            created_by_label: string;
+            /** @enum {string} */
+            created_via: "ui" | "api";
+            id: string;
+            labels: string[];
+            /** Format: int32 */
+            version: number;
+        };
+        VersionUsage: {
+            /** Format: int64 */
+            calls: number;
+            cost_usd: number | null;
+            /** Format: int64 */
+            error_calls: number;
+            first_seen: string;
+            /** Format: int64 */
+            input_tokens: number | null;
+            last_seen: string;
+            /** Format: int64 */
+            output_tokens: number | null;
+            /** Format: int64 */
+            p50_ms: number | null;
+            /** Format: int64 */
+            p95_ms: number | null;
+            /** Format: int64 */
+            unpriced_calls: number;
+            version: string | null;
         };
         View: {
             auth_mode: string;
@@ -6499,6 +6967,373 @@ export interface operations {
             };
         };
     };
+    PromptController_list: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                q?: string;
+                name?: string;
+                folder?: string;
+                label?: string;
+                tag?: string;
+                type?: string;
+                page?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptPage"];
+                };
+            };
+        };
+    };
+    PromptController_create: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePromptRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptDetail"];
+                };
+            };
+        };
+    };
+    PromptController_deleteFolder: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                path: string;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFolderDeleteResponse"];
+                };
+            };
+        };
+    };
+    PlaygroundController_run: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaygroundRunRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePlaygroundRunView"];
+                };
+            };
+        };
+    };
+    PromptUsageController_summary: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                days?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptUsageSummary"];
+                };
+            };
+        };
+    };
+    PromptController_get: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                promptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptDetail"];
+                };
+            };
+        };
+    };
+    PromptController_delete: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                promptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseDeleteResponse"];
+                };
+            };
+        };
+    };
+    PromptController_updateTags: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                promptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptDetail"];
+                };
+            };
+        };
+    };
+    PromptUsageController_usage: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                days?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                promptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptUsage"];
+                };
+            };
+        };
+    };
+    PromptController_createVersion: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                promptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptVersionView"];
+                };
+            };
+        };
+    };
+    PromptController_getVersion: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                promptId: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptVersionView"];
+                };
+            };
+        };
+    };
+    PromptController_deleteVersion: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                promptId: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseDeleteResponse"];
+                };
+            };
+        };
+    };
+    PromptController_setLabels: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                promptId: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLabelsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptVersionView"];
+                };
+            };
+        };
+    };
     RcaController_get: {
         parameters: {
             query: {
@@ -6816,6 +7651,8 @@ export interface operations {
                 status?: string;
                 q?: string;
                 detectedBy?: string;
+                promptName?: string;
+                promptVersion?: string;
             };
             header?: never;
             path: {
@@ -6850,6 +7687,8 @@ export interface operations {
                 status?: string;
                 q?: string;
                 detectedBy?: string;
+                promptName?: string;
+                promptVersion?: string;
             };
             header?: never;
             path: {
@@ -6993,6 +7832,8 @@ export interface operations {
                 q?: string;
                 sort?: string;
                 detectedBy?: string;
+                promptName?: string;
+                promptVersion?: string;
             };
             header?: never;
             path: {
@@ -7644,6 +8485,137 @@ export interface operations {
                 };
                 content: {
                     "application/json": string;
+                };
+            };
+        };
+    };
+    PromptPublicController_list: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                name?: string;
+                label?: string;
+                tag?: string;
+                page?: number;
+                limit?: number;
+                fromUpdatedAt?: string;
+                toUpdatedAt?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptList"];
+                };
+            };
+        };
+    };
+    PromptPublicController_create: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicCreatePromptRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePublicPrompt"];
+                };
+            };
+        };
+    };
+    PromptPublicController_delete: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                name?: string;
+                version?: number;
+                label?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseDeleteResponse"];
+                };
+            };
+        };
+    };
+    PromptPublicController_fetch: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                name?: string;
+                version?: number;
+                label?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePublicPrompt"];
+                };
+            };
+        };
+    };
+    PromptPublicController_updateLabels: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateLabelsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePublicPrompt"];
                 };
             };
         };

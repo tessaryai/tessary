@@ -35,7 +35,7 @@ conventions*.
 `observability/alloy/config.dev.alloy` keeps a span for Langfuse when it
 has **either**:
 
-- `gen_ai.operation.name` (set by `JevDecisionClient` and agentic roots), **or**
+- `gen_ai.operation.name` (set by `JevDecisionClient`, `PlaygroundService` and agentic roots), **or**
 - `langfuse.trace.name` (set on non-LLM product roots such as `agentic-rca`).
 
 A new non-LLM product span that should reach Langfuse **must** stamp
@@ -50,6 +50,7 @@ A new non-LLM product span that should reach Langfuse **must** stamp
 | `E2bAgentRunSandbox` | `agent-run` | `agent-run` | The generic agent run (`agentrun/`), on whichever lane the caller named: `tessary.agentrun.lane` carries it, since this emitter is not one lane. Metadata: `tessary.agentrun.subject_kind` / `subject_id`, the ledger subject the run's spend is booked against. |
 | `AgentSpanTelemetry` | `agent.llm_request` | — | Per-turn child under agentic roots (carve-out) |
 | `JevDecisionClient` | `decision-call` | — | One hosted decision-model call. Sets `gen_ai.operation.name=decision`, so Alloy admits it. Metadata: `lane`, `provider` (the gateway), `project_id`. No message content on the span. |
+| `PlaygroundService` | `playground-run` | — | One prompt-playground chat call on the org's own key. Sets `gen_ai.operation.name=chat`. Metadata: `lane`, `provider`, `project_id`, `prompt_version_id`. No message content on the span; nothing is ingested into the project's traces. |
 
 **Span names retired, deliberately not re-homed:** `llm-grader-run`,
 `llm-grader-applies-when`, `deterministic-grader-run`, `agentic-synthesis`, `agentic-codegen`,

@@ -123,6 +123,43 @@ Do not describe a flagged answer as a confirmed error. A flag says the model fou
 
 What a person said a closed frustration or groundedness case turned out to be: **Fixed** or **False alarm**. The case page no longer asks for one, so only cases closed before that change carry it, and their closing line still names it.
 
+## Prompt
+
+A named template that an agent fetches from Tessary and fills in at run time. A prompt is text or a list of chat messages, and it can hold variables written as `{{name}}`.
+
+A prompt belongs to one project. A `/` in its name puts it in a folder, for example `support/greeting`.
+
+Use:
+
+- Create a prompt for the support agent's greeting.
+- The agent fetches the prompt by name.
+
+Do not use “prompt” for the messages that a trace recorded. Those are the trace’s input.
+
+## Prompt version
+
+One saved state of a prompt. Each save creates a new version with the next number, and a version never changes after it is created.
+
+Use:
+
+- Version 3 shortens the system message.
+- Compare version 2 and version 4.
+
+Do not use “revision” or “draft” for a prompt version.
+
+## Deployment label
+
+A name that points at one version of a prompt, such as `production` or `staging`. An agent fetches a prompt by its label, so moving the label to another version changes what runs without a code change. A label is on one version at a time.
+
+`latest` is not a deployment label you set. It always points at the highest version number.
+
+Use:
+
+- Move the `production` label to version 4.
+- Roll back by moving `production` to version 3.
+
+Write “deployment label” the first time on a page. After that, “label” is clear only when no form field is nearby, because “label” also means a field label (see the [product copy guide](product-copy-guide.md)). Do not use “tag” for a deployment label: a tag only groups prompts and changes nothing an agent fetches.
+
 ## How the terms relate
 
 1. An **agent** produces a **trace**.
@@ -141,5 +178,8 @@ Use lowercase for these terms in sentences:
 - finding
 - triage
 - case
+- prompt
+- prompt version
+- deployment label
 
 Capitalize them when required by the Tessary [writing style guide](writing-style-guide.md), such as in a top-level page title.

@@ -369,8 +369,9 @@ public class TraceV2Repository {
     }
 
     /**
-     * Optional filters that compose with AND. {@code model}, {@code kind}, {@code callSite} and {@code hasCallSite} are
-     * {@code EXISTS} semi-joins over spans; {@code detectedBy} is a classifier id or {@code any}. {@link TraceFilters}
+     * Optional filters that compose with AND. {@code model}, {@code kind}, {@code callSite}, {@code hasCallSite} and
+     * {@code promptName} are {@code EXISTS} semi-joins over spans; {@code promptVersion} narrows the same span and is
+     * ignored without {@code promptName}; {@code detectedBy} is a classifier id or {@code any}. {@link TraceFilters}
      * writes the SQL.
      */
     public record TraceQuery(
@@ -382,9 +383,12 @@ public class TraceV2Repository {
             @Nullable String to,
             @Nullable String status,
             @Nullable String q,
-            @Nullable String detectedBy) {
+            @Nullable String detectedBy,
+            @Nullable String promptName,
+            @Nullable String promptVersion) {
 
-        public static final TraceQuery NONE = new TraceQuery(null, null, null, null, null, null, null, null, null);
+        public static final TraceQuery NONE =
+                new TraceQuery(null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

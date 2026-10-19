@@ -32,8 +32,16 @@ All project-scoped bearer tokens live in the `api_key` table and are issued/veri
 | Family | Prefix | Typical use |
 |---|---|---|
 | `write` | `tsy_w_…` | Ingest (`POST /v1/traces`) |
-| `query` | `tsy_q_…` | Aggregation-first query API |
-| `admin` | `tsy_a_…` | Superset: write + query + `/mcp` tools |
+| `query` | `tsy_q_…` | Aggregation-first query API; prompt reads (`GET /v1/prompts/**`) |
+| `admin` | `tsy_a_…` | Superset: write + query + `/mcp` tools; prompt writes and the playground |
+
+**Prompt routes check the key scope themselves.** Every bearer key authenticates as role `member`, so
+RBAC alone would let an ingest key read prompts. On `/v1/prompts/**` and on `/api/.../prompts/**`
+(usage and playground included), a bearer read needs a `query` or `admin` key and a write or a
+playground run an `admin` key, else 403 `PROMPTS.WRONG_KEY_SCOPE`; a cookie session passes the scope
+check and meets RBAC as usual. `/v1/prompts` takes no cookie session (403 `PROMPTS.TOKEN_REQUIRED`), and
+the scope check runs before the `PROMPT_MANAGEMENT` capability check, so a key that may not read learns
+nothing about the org. Routes and error codes: [prompt-management.md](./prompt-management.md).
 
 MCP token UI (`McpTokenController`) and the plugin device-link handshake mint **admin**-scoped
 keys via `ApiKeyService.issue(...)`. So do the three agent lanes, one short-lived key per run, revoked
@@ -90,12 +98,16 @@ cross-tenant id reads as not-found), and there is deliberately **no server-side 
 agent that wants a stride or a draw takes it and says so in its citation.
 
 The launch product's own output is open (project, imported taxonomy, cases and the RCA reports they
-carry, findings, query, the substrate list/read tools). The full catalogue is **20 tools, and every
-one of them is open**: `tools/list` returns all of them for any valid token. It was 22 with two gated
-on `GRADERS` until grading was deleted and took three with it: `list_graders` and `get_grader` (the
-gated pair) plus the open `list_quality_dimensions`, whose axes each named a grader. The per-tool
-capability field went later, once no tool declared one. `McpCapabilityGateTest` pins the count
-alongside the read-only invariant.
+carry, findings, query, the substrate list/read tools, and the managed prompts). The full catalogue is
+**22 tools, and every one of them is listed**: `tools/list` returns all of them for any valid token. It
+was 22 once before, with two gated on `GRADERS`, until grading was deleted and took three with it:
+`list_graders` and `get_grader` (the gated pair) plus the open `list_quality_dimensions`, whose axes each
+named a grader. The per-tool capability field went later, once no tool declared one. The two prompt
+tools, `list_prompts(folder?, label?)` (at most 100 prompts, newest change first) and
+`get_prompt(name, version?, label?)` (one version; neither argument reads `production`), came back to 22
+without one: each checks `PROMPT_MANAGEMENT` in its handler and answers a tool error while it is off,
+and both return the snake_case `PromptDtos` records. `McpCapabilityGateTest` pins the count alongside
+the read-only invariant.
 
 **No MCP tool is RCA-gated.** `Capability.RCA` used to gate five of them, for spend — `run_triage`
 started a platform-paid agent session. Now that a finished report reaches MCP inlined on the case

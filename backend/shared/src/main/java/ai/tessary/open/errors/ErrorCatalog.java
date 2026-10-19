@@ -35,7 +35,9 @@ public class ErrorCatalog {
             AuthError.class,
             DecisionError.class,
             RetentionError.class,
-            AgentRunError.class);
+            AgentRunError.class,
+            PromptsError.class,
+            PlaygroundError.class);
 
     private final List<Class<? extends ErrorCode>> registered;
 

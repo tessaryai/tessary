@@ -40,7 +40,7 @@ import type { components } from "./api/generated/schema";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
 import { preloadRouteChunk } from "./lib/routePreload";
-import { chartCard, chartPoint } from "./test/fixtures";
+import { chartCard, chartPoint, promptDetail, promptVersion } from "./test/fixtures";
 import {
   GROUNDEDNESS_CASE_DETAIL,
   GROUNDEDNESS_FINDING_DETAIL,
@@ -67,6 +67,7 @@ const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "secret_leak_enabled",
   "malformed_output_enabled",
   "triage_automatic_enabled",
+  "prompt_management_enabled",
 ];
 const OPEN_EDITION_CAPABILITIES: Record<CapabilityWire, boolean> = Object.fromEntries(
   ALL_CAPABILITY_KEYS.map((k) => [k, !OFF_IN_OPEN_EDITION.includes(k)]),
@@ -273,6 +274,8 @@ const EMPTY_MODEL_SETTINGS = { groups: [] as unknown[], lanes: [] as unknown[], 
 const EMPTY_REDACTION_RULES = { rules: [] as unknown[] };
 const EMPTY_SESSION_SPANS = { spans: [] as unknown[], spans_truncated: false };
 const EMPTY_CHART_SCOPES = { days: 28, call_sites: [] as unknown[], tools: [] as unknown[], classifiers: [] as unknown[] };
+const EMPTY_PROMPT_PAGE = { items: [] as unknown[], page: 1, limit: 200, total: 0 };
+const EMPTY_PROMPT_USAGE_SUMMARY = { days: 7, items: [] as unknown[] };
 
 /**
  * Applied to every tenant route. ShellChrome's nav badge reads getTriage; CapabilityGate briefly mounts Triage
@@ -329,6 +332,14 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   },
   vitals: {
     getVitals: () => Promise.resolve(EMPTY_VITALS),
+  },
+  prompts: {
+    listPrompts: () => Promise.resolve(EMPTY_PROMPT_PAGE),
+    getPromptUsageSummary: () => Promise.resolve(EMPTY_PROMPT_USAGE_SUMMARY),
+  },
+  // Every read below the prompt waits for it, so the not-found path fires no other.
+  "prompts/:promptId": {
+    getPrompt: NOT_FOUND("prompt"),
   },
   // Legacy `/pipeline/*` still resolves to a view (triage), so it needs triage's queries.
   "pipeline/*": {
@@ -730,6 +741,12 @@ const DETAIL_FIXTURES: {
     heading: /Schema failure rate 2\.00% → 17\.00%/,
   },
   {
+    name: "a chat prompt with two versions",
+    path: "prompts/:promptId",
+    overrides: { getPrompt: resolved(promptDetail()), getPromptVersion: resolved(promptVersion()) },
+    heading: /^support\/greeting$/,
+  },
+  {
     name: "a finished RCA report",
     path: "rca/:reportId",
     overrides: { getRcaReport: resolved(FINISHED_RCA) },
@@ -901,6 +918,20 @@ describe("route manifest render smoke test", () => {
     await mountAndSettle(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/settings/notifications"));
 
     expect(listAlertRules).not.toHaveBeenCalled();
+  });
+
+  // Bug: the Prompts page reachable by URL while prompt management is off, where every one of its reads is refused.
+  it("does not open the prompts page while prompt management is off", async () => {
+    const listPrompts = vi.fn(() => Promise.resolve(EMPTY_PROMPT_PAGE));
+    vi.mocked(mockedAuth.getCapabilities).mockResolvedValueOnce({
+      capabilities: { ...OPEN_EDITION_CAPABILITIES, prompt_management_enabled: false },
+    });
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...VIEW_OVERRIDES.prompts, listPrompts };
+
+    const container = await mountAndSettle(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/prompts"));
+
+    within(container).getByRole("heading", { level: 1, name: "Triage" });
+    expect(listPrompts).not.toHaveBeenCalled();
   });
 });
 
