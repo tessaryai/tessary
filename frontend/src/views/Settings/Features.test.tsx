@@ -18,7 +18,7 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: "u-me" } }) }));
 
 const triage = (over: Partial<CapabilityOverrideView> = {}): CapabilityOverrideView => ({
-  capability: "triage_automatic_enabled", enabled: false, default_enabled: false, has_override: false, ...over,
+  capability: "triage_automatic_enabled", enabled: false, default_enabled: false, has_override: false, licensed: true, ...over,
 });
 
 beforeEach(() => {

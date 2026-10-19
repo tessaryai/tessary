@@ -10,6 +10,8 @@ import org.springframework.http.HttpStatus;
 public enum CapabilityError implements ErrorCode {
     /** 403, same shape as RBAC. */
     DISABLED(HttpStatus.FORBIDDEN, "The '%s' capability is not available for this organization"),
+    /** 403: the deployment's license lists the capability false, so no override can turn it on. */
+    LICENSED(HttpStatus.FORBIDDEN, "The '%s' capability is not included in this deployment's license"),
     /** Write-side guard on org_feature_flag. */
     UNKNOWN(HttpStatus.UNPROCESSABLE_ENTITY, "Unknown capability '%s'"),
     /** 402, the monetization boundary. */
