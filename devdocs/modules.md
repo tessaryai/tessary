@@ -258,7 +258,7 @@ gate builds and tests the open edition directly.
 When open code needs paid behaviour, the move is the same one the layering already uses: an SPI
 interface in the open module with a working open default, implemented by a paid module. That is
 what makes `analysis` able to ship its default classifiers with the paid ones absent. Paid code
-reaches a running backend by component scan: the paid jars live in `ai.tessary.paid.*`, under
+reaches a running backend by component scan: the paid jars use packages under
 `TessaryApplication`'s package, and the paid image puts them on the classpath beside the open jar
 (`-cp /app/app.jar:/app/paid/*`). This is not the classifier extension registry, which is a separate
 seam for classifiers and does not load beans.
