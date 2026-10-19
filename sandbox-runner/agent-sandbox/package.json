@@ -11,7 +11,7 @@
   "dependencies": {
     "@opencode-ai/sdk": "1.18.30",
     "e2b": "^2.55.0",
-    "undici": "^6.29.0"
+    "undici": "^6.29.1"
   },
   "devDependencies": {
     "dotenv": "^18.0.7",
