@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { spawnLauncher, startLauncher, request, tempDir } = require('./fixtures/launcher-harness');
 
 const E2B_ENV = { SANDBOX_BACKEND: 'e2b', E2B_API_KEY: 'fake-e2b-key', SANDBOX_API_KEY: 'testkey' };
@@ -144,6 +145,48 @@ test('a docker backend with no SANDBOX_WORK_VOLUME refuses to boot', async () =>
   const code = await new Promise((resolve) => child.on('exit', resolve));
   assert.equal(code, 1, 'it must exit rather than serve requests that will each fail at mount time');
   assert.match(stderr, /requires SANDBOX_WORK_VOLUME/);
+});
+
+/**
+ * The real server.js in a directory of its own, beside the IMAGE_VERSION file the launcher image writes. Resolves once it
+ * either listens or exits, with its output and exit code (null while it still runs).
+ */
+async function bootReleasedLauncher(imageVersion, template) {
+  const dir = tempDir('launcher-release-');
+  fs.copyFileSync(path.join(__dirname, '..', 'server.js'), path.join(dir, 'server.js'));
+  fs.writeFileSync(path.join(dir, 'IMAGE_VERSION'), `${imageVersion}\n`);
+  const env = { ...process.env, ...E2B_ENV, E2B_ANALYZER_TEMPLATE: template, PORT: '0' };
+  const child = spawn('node', [path.join(dir, 'server.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  let timer;
+  const code = await new Promise((resolve) => {
+    const onData = (d) => {
+      output += d.toString();
+      if (/listening on :\d+/.test(output)) resolve(null);
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('exit', resolve);
+    timer = setTimeout(() => resolve('timeout'), 5000);
+  });
+  clearTimeout(timer);
+  child.kill();
+  return { code, output };
+}
+
+const TEMPLATE = 'tessary/tessary-agent-sandbox';
+
+test('an e2b template from another release refuses to boot (a 1.11.2 launcher runs lane.js, which a 1.6.0 template lacks, so every lane exits 1)', async () => {
+  const { code, output } = await bootReleasedLauncher('1.11.2', `${TEMPLATE}:1.6.0`);
+  assert.equal(code, 1, `it must exit rather than serve lanes the template cannot run: ${output}`);
+  assert.match(output, /E2B_ANALYZER_TEMPLATE=tessary\/tessary-agent-sandbox:1\.6\.0 is not this launcher's release 1\.11\.2/);
+});
+
+test('an e2b template of the same release, a floating tag, or a local build boots (the release check must not block a matching install)', async () => {
+  for (const [imageVersion, template] of [['1.11.2', `${TEMPLATE}:1.11.2`], ['1.11.2', `${TEMPLATE}:latest`], ['dev', `${TEMPLATE}:1.6.0`]]) {
+    const { code, output } = await bootReleasedLauncher(imageVersion, template);
+    assert.equal(code, null, `launcher ${imageVersion} with ${template} must boot: ${output}`);
+  }
 });
 
 // ---- Launcher sessions: the front door ------------------------------------------------------

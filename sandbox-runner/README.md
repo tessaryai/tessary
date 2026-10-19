@@ -310,6 +310,10 @@ network it shares with the container, chosen by that network's name, never the f
 
 ### E2B
 
+The launcher refuses to boot when `E2B_ANALYZER_TEMPLATE` names a release other than its own
+`IMAGE_VERSION`: the lane and session scripts it runs ship in the template of the same release.
+A local build (`dev`) or a floating tag (`latest`) is not checked.
+
 A session sandbox is created from `E2B_ANALYZER_TEMPLATE` with `timeoutMs` set to
 `SANDBOX_SESSION_MAX_MS` + 60 s and the metadata `tessary.sandbox.session=<id>`. The launcher
 writes `session.json` to `/home/user/session.json` through the files API, then runs
