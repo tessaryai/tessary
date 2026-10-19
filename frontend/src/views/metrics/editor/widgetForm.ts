@@ -59,6 +59,7 @@ export function switchView(d: WidgetDraft, view: string, catalog: MetricsCatalog
     measures: v ? [v.measures[0].name] : [],
     note: null,
     dimension: v && d.chart === "table" ? v.dimensions[0].name : null,
+    filters: d.filters && d.filters.filter((f) => v?.dimensions.some((x) => x.name === f.field)),
   };
 }
 

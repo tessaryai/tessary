@@ -573,15 +573,27 @@ describe("dashboards", () => {
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Spend review" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await toast("Dashboard renamed");
-    expect(api.updateMetricDashboard).toHaveBeenCalledWith("01JCOST", {
-      name: "Spend review", description: "Where the money goes", definition: COST.definition,
-    });
+    // Bug: the rename sends the cached definition and overwrites widgets saved since from another tab.
+    expect(api.updateMetricDashboard.mock.calls[0]).toEqual([
+      "01JCOST", { name: "Spend review", description: "Where the money goes" },
+    ]);
 
     dashboardMenu("Delete");
     fireEvent.click(screen.getByRole("button", { name: "Delete dashboard" }));
     await toast("Dashboard deleted");
     expect(api.deleteMetricDashboard).toHaveBeenCalledWith("01JCOST");
     await waitFor(() => expect(currentLocation()).toBe(`${BASE}/metrics`));
+  });
+
+  // Bug: Rename is offered while the dashboard read failed or is still running, and saving it crashes on the missing
+  // dashboard.
+  it("renameWaitsForTheDashboardRead", async () => {
+    api.getMetricDashboard.mockRejectedValue(new ApiError(500, { code: "INTERNAL", message: "Read failed" }));
+    renderPage(`${BASE}/metrics/01JCOST`);
+    expect((await screen.findByRole("alert")).textContent).toBe("INTERNAL: Read failed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard actions" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Duplicate", "Delete"]);
   });
 
   // Bug: a failed create or delete closes its modal or navigates as if it had worked.

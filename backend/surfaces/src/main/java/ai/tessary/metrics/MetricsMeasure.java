@@ -11,6 +11,12 @@ public record MetricsMeasure(
         /** The SQL column alias. Measures that share an alias share one SQL expression (the latency family). */
         String alias,
         String sql,
+        /**
+         * Every qualified column {@code sql} reads, such as {@code s.total_cost} or {@code root.started_at}, in the
+         * order they first appear. A dimensioned query carries exactly these through its base CTE, so a column read
+         * and not declared here fails that query.
+         */
+        List<String> reads,
         /** Index into the float8[] the expression yields; null for a scalar. */
         @Nullable Integer arrayIndex,
         Unit unit,

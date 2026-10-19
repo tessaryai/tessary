@@ -69,6 +69,7 @@ public final class MetricsQueryValidator {
 
         boolean compare = req.compare() != null;
         if (compare && axis) throw new TessaryException(MetricsError.COMPARE_NEEDS_NO_AXIS);
+        if (compare && dimension != null) throw new TessaryException(MetricsError.COMPARE_NEEDS_NO_DIMENSION);
 
         return new MetricsQuery(
                 view, asked, withCompanions(view, asked), dimension, filters, from, to, unit, topN, compare);

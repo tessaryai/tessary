@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Triage imports pulseQueries from here, so this file must never import the grid or anything that loads it.
-import { keepPreviousData, queryOptions } from "@tanstack/react-query";
+import { queryOptions } from "@tanstack/react-query";
 import type { ProjectApi } from "../../api/client";
 import type { ApiError } from "../../api/types";
 import { resolveWindow } from "./metricsRules";
 import type { MetricsQueryRequest } from "./wire";
 
-/** The server admits three metrics reads per project at once; four in flight keeps one queued there, not six. */
-export const MAX_IN_FLIGHT = 4;
+/**
+ * The server runs at most two metrics reads per project and refuses a read that waits too long for a permit, so the
+ * page sends no more than the project can run at once.
+ */
+export const MAX_IN_FLIGHT = 2;
 
 /** FIFO: a settled read, kept or refused, starts the next one; an aborted read still waiting leaves without running. */
 export class Limiter {
@@ -69,11 +72,15 @@ export const dashboardQuery = (api: ProjectApi, id: string) =>
 
 export const isBusy = (err: unknown) => (err as ApiError | undefined)?.code === "METRICS.BUSY";
 
+/** Rows of one shape (a total, a breakdown, a series) handed to the body of another can crash it. */
+const sameShape = (a: MetricsQueryRequest, b: MetricsQueryRequest) =>
+  (a.dimension == null) === (b.dimension == null) && (a.granularity == null) === (b.granularity == null);
+
 export const widgetQuery = (api: ProjectApi, req: MetricsQueryRequest) =>
   queryOptions({
-    queryKey: ["metrics", "query", api.base, req],
+    queryKey: ["metrics", "query", api.base, req] as const,
     queryFn: ({ signal }) => widgetLimiter.run(() => api.queryMetrics(req, signal), signal),
-    placeholderData: keepPreviousData,
+    placeholderData: (last, lastQuery) => (lastQuery && sameShape(lastQuery.queryKey[3], req) ? last : undefined),
     retry: (count: number, err: unknown) => count < 1 && isBusy(err),
     retryDelay: 1500,
   });

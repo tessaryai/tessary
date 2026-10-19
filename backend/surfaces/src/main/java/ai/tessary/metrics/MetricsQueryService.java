@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -103,10 +104,14 @@ public class MetricsQueryService {
                 q.compare() ? MetricsQueryPlanner.plan(q, projectId, q.from().minus(q.length()), q.from()) : null;
         Result raw;
         try {
-            raw = gate.withPermit(() -> repo.run(current, previous, props.statementTimeoutMs(), props.workMem()));
+            raw = gate.withPermit(
+                    projectId, () -> repo.run(current, previous, props.statementTimeoutMs(), props.workMem()));
+        } catch (TessaryException busy) {
+            logQuery(q, start, 0, Outcome.BUSY);
+            throw busy;
         } catch (DataAccessException e) {
             RuntimeException translated = MetricsFailures.translate(e);
-            logQuery(q, start, 0, translated instanceof TessaryException);
+            logQuery(q, start, 0, translated instanceof TessaryException ? Outcome.TIMED_OUT : Outcome.FAILED);
             throw translated;
         }
 
@@ -116,7 +121,6 @@ public class MetricsQueryService {
         if (dimension != null && "call_site".equals(dimension.wire())) {
             Set<String> keys = new HashSet<>();
             for (Raw r : raw.rows()) keys.add(Objects.requireNonNull(r.key()));
-            if (previousRaw != null) for (Raw r : previousRaw) keys.add(Objects.requireNonNull(r.key()));
             names = labels.callSiteLabels(projectId, keys);
         }
 
@@ -138,11 +142,14 @@ public class MetricsQueryService {
                 topN,
                 totalKeys > q.topN(),
                 Duration.between(start, Instant.now()).toMillis());
-        logQuery(q, start, rows.size(), false);
+        logQuery(q, start, rows.size(), Outcome.OK);
         return result;
     }
 
-    /** Previous rows have no axis (compare refuses one), so {@code buckets} only ever serves the current rows. */
+    /**
+     * Previous rows have no axis and no dimension (compare refuses both), so {@code buckets} and {@code names} only
+     * ever serve the current rows.
+     */
     private static List<MetricsRow> assemble(
             MetricsQuery q, Shape shape, List<Raw> raws, List<Instant> buckets, Map<String, String> names) {
         long totalKeys = raws.isEmpty() ? 0 : raws.get(0).totalKeys();
@@ -200,18 +207,42 @@ public class MetricsQueryService {
         return names.getOrDefault(key, key);
     }
 
+    /** How a query ended: answered, cancelled by its timeout, failed in the database, or refused at the gate. */
+    private enum Outcome {
+        OK("answered"),
+        TIMED_OUT("timed out"),
+        FAILED("failed"),
+        BUSY("was refused as busy");
+
+        private final String verb;
+
+        Outcome(String verb) {
+            this.verb = verb;
+        }
+
+        String wire() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+    }
+
     /** No filter values and no keys: the OPS marker forbids user-supplied fields. */
-    private static void logQuery(MetricsQuery q, Instant start, int rows, boolean timedOut) {
+    private static void logQuery(MetricsQuery q, Instant start, int rows, Outcome outcome) {
         MetricsGranularity unit = q.unit();
         MetricsDimension dimension = q.dimension();
+        String granularity = unit == null ? "none" : unit.wire();
+        String by = dimension == null ? "none" : dimension.wire();
+        long ms = Math.max(0, Duration.between(start, Instant.now()).toMillis());
         StructuredLog.info(log, Markers.OPS, "metrics.query")
+                .message(
+                        "metrics query on %s by %s over %dh %s in %dms with %d rows",
+                        q.view().wire(), by, q.length().toHours(), outcome.verb, ms, rows)
                 .field("view", q.view().wire())
                 .field("windowHours", q.length().toHours())
-                .field("granularity", unit == null ? "none" : unit.wire())
-                .field("dimension", dimension == null ? "none" : dimension.wire())
+                .field("granularity", granularity)
+                .field("dimension", by)
                 .field("rows", rows)
-                .field("timedOut", timedOut)
-                .durationMs(start)
+                .field("outcome", outcome.wire())
+                .field("durationMs", ms)
                 .log();
     }
 }

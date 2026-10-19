@@ -7,17 +7,21 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * Turns a resolved query into one SQL statement. Every name in the query is already a catalog constant, so the SQL is
  * assembled from constants only; filter values, instants and limits are bound. A dimensioned query ranks its keys in a
- * CTE and folds those past top N into {@code __other__} in SQL, so every measure of the fold is exact. When its measures
- * join trace, it first reads span and trace once into a materialized {@code base} CTE of the columns they use, and
- * ranks and aggregates from that, so the join is paid once rather than once per pass.
+ * CTE and folds those past top N into {@code __other__} in SQL, so every measure of the fold is exact. It first reads
+ * its table, with the joins its measures need, once into a materialized {@code base} CTE of the group key and the
+ * columns those measures declare, and ranks and aggregates from that, so the scan, the joins, the dimension and the
+ * filters are paid once rather than once per pass.
  */
 public final class MetricsQueryPlanner {
 
@@ -45,19 +49,19 @@ public final class MetricsQueryPlanner {
                 + ", 'UTC') AS bkt, ";
         boolean anyRoot = q.all().stream().anyMatch(MetricsMeasure::needsRoot);
         boolean anyTrace = q.all().stream().anyMatch(MetricsMeasure::needsTrace);
-        String outerFrom = from(view, anyRoot, anyTrace);
+        String source = from(view, anyRoot, anyTrace);
 
         if (dimension == null) {
             if (unit == null) {
                 return new MetricsStatement(
                         Shape.TOTAL,
-                        "SELECT " + measures + "\n  FROM " + outerFrom + "\n WHERE " + where,
+                        "SELECT " + measures + "\n  FROM " + source + "\n WHERE " + where,
                         params,
                         columns);
             }
             return new MetricsStatement(
                     Shape.SERIES,
-                    "SELECT " + bucket + measures + "\n  FROM " + outerFrom + "\n WHERE " + where
+                    "SELECT " + bucket + measures + "\n  FROM " + source + "\n WHERE " + where
                             + "\n GROUP BY 1\n ORDER BY 1",
                     params,
                     columns);
@@ -66,31 +70,20 @@ public final class MetricsQueryPlanner {
         params.put("topN", q.topN());
         params.put("topNPlusOne", q.topN() + 1);
         MetricsMeasure ranking = q.all().get(0);
-        String d = dimension.sql();
-        String ranked;
+        String alias = view.alias();
+        Set<String> reads = new LinkedHashSet<>();
+        for (MetricsMeasure m : q.all()) reads.addAll(m.reads());
+        Set<String> carried = new LinkedHashSet<>();
+        carried.add(dimension.sql() + " AS k");
+        if (unit != null) carried.add(view.clock());
+        for (String column : reads) carried.add(owned(alias, column) ? column : column + " AS " + carriedName(column));
+        String ranked = "WITH base AS MATERIALIZED (\n    SELECT " + String.join(", ", carried) + "\n      FROM "
+                + source + "\n     WHERE " + where + "),\nranked AS (\n    SELECT k, row_number() OVER (ORDER BY "
+                + ranking.rankSql() + " DESC NULLS LAST, k ASC) AS rn\n      FROM " + fromBase(alias, ranking.reads())
+                + "\n     GROUP BY 1)\n";
         String keyed = "CASE WHEN r.rn <= :topN THEN r.k ELSE '" + MetricsSql.OTHER + "' END AS k,"
-                + " LEAST(r.rn, :topNPlusOne) AS rank, " + measures + ", (SELECT count(*) FROM ranked) AS total_keys";
-        if (anyTrace) {
-            // Span and its trace join are read once, into base; the ranking and the sums both read base.
-            List<String> carried = new ArrayList<>();
-            carried.add(d + " AS k");
-            if (unit != null) carried.add(view.clock());
-            view.carried().stream().filter(measures::contains).forEach(carried::add);
-            carried.add(MetricsSql.SETTLED);
-            String base = "base s " + MetricsSql.SETTLED_LATERAL;
-            ranked = "WITH base AS MATERIALIZED (\n    SELECT " + String.join(", ", carried) + "\n      FROM "
-                    + from(view, false, true) + "\n     WHERE " + where + "),\nranked AS (\n    SELECT k,"
-                    + " row_number() OVER (ORDER BY " + ranking.rankSql()
-                    + " DESC NULLS LAST, k ASC) AS rn\n      FROM "
-                    + base + "\n     GROUP BY 1)\n";
-            keyed += "\n  FROM " + base + " JOIN ranked r ON r.k = s.k";
-        } else {
-            ranked = "WITH ranked AS (\n    SELECT " + d + " AS k, row_number() OVER (ORDER BY " + ranking.rankSql()
-                    + " DESC NULLS LAST, " + d + " ASC) AS rn\n      FROM "
-                    + from(view, ranking.needsRoot(), ranking.needsTrace()) + "\n     WHERE " + where
-                    + "\n     GROUP BY 1)\n";
-            keyed += "\n  FROM " + outerFrom + " JOIN ranked r ON r.k = " + d + "\n WHERE " + where;
-        }
+                + " LEAST(r.rn, :topNPlusOne) AS rank, " + measures + ", (SELECT count(*) FROM ranked) AS total_keys"
+                + "\n  FROM " + fromBase(alias, reads) + " JOIN ranked r ON r.k = " + alias + ".k";
         if (unit == null) {
             return new MetricsStatement(
                     Shape.GROUPED, ranked + "SELECT " + keyed + "\n GROUP BY 1, 2\n ORDER BY 2", params, columns);
@@ -110,6 +103,37 @@ public final class MetricsQueryPlanner {
         return byAlias.entrySet().stream()
                 .map(e -> new Column(e.getKey(), List.copyOf(e.getValue())))
                 .toList();
+    }
+
+    /**
+     * Reads {@code base} under the view's own alias, so a measure reads the columns its view owns unchanged, and puts
+     * each joined table's carried columns back under that table's alias. Postgres flattens these laterals: the plan has
+     * no node for them.
+     */
+    private static String fromBase(String alias, Collection<String> reads) {
+        Map<String, List<String>> joined = new LinkedHashMap<>();
+        for (String column : reads) {
+            if (owned(alias, column)) continue;
+            String table = column.substring(0, column.indexOf('.'));
+            String name = column.substring(column.indexOf('.') + 1);
+            joined.computeIfAbsent(table, t -> new ArrayList<>())
+                    .add(alias + "." + carriedName(column) + " AS " + name);
+        }
+        StringBuilder out = new StringBuilder("base ").append(alias);
+        joined.forEach((table, columns) -> out.append("\n  CROSS JOIN LATERAL (SELECT ")
+                .append(String.join(", ", columns))
+                .append(") ")
+                .append(table));
+        return out.toString();
+    }
+
+    private static boolean owned(String alias, String column) {
+        return column.startsWith(alias + ".");
+    }
+
+    /** A joined table's column is carried as {@code table_column}, so it cannot clash with one the view owns. */
+    private static String carriedName(String column) {
+        return column.replace('.', '_');
     }
 
     private static String from(MetricsView view, boolean root, boolean trace) {

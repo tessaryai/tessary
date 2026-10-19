@@ -40,7 +40,7 @@ All routes sit under `/api/orgs/{orgSlug}/projects/{projectSlug}/metrics` and an
 | `GET /dashboards` | `default` first, then the project's dashboards by name, with `can_manage` | same |
 | `GET /dashboards/{id}` | One dashboard; `default` comes from code | same |
 | `POST /dashboards` | Create; `clone_of` copies a dashboard, `default` included | `ORG_MANAGE`, signed-in session only |
-| `PUT /dashboards/{id}` | Replace name, description and definition; `409 BUILT_IN_READ_ONLY` on `default` | same |
+| `PUT /dashboards/{id}` | Replace name and description, and the definition when one is sent; `409 BUILT_IN_READ_ONLY` on `default` | same |
 | `DELETE /dashboards/{id}` | Delete; `409 BUILT_IN_READ_ONLY` on `default` | same |
 
 A `WRITE` key gets `403 METRICS.WRONG_KEY_SCOPE` on a read. Every key, `ADMIN` included, gets
@@ -69,7 +69,7 @@ A query names a view, one to four of its measures, at most one dimension, up to 
 The answer holds one row per group and bucket. `values` carries the asked measures and, appended
 by the server, their companions. `n` is the count of base rows in the group. `bucket` is null
 without a time axis and `key` is null without a dimension. With `compare: "previous_window"` (only
-without a time axis) the server runs the same statement over the window of the same length that
+without a time axis and without a dimension) the server runs the same statement over the window of the same length that
 ends at `from` and returns it as `previous_rows`. View, measure, dimension and granularity names
 resolve to catalog constants before any SQL is written; values, instants and limits are bound
 parameters, so nothing from the request is concatenated into a statement.
@@ -159,10 +159,10 @@ so a new widget gets it without asking.
 8. **The top N plus everything else adds up.** With a dimension, keys past `top_n` fold into one
    `__other__` group in SQL, so every measure of the fold, percentiles included, is exact, and
    `top_n.total_keys` says how many keys there were. The fold is labelled "Other (N more)". The
-   statement ranks its keys in a `ranked` CTE and then aggregates the rows again under that rank.
-   On `llm_calls`, whose every measure joins `trace`, it first reads `span` joined to `trace` once
-   into a materialized `base` CTE of the group key and the columns the measures read, and both the
-   ranking and the aggregate read `base`. The other views read their base table twice.
+   statement first reads its table once, with the joins its measures need (`trace` on `llm_calls`,
+   the root span on `traces` latency), into a materialized `base` CTE of the group key and the
+   columns its measures declare. The dimension and the filters run there, once. A `ranked` CTE
+   ranks the keys from `base`, and the aggregate reads `base` again under that rank.
 9. **NULL group keys have a name.** Every column-backed dimension is
    `COALESCE(<column>, '__unattributed__') COLLATE "C"` (or its own fallback, such as `none` for
    `error_type` and `unresolved` for `resolution`), so a filter on `__unattributed__` matches the
@@ -204,11 +204,11 @@ Each limit answers a named error rather than clamping silently, so an API caller
 | `top_n` | 1 to 5 with a time axis (default 5), 1 to 100 without (default 20) | `400 METRICS.TOP_N_TOO_LARGE` |
 | Measures per query | 1 to 4 | `400 METRICS.TOO_MANY_MEASURES` |
 | Filters | at most 3, each with 1 to 50 values, `in` or `not_in` | `TOO_MANY_FILTERS`, `TOO_MANY_VALUES`, `BAD_OPERATOR` (400) |
-| `compare` | only without a time axis | `400 METRICS.COMPARE_NEEDS_NO_AXIS` |
+| `compare` | only without a time axis and without a dimension | `400 METRICS.COMPARE_NEEDS_NO_AXIS`, `400 METRICS.COMPARE_NEEDS_NO_DIMENSION` |
 | Statement time | 8000 ms, `tessary.metrics.statement-timeout-ms` | `422 METRICS.TIMED_OUT` ("Query took too long. Narrow the window or pick a coarser granularity.") |
-| Concurrent queries | 3, `tessary.metrics.max-concurrent-reads`; a request waits 2 s for a permit | `503 METRICS.BUSY` |
+| Concurrent queries | 3, `tessary.metrics.max-concurrent-reads`; 2 of them per project, `tessary.metrics.max-concurrent-reads-per-project`; a request waits 2 s for both permits | `503 METRICS.BUSY` |
 | Widgets per dashboard | 12 | `400 METRICS.TOO_MANY_WIDGETS` |
-| Dashboards per project | 20, besides `default` | `400 METRICS.TOO_MANY_DASHBOARDS` |
+| Dashboards per project | 20, besides `default`; a create locks the project row before it counts, so two creates at 19 cannot both pass | `400 METRICS.TOO_MANY_DASHBOARDS` |
 | Dashboard names, widget titles | 80 characters | `400 COMMON.VALIDATION_FAILED` for a name, `400 METRICS.INVALID_WIDGET` for a title |
 
 With these rules a time series has at most 336 buckets (14 days of hours) and 2016 cells (336
@@ -218,9 +218,12 @@ The timeout and the query run in one read-only transaction (`set_config('stateme
 true)`), so the timeout ends with the transaction. The same transaction sets `work_mem` to
 `tessary.metrics.work-mem` (64MB), so long-window distinct counts sort in memory instead of on disk,
 and the setting ends with the transaction too. The three-permit gate exists because Metrics
-shares one connection pool with ingest; the page keeps at most four widget reads in flight and
-retries a `BUSY` once. Each query logs one line with its view, window, granularity, row count,
-duration and whether it timed out; no filter value or key goes in it.
+shares one connection pool with ingest. A read takes one of its project's two permits first and
+then one of the three shared ones, so one busy project cannot hold all three and keep the other
+projects out; its extra reads wait on their own project. The page keeps at most two widget reads
+in flight and retries a `BUSY` once. Each query logs one line, a sentence and the same facts as
+fields: its view, dimension, window, granularity, row count, duration and `outcome` (`ok`,
+`timed_out`, `failed` or `busy`). No filter value or key goes in it.
 
 ## Dashboards
 
@@ -260,7 +263,9 @@ widgets:
 **Editing starts with a copy.** The first edit on `default` opens "Make an editable copy", which
 creates "Default (copy)" (then "Default (copy 2)" on a name clash) through `POST /dashboards` with
 `clone_of: "default"` and the edit already applied. A dashboard is written whole: edit mode keeps a
-draft, and "Done" sends one `PUT`. `/metrics` always opens `default`; there is no home dashboard
+draft, and "Done" sends one `PUT`. A rename sends `PUT` with the name and description and no
+`definition`, which keeps the stored widgets, so a rename cannot overwrite widgets saved from
+another tab. `/metrics` always opens `default`; there is no home dashboard
 setting. `default_range` is stored but only the API sets it in v1; the page takes its window from
 the URL.
 

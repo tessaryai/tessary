@@ -150,6 +150,19 @@ describe("NumberWidget", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 
+  // Bug: a result with no rows, such as a grouped read kept on screen while the number's own read runs, throws and takes
+  // the page down instead of reading as an empty window.
+  it("aResultWithNoRowsReadsAsAnEmptyWindow", () => {
+    renderTile(CASES, { ...totalResult("cases", {}, 0, { cases: 5, open_cases: 1 }), rows: [] });
+    expect(screen.getByText("0")).toBeTruthy();
+    expect(screen.getByText("0 still open")).toBeTruthy();
+    expect(delta().textContent).toBe("-5 vs previous 7 days");
+
+    const p95 = widget({ id: "p95", title: "p95 latency", view: "traces", measures: ["latency_p95_ms"] });
+    renderTile(p95, { ...totalResult("traces", {}), rows: [] });
+    expect(screen.getByText("—").className).toContain("text-metric");
+  });
+
   // Bug: a measure the catalog no longer lists crashes the tile instead of printing its wire name.
   it("anUnknownMeasurePrintsItsWireName", () => {
     renderTile(

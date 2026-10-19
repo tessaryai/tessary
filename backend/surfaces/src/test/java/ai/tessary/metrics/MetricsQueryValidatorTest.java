@@ -138,6 +138,23 @@ class MetricsQueryValidatorTest {
         assertFalse(MetricsQueryValidator.resolve(req().build()).compare());
     }
 
+    /**
+     * The bug: a previous window planned with its own top N and its own fold, so its keys do not line up with the
+     * current window's and a delta compares one call site with another.
+     */
+    @Test
+    @DisplayName("compare is refused with a dimension, after the axis check")
+    void compareWithADimensionIsRefused() {
+        assertRefused(
+                MetricsError.COMPARE_NEEDS_NO_DIMENSION,
+                "compare works only without a dimension",
+                req().dimension("call_site").compare("previous_window"));
+        assertRefused(
+                MetricsError.COMPARE_NEEDS_NO_AXIS,
+                "compare works only without a granularity",
+                req().dimension("call_site").granularity("day").compare("previous_window"));
+    }
+
     /** The bug: a query of many measures that widens one scan without bound, or a repeated measure read twice. */
     @Test
     @DisplayName("four measures pass, five are refused, and a repeated measure counts once")

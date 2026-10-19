@@ -6481,7 +6481,14 @@
       "MetricDashboardUpdateRequest" : {
         "properties" : {
           "definition" : {
-            "$ref" : "#/components/schemas/MetricDashboardDefinition"
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/MetricDashboardDefinition"
+              },
+              {
+                "type" : "null"
+              }
+            ]
           },
           "description" : {
             "maxLength" : 500,
@@ -6498,7 +6505,6 @@
           }
         },
         "required" : [
-          "definition",
           "name"
         ],
         "type" : "object"

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../api/types";
 import { api } from "../../../test/api";
 import { DEFAULT_DASHBOARD, METRICS_CATALOG, resultFor, WINDOW_7D } from "../../../test/metricsFixtures";
-import { renderRoute } from "../../../test/render";
+import { pending, renderRoute } from "../../../test/render";
 import { widgetLimiter } from "../metricsQueries";
 import type { RangeState, Window } from "../metricsRules";
 import type { MetricsQueryRequest, MetricWidgetDefinition } from "../wire";
@@ -124,6 +124,22 @@ describe("WidgetEditor", () => {
     expect(within(preview()).queryByRole("region")).toBeNull();
     expect(save("Add widget").disabled).toBe(true);
     expect(api.queryMetrics).toHaveBeenCalledTimes(reads);
+  });
+
+  // Bug: switching a table over an empty window to a number hands the number body the table's empty result while its
+  // own read runs, and the page goes down.
+  it("switchingTheChartShapeWaitsForItsOwnReadInsteadOfTheLastShapesResult", async () => {
+    api.queryMetrics.mockImplementation((req: MetricsQueryRequest) =>
+      req.dimension == null ? pending() : Promise.resolve({ ...resultFor(req), rows: [] }),
+    );
+    renderEditor();
+    chart("Table");
+    pick("Break down by", "call_site");
+    await within(preview()).findByText("Nothing ran in this window.");
+
+    chart("Number");
+    expect(within(preview()).getByRole("status", { name: /^Loading/ })).toBeTruthy();
+    expect(within(preview()).queryByText("Nothing ran in this window.")).toBeNull();
   });
 
   // Bug: the preview reads another window, drops the call-site filter, or asks for no axis on a time series.

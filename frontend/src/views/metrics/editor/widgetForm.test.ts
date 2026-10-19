@@ -132,6 +132,15 @@ describe("switchView", () => {
   ])("switchViewResetsMeasuresNoteAndDimension (%s)", (_name, from, view, expected) => {
     expect(switchView(from, view, METRICS_CATALOG)).toEqual(expected);
   });
+
+  // Bug: a filter on a field the new view does not have survives the switch; the editor has no control to remove it, so
+  // every save is refused.
+  it("switchViewDropsFiltersOnFieldsTheNewViewLacks", () => {
+    const callSite = { field: "call_site", op: "in" as const, values: ["chat"] };
+    expect(switchView(draft({ filters: [model, callSite] }), "traces", METRICS_CATALOG).filters).toEqual([callSite]);
+    expect(switchView(draft({ filters: [model, callSite] }), "spans", METRICS_CATALOG).filters).toEqual([]);
+    expect(switchView(draft({ filters: null }), "traces", METRICS_CATALOG).filters).toBeNull();
+  });
 });
 
 describe("validateDraft", () => {

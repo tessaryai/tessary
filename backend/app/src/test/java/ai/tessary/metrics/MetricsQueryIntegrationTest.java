@@ -406,6 +406,69 @@ record MetricsQueryIntegrationTest(
         assertEquals(
                 List.of("client", MetricsSql.UNATTRIBUTED),
                 byScope.rows().stream().map(MetricsRow::key).toList());
+
+        MetricsQueryResult byTool =
+                query(pid, req("tool_calls", List.of("latency_p95_ms", "retries"), "tool", null, null, null));
+        assertEquals(
+                List.of("search", "fetch"),
+                byTool.rows().stream().map(MetricsRow::key).toList());
+        Map<String, Double> search = byTool.rows().get(0).values();
+        assertEquals(385.0, num(search.get("latency_p95_ms")), 1e-9);
+        assertEquals(4.0, search.get("latency_n"));
+        assertEquals(3.0, search.get("retries"));
+        Map<String, Double> fetch = byTool.rows().get(1).values();
+        assertNull(fetch.get("latency_p95_ms"));
+        assertEquals(0.0, fetch.get("latency_n"));
+        assertEquals(0.0, fetch.get("retries"));
+    }
+
+    /**
+     * The bug: a traces table read through its one base loses the root it carries, so latency by call site is blank
+     * or an unknown column, or a rootless trace's empty root lands in another key's percentile.
+     */
+    @Test
+    @DisplayName("a traces table and series by call site read latency and spend through the one base")
+    void aTracesTableAndSeriesByCallSiteReadLatencyAndSpendThroughTheOneBase() {
+        String pid = project("metrics-traces-base");
+        String fast = SubstrateV2Fixtures.traceId();
+        SpanRow priced = fx.span(pid, fast, SubstrateV2Fixtures.spanId(), null, "llm", RAN, RAN.plusSeconds(1));
+        priced = fx.withUsage(priced, 1_000L, 0L);
+        fx.withCost(priced, "2.00", "0", null, null, "inferred");
+        assertTrue(fx.rollup(pid, fast, RAN, RAN.plusSeconds(1), true));
+        fx.traceCallSite(pid, fast, "cs-a");
+        String slow = SubstrateV2Fixtures.traceId();
+        fx.span(pid, slow, SubstrateV2Fixtures.spanId(), null, "agent", RAN, RAN.plusSeconds(3));
+        assertTrue(fx.rollup(pid, slow, RAN, RAN.plusSeconds(3), true));
+        fx.traceCallSite(pid, slow, "cs-a");
+        fx.trace(pid, SubstrateV2Fixtures.traceId(), RAN);
+        List<String> measures = List.of("latency_p95_ms", "cost_usd", "traces");
+
+        MetricsQueryResult table = query(pid, req("traces", measures, "call_site", null, null, null));
+
+        assertEquals(
+                List.of("cs-a", MetricsSql.UNATTRIBUTED),
+                table.rows().stream().map(MetricsRow::key).toList());
+        Map<String, Double> a = table.rows().get(0).values();
+        assertEquals(2_900.0, num(a.get("latency_p95_ms")), 1e-6, "1000 + 0.95 x (3000 - 1000)");
+        assertEquals(2.0, num(a.get("latency_n")));
+        assertEquals(0.0, num(a.get("rootless_traces")));
+        assertEquals(2.0, num(a.get("cost_usd")), 1e-9);
+        assertEquals(2.0, a.get("traces"));
+        Map<String, Double> unattributed = table.rows().get(1).values();
+        assertNull(unattributed.get("latency_p95_ms"));
+        assertEquals(1.0, unattributed.get("rootless_traces"));
+        assertEquals(0.0, unattributed.get("cost_usd"));
+        assertEquals(1.0, unattributed.get("traces"));
+
+        MetricsQueryResult series =
+                query(pid, req("traces", List.of("latency_p95_ms"), "call_site", null, "day", null));
+
+        MetricsRow day = series.rows().stream()
+                .filter(r -> "2026-09-03T00:00:00Z".equals(r.bucket()) && "cs-a".equals(r.key()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(2_900.0, num(day.values().get("latency_p95_ms")), 1e-6);
+        assertEquals(14, series.rows().size(), "seven days by two keys");
     }
 
     /** The bug: a call-site row shown by its opaque id when the project named it. */

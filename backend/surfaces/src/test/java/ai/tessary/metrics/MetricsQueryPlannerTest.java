@@ -13,6 +13,7 @@ import ai.tessary.metrics.MetricsStatement.Shape;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -124,11 +125,14 @@ class MetricsQueryPlannerTest {
         assertEquals(Shape.GROUPED, st.shape());
         String cs = "COALESCE(t.call_site_id, '__unattributed__') COLLATE \"C\"";
         assertSql(
-                "WITH ranked AS ( SELECT " + cs + " AS k, row_number() OVER (ORDER BY sum(t.total_cost) FILTER (WHERE"
-                        + " t.is_settled) DESC NULLS LAST, " + cs + " ASC) AS rn"
-                        + " FROM trace t"
+                "WITH base AS MATERIALIZED ( SELECT " + cs + " AS k, t.total_cost, t.is_settled,"
+                        + " root.ended_at AS root_ended_at, root.started_at AS root_started_at, t.unpriced_spans"
+                        + " FROM trace t " + ROOT
                         + " WHERE t.project_id = :pid AND t.is_deleted IS NOT TRUE"
-                        + " AND t.started_at >= :from AND t.started_at < :to"
+                        + " AND t.started_at >= :from AND t.started_at < :to),"
+                        + " ranked AS ( SELECT k, row_number() OVER (ORDER BY sum(t.total_cost) FILTER (WHERE"
+                        + " t.is_settled) DESC NULLS LAST, k ASC) AS rn"
+                        + " FROM base t"
                         + " GROUP BY 1)"
                         + " SELECT CASE WHEN r.rn <= :topN THEN r.k ELSE '__other__' END AS k,"
                         + " LEAST(r.rn, :topNPlusOne) AS rank,"
@@ -148,38 +152,80 @@ class MetricsQueryPlannerTest {
                         + " count(*) FILTER (WHERE root.started_at IS NULL) AS rootless_traces,"
                         + " count(*) AS n,"
                         + " (SELECT count(*) FROM ranked) AS total_keys"
-                        + " FROM trace t " + ROOT
-                        + " JOIN ranked r ON r.k = " + cs
-                        + " WHERE t.project_id = :pid AND t.is_deleted IS NOT TRUE"
-                        + " AND t.started_at >= :from AND t.started_at < :to"
+                        + " FROM base t"
+                        + " CROSS JOIN LATERAL (SELECT t.root_ended_at AS ended_at, t.root_started_at AS started_at) root"
+                        + " JOIN ranked r ON r.k = t.k"
                         + " GROUP BY 1, 2"
                         + " ORDER BY 2",
                 st);
         assertEquals(Map.of("pid", PID, "from", FROM_AT, "to", TO_AT, "topN", 20, "topNPlusOne", 21), st.params());
-        String cte = collapse(st.sql()).substring(0, collapse(st.sql()).indexOf(" GROUP BY 1)"));
-        assertFalse(cte.contains("LEFT JOIN LATERAL"), "the cost ranking reads no root: " + cte);
     }
 
-    /** The bug: one ix_span_root probe, or one trace probe, per base row that the ranking never reads. */
+    /**
+     * The bug: the double scan returns on traces, tool_calls or cases: the table read, the dimension and the filters
+     * evaluated, and the root probed, once to rank and again to aggregate.
+     */
     @Test
-    @DisplayName("the CTE carries only the joins its ranking measure needs")
-    void theCteCarriesOnlyTheJoinsItsRankingMeasureNeeds() {
-        MetricsStatement byCalls =
-                plan(req("llm_calls", List.of("calls", "cost_usd")).dimension("call_site"));
-        assertTrue(cte(byCalls).contains("JOIN trace t"), "a settled count ranks through the join: " + cte(byCalls));
+    @DisplayName("every dimensioned shape scans, joins, groups and filters once, inside base")
+    void everyDimensionedShapeReadsItsTableOnceInsideBase() {
+        record Shaped(Req req, MetricsView view, String dimension, int roots) {}
+        List<Shaped> shapes = List.of(
+                new Shaped(
+                        req("traces", List.of("latency_p95_ms", "cost_usd"))
+                                .dimension("outcome")
+                                .filters(List.of(new MetricsFilter("call_site", "in", List.of("cs-a")))),
+                        MetricsView.TRACES,
+                        "outcome",
+                        1),
+                new Shaped(
+                        req("traces", List.of("traces", "errored_traces")).dimension("user"),
+                        MetricsView.TRACES,
+                        "user",
+                        0),
+                new Shaped(
+                        req("tool_calls", List.of("latency_p95_ms", "retries"))
+                                .dimension("tool")
+                                .filters(List.of(new MetricsFilter("scope", "not_in", List.of("client")))),
+                        MetricsView.TOOL_CALLS,
+                        "tool",
+                        0),
+                new Shaped(
+                        req("cases", List.of("open_cases", "resolved_cases"))
+                                .dimension("detector")
+                                .filters(List.of(new MetricsFilter("state", "in", List.of("open")))),
+                        MetricsView.CASES,
+                        "detector",
+                        0));
+        for (Shaped shape : shapes) {
+            for (@Nullable String granularity : Arrays.asList(null, "day")) {
+                String sql = collapse(plan(shape.req().granularity(granularity)).sql());
+                assertTrue(sql.startsWith("WITH base AS MATERIALIZED ( SELECT "), sql);
+                assertEquals(1, occurrences(sql, "FROM " + shape.view().base() + " "), sql);
+                assertEquals(
+                        1,
+                        occurrences(
+                                sql, shape.view().dimension(shape.dimension()).sql()),
+                        sql);
+                assertEquals(1, occurrences(sql, shape.view().gate()), "the filters run once, inside base: " + sql);
+                assertEquals(1 + shape.roots(), occurrences(sql, " WHERE "), sql);
+                assertEquals(shape.roots(), occurrences(sql, "LEFT JOIN LATERAL"), sql);
+            }
+        }
+    }
 
-        MetricsStatement bySpend =
-                plan(req("llm_calls", List.of("cost_usd", "calls")).dimension("call_site"));
-        assertTrue(cte(bySpend).contains("JOIN trace t"), cte(bySpend));
-
+    /** The bug: a ranking that re-exposes the root it never reads, or an aggregate that loses the root it does. */
+    @Test
+    @DisplayName("the ranking CTE re-exposes the root only when its ranking measure reads it")
+    void theRankingCteReExposesTheRootOnlyWhenItsRankingMeasureReadsIt() {
         MetricsStatement byLatency =
                 plan(req("traces", List.of("latency_p95_ms", "traces")).dimension("call_site"));
-        assertTrue(cte(byLatency).contains("LEFT JOIN LATERAL"), cte(byLatency));
-        assertTrue(outer(byLatency).contains("LEFT JOIN LATERAL"), outer(byLatency));
+        assertTrue(ranking(byLatency).contains(") root"), ranking(byLatency));
+        assertTrue(outer(byLatency).contains(") root"), outer(byLatency));
 
         MetricsStatement byCount =
                 plan(req("traces", List.of("traces", "latency_p95_ms")).dimension("call_site"));
-        assertFalse(cte(byCount).contains("LEFT JOIN LATERAL"), cte(byCount));
+        assertFalse(ranking(byCount).contains("LATERAL"), ranking(byCount));
+        assertTrue(outer(byCount).contains(") root"), outer(byCount));
     }
 
     /** The bug: ORDER BY on an output alias with a subscript, which Postgres refuses, or ranking by the whole array. */
@@ -231,10 +277,10 @@ class MetricsQueryPlannerTest {
                 + " AND s.started_at >= :from AND s.started_at < :to"
                 + " AND COALESCE(s.provided_model_name, '__unattributed__') COLLATE \"C\" = ANY(:f0)";
         String join = " JOIN trace t ON t.project_id = s.project_id AND t.id = s.trace_id";
-        String base = " FROM base s CROSS JOIN LATERAL (SELECT s.is_settled) t";
+        String base = " FROM base s CROSS JOIN LATERAL (SELECT s.t_is_settled AS is_settled) t";
         assertSql(
-                "WITH base AS MATERIALIZED ( SELECT " + cs + " AS k, s.started_at, s.trace_id, s.total_tokens,"
-                        + " s.total_cost, s.cost_source, t.is_settled"
+                "WITH base AS MATERIALIZED ( SELECT " + cs + " AS k, s.started_at, s.total_cost,"
+                        + " t.is_settled AS t_is_settled, s.cost_source, s.total_tokens, s.trace_id"
                         + " FROM span s" + join + where + "),"
                         + " ranked AS ( SELECT k, row_number() OVER (ORDER BY sum(s.total_cost) FILTER (WHERE"
                         + " t.is_settled) DESC NULLS LAST, k ASC) AS rn"
@@ -271,9 +317,9 @@ class MetricsQueryPlannerTest {
     void aDimensionedLlmCallsQueryJoinsTraceOnce() {
         MetricsStatement table = plan(req("llm_calls", List.of("calls")).dimension("model"));
         String model = "COALESCE(s.provided_model_name, '__unattributed__') COLLATE \"C\"";
-        String base = " FROM base s CROSS JOIN LATERAL (SELECT s.is_settled) t";
+        String base = " FROM base s CROSS JOIN LATERAL (SELECT s.t_is_settled AS is_settled) t";
         assertSql(
-                "WITH base AS MATERIALIZED ( SELECT " + model + " AS k, s.total_tokens, t.is_settled"
+                "WITH base AS MATERIALIZED ( SELECT " + model + " AS k, t.is_settled AS t_is_settled, s.total_tokens"
                         + " FROM span s JOIN trace t ON t.project_id = s.project_id AND t.id = s.trace_id"
                         + " WHERE s.project_id = :pid AND s.kind = 'llm' AND NOT s.is_deleted"
                         + " AND s.started_at >= :from AND s.started_at < :to),"
@@ -346,7 +392,7 @@ class MetricsQueryPlannerTest {
         String series = collapse(
                 plan(req("cases", List.of("cases")).dimension("detector").granularity("day"))
                         .sql());
-        String where = series.substring(series.lastIndexOf(" WHERE "));
+        String where = series.substring(series.indexOf(" WHERE "), series.indexOf("), ranked AS ("));
         assertTrue(series.contains("date_trunc(:unit::text, c.opened_at::timestamptz, 'UTC') AS bkt"), series);
         assertFalse(where.contains("::timestamptz"), where);
     }
@@ -417,9 +463,9 @@ class MetricsQueryPlannerTest {
         return n;
     }
 
-    private static String cte(MetricsStatement st) {
+    private static String ranking(MetricsStatement st) {
         String sql = collapse(st.sql());
-        return sql.substring(0, sql.indexOf(" GROUP BY 1)"));
+        return sql.substring(sql.indexOf("ranked AS ("), sql.indexOf(" GROUP BY 1)"));
     }
 
     private static String outer(MetricsStatement st) {
@@ -455,7 +501,7 @@ class MetricsQueryPlannerTest {
             return this;
         }
 
-        Req granularity(String v) {
+        Req granularity(@Nullable String v) {
             this.granularity = v;
             return this;
         }

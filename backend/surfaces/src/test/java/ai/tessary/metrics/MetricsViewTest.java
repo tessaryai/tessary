@@ -10,6 +10,7 @@ import ai.tessary.open.errors.MetricsError;
 import ai.tessary.open.errors.TessaryException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -144,25 +145,27 @@ class MetricsViewTest {
     }
 
     /**
-     * The bug: a trace-joined measure that reads a span column the dimensioned query's base CTE does not carry, or a
-     * trace column other than is_settled, so every table and by-key chart naming it fails with an unknown column.
+     * The bug: a measure reads a column it does not declare, so the base CTE of every dimensioned query naming it does
+     * not carry the column and the query fails with an unknown column; or it declares a join it does not flag, so the
+     * base has no join to read the column from.
      */
     @Test
-    @DisplayName("a trace-joined measure reads only carried span columns and t.is_settled")
-    void aTraceJoinedMeasureReadsOnlyCarriedColumns() {
-        Pattern column = Pattern.compile("\\b[st]\\.[a-z_]+");
+    @DisplayName("every measure declares exactly the columns its SQL reads, and flags the join each one needs")
+    void everyMeasureDeclaresExactlyTheColumnsItsSqlReads() {
+        Pattern column = Pattern.compile("\\b[a-z][a-z_]*\\.[a-z_]+");
         for (MetricsView view : MetricsView.values()) {
             for (MetricsMeasure m : view.measures()) {
-                if (!m.needsTrace()) continue;
-                Matcher read = column.matcher(m.sql());
-                while (read.find()) {
-                    String c = read.group();
-                    assertTrue(
-                            c.equals(MetricsSql.SETTLED) || view.carried().contains(c),
-                            view.wire() + "." + m.wire() + " reads " + c + ", which its base CTE does not carry");
-                }
+                Set<String> read = new LinkedHashSet<>();
+                Matcher found = column.matcher(m.sql());
+                while (found.find()) read.add(found.group());
+                String name = view.wire() + "." + m.wire();
+                assertEquals(List.copyOf(read), m.reads(), name);
+                assertEquals(m.reads().stream().anyMatch(c -> c.startsWith("root.")), m.needsRoot(), name);
+                assertEquals(
+                        m.reads().stream().anyMatch(c -> !c.startsWith(view.alias() + ".") && !c.startsWith("root.")),
+                        m.needsTrace(),
+                        name);
             }
-            assertTrue(view.carried().stream().allMatch(c -> c.startsWith("s.")), view.wire() + " " + view.carried());
         }
     }
 

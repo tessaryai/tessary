@@ -11,6 +11,7 @@ import static ai.tessary.db.schema.MetricDashboardColumns.PROJECT_ID;
 import static ai.tessary.db.schema.MetricDashboardColumns.TABLE;
 import static ai.tessary.db.schema.MetricDashboardColumns.UPDATED_AT;
 
+import ai.tessary.db.schema.ProjectColumns;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -50,6 +51,18 @@ public class MetricDashboardRepository {
                 .optional();
     }
 
+    /**
+     * Holds the project row until the transaction ends, so two creates count the project's dashboards one after the
+     * other. NO KEY UPDATE, so a foreign-key check on the row, which every insert under the project makes, does not wait.
+     */
+    public void lockProject(String projectId) {
+        jdbc.sql("SELECT " + ProjectColumns.ID + " FROM " + ProjectColumns.TABLE + " WHERE " + ProjectColumns.ID
+                        + " = :pid FOR NO KEY UPDATE")
+                .param("pid", projectId)
+                .query(String.class)
+                .optional();
+    }
+
     public int count(String projectId) {
         return jdbc.sql("SELECT count(*) FROM " + TABLE + " WHERE " + PROJECT_ID + " = :pid")
                 .param("pid", projectId)
@@ -82,6 +95,21 @@ public class MetricDashboardRepository {
                 .param("pid", row.projectId())
                 .param("id", row.id())
                 .update();
+    }
+
+    /** Writes the name, description and clock and leaves the definition as stored; empty when no such row. */
+    public Optional<MetricDashboardRow> rename(
+            String projectId, String id, String name, String description, String updatedAt) {
+        return jdbc.sql("UPDATE " + TABLE + " SET " + NAME + " = :name, " + DESCRIPTION + " = :description, "
+                        + UPDATED_AT + " = :updatedAt WHERE " + PROJECT_ID + " = :pid AND " + ID + " = :id RETURNING "
+                        + COLS)
+                .param("name", name)
+                .param("description", description)
+                .param("updatedAt", updatedAt)
+                .param("pid", projectId)
+                .param("id", id)
+                .query((rs, n) -> map(rs))
+                .optional();
     }
 
     public boolean delete(String projectId, String id) {

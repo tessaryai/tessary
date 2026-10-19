@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The widget read limiter and the query factories. The bugs worth catching: a fifth read that starts while four are in
+ * The widget read limiter and the query factories. The bugs worth catching: a third read that starts while two are in
  * flight, a queue that drains out of order or freezes after a refused read, a BUSY refusal retried forever or never,
  * and a Triage pulse that asks for a different slice than the default dashboard's Spend tile.
  */
@@ -36,8 +36,8 @@ const TIMED_OUT = new ApiError(504, { code: "METRICS.TIMED_OUT", message: "Query
 const NOW = Date.parse("2026-10-18T09:58:48Z");
 
 describe("Limiter", () => {
-  // Bug: nine widgets fire nine reads at once and the server's gate of three refuses six of them.
-  it("theLimiterRunsAtMostFourAndDrainsInOrder", async () => {
+  // Bug: nine widgets fire nine reads at once, and the ones past the server's per-project gate of two wait there until they come back Busy.
+  it("theLimiterRunsAtMostTheProjectCapAndDrainsInOrder", async () => {
     const limiter = new Limiter(MAX_IN_FLIGHT);
     const work = Array.from({ length: 6 }, deferred);
     const started: number[] = [];
@@ -47,18 +47,19 @@ describe("Limiter", () => {
         return d.promise;
       }),
     );
-    expect(MAX_IN_FLIGHT).toBe(4);
-    expect(started).toEqual([0, 1, 2, 3]);
-    expect([limiter.active, limiter.waiting]).toEqual([4, 2]);
-
-    work[2].resolve("c");
-    await flush();
-    expect(started).toEqual([0, 1, 2, 3, 4]);
-    expect([limiter.active, limiter.waiting]).toEqual([4, 1]);
+    expect(MAX_IN_FLIGHT).toBe(2);
+    expect(started).toEqual([0, 1]);
+    expect([limiter.active, limiter.waiting]).toEqual([2, 4]);
 
     work[0].resolve("a");
     await flush();
-    expect(started).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(started).toEqual([0, 1, 2]);
+    expect([limiter.active, limiter.waiting]).toEqual([2, 3]);
+
+    work[2].resolve("c");
+    await flush();
+    expect(started).toEqual([0, 1, 2, 3]);
+    expect([limiter.active, limiter.waiting]).toEqual([2, 2]);
 
     for (const d of work) d.resolve("x");
     await expect(done[2]).resolves.toBe("c");
@@ -143,6 +144,18 @@ describe("query factories", () => {
     const signal = new AbortController().signal;
     await expect((q.queryFn as (ctx: { signal: AbortSignal }) => Promise<unknown>)({ signal })).resolves.toBe(result);
     expect(api.queryMetrics).toHaveBeenCalledWith(req, signal);
+  });
+
+  // Bug: a read for another chart shape is shown the last shape's rows meanwhile, so a number body gets a grouped result;
+  // or a new window for the same shape drops the dimmed figures it should keep.
+  it("widgetQueryKeepsTheLastResultOnlyForTheSameShape", () => {
+    const placeholder = widgetQuery(api as never, req).placeholderData as (prev: unknown, query: unknown) => unknown;
+    const last = { view: "llm_calls" };
+    const after = (r: MetricsQueryRequest) => placeholder(last, { queryKey: widgetQuery(api as never, r).queryKey });
+    expect(after({ ...req, from: "2026-10-01T00:00:00Z", measures: ["calls"], compare: "previous_window" })).toBe(last);
+    expect(after({ ...req, dimension: "model" })).toBeUndefined();
+    expect(after({ ...req, granularity: "auto" })).toBeUndefined();
+    expect(placeholder(undefined, undefined)).toBeUndefined();
   });
 
   // Bug: a project switch serves the last project's catalog or dashboards from the cache.

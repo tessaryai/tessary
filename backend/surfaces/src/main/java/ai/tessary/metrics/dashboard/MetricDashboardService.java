@@ -13,12 +13,14 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Dashboard reads and writes. The built-in dashboard is answered from {@link DefaultDashboard} and never touches the
@@ -29,10 +31,17 @@ public class MetricDashboardService {
 
     private final MetricDashboardRepository repo;
     private final ObjectMapper mapper;
+    private final Clock clock;
 
+    @Autowired
     public MetricDashboardService(MetricDashboardRepository repo, ObjectMapper mapper) {
+        this(repo, mapper, Clock.systemUTC());
+    }
+
+    MetricDashboardService(MetricDashboardRepository repo, ObjectMapper mapper, Clock clock) {
         this.repo = repo;
         this.mapper = mapper;
+        this.clock = clock;
     }
 
     public MetricDashboardList list(String projectId, boolean canManage) {
@@ -55,15 +64,18 @@ public class MetricDashboardService {
         return view(stored(projectId, id), canManage);
     }
 
+    /** The project row is locked before the count, so a concurrent create waits and then counts this one's row. */
+    @Transactional
     public MetricDashboard create(
             String projectId, @Nullable String userId, MetricDashboardCreateRequest req, boolean canManage) {
         refuseBuiltInName(req.name());
         MetricDashboardDefinition def = sourceOf(projectId, req);
         MetricDashboardValidator.validate(def);
+        repo.lockProject(projectId);
         if (repo.count(projectId) >= MetricsQueryValidator.MAX_DASHBOARDS) {
             throw new TessaryException(MetricsError.TOO_MANY_DASHBOARDS, MetricsQueryValidator.MAX_DASHBOARDS);
         }
-        String now = Instant.now().toString();
+        String now = clock.instant().toString();
         MetricDashboardRow row = new MetricDashboardRow(
                 Ids.ulid(), projectId, req.name(), descriptionOf(req.description()), write(def), userId, now, now);
         try {
@@ -74,26 +86,35 @@ public class MetricDashboardService {
         return view(row, def, canManage);
     }
 
+    /** A null definition renames only: the stored definition is left as it is, whatever another tab saved. */
     public MetricDashboard update(String projectId, String id, MetricDashboardUpdateRequest req, boolean canManage) {
         if (DefaultDashboard.ID.equals(id)) throw new TessaryException(MetricsError.BUILT_IN_READ_ONLY);
         MetricDashboardRow existing = stored(projectId, id);
         refuseBuiltInName(req.name());
-        MetricDashboardValidator.validate(req.definition());
-        MetricDashboardRow row = new MetricDashboardRow(
-                existing.id(),
-                projectId,
-                req.name(),
-                descriptionOf(req.description()),
-                write(req.definition()),
-                existing.createdBy(),
-                existing.createdAt(),
-                Instant.now().toString());
+        MetricDashboardDefinition def = req.definition();
+        if (def != null) MetricDashboardValidator.validate(def);
+        String description = descriptionOf(req.description());
+        String now = clock.instant().toString();
         try {
+            if (def == null) {
+                MetricDashboardRow renamed = repo.rename(projectId, id, req.name(), description, now)
+                        .orElseThrow(() -> new TessaryException(MetricsError.DASHBOARD_NOT_FOUND, id));
+                return view(renamed, canManage);
+            }
+            MetricDashboardRow row = new MetricDashboardRow(
+                    existing.id(),
+                    projectId,
+                    req.name(),
+                    description,
+                    write(def),
+                    existing.createdBy(),
+                    existing.createdAt(),
+                    now);
             repo.update(row);
+            return view(row, def, canManage);
         } catch (DuplicateKeyException e) {
             throw new TessaryException(MetricsError.DUPLICATE_NAME, e, req.name());
         }
-        return view(row, req.definition(), canManage);
     }
 
     public void delete(String projectId, String id) {

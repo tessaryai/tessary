@@ -262,7 +262,7 @@ function DashboardPage({ id }: { id: string }) {
           disabled={editing}
           onSelect={open}
           onNew={() => setModal({ kind: "create" })}
-          onRename={(d) => setModal({ kind: "rename", dashboard: d })}
+          onRename={dashboard ? (d) => setModal({ kind: "rename", dashboard: d }) : undefined}
           onDuplicate={(d) => setModal({ kind: "clone", source: d, definition: null, reason: "duplicate" })}
           onDelete={(d) => setModal({ kind: "delete", dashboard: d })}
         />
@@ -393,7 +393,7 @@ function DashboardPage({ id }: { id: string }) {
         onClose={() => setModal(null)}
         onCreate={(name, description) => create.mutate({ name, description })}
         onRename={(dashboardId, name, description) =>
-          update.mutate({ id: dashboardId, body: { name, description, definition: dashboard!.definition }, kind: "rename" })
+          update.mutate({ id: dashboardId, body: { name, description }, kind: "rename" })
         }
         onDelete={(dashboardId) => remove.mutate(dashboardId)}
         onClone={(sourceId, name, definition) => clone.mutate({ sourceId, name, definition })}

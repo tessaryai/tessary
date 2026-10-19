@@ -3265,7 +3265,7 @@ export interface components {
             widget_count: number;
         };
         MetricDashboardUpdateRequest: {
-            definition: components["schemas"]["MetricDashboardDefinition"];
+            definition?: components["schemas"]["MetricDashboardDefinition"] | null;
             description?: string | null;
             name: string;
         };

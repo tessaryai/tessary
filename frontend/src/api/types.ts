@@ -348,8 +348,9 @@ export type MetricDashboard = Omit<S["MetricDashboard"], "definition"> & { defin
 export type MetricDashboardCreateRequest = Omit<S["MetricDashboardCreateRequest"], "definition"> & {
   definition?: MetricDashboardDefinition | null;
 };
+/** Without a definition the server keeps the stored one, so a rename cannot overwrite widgets saved elsewhere. */
 export type MetricDashboardUpdateRequest = Omit<S["MetricDashboardUpdateRequest"], "definition"> & {
-  definition: MetricDashboardDefinition;
+  definition?: MetricDashboardDefinition | null;
 };
 
 // ---- Cases ----

@@ -31,15 +31,6 @@ public final class MetricsSql {
     /** Joined only when a settled measure is asked, so a plain call count stays an index-only span scan. */
     public static final String TRACE_JOIN = "JOIN trace t ON t.project_id = s.project_id AND t.id = s.trace_id";
 
-    /** The one trace column a trace-joined measure reads. */
-    public static final String SETTLED = "t.is_settled";
-
-    /**
-     * Puts the settle flag a base CTE carried back under the trace alias, so a measure reads {@link #SETTLED} from
-     * {@code base s} unchanged. Postgres flattens it: the plan has no node for it.
-     */
-    public static final String SETTLED_LATERAL = "CROSS JOIN LATERAL (SELECT s.is_settled) t";
-
     public static final String TURN_MS = "EXTRACT(EPOCH FROM (root.ended_at - root.started_at))::float8 * 1000";
 
     /** No leading AND, so it fits a FILTER clause. */

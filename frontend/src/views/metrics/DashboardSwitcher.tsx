@@ -14,7 +14,7 @@ const ITEM =
   "flex w-full items-center h-8 px-2.5 rounded-control text-left text-small text-fg-secondary " +
   "hover:bg-hover hover:text-fg focus:bg-hover focus:text-fg outline-none";
 
-/** The kebab acts on the current dashboard; the built-in one can only be duplicated. */
+/** The kebab acts on the current dashboard; the built-in one can only be duplicated, and Rename waits for its read. */
 function DashboardMenu({
   dashboard,
   disabled,
@@ -24,7 +24,7 @@ function DashboardMenu({
 }: {
   dashboard: MetricDashboardSummary;
   disabled: boolean;
-  onRename: (d: MetricDashboardSummary) => void;
+  onRename: ((d: MetricDashboardSummary) => void) | undefined;
   onDuplicate: (d: MetricDashboardSummary) => void;
   onDelete: (d: MetricDashboardSummary) => void;
 }) {
@@ -33,7 +33,7 @@ function DashboardMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const actions = [
-    ...(dashboard.built_in ? [] : [{ label: "Rename", run: onRename }]),
+    ...(dashboard.built_in || !onRename ? [] : [{ label: "Rename", run: onRename }]),
     { label: "Duplicate", run: onDuplicate },
     ...(dashboard.built_in ? [] : [{ label: "Delete", run: onDelete }]),
   ];
@@ -126,7 +126,8 @@ export function DashboardSwitcher({
   disabled: boolean;
   onSelect: (id: string) => void;
   onNew: () => void;
-  onRename: (d: MetricDashboardSummary) => void;
+  /** Absent until the current dashboard has loaded. */
+  onRename?: (d: MetricDashboardSummary) => void;
   onDuplicate: (d: MetricDashboardSummary) => void;
   onDelete: (d: MetricDashboardSummary) => void;
 }) {

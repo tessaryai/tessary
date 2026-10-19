@@ -30,6 +30,7 @@ import ai.tessary.metrics.MetricsQueryRepository.Raw;
 import ai.tessary.metrics.MetricsQueryRepository.Result;
 import ai.tessary.open.errors.MetricsError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.LogCapture;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,12 +38,12 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
 
@@ -56,7 +57,7 @@ class MetricsQueryServiceTest {
     private final MetricsQueryRepository repo = mock(MetricsQueryRepository.class);
     private final MetricsLabelRepository labels = mock(MetricsLabelRepository.class);
     private final MetricsQueryService service =
-            new MetricsQueryService(repo, labels, new MetricsGate(3, 10), new MetricsProperties(8000, 3, "64MB"));
+            new MetricsQueryService(repo, labels, new MetricsGate(3, 2, 10), new MetricsProperties(8000, 3, 2, "64MB"));
 
     /** The bug: a number tile that carries a top_n block or a fold flag it never asked for. */
     @Test
@@ -306,30 +307,22 @@ class MetricsQueryServiceTest {
     @DisplayName("labels are the use case, Unattributed, Other with its count, or the key")
     void labelsAreUseCaseUnattributedOtherOrTheKey() {
         when(labels.callSiteLabels(eq(PID), any())).thenReturn(Map.of("cs-chat", "Chat support"));
-        answer(
-                List.of(
-                        raw(null, "cs-chat", 1, 5, 12, vals("traces", 5.0)),
-                        raw(null, "__unattributed__", 2, 4, 12, vals("traces", 4.0)),
-                        raw(null, "cs-raw", 3, 3, 12, vals("traces", 3.0)),
-                        raw(null, "__other__", 4, 9, 12, vals("traces", 9.0))),
-                List.of(raw(null, "cs-gone", 1, 2, 1, vals("traces", 2.0))));
+        answer(List.of(
+                raw(null, "cs-chat", 1, 5, 12, vals("traces", 5.0)),
+                raw(null, "__unattributed__", 2, 4, 12, vals("traces", 4.0)),
+                raw(null, "cs-raw", 3, 3, 12, vals("traces", 3.0)),
+                raw(null, "__other__", 4, 9, 12, vals("traces", 9.0))));
 
         MetricsQueryResult r = service.query(
-                PID,
-                new MetricsQueryRequest(
-                        "traces", List.of("traces"), "call_site", null, FROM, TO, null, 3, "previous_window"));
+                PID, new MetricsQueryRequest("traces", List.of("traces"), "call_site", null, FROM, TO, null, 3, null));
 
         assertEquals(
                 List.of("Chat support", "Unattributed", "cs-raw", "Other (9 more)"),
                 r.rows().stream().map(MetricsRow::label).toList());
-        assertEquals(
-                List.of("cs-gone"),
-                requireRows(r.previousRows()).stream().map(MetricsRow::label).toList());
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Collection<String>> keys = ArgumentCaptor.forClass(Collection.class);
         verify(labels).callSiteLabels(eq(PID), keys.capture());
-        assertEquals(
-                Set.of("cs-chat", "__unattributed__", "cs-raw", "__other__", "cs-gone"), Set.copyOf(keys.getValue()));
+        assertEquals(Set.of("cs-chat", "__unattributed__", "cs-raw", "__other__"), Set.copyOf(keys.getValue()));
     }
 
     /** The bug: the previous window shifted by the wrong length, so every delta compares unequal spans of time. */
@@ -413,6 +406,29 @@ class MetricsQueryServiceTest {
         assertSame(lost, thrown);
     }
 
+    /** The bug: a query that failed on a lost connection logs like an empty success, so its one line says all is well. */
+    @Test
+    @DisplayName("each query logs one line whose outcome is ok, timed_out, failed or busy")
+    void eachQueryLogsItsOutcome() {
+        MetricsQueryRequest calls = req("llm_calls", List.of("calls"), null, null, null, null);
+        answer(List.of());
+        assertEquals("ok", loggedOutcome(() -> service.query(PID, calls)));
+
+        when(repo.run(any(), any(), anyLong(), anyString()))
+                .thenThrow(new QueryTimeoutException(
+                        "cancelled", new SQLException("canceling statement due to statement timeout", "57014")));
+        assertEquals("timed_out", loggedOutcome(() -> service.query(PID, calls)));
+
+        doThrow(new DataAccessResourceFailureException("connection lost"))
+                .when(repo)
+                .run(any(), any(), anyLong(), anyString());
+        assertEquals("failed", loggedOutcome(() -> service.query(PID, calls)));
+
+        MetricsQueryService full = new MetricsQueryService(
+                repo, labels, new MetricsGate(0, 2, 10), new MetricsProperties(8000, 0, 2, "64MB"));
+        assertEquals("busy", loggedOutcome(() -> full.query(PID, calls)));
+    }
+
     /** The bug: an editor option the engine rejects, or a limit the editor does not know about. */
     @Test
     @DisplayName("the catalog lists every view, dimension, measure, granularity and limit")
@@ -473,16 +489,25 @@ class MetricsQueryServiceTest {
         assertEquals(new MetricsWindow(FROM, TO, null, 0), r.window());
     }
 
+    private static @Nullable Object loggedOutcome(Runnable query) {
+        LogCapture log = LogCapture.during(MetricsQueryService.class, () -> {
+            try {
+                query.run();
+            } catch (TessaryException | DataAccessException refused) {
+                // The outcome line is what this reads; each refusal's own type is pinned by the tests above.
+            }
+        });
+        List<Map<String, Object>> lines = log.fields("metrics.query");
+        assertEquals(1, lines.size(), "one line per query: " + lines);
+        return lines.get(0).get("outcome");
+    }
+
     private void answer(List<Raw> rows) {
         when(repo.run(any(), any(), anyLong(), anyString())).thenReturn(new Result(rows, null));
     }
 
     private void answer(List<Raw> rows, List<Raw> previous) {
         when(repo.run(any(), any(), anyLong(), anyString())).thenReturn(new Result(rows, previous));
-    }
-
-    private static List<MetricsRow> requireRows(@Nullable List<MetricsRow> rows) {
-        return Objects.requireNonNull(rows, "previous_rows");
     }
 
     private static MetricsQueryRequest req(

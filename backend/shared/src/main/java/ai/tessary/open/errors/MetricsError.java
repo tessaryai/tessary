@@ -16,6 +16,7 @@ public enum MetricsError implements ErrorCode {
     INVALID_RANGE(HttpStatus.BAD_REQUEST, "'from' and 'to' must be ISO-8601 instants with from before to"),
     TOP_N_TOO_LARGE(HttpStatus.BAD_REQUEST, "top_n must be between 1 and %s for this query"),
     COMPARE_NEEDS_NO_AXIS(HttpStatus.BAD_REQUEST, "compare works only without a granularity"),
+    COMPARE_NEEDS_NO_DIMENSION(HttpStatus.BAD_REQUEST, "compare works only without a dimension"),
     INVALID_WIDGET(HttpStatus.BAD_REQUEST, "Widget '%s': %s"),
     TOO_MANY_WIDGETS(HttpStatus.BAD_REQUEST, "A dashboard holds at most %s widgets"),
     TOO_MANY_DASHBOARDS(HttpStatus.BAD_REQUEST, "A project holds at most %s dashboards"),

@@ -3,6 +3,7 @@ package ai.tessary.metrics;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,6 +21,7 @@ import ai.tessary.metrics.dashboard.MetricDashboardDtos.MetricDashboardSummary;
 import ai.tessary.metrics.dashboard.MetricDashboardDtos.MetricDashboardUpdateRequest;
 import ai.tessary.metrics.dashboard.MetricDashboardRepository;
 import ai.tessary.metrics.dashboard.MetricDashboardRow;
+import ai.tessary.metrics.dashboard.MetricDashboardService;
 import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.MetricsError;
 import ai.tessary.open.errors.TessaryException;
@@ -37,12 +39,17 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -55,7 +62,9 @@ record MetricDashboardIntegrationTest(
         OrgMembershipRepository memberships,
         MetricDashboardController controller,
         MetricDashboardRepository repo,
+        MetricDashboardService service,
         JdbcClient jdbc,
+        TransactionTemplate transactions,
         ObjectMapper mapper) {
 
     /** The bug: a column dropped or swapped in or out, or the jsonb definition unreadable by the strict mapper. */
@@ -193,6 +202,60 @@ record MetricDashboardIntegrationTest(
         assertEquals(20, repo.count(s.project().id()));
     }
 
+    /**
+     * The bug: two creates at 19 dashboards both count 19 and both insert, so the project holds 21. The first create's
+     * transaction is held open after its insert; the second must wait for it and then count its row.
+     */
+    @Test
+    void aCreateBesideAnUncommittedCreateCountsItsRowAndRefusesTheTwentyFirst() throws Exception {
+        Setup s = TenantFixture.bootstrap(tenants, "mdash-race");
+        String pid = s.project().id();
+        for (int i = 1; i <= 19; i++) create(s, "D" + i, null, oneTile(), null);
+        CountDownLatch inserted = new CountDownLatch(1);
+        CountDownLatch commit = new CountDownLatch(1);
+        CompletableFuture<Void> first = CompletableFuture.runAsync(() -> transactions.executeWithoutResult(tx -> {
+            service.create(pid, s.user().id(), new MetricDashboardCreateRequest("D20", null, null, null), true);
+            inserted.countDown();
+            await(commit);
+        }));
+        assertTrue(inserted.await(10, TimeUnit.SECONDS));
+
+        CompletableFuture<MetricDashboard> second = CompletableFuture.supplyAsync(() ->
+                service.create(pid, s.user().id(), new MetricDashboardCreateRequest("D21", null, null, null), true));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!second.isDone() && !aSessionWaitsOnALock()) {
+            assertTrue(System.nanoTime() < deadline, "the second create neither finished nor waited on a lock");
+        }
+        commit.countDown();
+        first.get(10, TimeUnit.SECONDS);
+
+        ExecutionException refused = assertThrows(ExecutionException.class, () -> second.get(10, TimeUnit.SECONDS));
+        TessaryException cause = assertInstanceOf(TessaryException.class, refused.getCause());
+        assertSame(MetricsError.TOO_MANY_DASHBOARDS, cause.error());
+        assertEquals(20, repo.count(pid));
+    }
+
+    /** The bug: a rename from one tab overwrites the widgets another tab saved after the first tab loaded. */
+    @Test
+    void aRenameWithoutADefinitionKeepsWidgetsSavedFromAnotherTab() throws Exception {
+        Setup s = TenantFixture.bootstrap(tenants, "mdash-rename");
+        MetricDashboard made = create(s, "Ops", "old words", oneTile(), null);
+        MetricDashboardDefinition twoTiles =
+                new MetricDashboardDefinition(1, "7d", List.of(tile("spend", 0, 0), tile("more", 3, 0)));
+        data(controller.update(
+                owner(s), slug(s), proj(s), made.id(), new MetricDashboardUpdateRequest("Ops", "old words", twoTiles)));
+
+        MetricDashboard renamed = data(controller.update(
+                owner(s), slug(s), proj(s), made.id(), new MetricDashboardUpdateRequest("Ops 2", "new words", null)));
+
+        MetricDashboardRow row = repo.find(s.project().id(), made.id()).orElseThrow();
+        assertEquals("Ops 2", row.name());
+        assertEquals("new words", row.description());
+        assertEquals(twoTiles, mapper.readValue(row.definitionJson(), MetricDashboardDefinition.class));
+        assertEquals(twoTiles, renamed.definition());
+        assertEquals(renamed, data(controller.get(owner(s), slug(s), proj(s), made.id())));
+    }
+
     /** The bug: "Make a copy" of the built-in storing an empty dashboard, or a copy of a missing source made anyway. */
     @Test
     void cloneOfDefaultCopiesNineWidgetsAndCloneOfAnUnknownIdIs404() {
@@ -323,6 +386,23 @@ record MetricDashboardIntegrationTest(
             @Nullable String cloneOf) {
         return data(controller.create(
                 owner(s), slug(s), proj(s), new MetricDashboardCreateRequest(name, description, definition, cloneOf)));
+    }
+
+    private boolean aSessionWaitsOnALock() {
+        return jdbc.sql("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                                + " AND wait_event_type = 'Lock'")
+                        .query(Long.class)
+                        .single()
+                > 0;
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            assertTrue(latch.await(10, TimeUnit.SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     private Principal withRole(Setup s, String role, String tag) {

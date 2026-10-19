@@ -24,7 +24,6 @@ public enum MetricsView {
             "t.project_id = :pid AND t.is_deleted IS NOT TRUE",
             "t.started_at",
             false,
-            List.of(),
             List.of(
                     dimension("call_site", "Call site", unattributed("t.call_site_id"), false),
                     dimension("name", "Trace name", unattributed("t.name"), true),
@@ -36,11 +35,12 @@ public enum MetricsView {
                             collate("CASE WHEN COALESCE(t.error_count, 0) > 0 THEN 'error' ELSE 'ok' END"),
                             false)),
             List.of(
-                    measure("traces", "Traces", "count(*)", Unit.COUNT, GapFill.ZERO, false, false),
+                    measure("traces", "Traces", "count(*)", List.of(), Unit.COUNT, GapFill.ZERO, false, false),
                     measure(
                             "errored_traces",
                             "Errored traces",
                             "count(*) FILTER (WHERE COALESCE(t.error_count, 0) > 0)",
+                            List.of("t.error_count"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -49,6 +49,7 @@ public enum MetricsView {
                             "cost_usd",
                             "Spend",
                             "sum(t.total_cost) FILTER (WHERE t.is_settled)",
+                            List.of("t.total_cost", "t.is_settled"),
                             Unit.USD,
                             GapFill.ZERO,
                             false,
@@ -61,6 +62,7 @@ public enum MetricsView {
                             "Spend per priced trace",
                             "sum(t.total_cost) FILTER (WHERE t.is_settled) / NULLIF(count(*) FILTER (WHERE t.is_settled"
                                     + " AND t.total_cost IS NOT NULL), 0)",
+                            List.of("t.total_cost", "t.is_settled"),
                             Unit.USD,
                             GapFill.NONE,
                             false,
@@ -72,6 +74,7 @@ public enum MetricsView {
                             "unpriced_traces",
                             "Unpriced traces",
                             "count(*) FILTER (WHERE t.is_settled AND COALESCE(t.unpriced_spans, 0) > 0)",
+                            List.of("t.is_settled", "t.unpriced_spans"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -80,6 +83,7 @@ public enum MetricsView {
                             "unsettled_traces",
                             "Traces still settling",
                             "count(*) FILTER (WHERE NOT t.is_settled)",
+                            List.of("t.is_settled"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -88,6 +92,7 @@ public enum MetricsView {
                             "priced_traces",
                             "Priced traces",
                             "count(*) FILTER (WHERE t.is_settled AND t.total_cost IS NOT NULL)",
+                            List.of("t.is_settled", "t.total_cost"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -99,6 +104,7 @@ public enum MetricsView {
                             "latency_n",
                             "Traces with a finished root",
                             "count(*) FILTER (WHERE " + MetricsSql.TURN_ENDED + ")",
+                            List.of("root.ended_at", "root.started_at"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             true,
@@ -107,6 +113,7 @@ public enum MetricsView {
                             "unterminated_traces",
                             "Traces that did not finish",
                             "count(*) FILTER (WHERE root.started_at IS NOT NULL AND root.ended_at IS NULL)",
+                            List.of("root.started_at", "root.ended_at"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             true,
@@ -115,6 +122,7 @@ public enum MetricsView {
                             "rootless_traces",
                             "Traces with no root span",
                             "count(*) FILTER (WHERE root.started_at IS NULL)",
+                            List.of("root.started_at"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             true,
@@ -134,7 +142,6 @@ public enum MetricsView {
             "s.project_id = :pid AND s.kind = 'llm' AND NOT s.is_deleted",
             "s.started_at",
             false,
-            List.of("s.trace_id", "s.total_tokens", "s.total_cost", "s.cost_source"),
             List.of(
                     dimension("call_site", "Call site", unattributed("s.call_site_id"), false),
                     dimension("model", "Model", unattributed("s.provided_model_name"), false),
@@ -144,6 +151,7 @@ public enum MetricsView {
                             "calls",
                             "LLM calls",
                             "count(*) FILTER (WHERE t.is_settled AND s.total_tokens IS NOT NULL)",
+                            List.of("t.is_settled", "s.total_tokens"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -152,6 +160,7 @@ public enum MetricsView {
                             "tokens",
                             "Tokens",
                             "sum(s.total_tokens) FILTER (WHERE t.is_settled)",
+                            List.of("s.total_tokens", "t.is_settled"),
                             Unit.TOKENS,
                             GapFill.ZERO,
                             false,
@@ -161,6 +170,7 @@ public enum MetricsView {
                             "cost_usd",
                             "Spend",
                             "sum(s.total_cost) FILTER (WHERE t.is_settled)",
+                            List.of("s.total_cost", "t.is_settled"),
                             Unit.USD,
                             GapFill.ZERO,
                             false,
@@ -173,6 +183,7 @@ public enum MetricsView {
                             "Spend per priced trace",
                             "sum(s.total_cost) FILTER (WHERE t.is_settled) / NULLIF(count(DISTINCT s.trace_id COLLATE"
                                     + " \"C\") FILTER (WHERE t.is_settled AND s.total_cost IS NOT NULL), 0)",
+                            List.of("s.total_cost", "t.is_settled", "s.trace_id"),
                             Unit.USD,
                             GapFill.NONE,
                             false,
@@ -185,6 +196,7 @@ public enum MetricsView {
                             "Unpriced calls",
                             "count(*) FILTER (WHERE t.is_settled AND s.cost_source = 'unpriced' AND s.total_tokens IS"
                                     + " NOT NULL)",
+                            List.of("t.is_settled", "s.cost_source", "s.total_tokens"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -193,6 +205,7 @@ public enum MetricsView {
                             "unsettled_calls",
                             "Calls in traces still settling",
                             "count(*) FILTER (WHERE NOT t.is_settled)",
+                            List.of("t.is_settled"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -202,6 +215,7 @@ public enum MetricsView {
                             "Priced traces",
                             "count(DISTINCT s.trace_id COLLATE \"C\") FILTER (WHERE t.is_settled AND s.total_cost IS NOT"
                                     + " NULL)",
+                            List.of("s.trace_id", "t.is_settled", "s.total_cost"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -211,6 +225,7 @@ public enum MetricsView {
                             "Traces with token usage",
                             "count(DISTINCT s.trace_id COLLATE \"C\") FILTER (WHERE t.is_settled AND s.total_tokens IS"
                                     + " NOT NULL)",
+                            List.of("s.trace_id", "t.is_settled", "s.total_tokens"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -224,18 +239,18 @@ public enum MetricsView {
             "tc.project_id = :pid AND tc.is_deleted IS NOT TRUE",
             "tc.started_at",
             false,
-            List.of(),
             List.of(
                     dimension("tool", "Tool", collate(MetricsSql.TOOL_CALL_NAME), false),
                     dimension("error_type", "Error type", collate("COALESCE(tc.error_type, 'none')"), false),
                     dimension("scope", "Scope", unattributed("tc.scope"), false),
                     dimension("tool_type", "Tool type", unattributed("tc.tool_type"), false)),
             List.of(
-                    measure("calls", "Tool calls", "count(*)", Unit.COUNT, GapFill.ZERO, false, false),
+                    measure("calls", "Tool calls", "count(*)", List.of(), Unit.COUNT, GapFill.ZERO, false, false),
                     measure(
                             "retries",
                             "Retries",
                             "sum(COALESCE(tc.retries, 0))",
+                            List.of("tc.retries"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -247,6 +262,7 @@ public enum MetricsView {
                             "latency_n",
                             "Calls with a latency",
                             "count(*) FILTER (WHERE " + Latency.TOOL.present + ")",
+                            Latency.TOOL.reads,
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -260,7 +276,6 @@ public enum MetricsView {
             "c.project_id = :pid",
             "c.opened_at",
             true,
-            List.of(),
             List.of(
                     dimension("detector", "Detector", collate("c.detector"), false),
                     dimension("call_site", "Call site", unattributed("c.call_site_id"), false),
@@ -268,11 +283,12 @@ public enum MetricsView {
                     dimension("resolution", "Resolution", collate("COALESCE(c.resolution, 'unresolved')"), false),
                     dimension("disposition", "Disposition", collate("COALESCE(c.disposition, 'none')"), false)),
             List.of(
-                    measure("cases", "Cases opened", "count(*)", Unit.COUNT, GapFill.ZERO, false, false),
+                    measure("cases", "Cases opened", "count(*)", List.of(), Unit.COUNT, GapFill.ZERO, false, false),
                     measure(
                             "open_cases",
                             "Still open",
                             "count(*) FILTER (WHERE c.state <> 'resolved')",
+                            List.of("c.state"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -281,6 +297,7 @@ public enum MetricsView {
                             "resolved_cases",
                             "Resolved",
                             "count(*) FILTER (WHERE c.state = 'resolved')",
+                            List.of("c.state"),
                             Unit.COUNT,
                             GapFill.ZERO,
                             false,
@@ -293,7 +310,6 @@ public enum MetricsView {
     private final String gate;
     private final String clock;
     private final boolean textClock;
-    private final List<String> carried;
     private final List<MetricsDimension> dimensions;
     private final List<MetricsMeasure> measures;
 
@@ -305,7 +321,6 @@ public enum MetricsView {
             String gate,
             String clock,
             boolean textClock,
-            List<String> carried,
             List<MetricsDimension> dimensions,
             List<MetricsMeasure> measures) {
         this.wire = wire;
@@ -315,7 +330,6 @@ public enum MetricsView {
         this.gate = gate;
         this.clock = clock;
         this.textClock = textClock;
-        this.carried = carried;
         this.dimensions = dimensions;
         this.measures = measures;
     }
@@ -352,12 +366,9 @@ public enum MetricsView {
         return textClock;
     }
 
-    /**
-     * The span columns a trace-joined measure may read, so a dimensioned query can carry them through its base CTE.
-     * Empty on a view with no trace-joined measure.
-     */
-    public List<String> carried() {
-        return carried;
+    /** The base table's alias, the last word of {@link #base()}: the qualifier of the columns the view owns. */
+    public String alias() {
+        return base.substring(base.lastIndexOf(' ') + 1);
     }
 
     public List<MetricsDimension> dimensions() {
@@ -404,13 +415,14 @@ public enum MetricsView {
             String wire,
             String label,
             String sql,
+            List<String> reads,
             Unit unit,
             GapFill gapFill,
             boolean needsRoot,
             boolean needsTrace,
             String... companions) {
         return new MetricsMeasure(
-                wire, label, wire, sql, null, unit, gapFill, needsRoot, needsTrace, List.of(companions));
+                wire, label, wire, sql, reads, null, unit, gapFill, needsRoot, needsTrace, List.of(companions));
     }
 
     private static MetricsMeasure latency(String wire, String label, Latency family, int index) {
@@ -419,6 +431,7 @@ public enum MetricsView {
                 label,
                 "latency_q",
                 MetricsSql.quantiles(family.value, family.present),
+                family.reads,
                 index,
                 Unit.MS,
                 GapFill.NONE,
@@ -432,18 +445,26 @@ public enum MetricsView {
         TURN(
                 MetricsSql.TURN_MS,
                 MetricsSql.TURN_ENDED,
+                List.of("root.ended_at", "root.started_at"),
                 true,
                 List.of("latency_n", "unterminated_traces", "rootless_traces")),
-        TOOL("tc.latency_ms::float8", "tc.latency_ms IS NOT NULL AND tc.latency_ms >= 0", false, List.of("latency_n"));
+        TOOL(
+                "tc.latency_ms::float8",
+                "tc.latency_ms IS NOT NULL AND tc.latency_ms >= 0",
+                List.of("tc.latency_ms"),
+                false,
+                List.of("latency_n"));
 
         private final String value;
         private final String present;
+        private final List<String> reads;
         private final boolean needsRoot;
         private final List<String> companions;
 
-        Latency(String value, String present, boolean needsRoot, List<String> companions) {
+        Latency(String value, String present, List<String> reads, boolean needsRoot, List<String> companions) {
             this.value = value;
             this.present = present;
+            this.reads = reads;
             this.needsRoot = needsRoot;
             this.companions = companions;
         }

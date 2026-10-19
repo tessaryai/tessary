@@ -4,7 +4,6 @@ package ai.tessary.metrics.dashboard;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,7 +26,9 @@ import ai.tessary.open.errors.MetricsError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +41,7 @@ class MetricDashboardServiceTest {
 
     private static final String PID = "proj-1";
     private static final String STAMP = "2026-10-01T09:00:00Z";
+    private static final String NOW = "2026-10-19T08:30:00Z";
     private static final MetricDashboardDefinition ONE_TILE = MetricDashboardValidatorTest.def(
             MetricDashboardValidatorTest.W.number("spend").build());
     private static final MetricDashboardDefinition TWO_TILES = MetricDashboardValidatorTest.def(
@@ -48,7 +50,8 @@ class MetricDashboardServiceTest {
 
     private final MetricDashboardRepository repo = mock(MetricDashboardRepository.class);
     private final ObjectMapper mapper = new ObjectMapper();
-    private final MetricDashboardService service = new MetricDashboardService(repo, mapper);
+    private final MetricDashboardService service =
+            new MetricDashboardService(repo, mapper, Clock.fixed(Instant.parse(NOW), ZoneOffset.UTC));
 
     /** The bug: the built-in missing from the switcher, listed after a copy, or a widget count read as zero. */
     @Test
@@ -94,7 +97,6 @@ class MetricDashboardServiceTest {
     @Test
     @DisplayName("create stores the given definition even when clone_of names a source")
     void createUsesTheGivenDefinitionOverTheCloneSource() {
-        Instant before = Instant.now();
         MetricDashboard made = service.create(
                 PID, "user-1", new MetricDashboardCreateRequest("Default (copy)", "mine", ONE_TILE, "default"), true);
 
@@ -105,21 +107,12 @@ class MetricDashboardServiceTest {
         assertEquals("Default (copy)", inserted.name());
         assertEquals("mine", inserted.description());
         assertEquals("user-1", inserted.createdBy());
-        assertEquals(inserted.createdAt(), inserted.updatedAt());
-        assertFalse(Instant.parse(inserted.createdAt()).isBefore(before));
+        assertEquals(NOW, inserted.createdAt());
+        assertEquals(NOW, inserted.updatedAt());
         verify(repo, never()).find(any(), any());
 
         assertEquals(
-                new MetricDashboard(
-                        inserted.id(),
-                        "Default (copy)",
-                        "mine",
-                        false,
-                        ONE_TILE,
-                        "user-1",
-                        inserted.createdAt(),
-                        inserted.updatedAt(),
-                        true),
+                new MetricDashboard(inserted.id(), "Default (copy)", "mine", false, ONE_TILE, "user-1", NOW, NOW, true),
                 made);
     }
 
@@ -193,6 +186,14 @@ class MetricDashboardServiceTest {
                 MetricsError.DUPLICATE_NAME,
                 "A dashboard named 'Beta' already exists in this project",
                 () -> service.update(PID, "01A", new MetricDashboardUpdateRequest("Beta", null, ONE_TILE), true));
+
+        doThrow(new DuplicateKeyException("ux_metric_dashboard_name"))
+                .when(repo)
+                .rename(any(), any(), any(), any(), any());
+        assertCode(
+                MetricsError.DUPLICATE_NAME,
+                "A dashboard named 'Gamma' already exists in this project",
+                () -> service.update(PID, "01A", new MetricDashboardUpdateRequest("Gamma", null, null), true));
     }
 
     /** The bug: a stored dashboard named "Default" sits next to the built-in and the switcher shows two pills alike. */
@@ -236,6 +237,13 @@ class MetricDashboardServiceTest {
                 "No dashboard 'nope' for this project",
                 () -> service.delete(PID, "nope"));
 
+        when(repo.find(PID, "01B")).thenReturn(Optional.of(row("01B", "Beta", ONE_TILE)));
+        when(repo.rename(PID, "01B", "Gone", "", NOW)).thenReturn(Optional.empty());
+        assertCode(
+                MetricsError.DASHBOARD_NOT_FOUND,
+                "No dashboard '01B' for this project",
+                () -> service.update(PID, "01B", new MetricDashboardUpdateRequest("Gone", null, null), true));
+
         when(repo.delete(PID, "01A")).thenReturn(true);
         assertDoesNotThrow(() -> service.delete(PID, "01A"));
         verify(repo, never()).update(any());
@@ -246,7 +254,6 @@ class MetricDashboardServiceTest {
     @DisplayName("update writes the new name, description, definition and updated_at, and keeps the author")
     void updateWritesNameDescriptionDefinitionAndUpdatedAt() {
         when(repo.find(PID, "01A")).thenReturn(Optional.of(row("01A", "Alpha", ONE_TILE)));
-        Instant before = Instant.now();
 
         MetricDashboard updated =
                 service.update(PID, "01A", new MetricDashboardUpdateRequest("Renamed", null, TWO_TILES), false);
@@ -261,12 +268,9 @@ class MetricDashboardServiceTest {
         assertEquals(TWO_TILES, parse(w.definitionJson()));
         assertEquals("user-0", w.createdBy());
         assertEquals(STAMP, w.createdAt());
-        assertNotEquals(STAMP, w.updatedAt());
-        assertFalse(Instant.parse(w.updatedAt()).isBefore(before));
+        assertEquals(NOW, w.updatedAt());
 
-        assertEquals(
-                new MetricDashboard("01A", "Renamed", "", false, TWO_TILES, "user-0", STAMP, w.updatedAt(), false),
-                updated);
+        assertEquals(new MetricDashboard("01A", "Renamed", "", false, TWO_TILES, "user-0", STAMP, NOW, false), updated);
 
         MetricDashboardDefinition overlapping = MetricDashboardValidatorTest.def(
                 MetricDashboardValidatorTest.W.number("a").build(),
@@ -276,6 +280,31 @@ class MetricDashboardServiceTest {
                 "Widget 'b': overlaps widget 'a'",
                 () -> service.update(PID, "01A", new MetricDashboardUpdateRequest("R", null, overlapping), true));
         verify(repo).update(any());
+    }
+
+    /** The bug: a rename writes the definition its tab cached, over widgets another tab saved since. */
+    @Test
+    @DisplayName("an update without a definition writes name and description and answers the stored definition")
+    void anUpdateWithoutADefinitionKeepsTheStoredDefinition() {
+        when(repo.find(PID, "01A")).thenReturn(Optional.of(row("01A", "Alpha", ONE_TILE)));
+        MetricDashboardRow savedElsewhere = new MetricDashboardRow(
+                "01A",
+                PID,
+                "Renamed",
+                "new words",
+                mapper.valueToTree(TWO_TILES).toString(),
+                "user-0",
+                STAMP,
+                NOW);
+        when(repo.rename(PID, "01A", "Renamed", "new words", NOW)).thenReturn(Optional.of(savedElsewhere));
+
+        MetricDashboard renamed =
+                service.update(PID, "01A", new MetricDashboardUpdateRequest("Renamed", "new words", null), true);
+
+        assertEquals(
+                new MetricDashboard("01A", "Renamed", "new words", false, TWO_TILES, "user-0", STAMP, NOW, true),
+                renamed);
+        verify(repo, never()).update(any());
     }
 
     /** The bug: stored JSON in a shape the strict mapper cannot read back, which breaks every later read. */

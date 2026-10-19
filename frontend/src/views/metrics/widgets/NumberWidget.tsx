@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import {
   companionNotes, deltaText, formatValue, measureOf, noteText, RANGE_PRESETS, rangeNoun, type Window,
 } from "../metricsRules";
-import type { MetricsCatalogMeasure, MetricsCatalogView, MetricsQueryResult, MetricWidgetDefinition } from "../wire";
+import type {
+  MetricsCatalogMeasure, MetricsCatalogView, MetricsQueryResult, MetricsRow, MetricWidgetDefinition,
+} from "../wire";
 
 export type WidgetBodyProps = {
   widget: MetricWidgetDefinition;
@@ -29,14 +31,22 @@ function previousNoun(window: Window): string {
   return rangeNoun(preset ? { kind: "preset", key: preset.key } : { kind: "custom", ...window });
 }
 
+/** No row reads as an empty window: a count is 0 and a ratio has no value. */
+const valueIn = (row: MetricsRow | undefined, measure: MetricsCatalogMeasure) =>
+  row ? row.values[measure.name] : measure.gap_fill === "zero" ? 0 : null;
+
 export function NumberWidget({ widget, view, result, window, basePath, editing }: WidgetBodyProps) {
   const [m0, m1] = widget.measures;
-  const row = result.rows[0];
-  const unit = measureOrName(view, m0).unit;
-  const value = formatValue(unit, row.values[m0]);
+  const row = result.rows.at(0);
+  const measure = measureOrName(view, m0);
+  const note = m1 ? measureOrName(view, m1) : undefined;
+  const { unit } = measure;
+  const current = valueIn(row, measure);
+  const previous = result.previous_rows ? valueIn(result.previous_rows.at(0), measure) : null;
+  const value = formatValue(unit, current);
   const notes = [
-    ...(m1 ? [noteText(measureOrName(view, m1), row.values[m1])] : []),
-    ...companionNotes(widget.view, row.values, row.n, widget.measures),
+    ...(note ? [noteText(note, valueIn(row, note))] : []),
+    ...companionNotes(widget.view, row?.values ?? {}, row?.n ?? 0, widget.measures),
   ].slice(0, MAX_NOTES);
 
   return (
@@ -52,7 +62,7 @@ export function NumberWidget({ widget, view, result, window, basePath, editing }
       </div>
       {widget.compare != null && (
         <p aria-label="Change from the previous window" className="text-small text-muted tabular-nums mt-1">
-          {`${deltaText(row.values[m0], result.previous_rows?.[0]?.values[m0], unit)} vs previous ${previousNoun(window)}`}
+          {`${deltaText(current, previous, unit)} vs previous ${previousNoun(window)}`}
         </p>
       )}
       {notes.length > 0 && (
