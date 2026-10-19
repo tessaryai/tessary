@@ -260,7 +260,7 @@ the URL.
 
 ## The grid
 
-A dashboard lays out on 12 columns with Langfuse-style integer placements on each widget:
+A dashboard lays out on 12 columns with integer placements on each widget:
 `x` from 0 to 11, `y` from 0 with `y + h` at most 96 (twelve widgets of the tallest height), `w` from 3
 to 12 with `x + w` at most 12, and `h` from 2 to 8 rows.
 The validator refuses a placement outside the grid and any two widgets that overlap. A row is 72 px
