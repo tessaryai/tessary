@@ -2,6 +2,7 @@
 package ai.tessary.metrics;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -514,11 +515,31 @@ record MetricsQueryIntegrationTest(
                 Map.of(),
                 List.of());
 
-        Result r = repo.run(st, null, props.statementTimeoutMs());
+        Result r = repo.run(st, null, props.statementTimeoutMs(), props.workMem());
 
         assertEquals(8000, props.statementTimeoutMs());
         assertEquals(8000, r.rows().get(0).n());
         assertNull(r.previousRows());
+    }
+
+    /** The bug: long-window distinct counts sort on disk because the sort memory is missing, or it leaks to the pool. */
+    @Test
+    @DisplayName("the repository binds the configured work_mem inside its transaction and nowhere after")
+    void theRepositoryBindsTheConfiguredWorkMemOnlyInsideItsTransaction() {
+        MetricsStatement mem = new MetricsStatement(
+                Shape.TOTAL, "SELECT pg_size_bytes(current_setting('work_mem')) / 1024 AS n", Map.of(), List.of());
+        MetricsStatement pid = new MetricsStatement(Shape.TOTAL, "SELECT pg_backend_pid() AS n", Map.of(), List.of());
+
+        Result r = repo.run(mem, pid, props.statementTimeoutMs(), props.workMem());
+        Map<String, Object> after = jdbc.sql(
+                        "SELECT pg_backend_pid()::bigint AS pid, current_setting('work_mem') AS mem")
+                .query()
+                .singleRow();
+
+        assertEquals("64MB", props.workMem());
+        assertEquals(64 * 1024, r.rows().get(0).n());
+        assertEquals(Objects.requireNonNull(r.previousRows()).get(0).n(), after.get("pid"));
+        assertNotEquals(props.workMem(), after.get("mem"));
     }
 
     /** The bug: a cancelled statement surfacing as an unnamed 500 instead of "narrow the window". */
@@ -528,7 +549,8 @@ record MetricsQueryIntegrationTest(
         MetricsStatement slow =
                 new MetricsStatement(Shape.TOTAL, "SELECT count(*) AS n FROM pg_sleep(1)", Map.of(), List.of());
 
-        DataAccessException failure = assertThrows(DataAccessException.class, () -> repo.run(slow, null, 50));
+        DataAccessException failure =
+                assertThrows(DataAccessException.class, () -> repo.run(slow, null, 50, props.workMem()));
 
         TessaryException named = (TessaryException) MetricsFailures.translate(failure);
         assertEquals(MetricsError.TIMED_OUT, named.error());

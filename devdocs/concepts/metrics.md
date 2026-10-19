@@ -211,7 +211,9 @@ With these rules a time series has at most 336 buckets (14 days of hours) and 20
 buckets times five keys plus `__other__`), so there is no separate bucket or cell cap.
 
 The timeout and the query run in one read-only transaction (`set_config('statement_timeout', ...,
-true)`), so the timeout ends with the transaction. The three-permit gate exists because Metrics
+true)`), so the timeout ends with the transaction. The same transaction sets `work_mem` to
+`tessary.metrics.work-mem` (64MB), so long-window distinct counts sort in memory instead of on disk,
+and the setting ends with the transaction too. The three-permit gate exists because Metrics
 shares one connection pool with ingest; the page keeps at most four widget reads in flight and
 retries a `BUSY` once. Each query logs one line with its view, window, granularity, row count,
 duration and whether it timed out; no filter value or key goes in it.

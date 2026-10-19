@@ -103,7 +103,7 @@ public class MetricsQueryService {
                 q.compare() ? MetricsQueryPlanner.plan(q, projectId, q.from().minus(q.length()), q.from()) : null;
         Result raw;
         try {
-            raw = gate.withPermit(() -> repo.run(current, previous, props.statementTimeoutMs()));
+            raw = gate.withPermit(() -> repo.run(current, previous, props.statementTimeoutMs(), props.workMem()));
         } catch (DataAccessException e) {
             RuntimeException translated = MetricsFailures.translate(e);
             logQuery(q, start, 0, translated instanceof TessaryException);

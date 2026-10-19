@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -55,7 +56,7 @@ class MetricsQueryServiceTest {
     private final MetricsQueryRepository repo = mock(MetricsQueryRepository.class);
     private final MetricsLabelRepository labels = mock(MetricsLabelRepository.class);
     private final MetricsQueryService service =
-            new MetricsQueryService(repo, labels, new MetricsGate(3, 10), new MetricsProperties(8000, 3));
+            new MetricsQueryService(repo, labels, new MetricsGate(3, 10), new MetricsProperties(8000, 3, "64MB"));
 
     /** The bug: a number tile that carries a top_n block or a fold flag it never asked for. */
     @Test
@@ -343,7 +344,7 @@ class MetricsQueryServiceTest {
 
         ArgumentCaptor<MetricsStatement> current = ArgumentCaptor.forClass(MetricsStatement.class);
         ArgumentCaptor<MetricsStatement> previous = ArgumentCaptor.forClass(MetricsStatement.class);
-        verify(repo).run(current.capture(), previous.capture(), eq(8000L));
+        verify(repo).run(current.capture(), previous.capture(), eq(8000L), eq("64MB"));
         assertEquals(current.getValue().sql(), previous.getValue().sql());
         assertEquals(
                 "2026-10-11T00:00:00.000000000Z", current.getValue().params().get("from"));
@@ -396,7 +397,7 @@ class MetricsQueryServiceTest {
     @Test
     @DisplayName("a cancelled statement becomes TIMED_OUT and any other failure is rethrown as it was")
     void aCancelledStatementBecomesTimedOutAndAnotherFailureIsRethrown() {
-        when(repo.run(any(), any(), anyLong()))
+        when(repo.run(any(), any(), anyLong(), anyString()))
                 .thenThrow(new QueryTimeoutException(
                         "cancelled", new SQLException("canceling statement due to statement timeout", "57014")));
         TessaryException timedOut = assertThrows(
@@ -405,7 +406,7 @@ class MetricsQueryServiceTest {
         assertEquals(MetricsError.TIMED_OUT, timedOut.error());
 
         DataAccessResourceFailureException lost = new DataAccessResourceFailureException("connection lost");
-        doThrow(lost).when(repo).run(any(), any(), anyLong());
+        doThrow(lost).when(repo).run(any(), any(), anyLong(), anyString());
         DataAccessResourceFailureException thrown = assertThrows(
                 DataAccessResourceFailureException.class,
                 () -> service.query(PID, req("llm_calls", List.of("calls"), null, null, null, null)));
@@ -473,11 +474,11 @@ class MetricsQueryServiceTest {
     }
 
     private void answer(List<Raw> rows) {
-        when(repo.run(any(), any(), anyLong())).thenReturn(new Result(rows, null));
+        when(repo.run(any(), any(), anyLong(), anyString())).thenReturn(new Result(rows, null));
     }
 
     private void answer(List<Raw> rows, List<Raw> previous) {
-        when(repo.run(any(), any(), anyLong())).thenReturn(new Result(rows, previous));
+        when(repo.run(any(), any(), anyLong(), anyString())).thenReturn(new Result(rows, previous));
     }
 
     private static List<MetricsRow> requireRows(@Nullable List<MetricsRow> rows) {

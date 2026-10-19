@@ -37,14 +37,16 @@ public class MetricsQueryRepository {
     public record Result(List<Raw> rows, @Nullable List<Raw> previousRows) {}
 
     /**
-     * One read transaction: the timeout, then the statement, then the previous-window statement when asked. Call it
-     * through the Spring proxy only: a self-call skips the transaction, and the transaction-local timeout would then
-     * bind to nothing.
+     * One read transaction: the timeout and sort memory, then the statement, then the previous-window statement when
+     * asked. Call it through the Spring proxy only: a self-call skips the transaction, and the transaction-local
+     * settings would then bind to nothing.
      */
     @Transactional(readOnly = true)
-    public Result run(MetricsStatement current, @Nullable MetricsStatement previous, long statementTimeoutMs) {
-        jdbc.sql("SELECT set_config('statement_timeout', :ms, true)")
+    public Result run(
+            MetricsStatement current, @Nullable MetricsStatement previous, long statementTimeoutMs, String workMem) {
+        jdbc.sql("SELECT set_config('statement_timeout', :ms, true), set_config('work_mem', :mem, true)")
                 .param("ms", Long.toString(statementTimeoutMs))
+                .param("mem", workMem)
                 .query()
                 .listOfRows();
         List<Raw> rows = read(current);

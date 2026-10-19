@@ -78,7 +78,7 @@ class MetricsGateTest {
     @Test
     @DisplayName("the Spring constructor sizes its permits from the properties and waits two seconds")
     void theSpringConstructorSizesPermitsFromProperties() {
-        assertEquals(5, new MetricsGate(new MetricsProperties(8000, 5)).available());
+        assertEquals(5, new MetricsGate(new MetricsProperties(8000, 5, "64MB")).available());
         assertEquals(2000, MetricsGate.ACQUIRE_MS);
     }
 
