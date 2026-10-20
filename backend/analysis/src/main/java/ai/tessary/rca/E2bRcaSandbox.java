@@ -90,7 +90,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                 .setSpanKind(SpanKind.CLIENT)
                 .startSpan();
         try (var _ = span.makeCurrent()) {
-            span.setAttribute("langfuse.trace.name", OPERATION);
+            span.setAttribute("langfuse.trace.name", "agentic-rca");
             span.setAttribute("tessary.project.id", req.projectId());
             span.setAttribute("langfuse.trace.metadata.project_id", req.projectId());
             span.setAttribute("tessary.rca.subject_id", req.subjectId());
