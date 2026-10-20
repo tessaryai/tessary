@@ -63,6 +63,7 @@ class BehaviorTriageSourceDetailTest {
                 null,
                 "exhausted: 5 attempts (hung or crashed mid-triage)",
                 "2026-08-02T01:00Z",
+                "2026-08-02T00:00Z",
                 null,
                 COOLDOWN));
 
@@ -122,27 +123,31 @@ class BehaviorTriageSourceDetailTest {
 
     static Stream<Arguments> jobStates() {
         String at = "2026-08-02T01:00:00Z";
+        String queued = "2026-08-02T00:59:00Z";
         String due = "2026-08-02T01:00:30Z";
         return Stream.of(
                 Arguments.of(
-                        "a queued finding says when it was queued",
-                        new TriageJobState("f1", "pending", 0, 5, null, null, null, at, null, COOLDOWN),
+                        "a queued finding says when it was queued, not when a claim last bounced it",
+                        new TriageJobState("f1", "pending", 0, 5, null, null, null, at, queued, null, COOLDOWN),
                         TriageStatus.QUEUED,
-                        new TriageProgress(0, 5, null, null, at, null, null, COOLDOWN)),
+                        new TriageProgress(0, 5, null, null, queued, null, null, COOLDOWN)),
                 Arguments.of(
                         "a worker holds the lease",
-                        new TriageJobState("f1", "claimed", 2, 5, "worker-a", null, "kind=timeout", at, due, COOLDOWN),
+                        new TriageJobState(
+                                "f1", "claimed", 2, 5, "worker-a", null, "kind=timeout", at, queued, due, COOLDOWN),
                         TriageStatus.IN_FLIGHT,
                         new TriageProgress(2, 5, at, null, null, null, null, COOLDOWN)),
                 Arguments.of(
                         "a retrying finding says when it retries",
-                        new TriageJobState("f1", "claimed", 1, 5, null, null, "kind=timeout", at, due, COOLDOWN),
+                        new TriageJobState(
+                                "f1", "claimed", 1, 5, null, null, "kind=timeout", at, queued, due, COOLDOWN),
                         TriageStatus.RETRYING,
                         new TriageProgress(1, 5, null, null, null, due, null, COOLDOWN)),
                 Arguments.of(
                         "a run that spent the last attempt reads failed before the sweep dead-letters it, not attempt"
                                 + " 6 of 5",
-                        new TriageJobState("f1", "claimed", 5, 5, null, null, "kind=timeout", at, due, COOLDOWN),
+                        new TriageJobState(
+                                "f1", "claimed", 5, 5, null, null, "kind=timeout", at, queued, due, COOLDOWN),
                         TriageStatus.FAILED,
                         new TriageProgress(5, 5, null, null, null, null, "2026-08-02T01:30:00Z", COOLDOWN)),
                 Arguments.of(
@@ -156,6 +161,7 @@ class BehaviorTriageSourceDetailTest {
                                 "CLASSIFIER.TRIAGE_PROVIDER_REJECTED",
                                 "invalid key",
                                 at,
+                                queued,
                                 due,
                                 COOLDOWN),
                         TriageStatus.BLOCKED,
@@ -172,13 +178,14 @@ class BehaviorTriageSourceDetailTest {
                                 "CLASSIFIER.TRIAGE_PROVIDER_REJECTED",
                                 "x",
                                 at,
+                                queued,
                                 null,
                                 COOLDOWN),
                         TriageStatus.FAILED,
                         new TriageProgress(5, 5, null, null, null, null, "2026-08-02T01:30:00Z", COOLDOWN)),
                 Arguments.of(
                         "a dead job whose time cannot be read gives no revival time rather than failing the page",
-                        new TriageJobState("f1", "dead", 5, 5, null, null, "x", "not a time", null, COOLDOWN),
+                        new TriageJobState("f1", "dead", 5, 5, null, null, "x", "not a time", queued, null, COOLDOWN),
                         TriageStatus.FAILED,
                         new TriageProgress(5, 5, null, null, null, null, null, COOLDOWN)));
     }
@@ -192,7 +199,17 @@ class BehaviorTriageSourceDetailTest {
     void theFindingCarriesItsNewestRunsStepAndCurrentWords() {
         stubEscalatedFinding("f1");
         stubJob(new TriageJobState(
-                "f1", "claimed", 2, 5, "worker-a", null, null, "2026-08-02T01:00:00Z", null, COOLDOWN));
+                "f1",
+                "claimed",
+                2,
+                5,
+                "worker-a",
+                null,
+                null,
+                "2026-08-02T01:00:00Z",
+                "2026-08-02T00:59:00Z",
+                null,
+                COOLDOWN));
         stubRun(run("2026-08-02T01:00:02Z", null, null, null));
 
         var finding = source().detail(PROJECT, "f1").orElseThrow().finding();
@@ -212,7 +229,17 @@ class BehaviorTriageSourceDetailTest {
     void aRunningTriageWhoseRunHasNotOpenedCountsFromTheClaim() {
         stubEscalatedFinding("f1");
         stubJob(new TriageJobState(
-                "f1", "claimed", 2, 5, "worker-a", null, null, "2026-08-02T01:00:00Z", null, COOLDOWN));
+                "f1",
+                "claimed",
+                2,
+                5,
+                "worker-a",
+                null,
+                null,
+                "2026-08-02T01:00:00Z",
+                "2026-08-02T00:59:00Z",
+                null,
+                COOLDOWN));
         stubRun(run(
                 "2026-08-02T00:50:00Z", "2026-08-02T00:55:00Z", Outcome.RETRYING, "CLASSIFIER.TRIAGE_RUN_INCOMPLETE"));
 

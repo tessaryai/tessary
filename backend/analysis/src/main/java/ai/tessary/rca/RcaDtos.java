@@ -139,8 +139,8 @@ public final class RcaDtos {
      * Where an analysis stands: {@code queued} until a worker holds it, {@code running}, {@code stopped} when it failed,
      * {@code done}. A queued or running job shows no ended run, since that run belongs to an attempt before this one.
      *
-     * @param queuedAt when the job last changed state, which for a queued job is when it was queued @param doing the
-     * step the run is on, only while it runs @param stopCode the code the run stopped on
+     * @param queuedAt when the job was last asked for, kept through a claim that bounced off a full launcher @param
+     * doing the step the run is on, only while it runs @param stopCode the code the run stopped on
      */
     public record RcaRunView(
             String state,
@@ -167,11 +167,11 @@ public final class RcaDtos {
                     };
             boolean live = QUEUED.equals(state) || RUNNING.equals(state);
             if (s.runId() == null || (live && s.endedAt() != null)) {
-                return new RcaRunView(state, s.jobUpdatedAt(), null, null, null, 0, null, null);
+                return new RcaRunView(state, s.jobQueuedAt(), null, null, null, 0, null, null);
             }
             return new RcaRunView(
                     state,
-                    s.jobUpdatedAt(),
+                    s.jobQueuedAt(),
                     s.runId(),
                     s.startedAt(),
                     s.endedAt(),

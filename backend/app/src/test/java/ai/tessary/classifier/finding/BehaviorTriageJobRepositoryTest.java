@@ -193,7 +193,8 @@ record BehaviorTriageJobRepositoryTest(BehaviorTriageJobRepository jobs, TenantS
         String queuedAt = Instant.now().toString();
         String jobId = jobs.enqueue(pid, findingId, queuedAt).jobId();
         assertEquals(
-                new TriageJobState(findingId, "pending", 0, MAX_ATTEMPTS, null, null, null, queuedAt, null, 1800),
+                new TriageJobState(
+                        findingId, "pending", 0, MAX_ATTEMPTS, null, null, null, queuedAt, queuedAt, null, 1800),
                 state(pid, findingId));
 
         claimMine(pid);
@@ -203,6 +204,32 @@ record BehaviorTriageJobRepositoryTest(BehaviorTriageJobRepository jobs, TenantS
 
         assertEquals(retried.leaseExpiresAt(), retrying.leaseExpiresAt());
         assertEquals(1800, retrying.cooldownSeconds());
+    }
+
+    /**
+     * A queued job keeps the time it was asked for through a claim that bounced off a full launcher, and a press that
+     * runs a held job again starts its clock again (a queued clock reset to 0:00 on every bounce).
+     */
+    @Test
+    void aJobKeepsTheTimeItWasQueuedThroughABounceAndAPressRestartsIt() {
+        String pid = TenantFixture.bootstrap(tenants, "triage-job-queued-at")
+                .project()
+                .id();
+        String findingId = Ids.ulid();
+        String queuedAt = "2026-09-01T00:00:00Z";
+        String jobId = jobs.enqueue(pid, findingId, queuedAt).jobId();
+
+        claimMine(pid);
+        jobs.releaseWithoutAttempt(jobId, null, 0);
+
+        assertEquals(queuedAt, state(pid, findingId).queuedAt());
+
+        claimMine(pid);
+        jobs.holdUntilConfigured(jobId, "invalid key", "CLASSIFIER.TRIAGE_PROVIDER_REJECTED", 600);
+        String pressedAt = Instant.now().toString();
+        jobs.enqueue(pid, findingId, pressedAt);
+
+        assertEquals(pressedAt, state(pid, findingId).queuedAt());
     }
 
     private TriageJobState state(String pid, String findingId) {

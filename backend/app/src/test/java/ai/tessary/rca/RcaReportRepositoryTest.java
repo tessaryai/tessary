@@ -148,6 +148,38 @@ record RcaReportRepositoryTest(
                 "the case list and the report read the same state");
     }
 
+    /**
+     * A queued report keeps the time it was asked for through a claim that bounced off a full launcher, and a re-press
+     * that revives a failed job starts its clock again (a queued clock reset to 0:00 on every bounce).
+     */
+    @Test
+    void aQueuedReportKeepsTheTimeItWasQueuedThroughABounceAndARevivalRestartsIt() {
+        Seeded s = caseIn("rca-state-queued-at");
+        RcaReportView report = trigger.trigger(s.projectId(), s.findingId(), "user-1", null);
+        String queuedAt = jdbc.sql("SELECT created_at FROM job WHERE id = :id")
+                .param("id", report.jobId())
+                .query(String.class)
+                .single();
+        jdbc.sql("UPDATE job SET status = 'claimed', lease_owner = 'rca-worker-1', attempts = 1, updated_at = :now"
+                        + " WHERE id = :id")
+                .param("now", Instant.now().plusSeconds(30).toString())
+                .param("id", report.jobId())
+                .update();
+        jobs.requeue(report.jobId(), 30);
+
+        assertEquals(
+                queuedAt,
+                reports.runState(s.projectId(), report.id()).orElseThrow().jobQueuedAt());
+
+        jobs.markFailed(report.jobId(), "rejected");
+        Instant pressed = Instant.now();
+        trigger.trigger(s.projectId(), s.findingId(), "user-1", null);
+
+        Instant requeued = Instant.parse(
+                reports.runState(s.projectId(), report.id()).orElseThrow().jobQueuedAt());
+        assertFalse(requeued.isBefore(pressed), requeued + " is before the press at " + pressed);
+    }
+
     /** A case never analyzed has no state, and another project's case is never read (cross-project leak). */
     @Test
     void aCaseNeverAnalyzedHasNoStateAndAnotherProjectsCaseIsNotRead() {

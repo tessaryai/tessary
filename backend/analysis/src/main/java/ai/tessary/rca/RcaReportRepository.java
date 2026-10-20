@@ -148,14 +148,14 @@ public class RcaReportRepository {
     /**
      * Where a report's analysis stands: its job's status, whether a worker holds its lease, and its newest agent run.
      *
-     * @param leased a worker holds the job; a claimed job with no owner is back in the queue @param jobUpdatedAt when
-     * the job last changed state @param doing the words of the run's newest step that has not ended
+     * @param leased a worker holds the job; a claimed job with no owner is back in the queue @param jobQueuedAt when
+     * the job was last asked for @param doing the words of the run's newest step that has not ended
      */
     public record RunState(
             String reportId,
             String jobStatus,
             boolean leased,
-            String jobUpdatedAt,
+            String jobQueuedAt,
             @Nullable String runId,
             @Nullable String startedAt,
             @Nullable String endedAt,
@@ -164,8 +164,8 @@ public class RcaReportRepository {
             @Nullable String stopCode) {}
 
     private static final String RUN_STATE_COLS = "r.id AS report_id, j.status AS job_status,"
-            + " j.lease_owner IS NOT NULL AS leased, j.updated_at AS job_updated_at, a.id AS run_id, a.started_at,"
-            + " a.ended_at, COALESCE(a.step_count, 0) AS step_count, a.stop_code,"
+            + " j.lease_owner IS NOT NULL AS leased, COALESCE(j.queued_at, j.created_at) AS job_queued_at,"
+            + " a.id AS run_id, a.started_at, a.ended_at, COALESCE(a.step_count, 0) AS step_count, a.stop_code,"
             + " (SELECT s.doing FROM agent_run_step s WHERE s.run_id = a.id AND s.ended_ms IS NULL"
             + " ORDER BY s.seq DESC LIMIT 1) AS doing ";
 
@@ -201,7 +201,7 @@ public class RcaReportRepository {
                 rs.getString("report_id"),
                 rs.getString("job_status"),
                 rs.getBoolean("leased"),
-                rs.getString("job_updated_at"),
+                rs.getString("job_queued_at"),
                 rs.getString("run_id"),
                 rs.getString("started_at"),
                 rs.getString("ended_at"),

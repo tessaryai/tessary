@@ -298,7 +298,7 @@ public final class BehaviorDtos {
                     job.maxAttempts(),
                     TriageStatus.IN_FLIGHT.equals(status) ? startedAt(job, run) : null,
                     TriageStatus.BLOCKED.equals(status) ? job.holdCode() : null,
-                    TriageStatus.QUEUED.equals(status) ? job.updatedAt() : null,
+                    TriageStatus.QUEUED.equals(status) ? job.queuedAt() : null,
                     TriageStatus.RETRYING.equals(status) ? job.leaseExpiresAt() : null,
                     TriageStatus.FAILED.equals(status) ? revivableAt(job) : null,
                     job.cooldownSeconds());

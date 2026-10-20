@@ -46,6 +46,7 @@ public class BehaviorTriageJobRepository {
                     + " last_error = CASE WHEN " + REVIVABLE + " OR " + HELD + " THEN NULL ELSE job.last_error END,"
                     + " lease_expires_at = CASE WHEN " + HELD + " THEN :now ELSE job.lease_expires_at END,"
                     + " hold_code = CASE WHEN " + REVIVABLE + " OR " + HELD + " THEN NULL ELSE job.hold_code END,"
+                    + " queued_at = CASE WHEN " + REVIVABLE + " OR " + HELD + " THEN :now ELSE job.queued_at END,"
                     + " updated_at = CASE WHEN " + REVIVABLE + " OR " + HELD + " THEN :now ELSE job.updated_at END";
 
     private final JdbcClient jdbc;
@@ -71,9 +72,10 @@ public class BehaviorTriageJobRepository {
      */
     public EnqueueOutcome enqueue(String projectId, String findingId, String now) {
         return jdbc.sql("""
-                INSERT INTO job (id, project_id, kind, status, attempts, dedupe_key, payload, created_at, updated_at)
+                INSERT INTO job (id, project_id, kind, status, attempts, dedupe_key, payload, created_at, updated_at,
+                                 queued_at)
                 VALUES (:id, :pid, '""" + KIND + """
-                ', 'pending', 0, :dedupeKey, jsonb_build_object('finding_id', :findingId::text), :now, :now)
+                ', 'pending', 0, :dedupeKey, jsonb_build_object('finding_id', :findingId::text), :now, :now, :now)
                 ON CONFLICT (dedupe_key) WHERE kind = '""" + KIND + """
                 ' DO UPDATE SET\s""" + REVIVE_IF_COOLED + """
 
@@ -126,7 +128,8 @@ public class BehaviorTriageJobRepository {
         long cooldownSeconds = props.deadLetterCooldownSeconds();
         List<TriageJobState> rows = jdbc.sql(
                         "SELECT payload->>'finding_id' AS finding_id, status, attempts, lease_owner,"
-                                + " hold_code, last_error, updated_at, lease_expires_at FROM job"
+                                + " hold_code, last_error, updated_at, COALESCE(queued_at, created_at) AS queued_at,"
+                                + " lease_expires_at FROM job"
                                 + " WHERE kind = :kind AND project_id = :pid AND status <> 'done'"
                                 + "   AND payload->>'finding_id' IN (:findingIds)"
                                 + " ORDER BY attempts ASC, created_at ASC")
@@ -142,6 +145,7 @@ public class BehaviorTriageJobRepository {
                         rs.getString("hold_code"),
                         rs.getString("last_error"),
                         rs.getString("updated_at"),
+                        rs.getString("queued_at"),
                         rs.getString("lease_expires_at"),
                         cooldownSeconds))
                 .list();
@@ -152,8 +156,9 @@ public class BehaviorTriageJobRepository {
 
     /**
      * {@code leaseOwner} is set only while a worker runs the job: every way a run ends clears it. {@code updatedAt} is
-     * then when the run started. {@code leaseExpiresAt} is when a job waiting out its backoff is due again, and
-     * {@code cooldownSeconds} how long a dead job waits before a press can revive it.
+     * then when the run started. {@code queuedAt} is when the job was last asked for; a claim does not move it.
+     * {@code leaseExpiresAt} is when a job waiting out its backoff is due again, and {@code cooldownSeconds} how long a
+     * dead job waits before a press can revive it.
      */
     public record TriageJobState(
             String findingId,
@@ -164,6 +169,7 @@ public class BehaviorTriageJobRepository {
             @Nullable String holdCode,
             @Nullable String lastError,
             String updatedAt,
+            String queuedAt,
             @Nullable String leaseExpiresAt,
             long cooldownSeconds) {}
 
