@@ -69,7 +69,64 @@ export function VerbButton({
   );
 }
 
-/** A run that gave up says so and offers the run again rather than staying on "Triaging…". */
+/** How often a page reads a finding again while its run waits or runs. */
+export const TRIAGE_POLL_MS = 4000;
+
+const WAITING_LABEL: Partial<Record<BehaviorFinding["triageStatus"], string>> = {
+  queued: "Queued…",
+  in_flight: "Triaging…",
+  retrying: "Retrying…",
+};
+
+/** A run that can still end on its own, so the page keeps reading it. A held run waits on a person. */
+export function isTriageWaiting(finding: BehaviorFinding | undefined): boolean {
+  return finding != null && WAITING_LABEL[finding.triageStatus] != null;
+}
+
+/** For a list's `refetchInterval`: keep reading while any run in it can still end on its own. */
+export function triagePoll(findings: BehaviorFinding[] | undefined): number | false {
+  return findings?.some(isTriageWaiting) ? TRIAGE_POLL_MS : false;
+}
+
+/** The server sends the code of the refusal a held run waits on; this words what to fix. */
+const HELD_BY: Record<string, string> = {
+  "CLASSIFIER.TRIAGE_PROVIDER_REJECTED":
+    "The provider rejected the stored key. Fix the key under Settings, Providers, then run triage again.",
+  "CLASSIFIER.TRIAGE_REQUEST_REFUSED":
+    "The provider refused the request. Usually the triage model is not one the provider serves: check it under Settings, Models, then run triage again.",
+  "MODEL_CONFIG.MISSING_CREDENTIALS":
+    "There is no key for the provider triage runs on. Add one under Settings, Providers, then run triage again.",
+  "MODEL_CONFIG.AGENTIC_IAM_ROLE_UNSUPPORTED":
+    "Triage cannot use a key set to an IAM role. Set it to an access key under Settings, Providers, then run triage again.",
+  "CLASSIFIER.TRIAGE_LAUNCHER_MISCONFIGURED":
+    "The sandbox launcher refused the run. Its key or its version does not match this deployment. Fix the launcher, then run triage again.",
+};
+
+/** One line on where a run that has not ruled stands, or null when there is nothing to add. */
+export function triageProgressWords(finding: BehaviorFinding): string | null {
+  const progress = finding.triageProgress;
+  if (!progress) return null;
+  const of = `${progress.attempts} of ${progress.maxAttempts}`;
+  switch (finding.triageStatus) {
+    case "queued":
+      return "Waiting for the triage worker.";
+    case "in_flight":
+      if (!progress.startedAt) return null;
+      return `Started ${ago(progress.startedAt)}${progress.attempts > 1 ? `, attempt ${of}` : ""}.`;
+    case "retrying":
+      return `Attempt ${of} ended with no ruling. Triage tries again shortly.`;
+    case "blocked":
+      return (progress.heldBy && HELD_BY[progress.heldBy])
+        ?? "Triage is waiting for a setting to change. Fix it, then run triage again.";
+    default:
+      return finding.triageStatus === "failed" ? `Triage tried ${progress.attempts} times and gave up.` : null;
+  }
+}
+
+/**
+ * A run that gave up or is held says so and offers the run again rather than staying on "Triaging…"; a run that
+ * waits or runs says where it stands.
+ */
 export function RunTriageButton({
   finding,
   busy,
@@ -79,18 +136,20 @@ export function RunTriageButton({
   busy: boolean;
   onAnalyze: () => void;
 }) {
-  const inFlight = finding.triageStatus === "in_flight";
-  const failed = finding.triageStatus === "failed";
+  const waiting = WAITING_LABEL[finding.triageStatus];
+  const stopped = finding.triageStatus === "failed" || finding.triageStatus === "blocked";
+  const words = triageProgressWords(finding);
   const button = (
-    <VerbButton kind="filled" disabled={busy || inFlight} onClick={onAnalyze}>
-      {inFlight ? "Triaging…" : failed ? "Run triage again" : "Run triage"}
+    <VerbButton kind="filled" disabled={busy || waiting != null} onClick={onAnalyze}>
+      {waiting ?? (stopped ? "Run triage again" : "Run triage")}
     </VerbButton>
   );
-  if (!failed) return button;
+  if (!stopped && !words) return button;
   return (
     <span className="flex flex-wrap items-center gap-2.5">
-      <span className="text-error text-small">{triageState(finding).label}</span>
+      {stopped && <span className="text-error text-small">{triageState(finding).label}</span>}
       {button}
+      {words && <span className="text-muted text-small">{words}</span>}
     </span>
   );
 }
@@ -188,7 +247,10 @@ export type TriageState = { label: string; tone: "positive" | "closed" | "waitin
 
 export function triageState(finding: BehaviorFinding): TriageState {
   if (finding.triageStatus === "pending") return { label: "Pending", tone: "waiting" };
+  if (finding.triageStatus === "queued") return { label: "Queued", tone: "waiting" };
   if (finding.triageStatus === "in_flight") return { label: "Triaging", tone: "waiting" };
+  if (finding.triageStatus === "retrying") return { label: "Retrying", tone: "waiting" };
+  if (finding.triageStatus === "blocked") return { label: "Triage blocked", tone: "failed" };
   if (finding.triageStatus === "failed") return { label: "Triage failed", tone: "failed" };
   // `humanVerdictAt` means a person's ruling landed first, so name the verb they pressed.
   const byPerson = finding.humanVerdictAt != null;
@@ -207,16 +269,20 @@ export function isClosedByTriage(finding: BehaviorFinding): boolean {
   return finding.triageAction === "closed";
 }
 
+const CHAIN_WORDS: Partial<Record<BehaviorFinding["triageStatus"], string>> = {
+  queued: "triage queued",
+  in_flight: "triage running",
+  retrying: "triage retrying",
+  blocked: "triage blocked",
+  failed: "triage failed",
+};
+
 export function chainWords(finding: BehaviorFinding): string {
   return [
     `seen ${finding.traceCount}×`,
     finding.triageStatus === "done"
       ? `${finding.humanVerdictAt != null ? "a person" : "triage"} ruled ${finding.triageVerdict ?? "unknown"}`
-      : finding.triageStatus === "in_flight"
-        ? "triage running"
-        : finding.triageStatus === "failed"
-          ? "triage failed"
-          : "not triaged yet",
+      : CHAIN_WORDS[finding.triageStatus] ?? "not triaged yet",
   ]
     .filter(Boolean)
     .join(" · ");

@@ -50,7 +50,7 @@ export const GROUNDEDNESS_FINDING_DETAIL: BehaviorFindingDetail = {
     callSiteId: "support-agent", caseId: null, causeKey: "groundedness_rate:support-agent",
     causeKind: "groundedness_rate", firstSeenAt: "2026-09-23T13:40:00Z", lastSeenAt: "2026-09-23T13:40:00Z",
     humanVerdictAt: null, status: "open", traceCount: 58, triageAction: null, triageCitations: [],
-    triageStatus: "pending", triageSummary: null, triageVerdict: null, triagedAt: null, workflowKey: "support-agent",
+    triageStatus: "pending", triageProgress: null, triageSummary: null, triageVerdict: null, triagedAt: null, workflowKey: "support-agent",
   },
   armedWindow: null, frustration: null, groundedness: GROUNDEDNESS_DETAIL, classifierDetail: null,
   malformedOutput: null, metric: null, secretLeak: null, toolError: null,

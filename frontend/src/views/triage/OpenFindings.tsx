@@ -8,7 +8,7 @@ import { AlertCircle, ChevronRight } from "lucide-react";
 import type { BehaviorFinding } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, Section, Table, TableSkeleton, TBody, TD, TH, THead, TR } from "../../ui";
-import { ago, detectorLabel, isClosedByTriage, triageState } from "../classifiers/shared";
+import { ago, detectorLabel, isClosedByTriage, triagePoll, triageState } from "../classifiers/shared";
 import { displayCallSite } from "./bits";
 
 /** Open, and not yet the case Cases lists. */
@@ -25,6 +25,7 @@ export function OpenFindings({ basePath }: { basePath: string }) {
   const findingsQ = useQuery({
     queryKey: ["behavior-findings", api.base, "all"],
     queryFn: () => api.listBehaviorFindings(),
+    refetchInterval: (q) => triagePoll(q.state.data?.findings),
   });
   const open = useMemo(() => (findingsQ.data?.findings ?? []).filter(awaitsCase), [findingsQ.data]);
   const findingPath = (id: string) => `${basePath}/classifiers/findings/${encodeURIComponent(id)}`;

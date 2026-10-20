@@ -5,13 +5,14 @@
  * printed as a certainty, a pulse strip that disagrees with Metrics about spend or latency, and a
  * findings list that shows a finding already in Cases, drops one that is not, or opens the wrong page.
  */
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BehaviorFinding, Case, MetricsQueryRequest, TriageView } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_CASE_DETAIL } from "../../test/groundednessFixtures";
 import { totalResult } from "../../test/metricsFixtures";
 import { Triage } from "./Triage";
+import { TRIAGE_POLL_MS } from "../classifiers/shared";
 import { api } from "../../test/api";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
@@ -254,6 +255,8 @@ const finding = (id: string, over: Partial<BehaviorFinding> = {}) =>
   }) as BehaviorFinding;
 
 describe("the findings", () => {
+  afterEach(() => vi.useRealTimers());
+
   // Findings is drawn once the case queue has said something is open, so wait for the cases first.
   const renderLoaded = async () => {
     renderPage();
@@ -302,6 +305,21 @@ describe("the findings", () => {
     expect(within(c).getAllByRole("cell")[2].textContent).toBe("–");
     expect(within(c).getByText("Triage failed").className).not.toContain("text-error");
     expect(api.listBehaviorFindings).toHaveBeenCalledWith();
+  });
+
+  // Bug: a run that ruled, or was held on a rejected key, still read "Triaging" here until the page was reloaded.
+  it("keeps reading the findings while a run waits, and shows where it ended", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.listBehaviorFindings
+      .mockResolvedValueOnce({ findings: [finding("q", { triageStatus: "queued" })] })
+      .mockResolvedValue({ findings: [finding("q", { triageStatus: "blocked" })] });
+    await renderLoaded();
+    const row = () => within(section("Findings")).getByText("Finding q").closest("tr")!;
+    expect((await within(section("Findings")).findByText("Finding q")).closest("tr")!.textContent).toContain("Queued");
+
+    await act(() => vi.advanceTimersByTimeAsync(TRIAGE_POLL_MS));
+
+    expect(await within(row()).findByText("Triage blocked")).toBeTruthy();
   });
 
   // Bug: a finding row that opens the case list, or a path that breaks on an id with a slash in it.

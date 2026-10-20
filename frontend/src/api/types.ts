@@ -231,7 +231,7 @@ type TriageAction = "opened_case" | "closed";
  * `pending` is un-scheduled, not un-ruled. `failed` comes from the triage job: a run that gave up
  * leaves the finding identical to one still running.
  */
-type TriageStatus = "pending" | "in_flight" | "done" | "failed";
+type TriageStatus = "pending" | "queued" | "in_flight" | "retrying" | "blocked" | "done" | "failed";
 
 /** A second press lands on the existing job. */
 export type BehaviorAnalysis = S["BehaviorAnalysisView"];

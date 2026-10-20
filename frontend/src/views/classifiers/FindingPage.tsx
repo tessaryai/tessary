@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Measure, then workload, then decomposition: the order the ruling is made in. The ruling's citations
 // are shown in full, check scripts included, since they are the part a reader can re-run.
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
 import {
-  CONTAINER, FindingKicker, ResolveVerbs, RunTriageButton, TriageAction, chainWords, detectorLabel, stamp, triageState,
+  CONTAINER, FindingKicker, ResolveVerbs, RunTriageButton, TRIAGE_POLL_MS, TriageAction, chainWords, detectorLabel,
+  isTriageWaiting, stamp, triageState,
 } from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
@@ -52,7 +54,15 @@ export function FindingPage() {
     queryKey: ["behavior-finding", api.base, findingId],
     queryFn: () => api.getBehaviorFinding(findingId),
     enabled: findingId !== "",
+    refetchInterval: (q) => (isTriageWaiting(q.state.data?.finding) ? TRIAGE_POLL_MS : false),
   });
+  const triageStatus = detailQ.data?.finding.triageStatus;
+  /* The lists cache this finding's row; a run that moves on here would read as stuck there until they go stale. */
+  useEffect(() => {
+    if (triageStatus === undefined) return;
+    void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
+    void qc.invalidateQueries({ queryKey: ["classifier-findings", api.base] });
+  }, [qc, api.base, triageStatus]);
 
   const done = () => {
     void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });

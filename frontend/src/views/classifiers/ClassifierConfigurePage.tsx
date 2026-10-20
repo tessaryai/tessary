@@ -36,7 +36,9 @@ import {
 } from "./groundedness";
 import { CallSitesSection, UNSCOPED_DETECTORS } from "./CallSitesSection";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
-import { CONTAINER, Fact, PROVIDER_PAUSES, ResolveVerbs, VerbButton, ago, chainWords } from "./shared";
+import {
+  CONTAINER, Fact, PROVIDER_PAUSES, ResolveVerbs, RunTriageButton, VerbButton, ago, chainWords, triagePoll,
+} from "./shared";
 
 const WAITING_ON_SCHEMAS = "waiting_on_schemas";
 
@@ -501,6 +503,7 @@ function Findings({ classifier }: { classifier: Classifier }) {
   const findingsQ = useQuery({
     queryKey: key,
     queryFn: () => api.listBehaviorFindings(classifier.detector),
+    refetchInterval: (q) => triagePoll(q.state.data?.findings),
   });
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: key });
@@ -560,7 +563,6 @@ function FindingRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const triaged = finding.triageStatus === "done";
-  const inFlight = finding.triageStatus === "in_flight";
   const summary = finding.triageSummary;
 
   return (
@@ -570,14 +572,13 @@ function FindingRow({
       {summary && <p className={cn("text-muted mt-1.25 mx-0 mb-0 text-small", !expanded && "line-clamp-2")}>{summary}</p>}
       {expanded && <div className="font-mono text-muted mt-1.5 text-label">{finding.causeKey}</div>}
       <div className="flex flex-wrap items-center gap-2 mt-1.75">
-        <VerbButton
-          kind="filled"
-          // A second press lands on the same job.
-          disabled={busy || triaged || inFlight}
-          onClick={onAnalyze}
-        >
-          {triaged ? "Triaged" : inFlight ? "Triaging…" : "Run triage"}
-        </VerbButton>
+        {triaged ? (
+          <VerbButton kind="filled" disabled onClick={onAnalyze}>
+            Triaged
+          </VerbButton>
+        ) : (
+          <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
+        )}
         {/* A ruling freezes the finding: every verb on it 409s. */}
         {!triaged && <ResolveVerbs busy={busy} onResolve={onResolve} />}
         {summary && (

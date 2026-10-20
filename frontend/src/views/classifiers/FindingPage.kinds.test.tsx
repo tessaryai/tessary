@@ -6,14 +6,14 @@
  * a failing-trace link that resolves somewhere else, and a ruling that hides the scripts a reader
  * could re-run.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { BehaviorFindingDetail, ClassifierDetail, FrustrationDetail } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_DETAIL, GROUNDEDNESS_FINDING_DETAIL } from "../../test/groundednessFixtures";
 import { FindingPage } from "./FindingPage";
 import { dateTime } from "./groundedness";
-import { stamp } from "./shared";
+import { TRIAGE_POLL_MS, stamp } from "./shared";
 import { api } from "../../test/api";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
@@ -167,6 +167,87 @@ describe("a finding with no figure", () => {
     api.getBehaviorFinding.mockRejectedValue(new Error("finding unavailable"));
     renderPage();
     expect(await screen.findByText("finding unavailable")).toBeTruthy();
+  });
+});
+
+describe("a triage run that has not ruled yet", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const progress = (over: Partial<NonNullable<Finding["triageProgress"]>> = {}) => ({
+    attempts: 1, maxAttempts: 5, startedAt: null, heldBy: null, ...over,
+  });
+
+  // Bug: the page read the finding once after Run triage, so it said "Triaging…" until someone reloaded it.
+  it("keeps reading the finding while triage runs, and shows the ruling once it lands", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.getBehaviorFinding
+      .mockResolvedValueOnce(plain({ triageStatus: "in_flight", triageProgress: progress() }))
+      .mockResolvedValue(plain({
+        triageStatus: "done", triageVerdict: "positive", triageAction: "opened_case", triageProgress: null,
+        triageSummary: "Refund retries doubled after the prompt change.", triagedAt: "2026-09-23T15:00:00Z",
+      }));
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Triaging…" })).toBeTruthy();
+
+    await act(() => vi.advanceTimersByTimeAsync(TRIAGE_POLL_MS));
+
+    expect(await screen.findByText("Refund retries doubled after the prompt change.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Triaging…" })).toBeNull();
+  });
+
+  // Bug: a run with nothing left to wait on kept the page reading the server for ever.
+  it("stops reading the finding once the run is held for a person", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.getBehaviorFinding.mockResolvedValue(
+      plain({ triageStatus: "blocked", triageProgress: progress({ heldBy: "CLASSIFIER.TRIAGE_PROVIDER_REJECTED" }) }),
+    );
+    renderPage();
+    await screen.findByRole("button", { name: "Run triage again" });
+    const reads = api.getBehaviorFinding.mock.calls.length;
+
+    await act(() => vi.advanceTimersByTimeAsync(TRIAGE_POLL_MS * 3));
+
+    expect(api.getBehaviorFinding.mock.calls.length).toBe(reads);
+  });
+
+  // Bug: a run held on a rejected key read as "Triaging" for ever, with nothing saying what to fix.
+  it.each([
+    ["CLASSIFIER.TRIAGE_PROVIDER_REJECTED", /The provider rejected the stored key/],
+    ["CLASSIFIER.TRIAGE_REQUEST_REFUSED", /The provider refused the request/],
+    ["MODEL_CONFIG.MISSING_CREDENTIALS", /There is no key for the provider triage runs on/],
+    ["CLASSIFIER.TRIAGE_LAUNCHER_MISCONFIGURED", /The sandbox launcher refused the run/],
+    ["CLOUD.SOMETHING_NEW", /Triage is waiting for a setting to change/],
+  ])("says what to fix when a run is held on %s, and offers to run it again", async (heldBy, words) => {
+    api.getBehaviorFinding.mockResolvedValue(plain({ triageStatus: "blocked", triageProgress: progress({ heldBy }) }));
+    renderPage();
+
+    expect(await screen.findByText(words)).toBeTruthy();
+    expect(screen.getByText("seen 58× · triage blocked")).toBeTruthy();
+    fireEvent.click(button("Run triage again"));
+    await waitFor(() => expect(api.analyzeBehaviorFinding).toHaveBeenCalledWith("fnd-1"));
+  });
+
+  // Bug: a run that gave up said only that it failed, not that it had already been tried.
+  it("says how many times a run that gave up was tried, and offers to run it again", async () => {
+    api.getBehaviorFinding.mockResolvedValue(plain({ triageStatus: "failed", triageProgress: progress({ attempts: 5 }) }));
+    renderPage();
+
+    expect(await screen.findByText("Triage tried 5 times and gave up.")).toBeTruthy();
+    expect(button("Run triage again").disabled).toBe(false);
+  });
+
+  // Bug: a run waiting for the worker, or for its next attempt, read the same as one running.
+  it.each([
+    ["queued", progress({ attempts: 0 }), "Queued…", /Waiting for the triage worker/],
+    ["retrying", progress({ attempts: 1 }), "Retrying…", /Attempt 1 of 5 ended with no ruling/],
+    ["in_flight", progress({ attempts: 2, startedAt: new Date(Date.now() - 120_000).toISOString() }), "Triaging…",
+      /Started 2m ago, attempt 2 of 5/],
+  ] as const)("says where a %s run stands and keeps the button off", async (triageStatus, triageProgress, label, words) => {
+    api.getBehaviorFinding.mockResolvedValue(plain({ triageStatus, triageProgress }));
+    renderPage();
+
+    expect(await screen.findByText(words)).toBeTruthy();
+    expect(button(label).disabled).toBe(true);
   });
 });
 
