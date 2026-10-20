@@ -80,8 +80,8 @@ narrower.
   it in its failure envelope, and the 502's `kind` is then `provider_rejected` (401 or 403),
   `request_refused` (another refusal) or `provider_unavailable` (the agent gave up retrying), with
   the provider's HTTP status in `detail`. A session reports the same three kinds as an `error`
-  event at the end of the reply (see [Events](#events)), and the backend stops the triage or RCA
-  run on it.
+  event at the end of the reply (see [Events](#events)), and the backend maps each kind to the
+  lane's own code.
 - **Token scrubbing:** the short-lived clone token rides in the clone URL and is scrubbed from every
   line this launcher logs, and from the scripts' own output before it leaves the sandbox.
 - **Sessions:** a session sandbox serves `session.js` on `SESSION_PORT`, behind its own 32-byte
