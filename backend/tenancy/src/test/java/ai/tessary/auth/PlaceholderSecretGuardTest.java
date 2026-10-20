@@ -5,10 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.config.RcaProperties;
+import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TessaryProperties;
 import ai.tessary.testsupport.LogCapture;
-import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
@@ -34,8 +33,9 @@ class PlaceholderSecretGuardTest {
         tessary.setSecretKey(secretKey);
         AuthProperties auth = new AuthProperties();
         auth.setCookiePassword(cookiePassword);
-        RcaProperties rca = Props.of(RcaProperties.class, "agentic.launcher-api-key", launcherApiKey);
-        return new PlaceholderSecretGuard(tessary, auth, rca);
+        ObserverProperties observer = new ObserverProperties();
+        observer.getAgentic().setLauncherApiKey(launcherApiKey);
+        return new PlaceholderSecretGuard(tessary, auth, observer);
     }
 
     private static final String REAL_KEY = "b6jUqcQBRDIrJt5lZ0nCkQCLB1kIzHXKUuqZM1tEPCM=";
