@@ -84,7 +84,10 @@ function StepsBody({ read, live, cap }: { read: { page: StepsPage | null; error:
   return <RunSteps steps={read.page.steps} stepCount={read.page.step_count} runningSeq={running} cap={cap} />;
 }
 
-/** Newest last; the step in progress spins, a step that did not finish is crossed, and a cut list says so. */
+/**
+ * Newest last; the step in progress spins, a step that failed is crossed, one still open beside it waits, one the run
+ * stopped inside says it did not finish, and a cut list says so.
+ */
 export function RunSteps({
   steps,
   stepCount,
@@ -108,6 +111,8 @@ export function RunSteps({
       <ol aria-label="Steps" className="m-0 flex list-none flex-col gap-1.25 p-0">
         {shown.map((step) => {
           const running = step.seq === runningSeq;
+          const open = step.ended_ms == null;
+          const words = !open ? step.words : runningSeq == null ? `${step.doing} (did not finish)` : `${step.doing}…`;
           return (
             <li
               key={step.seq}
@@ -118,10 +123,10 @@ export function RunSteps({
                 <Spinner size="sm" className="size-2.75 shrink-0" />
               ) : (
                 <span aria-hidden="true" className="w-3 shrink-0 text-subtle">
-                  {step.ok ? "✓" : "✕"}
+                  {open ? "·" : step.ok ? "✓" : "✕"}
                 </span>
               )}
-              <span className="min-w-0">{running ? `${step.doing}…` : step.words}</span>
+              <span className="min-w-0">{words}</span>
               {!running && (
                 <span className="ml-auto font-mono text-label text-subtle tabular-nums">{clock(step.started_ms)}</span>
               )}

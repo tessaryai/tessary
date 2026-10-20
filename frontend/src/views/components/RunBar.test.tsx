@@ -182,6 +182,20 @@ describe("RunBar", () => {
 });
 
 describe("RunSteps", () => {
+  // Bug: the step a run stopped inside reads as a finished step that failed, with a cross beside its done words.
+  it("a step that never ended says it did not finish, with no cross", () => {
+    const stopped = TRIAGE_STEPS.slice(5);
+    const { rerender } = render(<RunSteps steps={stopped} stepCount={7} />);
+    expect(rows().map((row) => row.textContent)).toEqual([
+      "✓Wrote checks/unsupported_terms.py2:40",
+      "·Running checks/unsupported_terms.py (did not finish)2:55",
+    ]);
+
+    const twoOpen = [{ ...TRIAGE_STEPS[5], ended_ms: null, ok: null }, TRIAGE_STEPS[6]];
+    rerender(<RunSteps steps={twoOpen} stepCount={7} runningSeq={7} />);
+    expect(rows()[0].textContent).toBe("·Writing checks/unsupported_terms.py…2:40");
+  });
+
   // Bug: a long run lists every step, or cuts the oldest ones without saying how many.
   it("more than 30 steps shows the newest and says how many earlier", () => {
     const { rerender } = render(<RunSteps steps={numberedSteps(1, 35)} stepCount={35} />);
