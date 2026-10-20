@@ -900,6 +900,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/triage-steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["FindingController_triageSteps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/git": {
         parameters: {
             query?: never;
@@ -1230,6 +1246,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["RcaController_rerun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/rca/{id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["RcaController_steps"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2210,6 +2242,10 @@ export interface components {
             data?: components["schemas"]["RuleView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseRunStepsView: {
+            data?: components["schemas"]["RunStepsView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseSearchView: {
             data?: components["schemas"]["SearchView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2351,6 +2387,7 @@ export interface components {
             triageAction: string | null;
             triageCitations: components["schemas"]["Citation"][];
             triageProgress: components["schemas"]["TriageProgress"] | null;
+            triageRun: components["schemas"]["TriageRunView"] | null;
             triageStatus: string;
             triageSummary: string | null;
             triageVerdict: string | null;
@@ -2509,6 +2546,8 @@ export interface components {
             metric: string;
             onset_at: string;
             opened_at: string;
+            rca_run_since: string | null;
+            rca_run_state: string | null;
             rca_verdict: string | null;
             reference: string;
             resolution: string | null;
@@ -3654,6 +3693,7 @@ export interface components {
             repo_available: boolean | null;
             report_kind: string;
             ruled_out: components["schemas"]["RuledOutCheck"][];
+            run: components["schemas"]["RcaRunView"] | null;
             status: string;
             subject_id: string;
             subject_kind: string;
@@ -3663,6 +3703,17 @@ export interface components {
             window_from: string;
             window_split: string;
             window_to: string;
+        };
+        RcaRunView: {
+            doing: string | null;
+            ended_at: string | null;
+            queued_at: string;
+            run_id: string | null;
+            started_at: string | null;
+            state: string;
+            /** Format: int32 */
+            step_count: number;
+            stop_code: string | null;
         };
         RepoOption: {
             defaultBranch: string;
@@ -3735,6 +3786,12 @@ export interface components {
             measurement: string | null;
             passed: boolean;
             question: string | null;
+        };
+        RunStepsView: {
+            run_id: string;
+            /** Format: int32 */
+            step_count: number;
+            steps: components["schemas"]["StepView"][];
         };
         Runtime: {
             /** Format: double */
@@ -4049,6 +4106,17 @@ export interface components {
             verification_uri: string;
             verification_uri_complete: string;
         };
+        StepView: {
+            doing: string;
+            /** Format: int64 */
+            ended_ms: number | null;
+            ok: boolean | null;
+            /** Format: int32 */
+            seq: number;
+            /** Format: int64 */
+            started_ms: number;
+            words: string;
+        };
         SubstrateStatusView: {
             has_live: boolean;
             has_tagged_span: boolean;
@@ -4189,10 +4257,27 @@ export interface components {
         TriageProgress: {
             /** Format: int32 */
             attempts: number;
+            /** Format: int64 */
+            cooldownSeconds: number;
             heldBy: string | null;
             /** Format: int32 */
             maxAttempts: number;
+            queuedAt: string | null;
+            retryAt: string | null;
+            revivableAt: string | null;
             startedAt: string | null;
+        };
+        TriageRunView: {
+            /** Format: int32 */
+            attempt: number;
+            doing: string | null;
+            endedAt: string | null;
+            id: string;
+            outcome: string | null;
+            startedAt: string;
+            /** Format: int32 */
+            stepCount: number;
+            stopCode: string | null;
         };
         TriageSpendRowView: {
             cost_usd: number;
@@ -6197,6 +6282,33 @@ export interface operations {
             };
         };
     };
+    FindingController_triageSteps: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                after?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseRunStepsView"];
+                };
+            };
+        };
+    };
     GitIntegrationController_get: {
         parameters: {
             query: {
@@ -6910,6 +7022,33 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseRcaReportView"];
+                };
+            };
+        };
+    };
+    RcaController_steps: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                after?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseRunStepsView"];
                 };
             };
         };

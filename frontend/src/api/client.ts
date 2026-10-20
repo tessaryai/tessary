@@ -7,6 +7,7 @@ import {
   type GitIntegration,
   type IngestionSource,
   type RcaReport,
+  type RunSteps,
   type RedactionRuleListView,
   type RetentionUpdateRequest,
   type RetentionView,
@@ -444,6 +445,10 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     resolveBehaviorFinding: (id: string, action: BehaviorResolutionAction) =>
       send<BehaviorFinding>("POST", `${base}/findings/${enc(id)}/resolution`, { action }),
 
+    /** The newest triage run's steps past `after`; 404s when the finding has never run. */
+    getTriageSteps: (id: string, after: number) =>
+      http<RunSteps>(withQuery(`${base}/findings/${enc(id)}/triage-steps`, { after })),
+
     listTraces: (params?: {
       limit?: number;
       cursor?: string;
@@ -542,6 +547,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     getRcaReport: (id: string) => http<RcaReport>(`${base}/rca/${enc(id)}`),
     /** Reports are immutable, so this returns a new report (or the running one, if it is still running). */
     rerunRca: (id: string) => send<RcaReport>("POST", `${base}/rca/${enc(id)}/rerun`),
+    getRcaSteps: (id: string, after: number) =>
+      http<RunSteps>(withQuery(`${base}/rca/${enc(id)}/steps`, { after })),
 
     getModelSettings: () => http<ModelSettingsResponse>(`${base}/model-settings`),
 

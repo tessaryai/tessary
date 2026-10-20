@@ -174,7 +174,8 @@ describe("a triage run that has not ruled yet", () => {
   afterEach(() => vi.useRealTimers());
 
   const progress = (over: Partial<NonNullable<Finding["triageProgress"]>> = {}) => ({
-    attempts: 1, maxAttempts: 5, startedAt: null, heldBy: null, ...over,
+    attempts: 1, maxAttempts: 5, startedAt: null, heldBy: null, queuedAt: null, retryAt: null, revivableAt: null,
+    cooldownSeconds: 1800, ...over,
   });
 
   // Bug: the page read the finding once after Run triage, so it said "Triaging…" until someone reloaded it.
