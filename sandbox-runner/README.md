@@ -66,8 +66,9 @@ narrower.
   - An **egress credential** (`credential.egress_secret`, Anthropic only, E2B backend only) carries
     no key: it names a secret in E2B's own store, which E2B's egress proxy injects as the provider's
     `x-api-key` outside the microVM. The agent gets a placeholder, and that run's or session's
-    egress is limited to the model provider, the MCP door, the clone host and `EGRESS_EXTRA_ALLOW`;
-    for a session the MCP door is every `mcp_servers` host.
+    egress is limited to the model provider, opencode's model list (`models.opencode.ai`), the MCP
+    door, the clone host and `EGRESS_EXTRA_ALLOW`; for a session the MCP door is every
+    `mcp_servers` host.
   - The other posture, UNTRUSTED_POSTURE (empty env, `NetworkMode: 'none'`), has **no route today**:
     its callers were `/grade` and `/lint`. It is kept deliberately — the pair exists so that a
     future untrusted-content route cannot default into the full credential set, and one legal value

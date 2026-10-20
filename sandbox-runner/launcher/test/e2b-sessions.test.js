@@ -492,7 +492,7 @@ test('an E2B session with an egress credential reaches only the model, every MCP
     assert.equal(started.status, 201, JSON.stringify(started.body));
 
     assert.deepEqual(control.calls.find((c) => c.op === 'create').network, {
-      allowOut: ['api.anthropic.com', 'tessary.example.com', 'notes.example.com', 'extra.example.com'],
+      allowOut: ['api.anthropic.com', 'models.opencode.ai', 'tessary.example.com', 'notes.example.com', 'extra.example.com'],
       denyOut: ['0.0.0.0/0'],
       rules: { 'api.anthropic.com': [{ transform: { headers: { 'x-api-key': '${e2b.secrets.tessary-ai-anthropic}' } } }] },
     });
