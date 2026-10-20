@@ -354,7 +354,7 @@ test('systemPrompt: selects the custom triage agent, routes MCP through a loopba
   assert.equal(extDir[path.join(dataHome, 'opencode', 'tool-output', '*')], 'allow');
 });
 
-test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with a bearer header, no agent on the prompt, external_directory a blanket deny', async (t) => {
+test('no systemPrompt (a /runs caller that sends none): default build agent, direct MCP with a bearer header, no agent on the prompt, external_directory a blanket deny', async (t) => {
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs, promptBodies } = mockSdk({
@@ -371,7 +371,7 @@ test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with 
   });
 
   const config = serverConfigs()[0];
-  assert.deepEqual(config.agent, { build: { maxSteps: 8 } }, 'the RCA path still runs under opencode\'s default agent');
+  assert.deepEqual(config.agent, { build: { maxSteps: 8 } }, 'a run with no system prompt runs under opencode\'s default agent');
   assert.deepEqual(config.mcp['tessary-evals'], {
     type: 'remote',
     url: 'https://tessary.example/mcp',
