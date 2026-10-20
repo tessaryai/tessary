@@ -7,9 +7,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
+import type { ProjectApi } from "../../api/client";
+import { useCapabilities } from "../../capabilities/useCapabilities";
+import { RunBar, RunFold } from "../components/RunBar";
 import {
   CONTAINER, FindingKicker, ResolveVerbs, RunTriageButton, TRIAGE_POLL_MS, TriageAction, chainWords, detectorLabel,
-  isTriageWaiting, stamp, triageState,
+  isTriageWaiting, stamp, triageBar, triageState, triageSteps, useNow,
 } from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
@@ -57,6 +60,8 @@ export function FindingPage() {
     refetchInterval: (q) => (isTriageWaiting(q.state.data?.finding) ? TRIAGE_POLL_MS : false),
   });
   const triageStatus = detailQ.data?.finding.triageStatus;
+  const canProviders = useCapabilities().isEnabled("byo_provider_keys_enabled");
+  const now = useNow(triageStatus === "queued" || triageStatus === "in_flight");
   /* The lists cache this finding's row; a run that moves on here would read as stuck there until they go stale. */
   useEffect(() => {
     if (triageStatus === undefined) return;
@@ -85,6 +90,9 @@ export function FindingPage() {
   const triaged = finding.triageStatus === "done";
   const busy = resolveM.isPending || analyzeM.isPending;
   const state = triageState(finding);
+  const bar = triageBar(finding, basePath, canProviders, now, api);
+  /* A ruling, or a run under the header, sets the first section apart from what sits above it. */
+  const divided = triaged || bar != null;
 
   const shift = detail.metric;
   const rate = detail.toolError;
@@ -176,12 +184,7 @@ export function FindingPage() {
 
       {resolveM.isError && <ErrorNote error={resolveM.error} />}
       {analyzeM.isError && <ErrorNote error={analyzeM.error} />}
-      {/* A dead-lettered run revives only after its cooldown; before that the press lands on the dead job. */}
-      {analyzeM.data?.jobStatus === "dead" && (
-        <p className="text-muted text-small mt-2 mb-0">
-          Triage gave up on this finding recently. It can run again once its cooldown has passed.
-        </p>
-      )}
+      {bar && <RunBar {...bar} />}
 
       {/* The ruling sits above the evidence; its receipts come after. A frustration finding states its ruling
          in its own header. */}
@@ -201,13 +204,14 @@ export function FindingPage() {
               Opened case →
             </Link>
           )}
+          <RulingFold finding={finding} api={api} />
         </div>
       )}
 
       {shift && (
         <section
-          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+          style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
         >
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
@@ -223,8 +227,8 @@ export function FindingPage() {
 
       {rate && (
         <section
-          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+          style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
         >
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
@@ -240,8 +244,8 @@ export function FindingPage() {
 
       {secretLeak && (
         <section
-          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+          style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
         >
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-label uppercase text-muted">When it leaked</h2>
@@ -255,8 +259,8 @@ export function FindingPage() {
       {malformedOutput && (
         <>
           <section
-            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+            className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+            style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
           >
             <div className="flex items-baseline gap-3">
               <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
@@ -279,8 +283,8 @@ export function FindingPage() {
       {frustration && (
         <>
           <section
-            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+            className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+            style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
           >
             <div className="flex items-baseline gap-3">
               <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
@@ -311,8 +315,8 @@ export function FindingPage() {
       {groundedness && (
         <>
           <section
-            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+            className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+            style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
           >
             <div className="flex items-baseline gap-3">
               <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
@@ -339,8 +343,8 @@ export function FindingPage() {
 
       {classifierDetail && (
         <section
-          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+          style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
         >
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
@@ -357,7 +361,7 @@ export function FindingPage() {
         </p>
       )}
 
-      {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
+      {triaged && !story && <TriageRuling finding={finding} basePath={basePath} api={api} />}
 
       {!frustration && !groundedness && !classifierDetail && (
         <section className="mt-7">
@@ -458,7 +462,21 @@ export function FindingPage() {
   }
 }
 
-function TriageRuling({ finding, basePath }: { finding: Detail["finding"]; basePath: string }) {
+/** `› Did 12 steps in 4m` under a ruling, for the run that made it. */
+function RulingFold({ finding, api, className }: { finding: Detail["finding"]; api: ProjectApi; className?: string }) {
+  const run = finding.triageRun;
+  if (!run?.endedAt || run.outcome !== "done" || run.stepCount === 0) return null;
+  return (
+    <RunFold
+      stepCount={run.stepCount}
+      durationMs={Date.parse(run.endedAt) - Date.parse(run.startedAt)}
+      steps={triageSteps(api, finding)}
+      className={className}
+    />
+  );
+}
+
+function TriageRuling({ finding, basePath, api }: { finding: Detail["finding"]; basePath: string; api: ProjectApi }) {
   const scripts = finding.triageCitations.filter((c) => c.stdout !== null);
   const pointers = finding.triageCitations.filter((c) => c.stdout === null);
   return (
@@ -489,6 +507,7 @@ function TriageRuling({ finding, basePath }: { finding: Detail["finding"]; baseP
           {finding.triageSummary}
         </p>
       )}
+      <RulingFold finding={finding} api={api} className="mt-2.5" />
 
       {pointers.length > 0 && (
         <>

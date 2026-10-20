@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useEffect, useState, type ComponentProps } from "react";
 import { Link } from "react-router-dom";
+import type { ProjectApi } from "../../api/client";
 import type { BehaviorFinding } from "../../api/types";
 import { cn } from "../../ui";
+import type { RunBar, StepsSource } from "../components/RunBar";
+import { clock, elapsed, QUEUED_LINE, RUN_POLL_MS, stepMeta, stopFix, stopReason, THINKING } from "../components/runWords";
 
 export const CONTAINER: React.CSSProperties = { padding: "36px 40px 56px" };
 
@@ -70,12 +74,12 @@ export function VerbButton({
 }
 
 /** How often a page reads a finding again while its run waits or runs. */
-export const TRIAGE_POLL_MS = 4000;
+export const TRIAGE_POLL_MS = RUN_POLL_MS;
 
 const WAITING_LABEL: Partial<Record<BehaviorFinding["triageStatus"], string>> = {
   queued: "Queued…",
   in_flight: "Triaging…",
-  retrying: "Retrying…",
+  retrying: "Triaging…",
 };
 
 /** A run that can still end on its own, so the page keeps reading it. A held run waits on a person. */
@@ -88,45 +92,19 @@ export function triagePoll(findings: BehaviorFinding[] | undefined): number | fa
   return findings?.some(isTriageWaiting) ? TRIAGE_POLL_MS : false;
 }
 
-/** The server sends the code of the refusal a held run waits on; this words what to fix. */
-const HELD_BY: Record<string, string> = {
-  "CLASSIFIER.TRIAGE_PROVIDER_REJECTED":
-    "The provider rejected the stored key. Fix the key under Settings, Providers, then run triage again.",
-  "CLASSIFIER.TRIAGE_REQUEST_REFUSED":
-    "The provider refused the request. Usually the triage model is not one the provider serves: check it under Settings, Models, then run triage again.",
-  "MODEL_CONFIG.MISSING_CREDENTIALS":
-    "There is no key for the provider triage runs on. Add one under Settings, Providers, then run triage again.",
-  "MODEL_CONFIG.AGENTIC_IAM_ROLE_UNSUPPORTED":
-    "Triage cannot use a key set to an IAM role. Set it to an access key under Settings, Providers, then run triage again.",
-  "CLASSIFIER.TRIAGE_LAUNCHER_MISCONFIGURED":
-    "The sandbox launcher refused the run. Its key or its version does not match this deployment. Fix the launcher, then run triage again.",
-};
-
-/** One line on where a run that has not ruled stands, or null when there is nothing to add. */
-export function triageProgressWords(finding: BehaviorFinding): string | null {
-  const progress = finding.triageProgress;
-  if (!progress) return null;
-  const of = `${progress.attempts} of ${progress.maxAttempts}`;
-  switch (finding.triageStatus) {
-    case "queued":
-      return "Waiting for the triage worker.";
-    case "in_flight":
-      if (!progress.startedAt) return null;
-      return `Started ${ago(progress.startedAt)}${progress.attempts > 1 ? `, attempt ${of}` : ""}.`;
-    case "retrying":
-      return `Attempt ${of} ended with no ruling. Triage tries again shortly.`;
-    case "blocked":
-      return (progress.heldBy && HELD_BY[progress.heldBy])
-        ?? "Triage is waiting for a setting to change. Fix it, then run triage again.";
-    default:
-      return finding.triageStatus === "failed" ? `Triage tried ${progress.attempts} times and gave up.` : null;
-  }
+/** The time now, ticking each second while `ticking`, so a bar's clock moves between reads. */
+export function useNow(ticking: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [ticking]);
+  return now;
 }
 
-/**
- * A run that gave up or is held says so and offers the run again rather than staying on "Triaging…"; a run that
- * waits or runs says where it stands.
- */
+/** A run that gave up or is held offers the run again; a run that waits or runs keeps the button off. */
 export function RunTriageButton({
   finding,
   busy,
@@ -138,20 +116,80 @@ export function RunTriageButton({
 }) {
   const waiting = WAITING_LABEL[finding.triageStatus];
   const stopped = finding.triageStatus === "failed" || finding.triageStatus === "blocked";
-  const words = triageProgressWords(finding);
-  const button = (
+  return (
     <VerbButton kind="filled" disabled={busy || waiting != null} onClick={onAnalyze}>
       {waiting ?? (stopped ? "Run triage again" : "Run triage")}
     </VerbButton>
   );
-  if (!stopped && !words) return button;
-  return (
-    <span className="flex flex-wrap items-center gap-2.5">
-      {stopped && <span className="text-error text-small">{triageState(finding).label}</span>}
-      {button}
-      {words && <span className="text-muted text-small">{words}</span>}
-    </span>
-  );
+}
+
+/** Reads the steps of the finding's newest triage run, only once someone opens them. */
+export function triageSteps(api: ProjectApi, finding: BehaviorFinding): StepsSource {
+  return { load: (after) => api.getTriageSteps(finding.id, after), live: finding.triageStatus === "in_flight" };
+}
+
+const plural = (n: number, noun: string) => `${n} ${n === 1 ? noun : `${noun}s`}`;
+
+/** The bar under a finding's header while its triage waits, runs, retries or stopped; null before and after. */
+export function triageBar(
+  finding: BehaviorFinding,
+  basePath: string,
+  canProviders: boolean,
+  now: number,
+  api: ProjectApi,
+): ComponentProps<typeof RunBar> | null {
+  const progress = finding.triageProgress;
+  const run = finding.triageRun;
+  const steps = run ? triageSteps(api, finding) : undefined;
+  const since = (iso: string | null | undefined) => (iso ? now - Date.parse(iso) : null);
+  switch (finding.triageStatus) {
+    case "queued": {
+      const waited = since(progress?.queuedAt);
+      return { kind: "Triage", state: "queued", line: QUEUED_LINE, meta: waited == null ? undefined : clock(waited) };
+    }
+    case "in_flight": {
+      const open = run && !run.endedAt ? run : null;
+      const ran = since(progress?.startedAt);
+      return {
+        kind: "Triage",
+        state: "running",
+        line: open?.doing ? `${open.doing}…` : THINKING,
+        meta: ran == null ? undefined : open && open.stepCount > 0 ? stepMeta(open.stepCount, ran) : elapsed(ran),
+        steps: open ? steps : undefined,
+      };
+    }
+    case "retrying": {
+      const attempts = progress?.attempts ?? 0;
+      const max = progress?.maxAttempts ?? 0;
+      return {
+        kind: "Triage",
+        state: "running",
+        line: `Attempt ${attempts} of ${max} ended with no ruling. Trying again…`,
+        meta: `attempt ${attempts + 1} of ${max}`,
+        steps,
+      };
+    }
+    case "blocked":
+      return {
+        kind: "Triage",
+        state: "stopped",
+        line: `Stopped: ${stopReason(progress?.heldBy, "triage")}`,
+        fix: stopFix(progress?.heldBy, basePath, canProviders),
+      };
+    case "failed": {
+      const minutes = Math.round((progress?.cooldownSeconds ?? 0) / 60);
+      return {
+        kind: "Triage",
+        state: "stopped",
+        line:
+          `Stopped after ${plural(progress?.attempts ?? 0, "attempt")} with no ruling. ` +
+          `It can run again ${plural(minutes, "minute")} after it stopped.`,
+        steps,
+      };
+    }
+    default:
+      return null;
+  }
 }
 
 /**
@@ -263,6 +301,13 @@ export function triageState(finding: BehaviorFinding): TriageState {
       : { label: "Closed · negative", tone: "closed" };
   }
   return { label: "Closed", tone: "closed" };
+}
+
+/** Where triage stands, in words only: red for a run that stopped, full colour for a positive ruling. */
+export function TriageStateText({ finding }: { finding: BehaviorFinding }) {
+  const state = triageState(finding);
+  const tone = state.tone === "failed" ? "text-error" : state.tone === "positive" ? "text-fg" : "text-muted";
+  return <span className={cn(tone, "whitespace-nowrap")}>{state.label}</span>;
 }
 
 export function isClosedByTriage(finding: BehaviorFinding): boolean {
