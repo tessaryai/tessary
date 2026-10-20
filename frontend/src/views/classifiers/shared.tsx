@@ -304,10 +304,10 @@ export function triageState(finding: BehaviorFinding): TriageState {
 }
 
 /** Where triage stands, in words only: red for a run that stopped, full colour for a positive ruling. */
-export function TriageStateText({ finding }: { finding: BehaviorFinding }) {
+export function TriageStateText({ finding, className }: { finding: BehaviorFinding; className?: string }) {
   const state = triageState(finding);
   const tone = state.tone === "failed" ? "text-error" : state.tone === "positive" ? "text-fg" : "text-muted";
-  return <span className={cn(tone, "whitespace-nowrap")}>{state.label}</span>;
+  return <span className={cn(tone, "whitespace-nowrap", className)}>{state.label}</span>;
 }
 
 export function isClosedByTriage(finding: BehaviorFinding): boolean {

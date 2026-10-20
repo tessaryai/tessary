@@ -37,7 +37,8 @@ import {
 import { CallSitesSection, UNSCOPED_DETECTORS } from "./CallSitesSection";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
 import {
-  CONTAINER, Fact, PROVIDER_PAUSES, ResolveVerbs, RunTriageButton, VerbButton, ago, chainWords, triagePoll,
+  CONTAINER, Fact, PROVIDER_PAUSES, ResolveVerbs, RunTriageButton, TriageStateText, VerbButton, ago, chainWords,
+  triagePoll, triageState,
 } from "./shared";
 
 const WAITING_ON_SCHEMAS = "waiting_on_schemas";
@@ -577,7 +578,10 @@ function FindingRow({
             Triaged
           </VerbButton>
         ) : (
-          <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
+          <>
+            {triageState(finding).tone === "failed" && <TriageStateText finding={finding} className="text-small" />}
+            <RunTriageButton finding={finding} busy={busy} onAnalyze={onAnalyze} />
+          </>
         )}
         {/* A ruling freezes the finding: every verb on it 409s. */}
         {!triaged && <ResolveVerbs busy={busy} onResolve={onResolve} />}
