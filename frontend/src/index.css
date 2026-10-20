@@ -6,6 +6,7 @@
 
 @theme {
   --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-run-slide: run-slide 1.8s ease-in-out infinite;
 }
 
 /* ===== BASE LAYER ===== */
@@ -98,6 +99,12 @@
 @keyframes tsyRail {
   from { transform: translateX(14px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+
+/* The indeterminate line under a running triage or RCA bar. */
+@keyframes run-slide {
+  from { left: -30%; }
+  to { left: 100%; }
 }
 
 /* ===== MARKDOWN: scoped prose for PayloadViewer / Markdown, no typography plugin ===== */
