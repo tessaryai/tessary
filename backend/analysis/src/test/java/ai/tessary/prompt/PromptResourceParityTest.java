@@ -30,6 +30,7 @@ class PromptResourceParityTest {
     private static Map<String, Supplier<String>> pinned() {
         Map<String, Supplier<String>> m = new LinkedHashMap<>();
         constant(m, ai.tessary.classifier.finding.BehaviorTriageEngine.class, "SYSTEM_PROMPT");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "SYSTEM_PROMPT");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "PROMPT");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "REPO_PRESENT");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "REPO_ABSENT");

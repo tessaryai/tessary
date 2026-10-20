@@ -108,7 +108,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                             req.projectId(),
                             ModelLane.RCA,
                             new LlmUsageAccountant.Subject(SUBJECT_KIND, req.reportId()),
-                            null,
+                            req.systemPrompt(),
                             req.files(),
                             List.of(new AgentSessionClient.McpServer(
                                     StepWords.PLATFORM_SERVER, req.mcpUrl(), req.mcpToken())),

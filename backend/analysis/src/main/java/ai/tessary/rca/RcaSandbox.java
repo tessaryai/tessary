@@ -30,6 +30,7 @@ public interface RcaSandbox {
             @Nullable String headSha,
             @Nullable String onsetAt,
             Map<String, String> files,
+            String systemPrompt,
             String prompt,
             String jsonSchema,
             String mcpUrl,

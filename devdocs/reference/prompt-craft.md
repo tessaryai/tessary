@@ -15,10 +15,12 @@ which its `FindingAdapter` supplies ([below](#method-text-from-a-findingadapter)
 
 | file | what it holds | how it reaches the agent |
 |---|---|---|
-| `rca/prompt.md` | The one investigative prompt, with `{placeholders}` | The prompt, filled by `AgenticRcaEngine.buildPrompt` |
+| `rca/system_prompt.md` | The one investigative prompt: what a cause is, what to read, how to investigate, grade and report | The agent's system prompt, the same on every run so it stays cacheable |
+| `rca/prompt.md` | This run's facts, with `{placeholders}` | The first message, filled by `AgenticRcaEngine.buildPrompt` |
 | `rca/repo_present.md` | The repo is at HEAD; the code that matters is the code live at the onset | In place of `{repo}` when a repo is cloned. Its `{onset_commit}` is filled by the sandbox after the clone |
 | `rca/repo_absent.md` | No repo; the code side is unread | In place of `{repo}` otherwise |
 | `rca/baseline_present.md` | The `baseline` rows are the traffic before the onset | In place of `{baseline}` when the evidence has `baseline` rows; nothing otherwise |
+| `rca/method_present.md` | The line that points at `dossier/method.md` | In place of `{method_line}` when the dossier has a method file; nothing otherwise |
 | `rca/tools.md` | The MCP tools and how to page the evidence | `dossier/tools.md` |
 | `rca/response_schema.json` | The output contract, including what `high` and `medium` mean | The run's JSON schema |
 | `rca/methods/<classifier>.md` | One built-in classifier's instrument: what it measures, how its evidence reads, its quirks, where its code lives | `dossier/method.md`, chosen by classifier key. The two drift classifiers share `metric_drift.md`. A user or regex classifier gets none, and the prompt does not name the file, unless a `FindingAdapter` owns its finding |

@@ -65,6 +65,7 @@ class E2bRcaSandboxTest {
 
     private static final String CLONE_URL = "https://x-access-token:ghs_cloneSecret@github.com/acme/agent.git";
 
+    private static final String SYSTEM_PROMPT = "Find the cause.";
     private static final String PROMPT = "Investigate. The onset commit is {onset_commit}.";
 
     private final AgentSessionRunner runner = mock(AgentSessionRunner.class);
@@ -79,6 +80,7 @@ class E2bRcaSandboxTest {
                 headSha,
                 onsetAt,
                 Map.of("findings/1-f1/finding.md", "the finding"),
+                SYSTEM_PROMPT,
                 PROMPT,
                 "{\"type\":\"object\",\"required\":[\"verdict\"]}",
                 "https://api.example/mcp",
@@ -126,13 +128,13 @@ class E2bRcaSandboxTest {
     }
 
     /**
-     * The RCA session runs on the report's ledger subject and the RCA lane with no system prompt and the prompt
-     * byte for byte, so opencode's default agent reads exactly what the one-shot lane sent (an RCA prompt edited by
-     * the move); it gets the repository to clone, the platform's MCP door, RCA's own wall clock and the turn cap
-     * less the two the agent keeps for its answer.
+     * The RCA session runs on the report's ledger subject and the RCA lane, under RCA's own system prompt with the
+     * run's message byte for byte (an RCA run under the provider's default agent, or a message edited on the way);
+     * it gets the repository to clone, the platform's MCP door, RCA's own wall clock and the turn cap less the two
+     * the agent keeps for its answer.
      */
     @Test
-    void theSessionRunsOnTheReportWithThePromptUnchangedAndTheClone() {
+    void theSessionRunsOnTheReportWithTheSystemPromptTheMessageAndTheClone() {
         when(runner.run(any(), any())).thenReturn(new AgentSessionRunner.Answer("{\"verdict\":\"x\"}", usage(), 3));
 
         RcaSandbox.SandboxRun run = sandbox().run(request());
@@ -145,7 +147,7 @@ class E2bRcaSandboxTest {
                         "proj",
                         ModelLane.RCA,
                         new LlmUsageAccountant.Subject("rca_report", "report-1"),
-                        null,
+                        SYSTEM_PROMPT,
                         Map.of("findings/1-f1/finding.md", "the finding"),
                         List.of(new AgentSessionClient.McpServer(
                                 "tessary-evals", "https://api.example/mcp", "tsy_a_secret")),
