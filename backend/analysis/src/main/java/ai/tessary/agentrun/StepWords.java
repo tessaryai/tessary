@@ -1,0 +1,362 @@
+// SPDX-License-Identifier: Apache-2.0
+package ai.tessary.agentrun;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
+
+/**
+ * The plain words a triage or RCA page shows for one tool call, from its server, tool and input: a done form for the
+ * step list, a present form for the live line, and a "Could not" form for a call that failed. Words carry names the
+ * input gave (a path, a pattern, a short sha), never tool output, and never a value shaped like a token. Pure.
+ */
+public final class StepWords {
+
+    /** The MCP server of the platform's own tools. */
+    public static final String PLATFORM_SERVER = "tessary-evals";
+
+    /** {@code get_finding_evidence}'s page size when the call names none. */
+    private static final long EVIDENCE_PAGE = 100;
+
+    private static final int PATTERN_CHARS = 40;
+
+    private static final int PATH_CHARS = 120;
+
+    private static final int TRACE_CHARS = 16;
+
+    private static final int SHA_CHARS = 7;
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** Where the sandbox's work dir sits: E2B, then docker. */
+    private static final List<String> WORK_DIRS = List.of("/home/user/", "/work/");
+
+    private static final Pattern KEY_PREFIX = Pattern.compile("(?<![A-Za-z0-9])(?:tsy_|sk-|ghs_|ghp_)");
+
+    /** A long run with a digit in it; a long snake_case name has none. */
+    private static final Pattern LONG_RUN = Pattern.compile("[A-Za-z0-9_\\-]{32,}");
+
+    private static final Pattern SHA = Pattern.compile("[0-9a-f]{7,64}");
+
+    private static final Pattern CD_PREFIX = Pattern.compile("^cd\\s+\\S+\\s*&&\\s*");
+
+    private static final Set<String> SCRIPT_RUNNERS = Set.of("python", "python3", "node", "sh", "bash");
+
+    private static final Set<String> SILENT = Set.of("todowrite", "todoread");
+
+    /** Done, present and "Could not" forms of one phrase. */
+    public record Words(String done, String doing, String could) {}
+
+    /**
+     * Per classifier, so a step can say "flagged answers" where the evidence holds answers.
+     *
+     * @param roleNouns evidence role to the noun its rows are called @param roleTotals evidence role to its row count
+     */
+    public record Context(Map<String, String> roleNouns, Map<String, Long> roleTotals) {
+        public static final Context NONE = new Context(Map.of(), Map.of());
+    }
+
+    /** Evidence rows read so far per role in one run; a page counts only once its call ended well. */
+    public static final class RowCursor {
+        private final Map<String, Long> read = new HashMap<>();
+        private final Map<String, Page> pending = new HashMap<>();
+
+        private record Page(String role, long rows) {}
+
+        private long read(String role) {
+            return read.getOrDefault(role, 0L);
+        }
+
+        private void paging(String callId, String role, long rows) {
+            pending.put(callId, new Page(role, rows));
+        }
+
+        public void ended(String callId, boolean ok) {
+            Page page = pending.remove(callId);
+            if (page != null && ok) read.merge(page.role(), page.rows(), Long::sum);
+        }
+    }
+
+    private static final Map<String, String> DEFAULT_NOUNS = Map.of(
+            "witness", "flagged rows",
+            "member", "the flagged population",
+            "exemplar", "examples",
+            "changepoint", "change points");
+
+    /** The platform's read-only tools, worded as the paid authoring chat words them. */
+    private static final Map<String, Words> PLATFORM = Map.ofEntries(
+            Map.entry("get_project", phrase("Read", "Reading", "read", "the project")),
+            Map.entry("list_call_sites", phrase("Listed", "Listing", "list", "the call sites")),
+            Map.entry("list_sessions", phrase("Listed", "Listing", "list", "recent sessions")),
+            Map.entry("list_traces", phrase("Listed", "Listing", "list", "traces")),
+            Map.entry("list_spans", phrase("Searched", "Searching", "search", "the steps of the traces")),
+            Map.entry("list_findings", phrase("Listed", "Listing", "list", "the findings")),
+            Map.entry("list_cases", phrase("Listed", "Listing", "list", "the cases")),
+            Map.entry("get_finding", phrase("Read", "Reading", "read", "a finding")),
+            Map.entry("get_case", phrase("Read", "Reading", "read", "a case")),
+            Map.entry("get_session", phrase("Read", "Reading", "read", "a session")),
+            Map.entry("get_conversation", phrase("Read", "Reading", "read", "a conversation")),
+            Map.entry("describe_dataset", phrase("Read", "Reading", "read", "which fields the trace queries take")),
+            Map.entry("query_count", phrase("Counted", "Counting", "count", "the matching traces")),
+            Map.entry("query_timeseries", phrase("Counted", "Counting", "count", "the matching traces over time")),
+            Map.entry("query_facets", phrase("Broke", "Breaking", "break", "the matching traces down by a field")),
+            Map.entry("query_search", phrase("Searched", "Searching", "search", "the traces")));
+
+    private static final Map<String, Words> DOSSIER = Map.of(
+            "finding.md", phrase("Read", "Reading", "read", "the finding and its numbers"),
+            "method.md", phrase("Read", "Reading", "read", "how the classifier measures"),
+            "tools.md", phrase("Read", "Reading", "read", "the tool guide"));
+
+    private StepWords() {}
+
+    /** Null for a call the page shows no step for. */
+    public static @Nullable Words of(SessionEvent.ToolStart start, Context ctx) {
+        return of(start, ctx, new RowCursor());
+    }
+
+    /** Null for a call the page shows no step for. An evidence page is counted on {@code cursor}. */
+    public static @Nullable Words of(SessionEvent.ToolStart start, Context ctx, RowCursor cursor) {
+        String tool = start.tool();
+        String server = start.server();
+        JsonNode input = parse(start.inputSummary());
+        if (server == null) {
+            if (SILENT.contains(tool)) return null;
+            return own(tool, input);
+        }
+        if (PLATFORM_SERVER.equals(server)) return platform(start.callId(), tool, input, ctx, cursor);
+        return used(tool);
+    }
+
+    public static String failed(Words w) {
+        return "Could not " + w.could();
+    }
+
+    private static Words own(String tool, @Nullable JsonNode input) {
+        return switch (tool) {
+            case "read" -> read(text(input, "filePath"));
+            case "write", "edit" -> {
+                String path = shown(text(input, "filePath"));
+                yield phrase("Wrote", "Writing", "write", path == null ? "a file" : path);
+            }
+            case "bash" -> bash(text(input, "command"));
+            case "grep" -> grep(text(input, "pattern"), text(input, "path"));
+            case "glob" -> {
+                String pattern = safe(text(input, "pattern"));
+                yield pattern == null
+                        ? phrase("Listed", "Listing", "list", "the files")
+                        : phrase("Listed", "Listing", "list", "the files matching " + pattern);
+            }
+            case "list" -> phrase("Listed", "Listing", "list", place(text(input, "path")));
+            default -> used(tool);
+        };
+    }
+
+    private static Words read(@Nullable String filePath) {
+        String work = filePath == null ? null : workPath(filePath);
+        if (work != null && work.startsWith("dossier/")) {
+            Words known = DOSSIER.get(work.substring("dossier/".length()));
+            if (known != null) return known;
+        }
+        String path = shown(filePath);
+        return phrase("Read", "Reading", "read", path == null ? "a file" : path);
+    }
+
+    private static Words bash(@Nullable String command) {
+        Words generic = phrase("Ran", "Running", "run", "a command");
+        if (command == null) return generic;
+        List<String> words = List.of(firstCommand(command).split("\\s+"));
+        if (words.isEmpty()) return generic;
+        if (SCRIPT_RUNNERS.contains(words.getFirst())) {
+            for (String word : words.subList(1, words.size())) {
+                if (word.startsWith("-") || !looksLikePath(word)) continue;
+                String path = shown(word);
+                return path == null ? generic : phrase("Ran", "Running", "run", path);
+            }
+            return generic;
+        }
+        if ("git".equals(words.getFirst())) return git(words, generic);
+        return generic;
+    }
+
+    /** {@code cd <dir> && git ...} is how an agent most often reaches the clone. */
+    private static String firstCommand(String command) {
+        String c = command.strip();
+        Matcher cd = CD_PREFIX.matcher(c);
+        if (cd.find()) c = c.substring(cd.end());
+        int end = c.length();
+        for (String stop : List.of("&&", "||", ";", "|", "\n")) {
+            int at = c.indexOf(stop);
+            if (at >= 0) end = Math.min(end, at);
+        }
+        return c.substring(0, end).strip();
+    }
+
+    private static boolean looksLikePath(String word) {
+        return word.contains("/") || word.matches(".*\\.(py|js|mjs|cjs|sh)$");
+    }
+
+    private static Words git(List<String> words, Words generic) {
+        int at = 1;
+        while (at + 1 < words.size() && "-C".equals(words.get(at))) at += 2;
+        if (at >= words.size()) return generic;
+        String sub = words.get(at);
+        List<String> args = words.subList(at + 1, words.size()).stream()
+                .filter(w -> !w.startsWith("-"))
+                .toList();
+        return switch (sub) {
+            case "log" -> phrase("Read", "Reading", "read", "the commit history");
+            case "show" -> {
+                String sha = args.isEmpty() ? null : sha(args.getFirst());
+                yield sha == null
+                        ? phrase("Read", "Reading", "read", "a commit")
+                        : phrase("Read", "Reading", "read", "commit " + sha);
+            }
+            case "diff" -> {
+                List<String> shas = args.stream()
+                        .flatMap(a -> List.of(a.split("\\.{2,3}")).stream())
+                        .map(StepWords::sha)
+                        .toList();
+                yield shas.size() == 2 && shas.get(0) != null && shas.get(1) != null
+                        ? phrase("Compared", "Comparing", "compare", shas.get(0) + " and " + shas.get(1))
+                        : phrase("Compared", "Comparing", "compare", "two versions");
+            }
+            default -> generic;
+        };
+    }
+
+    private static @Nullable String sha(String word) {
+        return SHA.matcher(word).matches() ? word.substring(0, SHA_CHARS) : null;
+    }
+
+    private static Words grep(@Nullable String pattern, @Nullable String path) {
+        String scope = scope(path);
+        String shown = safe(pattern);
+        if (shown == null) return phrase("Searched", "Searching", "search", scope);
+        if (shown.length() > PATTERN_CHARS) shown = shown.substring(0, PATTERN_CHARS);
+        return phrase("Searched", "Searching", "search", scope + " for \"" + shown + "\"");
+    }
+
+    private static String scope(@Nullable String path) {
+        String work = path == null ? "" : workPath(path);
+        if (work.equals("repo") || work.startsWith("repo/")) return "the repository";
+        if (work.equals("dossier") || work.startsWith("dossier/")) return "the dossier";
+        return "the files";
+    }
+
+    private static String place(@Nullable String path) {
+        String work = path == null ? "" : workPath(path);
+        if (work.isEmpty() || work.equals(".")) return "the files";
+        if (work.equals("repo")) return "the repository";
+        if (work.equals("dossier")) return "the dossier";
+        String shown = shown(path);
+        return shown == null ? "the files" : shown;
+    }
+
+    private static Words platform(String callId, String tool, @Nullable JsonNode input, Context ctx, RowCursor cursor) {
+        return switch (tool) {
+            case "get_finding_evidence" -> evidence(callId, input, ctx, cursor);
+            case "get_trace" -> {
+                String trace = traceId(input);
+                yield trace == null
+                        ? phrase("Opened", "Opening", "open", "a trace")
+                        : phrase("Opened", "Opening", "open", "trace " + trace);
+            }
+            case "get_span" -> {
+                String trace = traceId(input);
+                yield trace == null
+                        ? phrase("Opened", "Opening", "open", "a span")
+                        : phrase("Opened", "Opening", "open", "a span of trace " + trace);
+            }
+            default -> PLATFORM.getOrDefault(tool, used(tool));
+        };
+    }
+
+    private static @Nullable String traceId(@Nullable JsonNode input) {
+        String id = text(input, "trace_id");
+        if (id == null) return null;
+        return safe(id.length() > TRACE_CHARS ? id.substring(0, TRACE_CHARS) : id);
+    }
+
+    /** Rows a to b, where a follows the rows already read and b stops at the role's total. */
+    private static Words evidence(String callId, @Nullable JsonNode input, Context ctx, RowCursor cursor) {
+        Words generic = phrase("Read", "Reading", "read", "the evidence");
+        if (input == null) return generic;
+        if (input.path("count_only").asBoolean(false)) return phrase("Counted", "Counting", "count", "the evidence");
+        String role = text(input, "role");
+        if (role == null) return generic;
+        if ("baseline".equals(role)) return phrase("Read", "Reading", "read", "the reference window");
+        String noun = ctx.roleNouns().getOrDefault(role, DEFAULT_NOUNS.getOrDefault(role, "the evidence"));
+        long limit =
+                input.path("limit").canConvertToLong() && input.path("limit").asLong() > 0
+                        ? input.path("limit").asLong()
+                        : EVIDENCE_PAGE;
+        Long total = ctx.roleTotals().get(role);
+        long from = cursor.read(role) + 1;
+        if (total != null && from > total) return phrase("Read", "Reading", "read", noun);
+        long to = total == null ? from - 1 + limit : Math.min(from - 1 + limit, total);
+        cursor.paging(callId, role, to - from + 1);
+        String range = noun + " " + from + " to " + to;
+        return new Words("Read " + range + (total == null ? "" : " of " + total), "Reading " + range, "read " + range);
+    }
+
+    private static Words used(String tool) {
+        String name = safe(tool);
+        return phrase("Used", "Using", "use", name == null ? "a tool" : name);
+    }
+
+    private static Words phrase(String done, String doing, String could, String rest) {
+        return new Words(done + " " + rest, doing + " " + rest, could + " " + rest);
+    }
+
+    /** The path relative to the sandbox's work dir, as the agent may have written it either way. */
+    private static String workPath(String path) {
+        String p = path.strip();
+        for (String dir : WORK_DIRS) {
+            if (p.startsWith(dir)) return p.substring(dir.length());
+            if (p.equals(dir.substring(0, dir.length() - 1))) return "";
+        }
+        return p.startsWith("./") ? p.substring(2) : p;
+    }
+
+    /** A path as a step shows it: under the work dir, without the clone's {@code repo/}, its tail when long. */
+    private static @Nullable String shown(@Nullable String path) {
+        if (path == null || path.isBlank()) return null;
+        String p = workPath(path);
+        if (p.startsWith("repo/")) p = p.substring("repo/".length());
+        if (p.isEmpty()) return null;
+        if (p.length() > PATH_CHARS) p = "..." + p.substring(p.length() - PATH_CHARS + 3);
+        return safe(p);
+    }
+
+    private static @Nullable String safe(@Nullable String value) {
+        if (value == null || value.isBlank() || KEY_PREFIX.matcher(value).find()) return null;
+        Matcher run = LONG_RUN.matcher(value);
+        while (run.find()) {
+            if (run.group().chars().anyMatch(Character::isDigit)) return null;
+        }
+        return value;
+    }
+
+    private static @Nullable String text(@Nullable JsonNode input, String field) {
+        if (input == null) return null;
+        JsonNode v = input.path(field);
+        return v.isTextual() ? v.textValue() : null;
+    }
+
+    /** Null for input the launcher cut or that is not an object. */
+    private static @Nullable JsonNode parse(String inputSummary) {
+        try {
+            JsonNode node = MAPPER.readTree(inputSummary);
+            return node != null && node.isObject() ? node : null;
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+    }
+}

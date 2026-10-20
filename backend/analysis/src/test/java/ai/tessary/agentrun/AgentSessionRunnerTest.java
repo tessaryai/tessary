@@ -1,0 +1,285 @@
+// SPDX-License-Identifier: Apache-2.0
+package ai.tessary.agentrun;
+
+import static ai.tessary.agentrun.FakeAgentSessionClient.CUT;
+import static ai.tessary.agentrun.FakeAgentSessionClient.end;
+import static ai.tessary.agentrun.FakeAgentSessionClient.failure;
+import static ai.tessary.agentrun.FakeAgentSessionClient.text;
+import static ai.tessary.agentrun.FakeAgentSessionClient.toolEnd;
+import static ai.tessary.agentrun.FakeAgentSessionClient.toolStart;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.errors.AgentRunError;
+import ai.tessary.open.errors.TessaryException;
+import ai.tessary.sandbox.AgentSpanTelemetry;
+import ai.tessary.usage.LlmUsageAccountant;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+
+/**
+ * {@link AgentSessionRunner} over a scripted session: which text is the answer, when it corrects the agent once, how it
+ * stops at the deadline, and that every path stops the session and reads it to its close so the last reply is booked.
+ */
+class AgentSessionRunnerTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Duration DEADLINE = Duration.ofMinutes(30);
+    private static final String SCHEMA = """
+            {
+              "type": "object",
+              "required": ["verdict", "why"]
+            }
+            """;
+
+    /** What the one-shot lane appended to every prompt: the schema instruction with the schema compacted. */
+    private static final String INSTRUCTION = "\n\nRespond with ONLY a single JSON object that validates against this"
+            + " JSON Schema. No prose, no markdown fence, no commentary before or after it.\n\n"
+            + "{\"type\":\"object\",\"required\":[\"verdict\",\"why\"]}";
+
+    private static final String RULING = "{\"verdict\":\"real\",\"why\":\"the answer cites no source\"}";
+    private static final LlmUsageAccountant.Subject SUBJECT = new LlmUsageAccountant.Subject("behavior_finding", "f-1");
+    private static final AgentSessionClient.McpServer MCP =
+            new AgentSessionClient.McpServer("tessary-evals", "https://api.example/mcp", "tsy_a_secret");
+
+    private final FakeAgentSessionClient client = new FakeAgentSessionClient();
+    private final FakeAgentSessionClient.FakeDeadlines deadlines = new FakeAgentSessionClient.FakeDeadlines();
+    private final List<String> sink = new ArrayList<>();
+
+    private AgentSessionRunner runner() {
+        return new AgentSessionRunner(
+                client, MAPPER, Clock.fixed(Instant.parse("2026-10-20T10:00:00Z"), ZoneOffset.UTC), deadlines);
+    }
+
+    private static AgentSessionRunner.Task task() {
+        return new AgentSessionRunner.Task(
+                "proj",
+                ModelLane.TRIAGE,
+                SUBJECT,
+                "You rule on findings.",
+                Map.of("finding.md", "the finding"),
+                List.of(MCP),
+                null,
+                "Rule on finding f-1.",
+                SCHEMA,
+                DEADLINE,
+                50,
+                StepWords.Context.NONE);
+    }
+
+    private final AgentSessionRunner.StepSink recording = new AgentSessionRunner.StepSink() {
+        @Override
+        public void session(String sessionId) {
+            sink.add("session " + sessionId);
+        }
+
+        @Override
+        public void started(String callId, StepWords.Words w, long atMs) {
+            sink.add("started " + callId + " " + w.doing());
+        }
+
+        @Override
+        public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {
+            sink.add("ended " + callId + " " + (ok ? w.done() : StepWords.failed(w)));
+        }
+    };
+
+    private AgentSessionRunner.Answer run() {
+        return runner().run(task(), recording);
+    }
+
+    private TessaryException fails() {
+        return assertThrows(TessaryException.class, this::run);
+    }
+
+    /**
+     * A ruling parsed from "Let me look": a reply's answer is the text after its last tool call, not the narration
+     * before it, even when the narration holds an object of its own. The session starts with the task's lane, subject,
+     * prompt and tool cap, and the first message is the task with the schema instruction.
+     */
+    @Test
+    void aRepliesAnswerIsTheTextAfterItsLastToolCallNotTheNarrationBeforeIt() {
+        client.reply(
+                text("Let me look at {\"verdict\":\"not_real\",\"why\":\"guess\"} first."),
+                toolStart("c-1", null, "read", "{\"filePath\":\"/home/user/dossier/finding.md\"}"),
+                toolEnd("c-1", true),
+                text("Now I know. "),
+                text(RULING.substring(0, 10)),
+                text(RULING.substring(10)),
+                end());
+
+        AgentSessionRunner.Answer answer = run();
+
+        assertEquals(
+                new AgentSessionRunner.Answer(
+                        RULING, new AgentSpanTelemetry.AgentUsage(10, 5, 0, 0, BigDecimal.ONE), 1),
+                answer);
+        assertEquals(
+                List.of(new AgentSessionClient.Start(
+                        "proj",
+                        ModelLane.TRIAGE,
+                        "You rule on findings.",
+                        Map.of("finding.md", "the finding"),
+                        List.of(MCP),
+                        120_000L,
+                        50,
+                        SUBJECT,
+                        null)),
+                client.starts);
+        assertEquals(List.of("Rule on finding f-1." + INSTRUCTION), client.sent);
+        assertEquals(
+                List.of(
+                        "session s-1",
+                        "started c-1 Reading the finding and its numbers",
+                        "ended c-1 Read the finding and its numbers"),
+                sink);
+    }
+
+    /** A rejected key retried as an empty reply: a provider failure ends the run with its kind, even after an agent error. */
+    @Test
+    void aProviderRejectedFailureEndsTheRunWithThatKindEvenWhenAnAgentErrorCameFirst() {
+        client.reply(failure("agent"), failure("provider_rejected"), end(SessionEvent.EndReason.DONE, 0));
+
+        TessaryException e = fails();
+
+        assertEquals(AgentRunError.RUN_FAILED, e.error());
+        assertEquals("provider_rejected", ((ProviderStop) e).kind());
+        assertEquals(1, client.sent.size(), "a provider refusal gets no correction");
+    }
+
+    /** An endless correction loop: an answer missing a required key gets one correction naming the keys, then fails. */
+    @Test
+    void anAnswerMissingARequiredKeyGetsOneCorrectionNamingTheKeysThenFailsBadOutput() {
+        client.reply(text("{\"verdict\":\"real\"}"), end()).reply(text("{\"verdict\":\"real\"}"), end());
+
+        TessaryException e = fails();
+
+        assertEquals(AgentRunError.BAD_OUTPUT, e.error());
+        assertEquals(
+                List.of(
+                        "Rule on finding f-1." + INSTRUCTION,
+                        "Your previous reply was missing why. Do NOT investigate further — you already have what you"
+                                + " need. Reply with the COMPLETE JSON object and nothing else." + INSTRUCTION),
+                client.sent);
+    }
+
+    /** A run that stops at its cap with no answer: a reply cut at the tool cap gets the no-tool-budget correction. */
+    @Test
+    void aReplyCutAtTheToolCapGetsTheNoToolBudgetCorrection() {
+        client.reply(
+                        toolStart("c-1", null, "bash", "{\"command\":\"ls\"}"),
+                        toolEnd("c-1", true),
+                        text("I still need to check"),
+                        end(SessionEvent.EndReason.LIMIT, 5))
+                .reply(text(RULING), end());
+
+        assertEquals(RULING, run().json());
+        assertEquals(
+                "You have no tool budget left. Do NOT call any tool. Using only the evidence you have already read,"
+                        + " reply now with the ruling JSON object and nothing else." + INSTRUCTION,
+                client.sent.get(1));
+    }
+
+    /** Prose with no object after real work gets the unparseable correction. */
+    @Test
+    void proseWithNoObjectGetsTheUnparseableCorrection() {
+        client.reply(text("It is real."), end()).reply(text(RULING), end());
+
+        assertEquals(RULING, run().json());
+        assertEquals(
+                "Your previous reply could not be parsed as a single JSON object. Do NOT investigate further — you"
+                        + " already have what you need. Reply with the JSON object and nothing else: no prose, no"
+                        + " markdown fence, nothing before or after it. Keep every string field short enough that the"
+                        + " whole object fits in one reply." + INSTRUCTION,
+                client.sent.get(1));
+    }
+
+    /** The empty completion some models return: an empty reply with no tool calls re-sends the task once. */
+    @Test
+    void anEmptyReplyWithNoToolCallsReSendsTheTaskOnce() {
+        client.reply(end(SessionEvent.EndReason.DONE, 0)).reply(text(RULING), end());
+
+        AgentSessionRunner.Answer answer = run();
+
+        assertEquals(RULING, answer.json());
+        assertEquals(new AgentSpanTelemetry.AgentUsage(20, 5, 0, 0, BigDecimal.TWO), answer.usage());
+        assertEquals(List.of("Rule on finding f-1." + INSTRUCTION, "Rule on finding f-1." + INSTRUCTION), client.sent);
+    }
+
+    /** A session that runs past the lease: the deadline aborts and stops the session and fails TIMED_OUT. */
+    @Test
+    void theDeadlineAbortsAndStopsTheSessionAndFailsTimedOut() {
+        client.reply(
+                toolStart("c-1", null, "bash", "{\"command\":\"sleep 9999\"}"),
+                new FakeAgentSessionClient.Do(() -> deadlines.fire(DEADLINE)));
+
+        TessaryException e = fails();
+
+        assertEquals(AgentRunError.TIMED_OUT, e.error());
+        assertEquals(List.of("send", "events 0", "abort", "stop"), client.calls.subList(0, 4));
+        assertTrue(client.closedRead, "the session was read to its close");
+    }
+
+    /** A reply's spend lost: the session is stopped and drained to closed on every path. */
+    @Test
+    void theSessionIsStoppedAndDrainedToClosedOnEveryPath() {
+        client.reply(text(RULING), end());
+        run();
+        assertEquals(List.of("send", "events 0", "close", "stop", "events 2", "close"), client.calls);
+        assertTrue(client.closedRead);
+
+        FakeAgentSessionClient failing =
+                new FakeAgentSessionClient().reply(text("no"), end()).reply(text("still no"), end());
+        assertThrows(
+                TessaryException.class,
+                () -> new AgentSessionRunner(failing, MAPPER, Clock.systemUTC(), deadlines).run(task(), recording));
+        assertEquals(
+                List.of("stop", "events 4", "close"),
+                failing.calls.subList(failing.calls.size() - 3, failing.calls.size()));
+        assertTrue(failing.closedRead);
+        assertTrue(deadlines.scheduled.stream().allMatch(s -> s.cancelled().get()), "no timer outlives its run");
+    }
+
+    /**
+     * Duplicate steps after a reconnect: a stream that ends without closed resumes from the last seq, after a pause
+     * only when it read nothing, and no step is written twice.
+     */
+    @Test
+    void aStreamThatEndsWithoutClosedResumesFromTheLastSeqAndNoStepIsWrittenTwice() {
+        client.reply(
+                CUT,
+                toolStart("c-1", null, "read", "{\"filePath\":\"/home/user/repo/a.py\"}"),
+                CUT,
+                toolEnd("c-1", true),
+                text(RULING),
+                end());
+
+        assertEquals(RULING, run().json());
+        assertEquals(
+                List.of("events 0", "events 0", "events 1"),
+                client.calls.stream()
+                        .filter(c -> c.startsWith("events"))
+                        .toList()
+                        .subList(0, 3));
+        assertEquals(List.of(Duration.ofSeconds(1)), deadlines.pauses);
+        assertEquals(List.of("session s-1", "started c-1 Reading a.py", "ended c-1 Read a.py"), sink);
+    }
+
+    /** A session closed under a running reply fails the run instead of waiting on it. */
+    @Test
+    void aSessionClosedBeforeItsReplyEndedFailsTheRun() {
+        client.reply(text("thinking"), FakeAgentSessionClient.closed(SessionEvent.CloseReason.FAILED));
+
+        assertEquals(AgentRunError.RUN_FAILED, fails().error());
+    }
+}

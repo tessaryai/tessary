@@ -67,6 +67,9 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
     /** The launcher's own limits plus 30 s: 90 s for a sandbox to become ready. */
     private static final Duration START_TIMEOUT = Duration.ofMinutes(2);
 
+    /** The same, plus the launcher's 180 s for the clone. */
+    private static final Duration CLONE_START_TIMEOUT = Duration.ofMinutes(5);
+
     /** 10 s for the script to take a message or an abort, plus 30 s. */
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(40);
 
@@ -178,17 +181,18 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         AgentModels.Choice choice = models.resolve(start.projectId(), start.lane());
         AgenticCredentialResolver.Credential credential = credentials.resolve(start.projectId(), choice.provider());
         Instant began = clock.instant();
+        Duration timeout = start.repo() == null ? START_TIMEOUT : CLONE_START_TIMEOUT;
         String sessionId;
         try {
             String body = mapper.writeValueAsString(startBody(start, choice, credential));
             HttpRequest request = request(launcherUrl, ROUTE)
-                    .timeout(START_TIMEOUT)
+                    .timeout(timeout)
                     .header("Accept", "application/json")
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> resp =
-                    exchange("start", request, launcherUrl, start.lane().wire(), START_TIMEOUT);
+                    exchange("start", request, launcherUrl, start.lane().wire(), timeout);
             if (resp.statusCode() / 100 != 2) {
                 throw refusal(
                         "start",
@@ -196,7 +200,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                         resp.body(),
                         launcherUrl,
                         start.lane().wire(),
-                        START_TIMEOUT);
+                        timeout);
             }
             sessionId = mapper.readTree(resp.body()).path("session_id").asText("");
         } catch (JsonProcessingException e) {
@@ -216,6 +220,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                         choice.provider(),
                         credential.platformFunded(),
                         start.subject()));
+        String systemPrompt = start.systemPrompt();
         long fileBytes = start.files().values().stream()
                 .mapToLong(LauncherAgentSessionClient::utf8Bytes)
                 .sum();
@@ -234,7 +239,8 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 .field("session", sessionId)
                 .field("files", start.files().size())
                 .field("fileBytes", fileBytes)
-                .field("systemPromptBytes", utf8Bytes(start.systemPrompt()))
+                .field("systemPromptBytes", systemPrompt == null ? 0 : utf8Bytes(systemPrompt))
+                .field("clone", start.repo() != null)
                 .field("mcpServers", start.mcpServers().size())
                 .field("durationMs", Duration.between(began, clock.instant()).toMillis())
                 .log();
@@ -631,7 +637,8 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
             Start start, AgentModels.Choice choice, AgenticCredentialResolver.Credential credential) {
         ObjectNode body = mapper.createObjectNode();
         body.put("lane", start.lane().wire());
-        body.put("system_prompt", start.systemPrompt());
+        String systemPrompt = start.systemPrompt();
+        if (systemPrompt != null) body.put("system_prompt", systemPrompt);
         ObjectNode files = body.putObject("files");
         start.files().forEach(files::put);
         body.put("model", choice.model());
@@ -648,6 +655,13 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         }
         body.put("idle_timeout_ms", start.idleTimeoutMs());
         body.put("max_tool_calls_per_message", start.maxToolCallsPerMessage());
+        Clone clone = start.repo();
+        if (clone != null) {
+            body.put("clone_url", clone.url());
+            body.put("head_sha", clone.headSha());
+            String onsetAt = clone.onsetAt();
+            if (onsetAt != null) body.put("onset_at", onsetAt);
+        }
         return body;
     }
 
