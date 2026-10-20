@@ -11,11 +11,12 @@ import type {
   GroundednessDetail,
   RcaCause,
   RcaReport,
+  RcaRun,
 } from "../../api/types";
 import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
-import { Button, Card, ErrorNote, Modal, PageHeader, StatusPill, Table, TableSkeleton, TBody, TD, TH, THead, TR } from "../../ui";
+import { Button, ErrorNote, Modal, PageHeader, Table, TableSkeleton, TBody, TD, TH, THead, TR } from "../../ui";
 import { rcaRunning, shiftKind, shownAsCause, RCA_VERDICT_LABEL, type CauseKind } from "../rcaLabels";
 import { CauseCard } from "../components/CauseCard";
 import { RateChart, RatePins } from "../classifiers/rateStory";
@@ -36,7 +37,11 @@ import { Dot, ListChassis, StateDot, detectorLabel, displayCallSite, timeAgo } f
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
 import { traceLinker } from "../traceLinker";
-import { stamp } from "../classifiers/shared";
+import { stamp, useNow } from "../classifiers/shared";
+import { RunBar, RunFold, type StepsSource } from "../components/RunBar";
+import { clock, elapsed, QUEUED_LINE, RUN_POLL_MS, stepMeta, stopFix, stopReason, THINKING } from "../components/runWords";
+import type { ProjectApi } from "../../api/client";
+import { useEffect, useRef, type ComponentProps } from "react";
 
 export function CasePage() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -60,13 +65,28 @@ export function CasePage() {
     queryKey: ["rca", api.base, detail?.rca_report_id],
     queryFn: () => api.getRcaReport(detail?.rca_report_id ?? ""),
     enabled: stillRunning,
-    refetchInterval: (q) =>
-      q.state.data && (q.state.data.status === "pending" || q.state.data.status === "claimed") ? 5000 : false,
+    refetchInterval: (q) => (q.state.data && rcaLive(q.state.data) ? RUN_POLL_MS : false),
   });
   const report: RcaReport | undefined = detail?.rca ?? rcaQ.data;
+  const run = runOf(report, detail?.case);
+
+  /* The case read inlines the report once it ends, and the cases list marks a running RCA; both go stale here. */
+  const polledState = rcaQ.data?.run?.state;
+  const seenState = useRef(polledState);
+  useEffect(() => {
+    if (polledState === seenState.current) return;
+    const was = seenState.current;
+    seenState.current = polledState;
+    if (was === undefined) return;
+    void qc.invalidateQueries({ queryKey: ["cases", api.base] });
+    void qc.invalidateQueries({ queryKey: ["case", api.base, caseId] });
+  }, [qc, api.base, caseId, polledState]);
+  const now = useNow(run?.state === "queued" || run?.state === "running");
 
 
-  const rcaEnabled = useCapabilities().isEnabled("rca_enabled");
+  const capabilities = useCapabilities();
+  const rcaEnabled = capabilities.isEnabled("rca_enabled");
+  const canProviders = capabilities.isEnabled("byo_provider_keys_enabled");
   const { canPrompt: canPromptRepo } = useRepoPrompt();
   const [connectRepoOpen, setConnectRepoOpen] = useState(false);
 
@@ -131,6 +151,8 @@ export function CasePage() {
   }
 
   const live = c.state !== "resolved";
+  const steps = run && detail.rca_report_id ? rcaSteps(api, detail.rca_report_id, run) : undefined;
+  const bar = run ? rcaBar(run, steps, basePath, canProviders, now) : null;
   const frustration = detail.frustration ?? null;
   const groundedness = detail.groundedness ?? null;
   const classifierDetail = detail.classifier_detail ?? null;
@@ -260,12 +282,14 @@ export function CasePage() {
 
         {rcaM.isError && <RcaErrorNote error={rcaM.error} />}
       </header>
+      {bar && <RunBar {...bar} />}
 
       {/* ----------------------------------------------------------------- why */}
       {(rcaEnabled || detail.rca_report_id != null) && (
         <Why
           report={report}
           analysing={analysing}
+          steps={steps}
           actions={
             live && detail.detector_available ? (
               <>
@@ -585,7 +609,7 @@ function affectedUnit(detail: CaseDetail): [string, string] {
 
 /**
  * The causes, carded under the headline. With no proven cause in an older report, the summary comes first
- * and the leads are labelled as leads. Also owns the in-flight "Analyzing" state.
+ * and the leads are labelled as leads.
  */
 function Why({
   report,
@@ -595,9 +619,12 @@ function Why({
   affected,
   basePath,
   show,
+  steps,
 }: {
   report: RcaReport | undefined;
   analysing: boolean;
+  /** The finished run's steps, behind the fold under the analysis. */
+  steps?: StepsSource;
   /** Close and Absorb. Shown only beside a finished analysis, never while one runs. */
   actions?: React.ReactNode;
   kind: CauseKind;
@@ -607,23 +634,8 @@ function Why({
   /** How a cause filters the flagged list below; the index is the cause's stored one. */
   show?: { count: (cause: RcaCause) => number; unit: [string, string]; onShow: (index: number) => void };
 }) {
-  if (analysing) {
-    return (
-      <Block label="Why">
-        <Card className="border border-border p-5">
-          <div className="flex items-center gap-2.5">
-            <StatusPill status="running" label="Analyzing" />
-            <span className="text-muted text-body">
-              Reading the evidence and looking for the cause.
-            </span>
-          </div>
-        </Card>
-      </Block>
-    );
-  }
-
-  // Nothing to say before a run, and a failed run says so once, in the block below the figure.
-  if (!report || report.status === "failed") return null;
+  // Nothing to say before a run or while one runs, and the bar under the header says a failed run stopped.
+  if (analysing || !report || report.status === "failed") return null;
 
   const indexed = report.causes.map((cause, index) => ({ cause, index }));
   const causes = indexed.filter((k) => shownAsCause(k.cause));
@@ -662,30 +674,20 @@ function Why({
           </p>
         )}
       </div>
-      <p className="mt-2.5 mb-0 text-small">
+      <div className="mt-2.5 text-small">
         <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
           Read the full analysis
         </Link>
-      </p>
+        {steps && <AnalysisFold run={report.run} steps={steps} />}
+      </div>
     </Block>
   );
 }
 
 /** What else was checked: the candidates the analysis ruled out, below the figure since none is the conclusion. */
 function Checks({ report, analysing }: { report: RcaReport | undefined; analysing: boolean }) {
-  // The card above owns the in-flight state, and there is nothing to say before a run.
-  if (analysing || !report) return null;
-
-  if (report.status === "failed") {
-    return (
-      <Block label="Why">
-        <p className="text-warning m-0 text-body" style={{ maxWidth: 640 }}>
-          The analysis did not finish, so there is nothing to show. Re-running is safe: it starts the same
-          analysis again from the beginning.
-        </p>
-      </Block>
-    );
-  }
+  // The bar under the header owns the in-flight and failed states, and there is nothing to say before a run.
+  if (analysing || !report || report.status === "failed") return null;
 
   // Every check, not just the eliminated ones: `contributing` and `explains` are part of the story.
   const checks = report.ruled_out;
@@ -772,6 +774,87 @@ function Activity({ events }: { events: CaseDetail["events"] }) {
         </ol>
       )}
     </section>
+  );
+}
+
+/** A report waits or runs while its run says so; a report from before runs were recorded says it by its status. */
+function rcaLive(report: RcaReport): boolean {
+  return report.run ? report.run.state === "queued" || report.run.state === "running" : rcaRunning(report.status);
+}
+
+/**
+ * Where the case's analysis stands: the report's own run, else what the case read says while the report is on
+ * its way, else a stop for a report that failed before runs were recorded.
+ */
+function runOf(report: RcaReport | undefined, c: CaseDetail["case"] | undefined): RcaRun | null {
+  if (report?.run) return report.run;
+  if (report?.status === "failed") {
+    return {
+      state: "stopped", queued_at: report.created_at, run_id: null, started_at: null,
+      ended_at: report.completed_at, step_count: 0, doing: null, stop_code: null,
+    };
+  }
+  const state = c?.rca_run_state;
+  if (!report && c && (state === "queued" || state === "running")) {
+    const since = c.rca_run_since ?? c.opened_at;
+    return {
+      state, queued_at: since, run_id: null, started_at: state === "running" ? since : null, ended_at: null,
+      step_count: 0, doing: null, stop_code: null,
+    };
+  }
+  return null;
+}
+
+/** The steps of a report's newest run, once the run has any; read only when someone opens them. */
+function rcaSteps(api: ProjectApi, reportId: string, run: RcaRun): StepsSource | undefined {
+  if (!run.run_id) return undefined;
+  return { load: (after) => api.getRcaSteps(reportId, after), live: run.state === "running" };
+}
+
+/** The bar after the header while an RCA waits, runs or stopped; a finished one has its fold instead. */
+function rcaBar(
+  run: RcaRun,
+  steps: StepsSource | undefined,
+  basePath: string,
+  canProviders: boolean,
+  now: number,
+): ComponentProps<typeof RunBar> | null {
+  const since = (iso: string | null) => (iso ? now - Date.parse(iso) : null);
+  if (run.state === "queued") {
+    const waited = since(run.queued_at);
+    return { kind: "RCA", state: "queued", line: QUEUED_LINE, meta: waited == null ? undefined : clock(waited) };
+  }
+  if (run.state === "running") {
+    const ran = since(run.started_at);
+    return {
+      kind: "RCA",
+      state: "running",
+      line: run.doing ? `${run.doing}…` : THINKING,
+      meta: ran == null ? undefined : run.step_count > 0 ? stepMeta(run.step_count, ran) : elapsed(ran),
+      steps,
+    };
+  }
+  if (run.state !== "stopped") return null;
+  const reason = stopReason(run.stop_code ?? "RCA.UPSTREAM_FAILED", "RCA");
+  return {
+    kind: "RCA",
+    state: "stopped",
+    line: run.step_count > 0 ? `Stopped at step ${run.step_count}: ${reason}` : `Stopped: ${reason}`,
+    fix: stopFix(run.stop_code, basePath, canProviders),
+    steps,
+  };
+}
+
+/** `› Did 23 steps in 9m` beside the link to the full analysis, for the run that wrote it. */
+function AnalysisFold({ run, steps }: { run: RcaRun | null; steps: StepsSource }) {
+  if (run?.state !== "done" || !run.started_at || !run.ended_at || run.step_count === 0) return null;
+  return (
+    <RunFold
+      stepCount={run.step_count}
+      durationMs={Date.parse(run.ended_at) - Date.parse(run.started_at)}
+      steps={steps}
+      className="ml-4"
+    />
   );
 }
 
