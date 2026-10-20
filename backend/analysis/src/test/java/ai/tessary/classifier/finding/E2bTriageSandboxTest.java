@@ -110,7 +110,7 @@ class E2bTriageSandboxTest {
                 new AgentSessionRunner.Task(
                         "proj",
                         ModelLane.TRIAGE,
-                        new LlmUsageAccountant.Subject("behavior_finding", "f1"),
+                        new LlmUsageAccountant.Subject(E2bTriageSandbox.SUBJECT_KIND, "f1"),
                         "system prompt",
                         Map.of("finding.md", "the finding"),
                         List.of(new AgentSessionClient.McpServer(

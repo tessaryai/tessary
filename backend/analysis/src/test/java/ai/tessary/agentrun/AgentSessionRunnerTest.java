@@ -48,7 +48,7 @@ class AgentSessionRunnerTest {
             + "{\"type\":\"object\",\"required\":[\"verdict\",\"why\"]}";
 
     private static final String RULING = "{\"verdict\":\"real\",\"why\":\"the answer cites no source\"}";
-    private static final LlmUsageAccountant.Subject SUBJECT = new LlmUsageAccountant.Subject("behavior_finding", "f-1");
+    private static final LlmUsageAccountant.Subject SUBJECT = new LlmUsageAccountant.Subject("finding", "f-1");
     private static final AgentSessionClient.McpServer MCP =
             new AgentSessionClient.McpServer("tessary-evals", "https://api.example/mcp", "tsy_a_secret");
 

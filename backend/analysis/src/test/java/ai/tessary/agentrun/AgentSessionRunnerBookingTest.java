@@ -80,8 +80,8 @@ class AgentSessionRunnerBookingTest {
 
     static Stream<Arguments> lanes() {
         return Stream.of(
-                Arguments.of(ModelLane.TRIAGE, new LlmUsageAccountant.Subject("behavior_finding", "f-1"), true),
-                Arguments.of(ModelLane.TRIAGE, new LlmUsageAccountant.Subject("behavior_finding", "f-1"), false),
+                Arguments.of(ModelLane.TRIAGE, new LlmUsageAccountant.Subject("finding", "f-1"), true),
+                Arguments.of(ModelLane.TRIAGE, new LlmUsageAccountant.Subject("finding", "f-1"), false),
                 Arguments.of(ModelLane.RCA, new LlmUsageAccountant.Subject("rca_report", "r-1"), true),
                 Arguments.of(ModelLane.RCA, new LlmUsageAccountant.Subject("rca_report", "r-1"), false));
     }
