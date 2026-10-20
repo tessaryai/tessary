@@ -289,7 +289,7 @@ class LauncherAgentSessionClientTest {
         return new AgentSessionClient.Start(
                 PROJECT,
                 ModelLane.RCA,
-                null,
+                "You find causes.",
                 Map.of("notes.md", "read me"),
                 List.of(),
                 120_000L,
@@ -300,8 +300,8 @@ class LauncherAgentSessionClientTest {
 
     /**
      * An RCA session that never gets its repository, or that is given up while a big repository still clones: a start
-     * with a clone sends clone_url, head_sha and onset_at, sends no system prompt when it has none, and waits the
-     * longer start timeout.
+     * with a clone sends clone_url, head_sha and onset_at beside its system prompt, and waits the longer start
+     * timeout.
      */
     @Test
     void aStartWithACloneSendsCloneUrlHeadShaAndOnsetAtAndWaitsTheLongerTimeout() throws Exception {
@@ -319,7 +319,7 @@ class LauncherAgentSessionClientTest {
                         body.path("clone_url").asText(),
                         body.path("head_sha").asText(),
                         body.path("onset_at").asText()));
-        assertFalse(body.has("system_prompt"), "a start with no system prompt sends none");
+        assertEquals("You find causes.", body.path("system_prompt").asText());
 
         TessaryException withClone = assertThrows(TessaryException.class, () -> client().start(rcaStart()));
         TessaryException without = assertThrows(TessaryException.class, () -> client().start(START));

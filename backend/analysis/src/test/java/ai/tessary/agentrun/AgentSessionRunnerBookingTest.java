@@ -127,7 +127,7 @@ class AgentSessionRunnerBookingTest {
                 PROJECT,
                 lane,
                 subject,
-                lane == ModelLane.RCA ? null : "You rule.",
+                "You rule.",
                 Map.of(),
                 List.of(),
                 null,

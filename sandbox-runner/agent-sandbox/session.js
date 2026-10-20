@@ -65,8 +65,7 @@ function readSessionFile(file) {
   const { lane, system_prompt: systemPrompt, files = {}, model, mcp_servers: servers, max_tool_calls_per_message: maxToolCalls, clone } = input;
   const posture = Object.hasOwn(SESSION_LANES, lane) ? SESSION_LANES[lane] : null;
   if (!posture) throw new Error(`session.json: lane must be one of ${LANE_NAMES}`);
-  const promptAbsent = systemPrompt === undefined || systemPrompt === null;
-  if (!(posture.promptOptional && promptAbsent) && (typeof systemPrompt !== 'string' || !systemPrompt)) {
+  if (typeof systemPrompt !== 'string' || !systemPrompt) {
     throw new Error('session.json: system_prompt must be a non-empty string');
   }
   if (clone !== undefined && clone !== null) {
@@ -99,7 +98,7 @@ function readSessionFile(file) {
   }
   return {
     posture,
-    systemPrompt: promptAbsent ? null : systemPrompt,
+    systemPrompt,
     files,
     model,
     servers,
@@ -455,7 +454,6 @@ async function main() {
   let tracker = null;
   let sessionId = null;
   let model = null;
-  let agent = null;
   let onset = null;
   let stopping = false;
   let lost = false;
@@ -573,7 +571,7 @@ async function main() {
     try {
       await client.session.promptAsync({
         path: { id: sessionId },
-        body: { ...(agent ? { agent } : {}), model, parts: [{ type: 'text', text: sent }] },
+        body: { agent: SESSION_AGENT, model, parts: [{ type: 'text', text: sent }] },
       });
       return { status: 202 };
     } catch (e) {
@@ -625,14 +623,11 @@ async function main() {
     if (posture.checksDir) fs.mkdirSync(path.join(WORK, posture.checksDir), { recursive: true });
     relay = await startMcpRelay({ servers: input.servers, workDir: WORK });
     const steps = input.maxToolCalls + 1;
-    agent = input.systemPrompt ? SESSION_AGENT : null;
     server = await startServer({
       permission: basePermission({ edit: posture.edit }, { scratchDirs: posture.scratchDirs }),
       lsp: {},
       mcp: remoteMcp(relay.urls),
-      agent: agent
-        ? { [SESSION_AGENT]: customAgent({ prompt: input.systemPrompt, steps }) }
-        : { build: { maxSteps: steps } },
+      agent: { [SESSION_AGENT]: customAgent({ prompt: input.systemPrompt, steps }) },
     });
     const { createOpencodeClient } = await import('@opencode-ai/sdk');
     client = createOpencodeClient({ baseUrl: server.url, fetch: makeFetch(REQUEST_MS), throwOnError: true });

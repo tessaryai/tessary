@@ -34,7 +34,7 @@ const START = {
 };
 const NOT_FOUND = { error: 'not found', kind: 'unknown_session' };
 const CLONE_URL = 'https://x-access-token:ghs_clonesecret@github.com/acme/app.git';
-const RCA_START = { ...START, lane: 'rca', system_prompt: undefined, clone_url: CLONE_URL, head_sha: 'a41c0de', onset_at: '2026-10-01T09:30:00Z' };
+const RCA_START = { ...START, lane: 'rca', system_prompt: 'You find causes.', clone_url: CLONE_URL, head_sha: 'a41c0de', onset_at: '2026-10-01T09:30:00Z' };
 
 /*
  * A fake Engine API that knows session containers. A create whose Cmd[1] is session.js is a
@@ -632,13 +632,14 @@ test('a reply whose message_end beats the 202 does not leave the session busy (a
   });
 });
 
-test('an rca session may omit system_prompt, and its session.json carries the lane and the clone (an RCA session refused for the system prompt it never had, or one that never clones)', T, async () => {
+test('an rca session\'s session.json carries the lane, the system prompt and the clone (an RCA session that runs the provider\'s default agent, or one that never clones)', T, async () => {
   await withSessionLauncher({}, async ({ start, daemon }) => {
     const started = await start(RCA_START);
     assert.equal(started.status, 201, JSON.stringify(started.body));
 
     assert.deepEqual(JSON.parse(daemon.sessionFiles.c1), {
       lane: 'rca',
+      system_prompt: 'You find causes.',
       files: { 'notes.md': 'hello' },
       model: 'amazon-bedrock/global.anthropic.claude-sonnet-4-6',
       mcp_servers: START.mcp_servers,
@@ -664,7 +665,7 @@ test('a clone field on a triage or agent_run session is bad_request and spends n
 
 test('a session with a clone gets the longer ready deadline (a clone of a big repo read as a failed start)', T, async () => {
   await withSessionLauncher({ shapes: [{ startFails: true }, { startFails: true }] }, async ({ start }) => {
-    assert.equal((await start({ ...RCA_START, system_prompt: 'You find causes.' })).body.timeout_ms, 270000);
+    assert.equal((await start(RCA_START)).body.timeout_ms, 270000);
     assert.equal((await start({ ...RCA_START, clone_url: undefined, head_sha: undefined, onset_at: undefined })).body.timeout_ms, 90000);
   });
 });
@@ -672,7 +673,7 @@ test('a session with a clone gets the longer ready deadline (a clone of a big re
 test('the clone URL never reaches the launcher log (token in console)', T, async () => {
   const failing = { startFails: `git clone failed: fatal: unable to access '${CLONE_URL}': 403` };
   await withSessionLauncher({ shapes: [failing] }, async ({ start, send, stop, events, stderr, stdout }) => {
-    const failed = await start({ ...RCA_START, system_prompt: 'You find causes.' });
+    const failed = await start(RCA_START);
     assert.equal(failed.status, 502);
     assert.doesNotMatch(JSON.stringify(failed.body), /clonesecret/);
 

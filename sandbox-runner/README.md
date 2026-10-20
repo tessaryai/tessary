@@ -112,9 +112,9 @@ drives it over HTTP.
 
 | Item | Value |
 |---|---|
-| `session.json` | `{ lane, system_prompt?, files, model, mcp_servers: [ { name, url, token } ], max_tool_calls_per_message, clone? }`. The script reads it and deletes it before anything else runs, so no token is on disk while the agent runs. |
+| `session.json` | `{ lane, system_prompt, files, model, mcp_servers: [ { name, url, token } ], max_tool_calls_per_message, clone? }`. The script reads it and deletes it before anything else runs, so no token is on disk while the agent runs. |
 | `lane` | `agent_run`, `triage` or `rca`; it sets the posture below (`SESSION_LANES` in `agent-stream.js`). Another value is a start failure. |
-| `system_prompt` | A non-empty string, run as the session agent `tessary-session`. Only `rca` may leave it out (absent or `null`): the session then runs OpenCode's default `build` agent with `maxSteps = max_tool_calls_per_message + 1`, and no message names an agent, as the `run` lane does without a system prompt. |
+| `system_prompt` | A non-empty string on every lane, run as the session agent `tessary-session`. |
 | `clone` | `rca` only: `{ url, head_sha, onset_at? }`, `head_sha` matching `^[0-9a-f]{7,64}$`. Before the session reports ready, the script clones `url` to `<WORK>/repo`, checks out `head_sha` and moves the repo's agent config (`AGENTS.md`, `.opencode`, ...) to `repo/quarantine/`. `url` carries a short-lived token: git runs with it kept out of errors, and every error is scrubbed. It then resolves the onset commit once (the newest commit on `HEAD` committed before `onset_at`, or `unknown`) and replaces `{onset_commit}` in the text of every message it forwards. A clone git refuses is a start failure with git's scrubbed reason. |
 | `files` | Relative path to content, written under `<WORK>/dossier/` (the lanes' layout). A path that escapes is a start failure. |
 | `mcp_servers` | Names match `^[a-z][a-z0-9-]{0,31}$` and are unique. The tokens go only to the relay (`mcp-relay.js`), which serves each name at `http://127.0.0.1:<port>/mcp/<name>`; OpenCode's config gets one remote entry per name with no headers. |
@@ -233,7 +233,7 @@ head_sha?, onset_at? }`. The launcher checks the body in this order, each a `bad
 | `idle_timeout_ms` positive integer | `session.js: idle_timeout_ms must be a positive integer` |
 | `idle_timeout_ms` at most 24 hours | `session.js: idle_timeout_ms must be at most 86400000` |
 | an `egress_secret` credential on docker | `session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)` |
-| `system_prompt` non-empty string; on `rca` it may be absent or `null` | `session.js: system_prompt must be a non-empty string` |
+| `system_prompt` non-empty string | `session.js: system_prompt must be a non-empty string` |
 | `clone_url`, `head_sha`, `onset_at` only on `rca` | `session.js: clone_url, head_sha and onset_at are for the rca lane only` |
 | `clone_url` and `head_sha` both or neither | `session.js: clone_url and head_sha go together` |
 | `onset_at` only with them | `session.js: onset_at needs clone_url and head_sha` |
@@ -252,7 +252,7 @@ These are the script's own checks of `session.json`, made here as well so a call
 `bad_request` (the backend's `RUN_FAILED`) that spends no sandbox, never a failed start that reads
 as an outage. A dossier path that escapes is still found only by the script. `provider` is ignored, as on `/runs`: `credential.provider`
 decides. `session.json` holds exactly `{ lane, system_prompt, files, model, mcp_servers,
-max_tool_calls_per_message }`, with `system_prompt` left out when the caller left it out, `clone: {
+max_tool_calls_per_message }`, with `clone: {
 url, head_sha, onset_at }` added for a clone, and the model qualified as on `/runs`; the
 credential reaches the sandbox only through its env, with `model_cost` declared in
 `OPENCODE_CONFIG_CONTENT`. The clone URL carries a short-lived token, so it is in `session.json` only
