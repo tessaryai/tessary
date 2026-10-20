@@ -302,6 +302,10 @@ function hostOf(url) {
   return url && URL.canParse(url) ? new URL(url).hostname : null;
 }
 
+// opencode resolves a model id against this list at run time; its bundled copy lags new models, so
+// with this host blocked a model such as claude-sonnet-5-5 is "not found" and the run fails with a 500.
+const OPENCODE_MODEL_LIST_HOST = 'models.opencode.ai';
+
 /**
  * Set only for an egress credential. A rule's host must also be allowed or the provider is
  * unreachable, which is why it leads `allowOut`.
@@ -309,7 +313,7 @@ function hostOf(url) {
 function egressNetwork(credential, urls) {
   if (!credential.egress_secret) return {};
   const modelHost = hostOf((credential.base_url || '').trim() || defaultBaseUrlFor(ANTHROPIC_MODE));
-  const hosts = [modelHost, ...urls.map(hostOf), ...EGRESS_EXTRA_ALLOW];
+  const hosts = [modelHost, OPENCODE_MODEL_LIST_HOST, ...urls.map(hostOf), ...EGRESS_EXTRA_ALLOW];
   return {
     network: {
       allowOut: [...new Set(hosts.filter(Boolean))],
@@ -1652,6 +1656,19 @@ if (badIntEnv.length > 0) {
 if (BACKEND === 'docker' && !SANDBOX_WORK_VOLUME) {
   console.error('error: SANDBOX_BACKEND=docker requires SANDBOX_WORK_VOLUME (the name of the Docker volume mounted at LAUNCHER_WORK_DIR).');
   console.error('       See docker-compose.yml\'s sandbox-runner service for how the two are wired together.');
+  process.exit(1);
+}
+
+// The lane and session scripts this file runs ship in the template of the same release, so a template pinned to another one
+// fails every run. Only two release numbers are compared: a local build (dev) or a floating tag (latest) is not checked.
+const RELEASE = /^\d+\.\d+\.\d+$/;
+const launcherRelease = (() => {
+  try { return fs.readFileSync(path.join(__dirname, 'IMAGE_VERSION'), 'utf8').trim(); } catch { return ''; }
+})();
+const templateRelease = ANALYZER_TEMPLATE.slice(ANALYZER_TEMPLATE.lastIndexOf(':') + 1);
+if (BACKEND === 'e2b' && RELEASE.test(launcherRelease) && RELEASE.test(templateRelease) && templateRelease !== launcherRelease) {
+  console.error(`error: E2B_ANALYZER_TEMPLATE=${ANALYZER_TEMPLATE} is not this launcher's release ${launcherRelease}.`);
+  console.error('       Unset it so docker-compose.yml takes the template from TESSARY_VERSION, or pin it to the same release.');
   process.exit(1);
 }
 

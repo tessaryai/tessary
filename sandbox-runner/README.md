@@ -66,8 +66,9 @@ narrower.
   - An **egress credential** (`credential.egress_secret`, Anthropic only, E2B backend only) carries
     no key: it names a secret in E2B's own store, which E2B's egress proxy injects as the provider's
     `x-api-key` outside the microVM. The agent gets a placeholder, and that run's or session's
-    egress is limited to the model provider, the MCP door, the clone host and `EGRESS_EXTRA_ALLOW`;
-    for a session the MCP door is every `mcp_servers` host.
+    egress is limited to the model provider, opencode's model list (`models.opencode.ai`), the MCP
+    door, the clone host and `EGRESS_EXTRA_ALLOW`; for a session the MCP door is every
+    `mcp_servers` host.
   - The other posture, UNTRUSTED_POSTURE (empty env, `NetworkMode: 'none'`), has **no route today**:
     its callers were `/grade` and `/lint`. It is kept deliberately — the pair exists so that a
     future untrusted-content route cannot default into the full credential set, and one legal value
@@ -309,6 +310,10 @@ and runs `/usr/local/bin/node-sealed session.js /work/session.json` with the lab
 network it shares with the container, chosen by that network's name, never the first one listed.
 
 ### E2B
+
+The launcher refuses to boot when `E2B_ANALYZER_TEMPLATE` names a release other than its own
+`IMAGE_VERSION`: the lane and session scripts it runs ship in the template of the same release.
+A local build (`dev`) or a floating tag (`latest`) is not checked.
 
 A session sandbox is created from `E2B_ANALYZER_TEMPLATE` with `timeoutMs` set to
 `SANDBOX_SESSION_MAX_MS` + 60 s and the metadata `tessary.sandbox.session=<id>`. The launcher

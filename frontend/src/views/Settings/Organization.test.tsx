@@ -4,7 +4,7 @@
  * can never be archived or deleted. The bugs worth catching: a non-owner offered a control that will
  * only be refused, a lifecycle action on the default or a deleting project, an action sent for the
  * wrong project, a delete without its confirmation or one that asks through the browser's blocking
- * confirm() (#84), and a deleting row that never goes away.
+ * confirm() (#84), a deleting row that never goes away, and a build line that names no build.
  */
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +48,7 @@ beforeEach(() => {
   nativeConfirm.mockClear();
   vi.spyOn(window, "confirm").mockImplementation(nativeConfirm);
   auth.getOrg.mockResolvedValue(ORG);
+  auth.getBuild.mockResolvedValue({ version: "1.4.0" });
   auth.listProjects.mockResolvedValue(PROJECTS.filter((p) => !p.deleting_at));
   auth.listMembers.mockImplementation(async () => [member("u-other", "owner"), member("u-me", session.role)]);
   for (const f of [auth.updateOrg, auth.makeProjectDefault, auth.archiveProject, auth.unarchiveProject, auth.deleteProject]) {
@@ -248,5 +249,27 @@ describe("the organization ID and appearance", () => {
       </DensityProvider>,
     );
     expect(screen.getByRole("radio", { name: "Compact" }).getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("the running build", () => {
+  it("names a release by its version", async () => {
+    renderRoute(<Organization />);
+    expect(await screen.findByText("Tessary 1.4.0")).toBeTruthy();
+  });
+
+  it("calls an unreleased build a dev build", async () => {
+    auth.getBuild.mockResolvedValue({ version: "dev" });
+    renderRoute(<Organization />);
+    expect(await screen.findByText("Tessary dev build")).toBeTruthy();
+  });
+
+  it("shows no build line when the read fails", async () => {
+    auth.getBuild.mockRejectedValue(new Error("down"));
+    renderRoute(<Organization />);
+    await screen.findByText("org_0123");
+    await waitFor(() => expect(auth.getBuild).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByText(/^Tessary /)).toBeNull();
   });
 });

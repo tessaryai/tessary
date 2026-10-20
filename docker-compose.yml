@@ -294,7 +294,7 @@ services:
       # Must equal the `sandbox-work` volume's `name:`; the docker backend fails at boot if unset.
       SANDBOX_WORK_VOLUME: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work}
       E2B_API_KEY: ${E2B_API_KEY:-}
-      # Namespaced so any E2B key can reach the public template; unset floats to `:latest`.
+      # Namespaced so any E2B key can reach the public template. The launcher refuses to boot on one from another release.
       E2B_ANALYZER_TEMPLATE: ${E2B_ANALYZER_TEMPLATE:-tessary/tessary-agent-sandbox:${TESSARY_VERSION:-latest}}
       # The launcher reads no provider secret from its env; each run carries the org's own credential.
       # MANTLE_PROJECT_ID is an attribution scope, not a secret.

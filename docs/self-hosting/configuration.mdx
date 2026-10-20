@@ -160,6 +160,7 @@ The groundedness model needs a GPU: a Mac with Apple silicon for development, or
 | --- | --- | --- |
 | `TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL` | URL of the sandbox-runner service that runs agentic analysis (RCA, triage, drift detection). | Auto-wired by Compose to `http://sandbox-runner:8080` |
 | `SANDBOX_BACKEND` | Where sandbox-runner launches sandboxed agent sessions: `docker` (sibling containers), `e2b` (Tessary-hosted microVMs), or `local` (the host's logged-in `claude`). | `docker` |
+| `E2B_ANALYZER_TEMPLATE` | The E2B template sandbox-runner starts agent sessions from, when `SANDBOX_BACKEND` is `e2b`. Leave it unset. The launcher runs scripts that its own release puts in the template, so it refuses to start on a template from a different release. | `tessary/tessary-agent-sandbox:<TESSARY_VERSION>` |
 | `SANDBOX_WORK_VOLUME` | Name of the Docker volume sandbox-runner shares with the sibling containers it spawns. The launcher hands this exact string to the Engine API, so it is the volume's real name and not a project-prefixed one. | `tessary-sandbox-work` |
 | `AGENT_PROVIDER` | Where the sandboxed agent runs: unset for SigV4 Bedrock, `anthropic` for the first-party Anthropic API, or `bedrock-api-key` for Bedrock over a bearer token. | Unset (SigV4 Bedrock) |
 | `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY` | The bearer the backend presents to the sandbox launcher, and the launcher checks it against. Anyone holding the published default can drive the launcher into spawning containers on the host, so replace it before the instance holds anything real: see [Secure the instance](/self-hosting/setup#secure-the-instance). | A placeholder, published in `docker-compose.yml` |
@@ -217,6 +218,7 @@ The complete set of destinations a self-hosted instance may reach, and when. Any
 | Destination | When | Why it is permitted |
 | --- | --- | --- |
 | `home.tessary.ai` | Once at backend start and every 6 hours, only while `TESSARY_TELEMETRY_ENABLED` is `true` | The heartbeat and the price book check above. Off, the name is never even resolved. |
+| `home.tessary.ai` (paid, licensed installs only) | Hourly, regardless of `TESSARY_TELEMETRY_ENABLED` | A paid self-hosted install under a license pulls its signed license check-in document. The open edition never makes this call; the paid overlay's README documents it. |
 | `docker.io` | `docker compose pull`, before the stack runs; and once more at the first analysis, for the agent image the sandbox runner pulls lazily unless you pull it first | The published images. The check pulls or builds them before its observation window opens, so a pull during operation is a failure; the agent image is the one exception, named here because the check's walk stops before the first analysis. |
 | Nothing from the bundled Redpanda | Only with `--profile kafka` | Redpanda's metrics reporter (`enable_metrics_reporter`, the one setting that phones home) is off in the flags the profile starts it with. |
 | `acme-v02.api.letsencrypt.org` | Only when `SITE_DOMAIN` names a real host | Caddy's certificate issuance. Unset, Caddy serves plain HTTP and contacts nobody. |
