@@ -1,12 +1,14 @@
 # The `home.tessary.ai` telemetry contract
 
-> **Status: the §1 heartbeat client is built; the §2 license-check endpoint is not.**
+> **Status: the §1 heartbeat client is built; the §2 license check is a pull in the paid overlay.**
 > `backend/core/.../telemetry` (`TelemetryProperties`, `HomeTessaryClient`, `InstanceIdRepository`) and
 > `backend/surfaces/.../telemetry` (`TelemetryHeartbeat`) implement §1, §3 and §5 of this contract.
 > The server is `tessaryai/tessary-home`; §1 matches its `POST /v1/ping` route, and
 > `TelemetryHeartbeatTest` validates the real payload against a copy of that repository's
 > `contracts/ping.v1.schema.json`. `home.tessary.ai` is deployed; a ping that fails still fails
-> harmlessly (see §1's error handling). The
+> harmlessly (see §1's error handling). §2's license check is not a call the open
+> edition makes: the paid overlay pulls a signed check-in document instead, and that
+> pull is outside §3's opt-out by design. The
 > Mixpanel-based analytics stack this doc's contract replaced (`ai.tessary.analytics`,
 > `frontend/src/lib/mixpanel.ts`) is gone outright, not superseded gradually — deleted in the same
 > change that added this client. §2's license-check endpoint remains spec-only.
@@ -103,9 +105,24 @@ version and are never stored twice.
 updates only with a release. `tessary.pricing.enabled=false` turns off both the
 bundled import and the fetch.
 
-## 2. License-check endpoint
+## 2. License check
 
-Not yet implemented. Shapes only:
+**Not a call the open edition makes, and not the shape below.** The open edition has no
+license and never touches this section. A paid self-hosted install under a license
+(the `tessary-paid` overlay) checks in by pulling a signed document, not by posting a
+key: `GET https://home.tessary.ai/v1/license/check-in`, no request body, no identifier,
+answered with a document signed under the same Ed25519 keys as the license itself
+(when it was published, when it goes stale, the ids of every revoked license, and the
+rollout flags). The install drops a license the document revokes, and treats its
+license as lapsed once it has failed to get through for longer than the license's
+grace. That pull is **outside §3's opt-out**: a licensed install reaches
+`home.tessary.ai` for its license whatever `TESSARY_TELEMETRY_ENABLED` says, which
+is a condition of the license and documented with it in the paid overlay's README.
+Nothing about the heartbeat changes: it stays optional, anonymous, and never carries a
+license key.
+
+The request/response shapes first sketched here are kept for the record and are not
+built:
 
 **Request**
 
@@ -123,10 +140,10 @@ Not yet implemented. Shapes only:
 | `expires_at` | ISO-8601 UTC or null | `"2027-03-01T00:00:00Z"` | When the license expires; null for perpetual/open. |
 | `entitlements` | string[] | `["custom_redaction_enabled"]` | Which paid capabilities this license unlocks. |
 
-`unreachable` degrades to "never blocks" — a self-hosted instance that cannot
-reach `home.tessary.ai` keeps running exactly as it was (price-book sync
-degrades the same way: falls back to the bundled data, a manual override always
-wins).
+`unreachable` was to degrade to "never blocks". The built check-in does not: an
+install that cannot reach `home.tessary.ai` for longer than its grace treats its
+license as lapsed, the way an expired token does. Price-book sync still degrades
+harmlessly (falls back to the bundled data, a manual override always wins).
 
 ## 3. Opt-out env var
 
@@ -136,9 +153,10 @@ wins).
 
 When set `false`: zero outbound network calls — including DNS resolution to
 `home.tessary.ai` — from the backend process (§4), covering the heartbeat
-ping (§1), the price book check (§1a), and the license-check call (§2): with the
-var off, no attempt to resolve or reach `home.tessary.ai` may occur anywhere in
-a boot-to-triage run.
+ping (§1) and the price book check (§1a): with the var off, the open edition makes
+no attempt to resolve or reach `home.tessary.ai` anywhere in a boot-to-triage run.
+The paid overlay's license check-in (§2) is the one deliberate exception, on a
+licensed install only.
 
 ## 4. Scope note: backend-only
 
@@ -188,3 +206,8 @@ The `home.tessary.ai` service itself lives outside this repo, in `tessaryai/tess
   §5: a transport header, not a payload field.
 - 2026-09-13 — §1a: the instance checks home's price book manifest on the same 6-hour tick and imports
   a new book when the digest changes. The ping gains `price_book.digest` and `price_book.schema_max`.
+- 2026-10-19 — §2 rewritten for what was built: the paid overlay pulls a signed check-in
+  document (`GET /v1/license/check-in`) rather than posting a license key, and that pull is
+  outside §3's opt-out on a licensed install. The open edition is untouched; the heartbeat
+  and its opt-out are exactly as before. Not a version bump under §5: no payload field of
+  the ping changed.
