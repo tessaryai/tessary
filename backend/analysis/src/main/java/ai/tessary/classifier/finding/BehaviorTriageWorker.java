@@ -204,7 +204,8 @@ public class BehaviorTriageWorker {
             if (ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE.equals(e.error())) {
                 // DEBUG because the breaker carries the one line an operator needs.
                 log.debug("triage of {} released unspent: {}", job.findingId(), e.getMessage());
-                jobs.releaseWithoutAttempt(job.id(), e.getMessage());
+                // No error kept: no attempt ran, so the finding still reads Queued rather than Retrying.
+                jobs.releaseWithoutAttempt(job.id(), null);
                 close(runId, Outcome.RELEASED, e.error().code());
                 breaker.recordLauncherFailure(e.toString());
                 return;
@@ -227,18 +228,11 @@ public class BehaviorTriageWorker {
                 releaseUntilConfigured(job, runId, e, "someone acts on: " + e.getMessage());
                 return;
             }
-            if (ClassifierError.TRIAGE_SANDBOX_BUSY.equals(e.error()) && e instanceof Retryable busy) {
-                // No error kept: nothing failed, so the finding still reads Queued rather than Retrying.
-                log.debug("triage of {} waits for a free sandbox: {}", job.findingId(), e.getMessage());
-                jobs.releaseWithoutAttempt(job.id(), null, busy.retryAfterSeconds());
-                close(runId, Outcome.RELEASED, e.error().code());
-                return;
-            }
             if (e instanceof Retryable retryable) {
-                // Clears on its own; back after the delay it names, unspent.
+                // Clears on its own; back after the delay it names, unspent, and with no error, so it reads Queued.
                 long delaySeconds = retryable.retryAfterSeconds();
                 log.debug("triage of {} deferred {}s: {}", job.findingId(), delaySeconds, e.getMessage());
-                jobs.releaseWithoutAttempt(job.id(), e.getMessage(), delaySeconds);
+                jobs.releaseWithoutAttempt(job.id(), null, delaySeconds);
                 close(runId, Outcome.RELEASED, e.error().code());
                 return;
             }
@@ -251,13 +245,26 @@ public class BehaviorTriageWorker {
     /**
      * A run still open on a job just claimed belongs to an attempt whose worker died: its session may still be
      * spending, so it is stopped and the run marked abandoned before this attempt opens its own. A launcher that cannot
-     * take the stop fails this attempt the way the run itself would.
+     * take the stop has lost the session already; if it is down, this attempt's own run says so a moment later.
      */
     private void abandonOrphans(BehaviorTriageJobRow job) {
         for (AgentRunRepository.RunSummary orphan : runs.openRunsOfJob(job.id())) {
             String sessionId = orphan.sessionId();
-            if (sessionId != null) sessions.stop(sessionId);
+            if (sessionId != null) stopOrphan(orphan.id(), sessionId);
             runs.close(orphan.id(), Outcome.ABANDONED, null);
+        }
+    }
+
+    private void stopOrphan(String runId, String sessionId) {
+        try {
+            sessions.stop(sessionId);
+        } catch (RuntimeException e) {
+            StructuredLog.warn(log, Markers.OPS, "behavior.triage.orphan-stop-failed")
+                    .message("could not stop session " + sessionId + " of abandoned triage run " + runId)
+                    .field("run", runId)
+                    .field("session", sessionId)
+                    .field("error", e.toString())
+                    .log();
         }
     }
 

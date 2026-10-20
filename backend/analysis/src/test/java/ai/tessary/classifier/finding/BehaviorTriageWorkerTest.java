@@ -156,7 +156,10 @@ class BehaviorTriageWorkerTest {
                         new OutOfCredit())));
     }
 
-    /** A refusal that clears on its own waits the delay it names, unspent and not held for a person. */
+    /**
+     * A refusal that clears on its own waits the delay it names, unspent, with no error so it reads Queued, and not
+     * held for a person.
+     */
     @Test
     void aRefusalThatClearsOnItsOwnWaitsTheDelayItNames() {
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
@@ -169,7 +172,7 @@ class BehaviorTriageWorkerTest {
         tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), props)
                 .triageForTest(job("job_1", "f1"));
 
-        verify(jobs).releaseWithoutAttempt("job_1", busy.getMessage(), 60L);
+        verify(jobs).releaseWithoutAttempt("job_1", null, 60L);
         verify(jobs, never()).holdUntilConfigured(anyString(), any(), anyString(), anyLong());
         verifyNoInteractions(breaker);
         verify(runs).close("run-1", Outcome.RELEASED, busy.error().code());
@@ -237,6 +240,46 @@ class BehaviorTriageWorkerTest {
         order.verify(runs).close("run-00", Outcome.ABANDONED, null);
         order.verify(runs).open(PROJECT, AgentRunRepository.Lane.TRIAGE, "f1", "job_1", 2);
         verify(sessions, times(1)).stop(anyString());
+    }
+
+    /**
+     * A launcher that is down spends no attempt, so the job goes back with no error and the finding still reads Queued
+     * (a retry line saying attempt 0 of 5 ended with no ruling when no attempt ran).
+     */
+    @Test
+    void aLauncherThatIsDownLeavesTheFindingReadingQueued() {
+        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
+        BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
+        when(engine.rule(eq(PROJECT), eq("f1"), any(), any()))
+                .thenThrow(new TessaryException(ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, "connection refused"));
+
+        worker(jobs, engine, breaker(), FakeTriageSource.briefing()).triageForTest(job("job_1", "f1"));
+
+        verify(jobs).releaseWithoutAttempt("job_1", null);
+        verify(jobs, never()).markRetryable(anyString(), any(), anyLong());
+    }
+
+    /**
+     * A launcher that cannot take the stop of a crashed attempt's session has lost that session already: the orphan is
+     * still closed and this attempt runs (an attempt spent on the stop, and the orphan left open for every reclaim).
+     */
+    @Test
+    void aStopTheLauncherCannotTakeStillClosesTheOrphanAndRunsTheAttempt() {
+        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
+        BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
+        when(runs.openRunsOfJob("job_1")).thenReturn(List.of(openRun("run-0", "s-old")));
+        doThrow(new TessaryException(AgentRunError.LAUNCHER_UNAVAILABLE, "unreachable"))
+                .when(sessions)
+                .stop("s-old");
+        when(engine.rule(eq(PROJECT), eq("f1"), any(), any()))
+                .thenReturn(new BehaviorTriageVerdict(FindingRow.TriageVerdict.NEGATIVE, "ordinary", List.of()));
+
+        worker(jobs, engine, mock(TriageLauncherBreaker.class), FakeTriageSource.briefing())
+                .triageForTest(job("job_1", "f1", 2));
+
+        verify(runs).close("run-0", Outcome.ABANDONED, null);
+        verify(jobs).markDone("job_1");
+        verify(jobs, never()).markRetryable(anyString(), any(), anyLong());
     }
 
     /** A run that cannot be closed never undoes the ruling: the job is still done (a ruling re-spent over a blip). */
@@ -374,7 +417,7 @@ class BehaviorTriageWorkerTest {
         tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), Props.of(ClassifierProperties.class))
                 .tick();
 
-        verify(jobs).releaseWithoutAttempt(eq("job_1"), anyString());
+        verify(jobs).releaseWithoutAttempt("job_1", null);
         verify(jobs, times(1)).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
         assertTrue(breaker.isOpen());
     }
