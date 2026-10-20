@@ -21,6 +21,14 @@
 
 Tessary is an open-source reliability platform for AI agents in production. It monitors every trace, detects issues using cheap classifiers, groups related findings into cases, and investigates their root cause using trace and repository evidence.
 
+<p align="center">
+  <a href="https://claude.ai/artifact/QgGwCRCSQoMCm79kJqynDN">
+    <img src=".github/assets/demo.gif" alt="A support agent starts promising refunds before it checks eligibility. A classifier flags the replies, triage opens a case, and RCA traces the case to a prompt change in commit a1f9c2 and suggests a fix.">
+  </a>
+</p>
+
+<p align="center">A prompt change makes a support agent promise refunds too early. Tessary flags it, opens a case, and finds the commit that caused it. <a href="https://claude.ai/artifact/QgGwCRCSQoMCm79kJqynDN">Step through the interactive demo</a>.</p>
+
 ## Get running
 
 To try it without installing anything, sign up for Tessary Cloud at <https://app.tessary.ai>. It's free, needs no credit card, and its limits are on the [pricing page](https://tessary.ai/#pricing).
