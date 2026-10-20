@@ -8,9 +8,13 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -93,6 +97,24 @@ final class FakeAgentSessionClient implements AgentSessionClient {
     /** True once a stream has handed the caller {@code closed}. */
     volatile boolean closedRead;
 
+    /** A session that emits nothing on abort or stop, so it never closes. */
+    boolean silent;
+
+    @Nullable
+    RuntimeException abortFails;
+
+    @Nullable
+    RuntimeException stopFails;
+
+    /** What every send returns once it is not {@code ACCEPTED}. */
+    @Nullable
+    SendOutcome refuse;
+
+    /** The n-th {@code events} call, from 0, throws this on its first read. */
+    final Map<Integer, RuntimeException> streamFailures = new HashMap<>();
+
+    private int streams;
+
     @Override
     public Session start(Start start) {
         starts.add(start);
@@ -103,6 +125,7 @@ final class FakeAgentSessionClient implements AgentSessionClient {
     public synchronized SendOutcome send(String sessionId, String text) {
         calls.add("send");
         if (closed) return SendOutcome.CLOSED;
+        if (refuse != null) return refuse;
         sent.add(text);
         List<Item> reply = replies.poll();
         if (reply == null) return SendOutcome.ACCEPTED;
@@ -114,13 +137,16 @@ final class FakeAgentSessionClient implements AgentSessionClient {
     @Override
     public synchronized void abort(String sessionId) {
         calls.add("abort");
+        if (abortFails != null) throw abortFails;
+        if (silent) return;
         if (replyOpen && !closed) emit(end(SessionEvent.EndReason.ABORTED, 0));
     }
 
     @Override
     public synchronized void stop(String sessionId) {
         calls.add("stop");
-        if (closed) return;
+        if (stopFails != null) throw stopFails;
+        if (closed || silent) return;
         if (replyOpen) emit(end(SessionEvent.EndReason.ABORTED, 0));
         emit(closed(SessionEvent.CloseReason.STOPPED));
     }
@@ -135,7 +161,7 @@ final class FakeAgentSessionClient implements AgentSessionClient {
     @Override
     public Stream<SessionEvent> events(String sessionId, long afterSeq) {
         calls.add("events " + afterSeq);
-        Reader reader = new Reader(afterSeq);
+        Reader reader = new Reader(afterSeq, streamFailures.get(streams++));
         return StreamSupport.stream(
                         Spliterators.spliteratorUnknownSize(reader, Spliterator.ORDERED | Spliterator.NONNULL), false)
                 .onClose(() -> {
@@ -146,16 +172,21 @@ final class FakeAgentSessionClient implements AgentSessionClient {
 
     private final class Reader implements Iterator<SessionEvent> {
         private final long after;
+        private @Nullable RuntimeException failure;
         private int i;
         private boolean ended;
         volatile boolean closed;
 
-        Reader(long after) {
+        Reader(long after, @Nullable RuntimeException failure) {
             this.after = after;
+            this.failure = failure;
         }
 
         @Override
         public boolean hasNext() {
+            RuntimeException f = failure;
+            failure = null;
+            if (f != null) throw f;
             while (!ended && !closed && i < emitted.size()) {
                 Entry e = emitted.get(i);
                 if (e.event() != null && e.event().seq() > after) return true;
@@ -184,16 +215,23 @@ final class FakeAgentSessionClient implements AgentSessionClient {
         final List<Scheduled> scheduled = Collections.synchronizedList(new ArrayList<>());
         final List<Duration> pauses = Collections.synchronizedList(new ArrayList<>());
 
+        /** Timers set for one of these delays fire as they are set. */
+        final Set<Duration> immediate = new HashSet<>();
+
+        boolean interruptPauses;
+
         @Override
         public Timer after(Duration delay, Runnable action) {
             Scheduled s = new Scheduled(delay, action, new AtomicBoolean());
             scheduled.add(s);
+            if (immediate.contains(delay) && s.cancelled().compareAndSet(false, true)) action.run();
             return () -> s.cancelled().set(true);
         }
 
         @Override
-        public void pause(Duration delay) {
+        public void pause(Duration delay) throws InterruptedException {
             pauses.add(delay);
+            if (interruptPauses) throw new InterruptedException();
         }
 
         /** Runs every live timer set for {@code delay}. */

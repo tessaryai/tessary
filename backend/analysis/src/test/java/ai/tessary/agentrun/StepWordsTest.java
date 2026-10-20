@@ -89,6 +89,16 @@ class StepWordsTest {
                         "Comparing 1234567 and abcdef1"),
                 Arguments.of(null, "bash", "{\"command\":\"ls -la /home/user\"}", "Ran a command", "Running a command"),
                 Arguments.of(
+                        null, "bash", "{\"command\":\"python3 -c print(1)\"}", "Ran a command", "Running a command"),
+                Arguments.of(null, "bash", "{\"command\":\"git show HEAD\"}", "Read a commit", "Reading a commit"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"git diff main\"}",
+                        "Compared two versions",
+                        "Comparing two versions"),
+                Arguments.of(null, "bash", "{\"command\":\"git status\"}", "Ran a command", "Running a command"),
+                Arguments.of(
                         null,
                         "grep",
                         "{\"pattern\":\"retriever\",\"path\":\"/home/user/repo/src\"}",
@@ -139,6 +149,12 @@ class StepWordsTest {
                         "Opening a span of trace 4bf92f3577b34da6"),
                 Arguments.of(
                         "tessary-evals",
+                        "get_span",
+                        "{\"span_id\":\"00f067aa0ba902b7\"}",
+                        "Opened a span",
+                        "Opening a span"),
+                Arguments.of(
+                        "tessary-evals",
                         "get_conversation",
                         "{\"session_id\":\"s\"}",
                         "Read a conversation",
@@ -154,7 +170,8 @@ class StepWordsTest {
                 Arguments.of("tessary-evals", "list_findings", "{}", "Listed the findings", "Listing the findings"),
                 Arguments.of("tessary-evals", "get_case", "{}", "Read a case", "Reading a case"),
                 Arguments.of("tessary-evals", "brand_new_tool", "{}", "Used brand_new_tool", "Using brand_new_tool"),
-                Arguments.of(null, "webfetch", "{}", "Used webfetch", "Using webfetch"));
+                Arguments.of(null, "webfetch", "{}", "Used webfetch", "Using webfetch"),
+                Arguments.of("docs-search", "search_docs", "{}", "Used search_docs", "Using search_docs"));
     }
 
     /**

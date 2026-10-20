@@ -25,8 +25,7 @@ final class JsonAnswer {
     static Optional<ObjectNode> extract(ObjectMapper mapper, String text) {
         for (String span : balancedSpans(text)) {
             try {
-                JsonNode parsed = mapper.readTree(span);
-                if (parsed instanceof ObjectNode object) return Optional.of(object);
+                return Optional.of(mapper.readValue(span, ObjectNode.class));
             } catch (JsonProcessingException e) {
                 // The next span may parse.
             }

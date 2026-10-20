@@ -8,11 +8,13 @@ import static ai.tessary.agentrun.FakeAgentSessionClient.text;
 import static ai.tessary.agentrun.FakeAgentSessionClient.toolEnd;
 import static ai.tessary.agentrun.FakeAgentSessionClient.toolStart;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.AgentRunError;
+import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.sandbox.AgentSpanTelemetry;
 import ai.tessary.usage.LlmUsageAccountant;
@@ -25,6 +27,9 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -281,5 +286,194 @@ class AgentSessionRunnerTest {
         client.reply(text("thinking"), FakeAgentSessionClient.closed(SessionEvent.CloseReason.FAILED));
 
         assertEquals(AgentRunError.RUN_FAILED, fails().error());
+    }
+
+    /** A run that never times out, or one stopped by a timer it cancelled: the real timers fire once and cancel. */
+    @Test
+    void theVirtualDeadlinesFireAfterTheirDelayAndACancelledOneDoesNot() throws InterruptedException {
+        AgentSessionRunner.Deadlines real = AgentSessionRunner.Deadlines.VIRTUAL;
+        CountDownLatch fired = new CountDownLatch(1);
+        AgentSessionRunner.Deadlines.Timer done = real.after(Duration.ofMillis(1), fired::countDown);
+        assertTrue(fired.await(10, TimeUnit.SECONDS), "the timer fired");
+        done.cancel();
+
+        AtomicBoolean ran = new AtomicBoolean();
+        AgentSessionRunner.Deadlines.Timer cancelled = real.after(Duration.ofHours(1), () -> ran.set(true));
+        cancelled.cancel();
+        cancelled.cancel();
+        real.pause(Duration.ZERO);
+
+        assertFalse(ran.get());
+    }
+
+    /**
+     * A run left holding its lease: an abort and a stop that fail at the deadline are logged, the run still fails
+     * TIMED_OUT, and a stop that fails afterwards still reads the session for its close.
+     */
+    @Test
+    void anAbortAndStopThatFailAtTheDeadlineAreLoggedAndTheRunStillTimesOut() {
+        client.abortFails = new TessaryException(AgentRunError.LAUNCHER_UNAVAILABLE, "down");
+        client.stopFails = new IllegalStateException("socket closed");
+        client.reply(
+                toolStart("c-1", null, "bash", "{\"command\":\"sleep 9999\"}"),
+                new FakeAgentSessionClient.Do(() -> deadlines.fire(DEADLINE)));
+
+        assertEquals(AgentRunError.TIMED_OUT, fails().error());
+        assertEquals(
+                List.of("stop", "events 1", "close", "events 1", "close", "events 1", "close", "events 1", "close"),
+                client.calls.subList(client.calls.size() - 9, client.calls.size()));
+    }
+
+    /**
+     * A run that hangs on a session deaf to its stop: the drain timer set at the deadline closes the open stream, so
+     * no later event of that reply becomes a step.
+     */
+    @Test
+    void aSessionThatIgnoresItsStopHasItsOpenStreamClosedWhenTheDrainRunsOut() {
+        client.silent = true;
+        client.reply(
+                toolStart("c-1", null, "bash", "{\"command\":\"sleep 9999\"}"),
+                new FakeAgentSessionClient.Do(() -> {
+                    deadlines.fire(DEADLINE);
+                    deadlines.fire(AgentSessionRunner.DRAIN);
+                }),
+                toolStart("c-2", null, "bash", "{\"command\":\"ls\"}"),
+                end());
+
+        assertEquals(AgentRunError.TIMED_OUT, fails().error());
+        assertEquals(List.of("session s-1", "started c-1 Running a command"), sink);
+        assertFalse(client.closedRead);
+    }
+
+    /** A run that never returns: a session that never closes after the stop is given up when the drain runs out. */
+    @Test
+    void aSessionThatNeverClosesIsGivenUpWhenTheDrainRunsOut() {
+        client.silent = true;
+        deadlines.immediate.add(AgentSessionRunner.DRAIN);
+        client.reply(text(RULING), end());
+
+        assertEquals(RULING, run().json());
+        assertEquals("stop", client.calls.getLast(), "no read after the drain ran out");
+    }
+
+    /** A session started for a task that can never be checked: a schema that does not parse fails before the start. */
+    @Test
+    void aTaskWhoseSchemaDoesNotParseFailsBeforeAnySessionStarts() {
+        AgentSessionRunner.Task t = task();
+        AgentSessionRunner.Task broken = new AgentSessionRunner.Task(
+                t.projectId(),
+                t.lane(),
+                t.subject(),
+                t.systemPrompt(),
+                t.files(),
+                t.mcp(),
+                t.repo(),
+                t.prompt(),
+                "{not a schema",
+                t.deadline(),
+                t.maxToolCalls(),
+                t.words());
+
+        TessaryException e = assertThrows(TessaryException.class, () -> runner().run(broken, recording));
+
+        assertEquals(CommonError.VALIDATION_FAILED, e.error());
+        assertEquals(List.of(), client.starts);
+    }
+
+    /** A run lost to its step list: a sink that throws on the session and on each step is logged and the run answers. */
+    @Test
+    void aStepSinkThatThrowsIsLoggedAndTheRunStillAnswers() {
+        AgentSessionRunner.StepSink throwing = new AgentSessionRunner.StepSink() {
+            @Override
+            public void session(String sessionId) {
+                throw new IllegalStateException("no run row");
+            }
+
+            @Override
+            public void started(String callId, StepWords.Words w, long atMs) {
+                throw new IllegalStateException("no run row");
+            }
+
+            @Override
+            public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {
+                throw new IllegalStateException("no run row");
+            }
+        };
+        client.reply(
+                toolStart("c-1", null, "read", "{\"filePath\":\"/home/user/repo/a.py\"}"),
+                toolEnd("c-1", true),
+                text(RULING),
+                end());
+
+        AgentSessionRunner.Answer answer = runner().run(task(), throwing);
+
+        assertEquals(RULING, answer.json());
+        assertEquals(1, answer.steps());
+    }
+
+    /** A run that waits on a session that took nothing: a message the session refuses fails RUN_FAILED at once. */
+    @Test
+    void aMessageTheSessionRefusesFailsRunFailed() {
+        client.refuse = AgentSessionClient.SendOutcome.BUSY;
+
+        assertEquals(AgentRunError.RUN_FAILED, fails().error());
+        assertEquals(List.of(), client.sent);
+    }
+
+    /** A timed-out run blamed on the session: a deadline that passes before the task is sent fails TIMED_OUT. */
+    @Test
+    void aDeadlineThatPassesBeforeTheTaskIsSentFailsTimedOut() {
+        AgentSessionRunner.StepSink late = new AgentSessionRunner.StepSink() {
+            @Override
+            public void session(String sessionId) {
+                deadlines.fire(DEADLINE);
+            }
+
+            @Override
+            public void started(String callId, StepWords.Words w, long atMs) {}
+
+            @Override
+            public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {}
+        };
+
+        TessaryException e = assertThrows(TessaryException.class, () -> runner().run(task(), late));
+
+        assertEquals(AgentRunError.TIMED_OUT, e.error());
+        assertEquals(List.of(), client.sent);
+        assertTrue(client.closedRead);
+    }
+
+    /** A run that polls a dead session until its lease ends: events that stop give up after four empty reads. */
+    @Test
+    void aSessionWhoseEventsStopFailsRunFailedAfterFourEmptyReads() {
+        TessaryException e = fails();
+
+        assertEquals(AgentRunError.RUN_FAILED, e.error());
+        assertEquals(
+                List.of(Duration.ofSeconds(1), Duration.ofSeconds(2), Duration.ofSeconds(4), Duration.ofSeconds(8)),
+                deadlines.pauses);
+    }
+
+    /** A worker that cannot shut down: an interrupted pause fails INTERRUPTED and keeps the thread's interrupt. */
+    @Test
+    void anInterruptedPauseFailsInterruptedAndKeepsTheInterrupt() {
+        deadlines.interruptPauses = true;
+
+        TessaryException e = fails();
+
+        assertEquals(CommonError.INTERRUPTED, e.error());
+        assertTrue(Thread.interrupted(), "the interrupt is kept for the caller");
+    }
+
+    /** A run failed after its answer: a drain that cannot reach the launcher is logged and the answer returns. */
+    @Test
+    void aDrainThatCannotReachTheLauncherIsLoggedAndTheAnswerStillReturns() {
+        client.streamFailures.put(1, new TessaryException(AgentRunError.LAUNCHER_UNAVAILABLE, "down"));
+        client.reply(text(RULING), end());
+
+        assertEquals(RULING, run().json());
+        assertEquals(
+                List.of("stop", "events 2", "close"),
+                client.calls.subList(client.calls.size() - 3, client.calls.size()));
     }
 }
