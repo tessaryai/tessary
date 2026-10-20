@@ -9,11 +9,15 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.agentrun.AgentRunRepository;
+import ai.tessary.agentrun.AgentSessionClient;
+import ai.tessary.agentrun.StepWords;
 import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierService;
@@ -101,6 +105,9 @@ class BehaviorTriageSourceTest {
     @Mock
     Tracer tracer;
 
+    @Mock
+    AgentRunRepository runs;
+
     /**
      * A negative tool-error ruling is recorded and folded back so the arm restarts from a reference that holds it.
      * The fold is advisory: if it fails, the ruling, case gate, and job completion still stand.
@@ -117,8 +124,7 @@ class BehaviorTriageSourceTest {
         when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(finding));
         when(engine.dossier(job, finding)).thenReturn(Map.of("finding.md", "the claim"));
         when(engine.buildPrompt(job, finding)).thenReturn("rule on it");
-        when(engine.rule(PROJECT, "f1", Map.of("finding.md", "the claim"), "rule on it"))
-                .thenReturn(verdict);
+        when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenReturn(verdict);
         when(engine.citationsJson(verdict)).thenReturn("[]");
         when(findings.recordTriage(
                         eq(PROJECT), eq("f1"), eq("negative"), eq("ordinary traffic"), eq("[]"), anyString()))
@@ -136,6 +142,39 @@ class BehaviorTriageSourceTest {
                 .foldRuledNegative(eq(PROJECT), eq("search_docs"), eq("f1"), eq(finding.payloadJson()), anyString());
         verify(caseOpener).ensureCaseFor(PROJECT, "f1", null);
         verify(jobs).markDone("job-f1");
+    }
+
+    /**
+     * The brief tells the run's steps what the classifier calls its flagged rows and how many of each role the finding
+     * cites, so a step can say "Read flagged answers 51 to 58 of 58" (a step that pages past the evidence, or says
+     * "rows" where the page means answers).
+     */
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                BuiltInDetector.Kind.GROUNDEDNESS,
+                BuiltInDetector.Kind.FRUSTRATION,
+                BuiltInDetector.Kind.TOOL_ERROR
+            })
+    void theBriefWordsTheEvidenceForTheRunsSteps(String classifierKey) {
+        FindingRow finding = FindingRowBuilder.of(classifierKey)
+                .id("f1")
+                .evidenceCounts("{\"witness\":58,\"baseline\":400}")
+                .build();
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(finding));
+
+        StepWords.Context words = source().brief(job("f1")).orElseThrow().words();
+
+        assertEquals(
+                switch (classifierKey) {
+                    case BuiltInDetector.Kind.GROUNDEDNESS -> Map.of("witness", "flagged answers");
+                    case BuiltInDetector.Kind.FRUSTRATION -> Map.of("witness", "flagged sessions");
+                    default -> Map.of();
+                },
+                words.roleNouns());
+        assertEquals(58L, words.roleTotals().get("witness"));
+        assertEquals(400L, words.roleTotals().get("baseline"));
+        assertEquals(0L, words.roleTotals().get("member"));
     }
 
     /** A finding ruled or closed while its job waited has nothing to rule on, so no run is briefed. */
@@ -550,7 +589,9 @@ class BehaviorTriageSourceTest {
                 Props.of(ObserverProperties.class),
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor(),
-                new TriageLauncherBreaker(Props.of(ClassifierProperties.class)));
+                new TriageLauncherBreaker(Props.of(ClassifierProperties.class)),
+                runs,
+                mock(AgentSessionClient.class));
     }
 
     private BehaviorTriageSource source() {
@@ -579,6 +620,7 @@ class BehaviorTriageSourceTest {
                 null,
                 groundednessRates,
                 null,
-                adapters);
+                adapters,
+                runs);
     }
 }

@@ -6,10 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.agentrun.AgentRunRepository;
+import ai.tessary.agentrun.AgentRunRepository.Outcome;
+import ai.tessary.agentrun.AgentRunRepository.RunSummary;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageProgress;
+import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageRunView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageStatus;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.TriageJobState;
 import ai.tessary.classifier.frustration.FrustrationDetailService;
@@ -21,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -41,6 +46,9 @@ class BehaviorTriageSourceDetailTest {
     private final FindingRepository findings = mock(FindingRepository.class);
     private final ClassifierService classifiers = mock(ClassifierService.class);
     private final BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
+    private final AgentRunRepository runs = mock(AgentRunRepository.class);
+
+    private static final long COOLDOWN = 1800;
 
     @Test
     @DisplayName("a dead-lettered triage reads as failed on the finding's page, not in flight")
@@ -54,7 +62,9 @@ class BehaviorTriageSourceDetailTest {
                 null,
                 null,
                 "exhausted: 5 attempts (hung or crashed mid-triage)",
-                "2026-08-02T01:00Z"));
+                "2026-08-02T01:00Z",
+                null,
+                COOLDOWN));
 
         assertEquals(TriageStatus.FAILED, statusOf("f1"));
     }
@@ -87,33 +97,158 @@ class BehaviorTriageSourceDetailTest {
 
     static Stream<Arguments> jobStates() {
         String at = "2026-08-02T01:00:00Z";
+        String due = "2026-08-02T01:00:30Z";
         return Stream.of(
                 Arguments.of(
-                        "asked for, never picked up",
-                        new TriageJobState("f1", "pending", 0, 5, null, null, null, at),
+                        "a queued finding says when it was queued",
+                        new TriageJobState("f1", "pending", 0, 5, null, null, null, at, null, COOLDOWN),
                         TriageStatus.QUEUED,
-                        new TriageProgress(0, 5, null, null)),
+                        new TriageProgress(0, 5, null, null, at, null, null, COOLDOWN)),
                 Arguments.of(
                         "a worker holds the lease",
-                        new TriageJobState("f1", "claimed", 2, 5, "worker-a", null, "kind=timeout", at),
+                        new TriageJobState("f1", "claimed", 2, 5, "worker-a", null, "kind=timeout", at, due, COOLDOWN),
                         TriageStatus.IN_FLIGHT,
-                        new TriageProgress(2, 5, at, null)),
+                        new TriageProgress(2, 5, at, null, null, null, null, COOLDOWN)),
                 Arguments.of(
-                        "a run ended without a ruling and waits out its backoff",
-                        new TriageJobState("f1", "claimed", 1, 5, null, null, "kind=timeout", at),
+                        "a retrying finding says when it retries",
+                        new TriageJobState("f1", "claimed", 1, 5, null, null, "kind=timeout", at, due, COOLDOWN),
                         TriageStatus.RETRYING,
-                        new TriageProgress(1, 5, null, null)),
+                        new TriageProgress(1, 5, null, null, null, due, null, COOLDOWN)),
                 Arguments.of(
                         "held until the key is fixed",
                         new TriageJobState(
-                                "f1", "claimed", 0, 5, null, "CLASSIFIER.TRIAGE_PROVIDER_REJECTED", "invalid key", at),
+                                "f1",
+                                "claimed",
+                                0,
+                                5,
+                                null,
+                                "CLASSIFIER.TRIAGE_PROVIDER_REJECTED",
+                                "invalid key",
+                                at,
+                                due,
+                                COOLDOWN),
                         TriageStatus.BLOCKED,
-                        new TriageProgress(0, 5, null, "CLASSIFIER.TRIAGE_PROVIDER_REJECTED")),
+                        new TriageProgress(
+                                0, 5, null, "CLASSIFIER.TRIAGE_PROVIDER_REJECTED", null, null, null, COOLDOWN)),
                 Arguments.of(
-                        "a dead job's stale hold does not hide that it gave up",
-                        new TriageJobState("f1", "dead", 5, 5, null, "CLASSIFIER.TRIAGE_PROVIDER_REJECTED", "x", at),
+                        "a dead finding says when it can run again, and a stale hold does not hide that it gave up",
+                        new TriageJobState(
+                                "f1",
+                                "dead",
+                                5,
+                                5,
+                                null,
+                                "CLASSIFIER.TRIAGE_PROVIDER_REJECTED",
+                                "x",
+                                at,
+                                null,
+                                COOLDOWN),
                         TriageStatus.FAILED,
-                        new TriageProgress(5, 5, null, null)));
+                        new TriageProgress(5, 5, null, null, null, null, "2026-08-02T01:30:00Z", COOLDOWN)),
+                Arguments.of(
+                        "a dead job whose time cannot be read gives no revival time rather than failing the page",
+                        new TriageJobState("f1", "dead", 5, 5, null, null, "x", "not a time", null, COOLDOWN),
+                        TriageStatus.FAILED,
+                        new TriageProgress(5, 5, null, null, null, null, null, COOLDOWN)));
+    }
+
+    /**
+     * The finding carries its newest run's step count and the words of the step running now, and a running triage
+     * says it started when its run did, not when the job was claimed (a live line with no step, or an elapsed time that
+     * counts the queue).
+     */
+    @Test
+    void theFindingCarriesItsNewestRunsStepAndCurrentWords() {
+        stubEscalatedFinding("f1");
+        stubJob(new TriageJobState(
+                "f1", "claimed", 2, 5, "worker-a", null, null, "2026-08-02T01:00:00Z", null, COOLDOWN));
+        stubRun(run("2026-08-02T01:00:02Z", null, null, null));
+
+        var finding = source().detail(PROJECT, "f1").orElseThrow().finding();
+
+        assertEquals(
+                new TriageRunView(
+                        "run-2", 2, "2026-08-02T01:00:02Z", null, 7, "Reading flagged answers 51 to 58", null, null),
+                finding.triageRun());
+        assertEquals("2026-08-02T01:00:02Z", requireProgress(finding).startedAt());
+    }
+
+    /**
+     * In the moment between the claim and the run's opening, the newest run is the last attempt's, already closed: the
+     * claim's time is when this attempt started (an elapsed time counted from an older attempt).
+     */
+    @Test
+    void aRunningTriageWhoseRunHasNotOpenedCountsFromTheClaim() {
+        stubEscalatedFinding("f1");
+        stubJob(new TriageJobState(
+                "f1", "claimed", 2, 5, "worker-a", null, null, "2026-08-02T01:00:00Z", null, COOLDOWN));
+        stubRun(run(
+                "2026-08-02T00:50:00Z", "2026-08-02T00:55:00Z", Outcome.RETRYING, "CLASSIFIER.TRIAGE_RUN_INCOMPLETE"));
+
+        var finding = source().detail(PROJECT, "f1").orElseThrow().finding();
+
+        assertEquals("2026-08-02T01:00:00Z", requireProgress(finding).startedAt());
+        assertEquals(
+                "retrying",
+                java.util.Objects.requireNonNull(finding.triageRun()).outcome());
+        assertEquals(
+                "CLASSIFIER.TRIAGE_RUN_INCOMPLETE",
+                java.util.Objects.requireNonNull(finding.triageRun()).stopCode());
+    }
+
+    /** The findings list reads every row's newest run in the same page read (a page with no live line). */
+    @Test
+    void theListCarriesEachFindingsNewestRun() {
+        FindingRow row = escalatedRow("f1");
+        when(findings.listByProject(PROJECT, null, null, null, false, 200)).thenReturn(List.of(row));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        when(jobs.statesByFinding(PROJECT, List.of("f1"))).thenReturn(Map.of());
+        stubRun(run("2026-08-02T01:00:02Z", null, null, null));
+
+        var listed = source().list(PROJECT, null, null, null, false);
+
+        assertEquals(
+                "run-2",
+                java.util.Objects.requireNonNull(listed.getFirst().triageRun()).id());
+    }
+
+    /** The RCA view of a finding carries no triage run: its step words say what triage read (triage leaking into RCA). */
+    @Test
+    void theRcaViewOfAFindingCarriesNoTriageRun() {
+        stubEscalatedFinding("f1");
+        when(jobs.statesByFinding(PROJECT, List.of("f1"))).thenReturn(Map.of());
+        stubRun(run("2026-08-02T01:00:02Z", null, null, null));
+
+        var finding = source().detail(PROJECT, "f1").orElseThrow().finding();
+
+        assertEquals(
+                "run-2", java.util.Objects.requireNonNull(finding.triageRun()).id());
+        assertNull(finding.withoutTriage().triageRun());
+    }
+
+    private static TriageProgress requireProgress(BehaviorDtos.BehaviorFindingView finding) {
+        return java.util.Objects.requireNonNull(finding.triageProgress());
+    }
+
+    private static RunSummary run(
+            String startedAt, @Nullable String endedAt, @Nullable Outcome outcome, @Nullable String stopCode) {
+        return new RunSummary(
+                "run-2",
+                AgentRunRepository.Lane.TRIAGE,
+                "f1",
+                2,
+                startedAt,
+                endedAt,
+                outcome,
+                stopCode,
+                7,
+                endedAt == null ? "Reading flagged answers 51 to 58" : null,
+                "s-1");
+    }
+
+    private void stubRun(RunSummary run) {
+        when(runs.latestBySubjects(PROJECT, AgentRunRepository.Lane.TRIAGE, List.of(run.subjectId())))
+                .thenReturn(Map.of(run.subjectId(), run));
     }
 
     private void stubJob(TriageJobState job) {
@@ -216,7 +351,8 @@ class BehaviorTriageSourceDetailTest {
                 mock(FrustrationDetailService.class),
                 null,
                 mock(GroundednessDetailService.class),
-                adapters);
+                adapters,
+                runs);
     }
 
     private static FindingRow escalatedRow(String id) {

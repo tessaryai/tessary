@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.agentrun.AgentRunRepository;
+import ai.tessary.agentrun.AgentRunRepository.RunSummary;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.TriageJobState;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
@@ -15,6 +17,8 @@ import ai.tessary.classifier.worker.ArmedWindowEvidence.ArmedWindowDetail;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.constraints.NotBlank;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -144,10 +148,11 @@ public final class BehaviorDtos {
                 @Nullable FrustrationDetail frustration,
                 @Nullable GroundednessDetail groundedness,
                 @Nullable ClassifierDetail classifierDetail,
-                @Nullable TriageJobState job) {
+                @Nullable TriageJobState job,
+                @Nullable RunSummary run) {
             String evidence = row.payloadJson();
             return new BehaviorFindingDetailView(
-                    BehaviorFindingView.of(row, job),
+                    BehaviorFindingView.of(row, job, run),
                     FindingRow.Cause.DISTRIBUTION_SHIFT.equals(row.causeKind())
                             ? MetricFindingEvidence.detail(evidence)
                             : null,
@@ -197,6 +202,8 @@ public final class BehaviorDtos {
             String triageStatus,
             /** Where the run stands while it has not ruled; null before a run is asked for and once it rules. */
             @Nullable TriageProgress triageProgress,
+            /** The newest triage run and its current step; null before the first run starts. */
+            @Nullable TriageRunView triageRun,
             @Nullable String humanVerdictAt,
             /** Null for a negative verdict, or a positive still waiting on {@code CaseOpener}. */
             @Nullable String caseId) {
@@ -226,13 +233,48 @@ public final class BehaviorDtos {
 
         /**
          * {@code attempts} counts the run in progress; {@code startedAt} is set only while one runs. {@code heldBy} is
-         * the error code of the refusal a blocked run waits on.
+         * the error code of the refusal a blocked run waits on. {@code queuedAt}, {@code retryAt} and
+         * {@code revivableAt} are set only while queued, retrying and failed: when it was asked for, when the next
+         * attempt is due, and when a press can run it again, {@code cooldownSeconds} after it stopped.
          */
         public record TriageProgress(
                 int attempts,
                 int maxAttempts,
                 @Nullable String startedAt,
-                @Nullable String heldBy) {}
+                @Nullable String heldBy,
+                @Nullable String queuedAt,
+                @Nullable String retryAt,
+                @Nullable String revivableAt,
+                long cooldownSeconds) {}
+
+        /**
+         * One triage run: {@code doing} is the step running now, {@code outcome} how the run ended and
+         * {@code stopCode} the error code it ended on; all three are null while nothing applies.
+         */
+        public record TriageRunView(
+                String id,
+                int attempt,
+                String startedAt,
+                @Nullable String endedAt,
+                int stepCount,
+                @Nullable String doing,
+                @Nullable String outcome,
+                @Nullable String stopCode) {
+
+            static @Nullable TriageRunView of(@Nullable RunSummary run) {
+                if (run == null) return null;
+                AgentRunRepository.Outcome outcome = run.outcome();
+                return new TriageRunView(
+                        run.id(),
+                        run.attempt(),
+                        run.startedAt(),
+                        run.endedAt(),
+                        run.stepCount(),
+                        run.doing(),
+                        outcome == null ? null : outcome.wire(),
+                        run.stopCode());
+            }
+        }
 
         private static String triageStatus(FindingRow row, @Nullable TriageJobState job) {
             if (row.triagedAt() != null) return TriageStatus.DONE;
@@ -244,13 +286,33 @@ public final class BehaviorDtos {
             return job.lastError() != null ? TriageStatus.RETRYING : TriageStatus.QUEUED;
         }
 
-        private static @Nullable TriageProgress triageProgress(String status, @Nullable TriageJobState job) {
+        private static @Nullable TriageProgress triageProgress(
+                String status, @Nullable TriageJobState job, @Nullable RunSummary run) {
             if (job == null || TriageStatus.DONE.equals(status) || TriageStatus.PENDING.equals(status)) return null;
             return new TriageProgress(
                     job.attempts(),
                     job.maxAttempts(),
-                    TriageStatus.IN_FLIGHT.equals(status) ? job.updatedAt() : null,
-                    TriageStatus.BLOCKED.equals(status) ? job.holdCode() : null);
+                    TriageStatus.IN_FLIGHT.equals(status) ? startedAt(job, run) : null,
+                    TriageStatus.BLOCKED.equals(status) ? job.holdCode() : null,
+                    TriageStatus.QUEUED.equals(status) ? job.updatedAt() : null,
+                    TriageStatus.RETRYING.equals(status) ? job.leaseExpiresAt() : null,
+                    TriageStatus.FAILED.equals(status) ? revivableAt(job) : null,
+                    job.cooldownSeconds());
+        }
+
+        /** The open run's start; the claim's time only in the moment before the worker opens the run. */
+        private static String startedAt(TriageJobState job, @Nullable RunSummary run) {
+            return run != null && run.endedAt() == null ? run.startedAt() : job.updatedAt();
+        }
+
+        private static @Nullable String revivableAt(TriageJobState job) {
+            try {
+                return Instant.parse(job.updatedAt())
+                        .plusSeconds(job.cooldownSeconds())
+                        .toString();
+            } catch (DateTimeParseException e) {
+                return null;
+            }
         }
 
         /** A malformed blob degrades to none rather than failing the row. */
@@ -264,7 +326,7 @@ public final class BehaviorDtos {
         }
 
         /** Carries no evidence: the population is paged through {@code GET /findings/{id}/evidence}. */
-        public static BehaviorFindingView of(FindingRow row, @Nullable TriageJobState job) {
+        public static BehaviorFindingView of(FindingRow row, @Nullable TriageJobState job, @Nullable RunSummary run) {
             String triageStatus = triageStatus(row, job);
             return new BehaviorFindingView(
                     row.id(),
@@ -286,18 +348,20 @@ public final class BehaviorDtos {
                     citations(row.triageCitationsJson()),
                     row.triagedAt(),
                     triageStatus,
-                    triageProgress(triageStatus, job),
+                    triageProgress(triageStatus, job, run),
+                    TriageRunView.of(run),
                     row.humanVerdictAt(),
                     row.caseId());
         }
 
         public static BehaviorFindingView of(FindingRow row) {
-            return of(row, null);
+            return of(row, null, null);
         }
 
         /**
-         * RCA must reach its own conclusion, and "nothing happened here" is a supported one, so the ruling is removed.
-         * {@code triageStatus} and {@code caseId} survive: they carry no opinion about the claim.
+         * RCA must reach its own conclusion, and "nothing happened here" is a supported one, so the ruling is removed,
+         * and with it the triage run, whose step words show what triage read. {@code triageStatus} and {@code caseId}
+         * survive: they carry no opinion about the claim.
          */
         public BehaviorFindingView withoutTriage() {
             return new BehaviorFindingView(
@@ -319,6 +383,7 @@ public final class BehaviorDtos {
                     null,
                     triageStatus,
                     triageProgress,
+                    null,
                     // Nulled with the verdict, or it would tell RCA which way a person decided.
                     null,
                     caseId);

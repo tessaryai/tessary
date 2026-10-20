@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.agentrun.AgentRunDtos.RunStepsView;
+import ai.tessary.agentrun.AgentRunRepository;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
@@ -18,6 +20,7 @@ import ai.tessary.classifier.frustration.FrustrationRateRepository;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.open.errors.ClassifierError;
+import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -49,6 +52,8 @@ public class FindingService {
 
     private final GroundednessDetailService groundedness;
 
+    private final AgentRunRepository runs;
+
     public FindingService(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -56,7 +61,8 @@ public class FindingService {
             List<TriageSource> triageSources,
             MalformedOutputDetailService malformedOutputs,
             FrustrationDetailService frustrations,
-            GroundednessDetailService groundedness) {
+            GroundednessDetailService groundedness,
+            AgentRunRepository runs) {
         this.findings = findings;
         this.evidence = evidence;
         this.classifiers = classifiers;
@@ -64,6 +70,7 @@ public class FindingService {
         this.malformedOutputs = malformedOutputs;
         this.frustrations = frustrations;
         this.groundedness = groundedness;
+        this.runs = runs;
     }
 
     /**
@@ -93,6 +100,22 @@ public class FindingService {
             if (view.isPresent()) return view.get();
         }
         throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
+    }
+
+    /**
+     * The steps of the finding's newest triage run after step {@code afterSeq}, behind the same reachability guard as
+     * {@link #finding}; a finding no run has started for is not found.
+     */
+    public RunStepsView triageSteps(String projectId, String findingId, int afterSeq) {
+        if (afterSeq < 0) {
+            throw new TessaryException(CommonError.VALIDATION_FAILED, "after must be zero or more");
+        }
+        requireReachableFinding(projectId, findingId);
+        AgentRunRepository.RunSummary run = runs.latestBySubjects(
+                        projectId, AgentRunRepository.Lane.TRIAGE, List.of(findingId))
+                .get(findingId);
+        if (run == null) throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
+        return RunStepsView.of(runs.steps(projectId, run.id(), afterSeq));
     }
 
     /** Behind the same reachability guard as {@link #finding}: the refs ARE the claim. */

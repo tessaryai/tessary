@@ -123,9 +123,10 @@ public class BehaviorTriageJobRepository {
     public Map<String, TriageJobState> statesByFinding(String projectId, List<String> findingIds) {
         if (findingIds.isEmpty()) return Map.of();
         int maxAttempts = props.maxAttempts();
+        long cooldownSeconds = props.deadLetterCooldownSeconds();
         List<TriageJobState> rows = jdbc.sql(
                         "SELECT payload->>'finding_id' AS finding_id, status, attempts, lease_owner,"
-                                + " hold_code, last_error, updated_at FROM job"
+                                + " hold_code, last_error, updated_at, lease_expires_at FROM job"
                                 + " WHERE kind = :kind AND project_id = :pid AND status <> 'done'"
                                 + "   AND payload->>'finding_id' IN (:findingIds)"
                                 + " ORDER BY attempts ASC, created_at ASC")
@@ -140,7 +141,9 @@ public class BehaviorTriageJobRepository {
                         rs.getString("lease_owner"),
                         rs.getString("hold_code"),
                         rs.getString("last_error"),
-                        rs.getString("updated_at")))
+                        rs.getString("updated_at"),
+                        rs.getString("lease_expires_at"),
+                        cooldownSeconds))
                 .list();
         Map<String, TriageJobState> out = new LinkedHashMap<>();
         for (TriageJobState row : rows) out.put(row.findingId(), row);
@@ -149,7 +152,8 @@ public class BehaviorTriageJobRepository {
 
     /**
      * {@code leaseOwner} is set only while a worker runs the job: every way a run ends clears it. {@code updatedAt} is
-     * then when the run started.
+     * then when the run started. {@code leaseExpiresAt} is when a job waiting out its backoff is due again, and
+     * {@code cooldownSeconds} how long a dead job waits before a press can revive it.
      */
     public record TriageJobState(
             String findingId,
@@ -159,7 +163,9 @@ public class BehaviorTriageJobRepository {
             @Nullable String leaseOwner,
             @Nullable String holdCode,
             @Nullable String lastError,
-            String updatedAt) {}
+            String updatedAt,
+            @Nullable String leaseExpiresAt,
+            long cooldownSeconds) {}
 
     public void markDone(String id) {
         jdbc.sql("UPDATE job SET status = 'done', last_error = NULL, hold_code = NULL, updated_at = :now"

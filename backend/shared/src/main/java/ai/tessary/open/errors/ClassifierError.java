@@ -53,7 +53,10 @@ public enum ClassifierError implements ErrorCode {
     TRIAGE_REQUEST_REFUSED(HttpStatus.SERVICE_UNAVAILABLE, "The model provider refused the triage request: %s"),
 
     /** The agent gave up retrying the provider; spends an attempt like any run that produced no ruling. */
-    TRIAGE_PROVIDER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "The model provider did not answer the triage run: %s");
+    TRIAGE_PROVIDER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "The model provider did not answer the triage run: %s"),
+
+    /** The launcher is at its session cap: nothing failed, so the job waits in the queue without spending an attempt. */
+    TRIAGE_SANDBOX_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "Every agent sandbox is busy: %s");
 
     private final HttpStatus status;
     private final String template;

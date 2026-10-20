@@ -180,6 +180,31 @@ record BehaviorTriageJobRepositoryTest(BehaviorTriageJobRepository jobs, TenantS
         assertEquals("kind=timeout", state(pid, findingId).lastError());
     }
 
+    /**
+     * A job's state reads back every column the finding page words it from: a queued job has no due time, a retrying
+     * one carries when it is due, and each carries the dead-letter cooldown (a retry that cannot say when, or a failed
+     * triage that cannot say when it can run again).
+     */
+    @Test
+    void aJobsStateReadsBackWhenItIsDueAndTheCooldown() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "triage-job-due").project().id();
+        String findingId = Ids.ulid();
+        String queuedAt = Instant.now().toString();
+        String jobId = jobs.enqueue(pid, findingId, queuedAt).jobId();
+        assertEquals(
+                new TriageJobState(findingId, "pending", 0, MAX_ATTEMPTS, null, null, null, queuedAt, null, 1800),
+                state(pid, findingId));
+
+        claimMine(pid);
+        jobs.markRetryable(jobId, "kind=timeout", 30);
+        Row retried = row(jobId);
+        TriageJobState retrying = state(pid, findingId);
+
+        assertEquals(retried.leaseExpiresAt(), retrying.leaseExpiresAt());
+        assertEquals(1800, retrying.cooldownSeconds());
+    }
+
     private TriageJobState state(String pid, String findingId) {
         return Objects.requireNonNull(
                 jobs.statesByFinding(pid, List.of(findingId)).get(findingId));

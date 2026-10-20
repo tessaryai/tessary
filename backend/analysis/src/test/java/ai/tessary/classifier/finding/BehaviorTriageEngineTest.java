@@ -104,6 +104,7 @@ class BehaviorTriageEngineTest {
                         BehaviorTriageEngine.SYSTEM_PROMPT,
                         req.systemPrompt(),
                         "the shared system prompt rides every run");
+                assertEquals("run-1", req.runId(), "the steps land on the run the worker opened");
                 return result;
             }
         };
@@ -118,7 +119,11 @@ class BehaviorTriageEngineTest {
 
         TessaryException e = assertThrows(
                 TessaryException.class,
-                () -> engine.rule(PROJECT_ID, FINDING_ID, Map.of("finding.md", "the claim"), "rule on this"));
+                () -> engine.rule(
+                        PROJECT_ID,
+                        FINDING_ID,
+                        new TriageBrief(Map.of("finding.md", "the claim"), "rule on this"),
+                        "run-1"));
 
         assertEquals(ClassifierError.TRIAGE_RUN_INCOMPLETE, e.error());
     }
@@ -151,7 +156,7 @@ class BehaviorTriageEngineTest {
         TessaryException e = assertThrows(
                 TessaryException.class,
                 () -> engine(props, fixedSandbox(Optional.empty()), memberships())
-                        .rule(PROJECT_ID, FINDING_ID, Map.of(), "rule on this"));
+                        .rule(PROJECT_ID, FINDING_ID, new TriageBrief(Map.of(), "rule on this"), "run-1"));
 
         assertEquals(
                 "Triage of finding 'finding1' produced no ruling: tessary.classifier.triage-mcp-base-url is unset, so"
@@ -169,7 +174,7 @@ class BehaviorTriageEngineTest {
         TessaryException e = assertThrows(
                 TessaryException.class,
                 () -> engine(props(), fixedSandbox(Optional.empty()), memberships)
-                        .rule(PROJECT_ID, FINDING_ID, Map.of(), "rule on this"));
+                        .rule(PROJECT_ID, FINDING_ID, new TriageBrief(Map.of(), "rule on this"), "run-1"));
 
         assertEquals(
                 "Triage of finding 'finding1' produced no ruling: the project's org has no owner to issue a key to",
@@ -193,7 +198,8 @@ class BehaviorTriageEngineTest {
                 engine(props(), fixedSandbox(Optional.of(new TriageSandbox.SandboxRun(answer))), memberships());
 
         TessaryException e = assertThrows(
-                TessaryException.class, () -> engine.rule(PROJECT_ID, FINDING_ID, Map.of(), "rule on this"));
+                TessaryException.class,
+                () -> engine.rule(PROJECT_ID, FINDING_ID, new TriageBrief(Map.of(), "rule on this"), "run-1"));
 
         assertEquals("Triage of finding 'finding1' produced no ruling: " + why, e.getMessage());
     }
@@ -208,7 +214,8 @@ class BehaviorTriageEngineTest {
         BehaviorTriageEngine engine = engine(
                 props(), fixedSandbox(Optional.of(new TriageSandbox.SandboxRun(answer))), memberships(), apiKeys);
 
-        BehaviorTriageVerdict verdict = engine.rule(PROJECT_ID, FINDING_ID, Map.of(), "rule on this");
+        BehaviorTriageVerdict verdict =
+                engine.rule(PROJECT_ID, FINDING_ID, new TriageBrief(Map.of(), "rule on this"), "run-1");
 
         assertEquals(
                 new BehaviorTriageVerdict(
