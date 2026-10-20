@@ -148,7 +148,7 @@ The exception is narrow by construction: series tokens are read only inside a ch
 and its legend; red, green and blue keep their status meaning everywhere else, a table or
 a number tile never takes a series color, and no series value equals a status hue.
 
-Three palettes ship. Each user picks one in Settings > Organization > Appearance, stored in
+Three palettes ship. Each user picks one from the three dots in the Metrics header (view mode only), stored in
 `localStorage` as `tessary.prefs.chartPalette`; `ChartPaletteProvider` (`src/ui/chartPalette.tsx`)
 stamps the choice on `<html>` as `data-chart-palette`, and that attribute re-points the seven
 `--color-series-*` tokens a chart reads. Every value clears 3:1 against `--color-surface`
