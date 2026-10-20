@@ -191,7 +191,7 @@ export function RunBar({
           <button
             type="button"
             aria-expanded={open}
-            aria-controls={panelId}
+            aria-controls={open ? panelId : undefined}
             onClick={() => setOpen((o) => !o)}
             className="whitespace-nowrap bg-transparent p-0 text-small text-muted transition-colors hover:text-fg"
             style={{ transitionDuration: "var(--duration-micro)" }}
@@ -239,7 +239,7 @@ export function RunFold({
       <button
         type="button"
         aria-expanded={open}
-        aria-controls={panelId}
+        aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((o) => !o)}
         className={cn(
           "inline-flex items-center gap-1 self-start bg-transparent p-0 text-small text-muted transition-colors hover:text-fg",
