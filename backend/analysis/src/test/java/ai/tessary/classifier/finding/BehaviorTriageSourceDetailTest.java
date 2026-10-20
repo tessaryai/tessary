@@ -79,6 +79,31 @@ class BehaviorTriageSourceDetailTest {
     }
 
     /**
+     * A finding closed while its triage waited ends with the job done and no ruling, so no job state is read; it read
+     * as in flight for ever, and the page spun and polled with nothing left to run.
+     */
+    @Test
+    void aFindingClosedWhileItsTriageWaitedStopsReadingAsRunning() {
+        FindingRow closed = FindingRowBuilder.of(BuiltInDetector.Kind.DURATION_DRIFT)
+                .id("f1")
+                .projectId(PROJECT)
+                .causeKey("cause:f1")
+                .subject(FindingRow.SubjectKind.CLASSIFIER, "clf_1")
+                .status(FindingRow.Status.CLOSED)
+                .payload("{\"cause_kind\":\"behavior_drift\"}")
+                .escalatedAt("2026-08-02T00:00:00Z")
+                .build();
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(closed));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        when(jobs.statesByFinding(PROJECT, List.of("f1"))).thenReturn(Map.of());
+
+        var finding = source().detail(PROJECT, "f1").orElseThrow().finding();
+
+        assertEquals(TriageStatus.PENDING, finding.triageStatus());
+        assertNull(finding.triageProgress());
+    }
+
+    /**
      * Each state the job can be in reads as its own status, with how far the run got. The bug: every one of them read
      * as "Triaging", so a run held on a rejected key, or waiting out a retry, looked like a run going on for ever.
      */
@@ -114,6 +139,12 @@ class BehaviorTriageSourceDetailTest {
                         new TriageJobState("f1", "claimed", 1, 5, null, null, "kind=timeout", at, due, COOLDOWN),
                         TriageStatus.RETRYING,
                         new TriageProgress(1, 5, null, null, null, due, null, COOLDOWN)),
+                Arguments.of(
+                        "a run that spent the last attempt reads failed before the sweep dead-letters it, not attempt"
+                                + " 6 of 5",
+                        new TriageJobState("f1", "claimed", 5, 5, null, null, "kind=timeout", at, due, COOLDOWN),
+                        TriageStatus.FAILED,
+                        new TriageProgress(5, 5, null, null, null, null, "2026-08-02T01:30:00Z", COOLDOWN)),
                 Arguments.of(
                         "held until the key is fixed",
                         new TriageJobState(

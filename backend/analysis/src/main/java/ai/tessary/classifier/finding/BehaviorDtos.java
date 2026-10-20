@@ -279,9 +279,13 @@ public final class BehaviorDtos {
         private static String triageStatus(FindingRow row, @Nullable TriageJobState job) {
             if (row.triagedAt() != null) return TriageStatus.DONE;
             if (row.escalatedAt() == null) return TriageStatus.PENDING;
-            if (job == null) return TriageStatus.IN_FLIGHT;
+            // A job that ended with no ruling: the finding was closed while it waited, and nothing is left to run.
+            if (job == null)
+                return FindingRow.Status.OPEN.equals(row.status()) ? TriageStatus.IN_FLIGHT : TriageStatus.PENDING;
             if (BehaviorTriageJobRow.DEAD.equals(job.status())) return TriageStatus.FAILED;
             if (job.leaseOwner() != null) return TriageStatus.IN_FLIGHT;
+            // The last attempt's failure reads as given up before the sweep marks the job dead.
+            if (job.attempts() >= job.maxAttempts() && job.lastError() != null) return TriageStatus.FAILED;
             if (job.holdCode() != null) return TriageStatus.BLOCKED;
             return job.lastError() != null ? TriageStatus.RETRYING : TriageStatus.QUEUED;
         }
