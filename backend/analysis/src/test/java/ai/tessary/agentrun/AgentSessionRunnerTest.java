@@ -313,7 +313,8 @@ class AgentSessionRunnerTest {
     @Test
     void anAbortAndStopThatFailAtTheDeadlineAreLoggedAndTheRunStillTimesOut() {
         client.abortFails = new TessaryException(AgentRunError.LAUNCHER_UNAVAILABLE, "down");
-        client.stopFails = new IllegalStateException("socket closed");
+        client.stopFailures.add(new IllegalStateException("socket closed"));
+        client.stopFailures.add(new IllegalStateException("socket closed"));
         client.reply(
                 toolStart("c-1", null, "bash", "{\"command\":\"sleep 9999\"}"),
                 new FakeAgentSessionClient.Do(() -> deadlines.fire(DEADLINE)));
@@ -475,5 +476,29 @@ class AgentSessionRunnerTest {
         assertEquals(
                 List.of("stop", "events 2", "close"),
                 client.calls.subList(client.calls.size() - 3, client.calls.size()));
+        assertFalse(client.closedRead, "the drain gave up at the failed read");
+    }
+
+    /** A run failed after its answer: a stop the launcher refuses after the answer is logged and the answer returns. */
+    @Test
+    void aStopTheLauncherRefusesAfterTheAnswerIsLoggedAndTheAnswerStillReturns() {
+        client.stopFailures.add(new TessaryException(AgentRunError.LAUNCHER_UNAVAILABLE, "down"));
+        client.reply(text(RULING), end());
+
+        assertEquals(RULING, run().json());
+        assertEquals("stop", client.calls.get(client.calls.size() - 9), "the drain still reads after a failed stop");
+    }
+
+    /** A drain that reads past its time: a drain that runs out while its stream opens closes it and reads nothing. */
+    @Test
+    void aDrainThatRunsOutWhileItsStreamOpensClosesItAndReadsNothing() {
+        client.whileOpening.put(1, () -> deadlines.fire(AgentSessionRunner.DRAIN));
+        client.reply(text(RULING), end());
+
+        assertEquals(RULING, run().json());
+        assertEquals(
+                List.of("stop", "events 2", "close"),
+                client.calls.subList(client.calls.size() - 3, client.calls.size()));
+        assertFalse(client.closedRead, "the closed event the stop wrote was never read");
     }
 }

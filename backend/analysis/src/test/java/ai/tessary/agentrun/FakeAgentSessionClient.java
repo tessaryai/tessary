@@ -103,8 +103,8 @@ final class FakeAgentSessionClient implements AgentSessionClient {
     @Nullable
     RuntimeException abortFails;
 
-    @Nullable
-    RuntimeException stopFails;
+    /** Each stop throws the next of these until none are left. */
+    final Deque<RuntimeException> stopFailures = new ArrayDeque<>();
 
     /** What every send returns once it is not {@code ACCEPTED}. */
     @Nullable
@@ -112,6 +112,9 @@ final class FakeAgentSessionClient implements AgentSessionClient {
 
     /** The n-th {@code events} call, from 0, throws this on its first read. */
     final Map<Integer, RuntimeException> streamFailures = new HashMap<>();
+
+    /** Runs while the n-th {@code events} call, from 0, opens its stream. */
+    final Map<Integer, Runnable> whileOpening = new HashMap<>();
 
     private int streams;
 
@@ -145,7 +148,8 @@ final class FakeAgentSessionClient implements AgentSessionClient {
     @Override
     public synchronized void stop(String sessionId) {
         calls.add("stop");
-        if (stopFails != null) throw stopFails;
+        RuntimeException failure = stopFailures.poll();
+        if (failure != null) throw failure;
         if (closed || silent) return;
         if (replyOpen) emit(end(SessionEvent.EndReason.ABORTED, 0));
         emit(closed(SessionEvent.CloseReason.STOPPED));
@@ -161,6 +165,8 @@ final class FakeAgentSessionClient implements AgentSessionClient {
     @Override
     public Stream<SessionEvent> events(String sessionId, long afterSeq) {
         calls.add("events " + afterSeq);
+        Runnable opening = whileOpening.get(streams);
+        if (opening != null) opening.run();
         Reader reader = new Reader(afterSeq, streamFailures.get(streams++));
         return StreamSupport.stream(
                         Spliterators.spliteratorUnknownSize(reader, Spliterator.ORDERED | Spliterator.NONNULL), false)
