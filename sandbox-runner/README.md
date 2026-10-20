@@ -97,8 +97,8 @@ narrower.
 ## Agent sessions (`session.js`)
 
 `agent-sandbox/session.js` keeps one OpenCode session alive for many messages, where the lane
-scripts run one prompt and exit. It is generic: it knows a system prompt, files, a model and named
-MCP servers, and nothing about what the caller builds with them. A launcher runs it once per
+scripts run one prompt and exit. It knows a lane, a system prompt, files, a model, named MCP
+servers and, for RCA, a repository to clone, and nothing about what the caller builds with them. A launcher runs it once per
 session as `/usr/local/bin/node-sealed session.js /home/user/session.json` (E2B) or
 `/usr/local/bin/node-sealed session.js /work/session.json` (Docker), with the copy of `node`
 both recipes make (execute-only on Docker only; see Sessions under the security notes above), and
@@ -108,13 +108,16 @@ drives it over HTTP.
 
 | Item | Value |
 |---|---|
-| `session.json` | `{ system_prompt, files, model, mcp_servers: [ { name, url, token } ], max_tool_calls_per_message }`. The script reads it and deletes it before anything else runs, so no token is on disk while the agent runs. |
+| `session.json` | `{ lane, system_prompt?, files, model, mcp_servers: [ { name, url, token } ], max_tool_calls_per_message, clone? }`. The script reads it and deletes it before anything else runs, so no token is on disk while the agent runs. |
+| `lane` | `agent_run`, `triage` or `rca`; it sets the posture below (`SESSION_LANES` in `agent-stream.js`). Another value is a start failure. |
+| `system_prompt` | A non-empty string, run as the session agent `tessary-session`. Only `rca` may leave it out (absent or `null`): the session then runs OpenCode's default `build` agent with `maxSteps = max_tool_calls_per_message + 1`, and no message names an agent, as the one-shot `rca` lane does. |
+| `clone` | `rca` only: `{ url, head_sha, onset_at? }`, `head_sha` matching `^[0-9a-f]{7,64}$`. Before the session reports ready, the script clones `url` to `<WORK>/repo`, checks out `head_sha` and moves the repo's agent config (`AGENTS.md`, `.opencode`, ...) to `repo/quarantine/`. `url` carries a short-lived token: git runs with it kept out of errors, and every error is scrubbed. It then resolves the onset commit once (the newest commit on `HEAD` committed before `onset_at`, or `unknown`) and replaces `{onset_commit}` in the text of every message it forwards. A clone git refuses is a start failure with git's scrubbed reason. |
 | `files` | Relative path to content, written under `<WORK>/dossier/` (the lanes' layout). A path that escapes is a start failure. |
 | `mcp_servers` | Names match `^[a-z][a-z0-9-]{0,31}$` and are unique. The tokens go only to the relay (`mcp-relay.js`), which serves each name at `http://127.0.0.1:<port>/mcp/<name>`; OpenCode's config gets one remote entry per name with no headers. |
-| `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent `tessary-session` gets `steps = max_tool_calls_per_message + 1`, and the script aborts a reply whose tool calls go past it (see `reason` below). |
+| `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent gets `steps = max_tool_calls_per_message + 1`, and the script aborts a reply whose tool calls go past it (see `reason` below). |
 | `SESSION_SECRET` | Env var, at least 32 characters (the launcher sends 32 random bytes as hex). The script reads it, then removes it from its env before it spawns `opencode serve`, so no child inherits it; on Docker the script's own start-time environment stays unreadable to the agent only because the script runs from the execute-only `node`, and on E2B the agent can read it. Missing or short: `SESSION_SECRET is required` on stderr, exit 2, nothing listens. |
 | `SESSION_PORT` | Env var, default `9400`. The launcher sets it from `SANDBOX_SESSION_PORT`, default 9400; the tests use free ports. The session server binds `0.0.0.0`; OpenCode and the relay stay on `127.0.0.1`. |
-| Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied, `edit` a blanket allow, outside directories denied except OpenCode's own scratch folders. |
+| Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied. `agent_run` and `triage`: `edit` a blanket allow, outside directories denied except OpenCode's own scratch folders; `triage` also gets an empty `checks/` for the agent's scripts. `rca`: `edit` denied everywhere and every outside directory denied. |
 
 ### Routes
 
@@ -155,6 +158,7 @@ OpenCode's instruction ends on the last step in text, also with `limit`.
 |---|---|---|
 | `start` | A bad `session.json`, a dossier path that escapes, or the relay, OpenCode or the OpenCode session did not start. | `closed { failed }`; open `/events` responses end; exit 1 after 5 s. |
 | `agent` | An OpenCode `session.error` during a reply, other than an abort. `detail` is `<name>: <message>`, scrubbed and cut to 500 characters. | The reply still ends with one `message_end`, so its spend is booked once. |
+| `provider_rejected`, `request_refused`, `provider_unavailable` | At the end of a reply, the reply's last assistant message holds the provider error OpenCode gave up on (`refusalOf` in `agent-stream.js`, as the one-shot lanes read it): a rejected key (`ProviderAuthError`, HTTP 401 or 403), a request the provider will not take (`isRetryable: false`), or an outage OpenCode already retried. `detail` is `model provider: <message> (HTTP <status>)`, scrubbed and cut to 500 characters; the status is left out when the error has none. An aborted reply never reports one. | Sent after any `agent` error of the same reply and just before its `message_end`, so the spend is still booked. A caller takes the provider kind over `agent`. |
 | `opencode_exit` | `opencode serve` exited after the session was ready. `detail` is `exit code <n>` or `signal <s>`. | `closed { failed }`; open `/events` responses end; exit 1 after 5 s. |
 
 SIGTERM or SIGINT stops OpenCode (awaited), the relay and the HTTP server, and exits 0 with no event.
@@ -187,8 +191,9 @@ which sends `server.heartbeat` about every 10 s). Three facts of the 1.18.30 bin
 
 The launcher owns long-lived agent sessions: `POST /sessions` starts one sandbox that runs
 `session.js` (see [Agent sessions](#agent-sessions-sessionjs)), and the routes below forward
-messages to it and stream its events. A session is generic: the launcher knows a lane name, files,
-a system prompt, a model and named MCP servers, and nothing about what the caller builds with them.
+messages to it and stream its events. The launcher knows a lane, files, a system prompt, a model,
+named MCP servers and, for RCA, a repository to clone, and nothing about what the caller builds with
+them.
 The registry lives in the launcher's memory, so after a launcher restart every session is unknown.
 
 ### Routes
@@ -203,26 +208,34 @@ sandbox exists); its `detail` is launcher-authored, never script output, a token
 
 | Route | Success | Other answers |
 |---|---|---|
-| `POST /sessions` | `201 { session_id }` once the script reports ready | `429 { "error": "sandbox session capacity reached", "kind": "capacity" }` at `SANDBOX_SESSION_CAP`, before any sandbox is spent; `502 kind: "bad_request"` for a bad body; `502 kind: "orchestration"` (or `"timeout"` after 90 s) when the sandbox never became ready |
+| `POST /sessions` | `201 { session_id }` once the script reports ready | `429 { "error": "sandbox session capacity reached", "kind": "capacity" }` at `SANDBOX_SESSION_CAP`, before any sandbox is spent; `502 kind: "bad_request"` for a bad body; `502 kind: "orchestration"` (or `"timeout"` after 90 s, or 270 s for a session that clones) when the sandbox never became ready |
 | `POST /sessions/{id}/messages` `{ text }` | `202`, no body | `409 { "error": "session busy", "kind": "busy" }` while a reply runs; `404`, also when the script cannot be reached or answers `503` (it is no longer ready), and the session then closes as `failed`; `502 bad_request` for a bad `text`; `502 orchestration` when the script refused the message with another status |
 | `POST /sessions/{id}/abort` | `204`, also with no reply running; the reply ends with `message_end.reason = "aborted"` and the session stays | `404`, also when the script cannot be reached, and the session then closes as `failed`; `502 orchestration` when the script refused the abort |
 | `GET /sessions/{id}/events?after=<seq>` | `200 text/event-stream` | `404`; `410 { "error": "events no longer held", "kind": "gone" }`; `502 bad_request` for an `after` that is not a non-negative integer or is past the last event |
 | `DELETE /sessions/{id}` | `204` after the sandbox is stopped and removed; `204` again on a closed session | `404` |
 
 `POST /sessions` takes `{ lane, system_prompt, files, model, model_cost?, provider, credential,
-mcp_servers: [ { name, url, token } ], idle_timeout_ms, max_tool_calls_per_message }`. The launcher
-checks the body in this order, each a `bad_request` with this `detail`:
+mcp_servers: [ { name, url, token } ], idle_timeout_ms, max_tool_calls_per_message, clone_url?,
+head_sha?, onset_at? }`. The launcher checks the body in this order, each a `bad_request` with this
+`detail`:
 
 | Check | `detail` |
 |---|---|
 | JSON, at most 8 MiB | `invalid json body` / `body too large` |
 | `lane` non-empty string | `session.js: lane must be a non-empty string` |
+| `lane` one of `agent_run`, `triage`, `rca` | `session.js: lane must be one of agent_run, triage, rca` |
 | `credential`, as on the one-shot routes | `session.js: missing or invalid credential (<why>)` |
 | `model` non-empty string | `session.js: model must be a non-empty string` |
 | `idle_timeout_ms` positive integer | `session.js: idle_timeout_ms must be a positive integer` |
 | `idle_timeout_ms` at most 24 hours | `session.js: idle_timeout_ms must be at most 86400000` |
 | an `egress_secret` credential on docker | `session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)` |
-| `system_prompt` non-empty string | `session.js: system_prompt must be a non-empty string` |
+| `system_prompt` non-empty string; on `rca` it may be absent or `null` | `session.js: system_prompt must be a non-empty string` |
+| `clone_url`, `head_sha`, `onset_at` only on `rca` | `session.js: clone_url, head_sha and onset_at are for the rca lane only` |
+| `clone_url` and `head_sha` both or neither | `session.js: clone_url and head_sha go together` |
+| `onset_at` only with them | `session.js: onset_at needs clone_url and head_sha` |
+| `clone_url` non-empty string | `session.js: clone_url must be a non-empty string` |
+| `head_sha` matches `^[0-9a-f]{7,64}$` | `session.js: head_sha must match ^[0-9a-f]{7,64}$` |
+| `onset_at` an ISO 8601 time | `session.js: onset_at must be an ISO 8601 time` |
 | `files`, if present, an object of strings | `session.js: files must map relative paths to strings` |
 | `mcp_servers` an array | `session.js: mcp_servers must be an array` |
 | each `mcp_servers` name matches `^[a-z][a-z0-9-]{0,31}$` | `session.js: each mcp_servers name must match ^[a-z][a-z0-9-]{0,31}$` |
@@ -234,9 +247,12 @@ checks the body in this order, each a `bad_request` with this `detail`:
 These are the script's own checks of `session.json`, made here as well so a caller's mistake is a
 `bad_request` (the backend's `RUN_FAILED`) that spends no sandbox, never a failed start that reads
 as an outage. A dossier path that escapes is still found only by the script. `provider` is ignored, as on the one-shot routes: `credential.provider`
-decides. `session.json` holds exactly `{ system_prompt, files, model, mcp_servers,
-max_tool_calls_per_message }`, with the model qualified as on the one-shot routes; the credential
-reaches the sandbox only through its env, with `model_cost` declared in `OPENCODE_CONFIG_CONTENT`.
+decides. `session.json` holds exactly `{ lane, system_prompt, files, model, mcp_servers,
+max_tool_calls_per_message }`, with `system_prompt` left out when the caller left it out, `clone: {
+url, head_sha, onset_at }` added for a clone, and the model qualified as on the one-shot routes; the
+credential reaches the sandbox only through its env, with `model_cost` declared in
+`OPENCODE_CONFIG_CONTENT`. The clone URL carries a short-lived token, so it is in `session.json` only
+until the script reads and deletes it, and the launcher never logs it.
 Each session has its own `SESSION_SECRET` (32 random bytes as hex), sent with every call the
 launcher makes to the script.
 
@@ -281,7 +297,8 @@ sandbox dies has no `message_end`, and its spend is lost.
 A closed session stays known for 5 minutes: `GET /events` replays its buffer and ends, `DELETE` is
 `204`, a message or an abort is `404`. After that it is unknown.
 
-A start that fails (the script reports `failed`, the sandbox exits, or 90 s pass) is a `502`; the
+A start that fails (the script reports `failed`, the sandbox exits, or 90 s pass, 270 s when the
+session clones) is a `502`, with that deadline as its `timeout_ms`; the
 launcher logs the script's start events on its console, scrubbed and cut to 500 characters, then
 stops the sandbox the same way. A failed E2B `create` leaves nothing to stop. No `closed` event is
 sent, because no caller holds the id.
@@ -293,7 +310,7 @@ already holds (`GET /events?from=<n>`), so no event is lost or doubled.
 
 | Env | Default | Meaning |
 |---|---|---|
-| `SANDBOX_SESSION_CAP` | `4` | Sessions at once (starting, live or closing), on every backend. Over it: `429`. |
+| `SANDBOX_SESSION_CAP` | `4` | Sessions at once (starting, live or closing), on every backend. Over it: `429`, and the backend puts the triage or RCA run back in its queue without spending an attempt. `docker-compose.yml` sets `2`: sessions take no `SANDBOX_DOCKER_CONCURRENCY` slot and each container may use `SANDBOX_DOCKER_MEMORY_MB` (2 GB), so triage, RCA and authoring sessions together stay within a small host. |
 | `SANDBOX_SESSION_BUFFER` | `5000` | Events kept per session for replay: enough for a whole reply's `text` deltas, about 1 MB per session. |
 | `SANDBOX_SESSION_MAX_MS` | `7200000` | A session's whole life; also the Docker container's `tessary.sandbox.timeout-ms` label, and on E2B the sandbox's `timeoutMs` less 60 s. |
 | `SANDBOX_SESSION_PORT` | `9400` | The port `session.js` listens on in the sandbox, passed to it as `SESSION_PORT`. |
@@ -318,7 +335,9 @@ The launcher refuses to boot when `E2B_ANALYZER_TEMPLATE` names a release other 
 A local build (`dev`) or a floating tag (`latest`) is not checked.
 
 A session sandbox is created from `E2B_ANALYZER_TEMPLATE` with `timeoutMs` set to
-`SANDBOX_SESSION_MAX_MS` + 60 s and the metadata `tessary.sandbox.session=<id>`. The launcher
+`SANDBOX_SESSION_MAX_MS` + 60 s and the metadata `tessary.sandbox.session=<id>`; with an egress
+credential it reaches only the model provider, every `mcp_servers` host, the clone host and
+`EGRESS_EXTRA_ALLOW`. The launcher
 writes `session.json` to `/home/user/session.json` through the files API, then runs
 `/usr/local/bin/node-sealed /home/user/session.js /home/user/session.json` in the background with no command timeout,
 the credential env, `SESSION_SECRET` and `SESSION_PORT`. It dials the script at

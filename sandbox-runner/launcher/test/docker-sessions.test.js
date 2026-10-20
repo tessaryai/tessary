@@ -33,6 +33,8 @@ const START = {
   max_tool_calls_per_message: 40,
 };
 const NOT_FOUND = { error: 'not found', kind: 'unknown_session' };
+const CLONE_URL = 'https://x-access-token:ghs_clonesecret@github.com/acme/app.git';
+const RCA_START = { ...START, lane: 'rca', system_prompt: undefined, clone_url: CLONE_URL, head_sha: 'a41c0de', onset_at: '2026-10-01T09:30:00Z' };
 
 /*
  * A fake Engine API that knows session containers. A create whose Cmd[1] is session.js is a
@@ -151,12 +153,12 @@ async function withSessionLauncher(opts, fn) {
     ...(opts.env || {}),
   });
   let log = '';
+  let out = '';
   child.stderr.on('data', (d) => { log += d.toString(); });
+  child.stdout.on('data', (d) => { out += d.toString(); });
   try {
     const port = await new Promise((resolve, reject) => {
-      let out = '';
-      child.stdout.on('data', (d) => {
-        out += d.toString();
+      child.stdout.on('data', () => {
         const bound = /listening on :(\d+)/.exec(out);
         if (bound) resolve(Number(bound[1]));
       });
@@ -169,6 +171,7 @@ async function withSessionLauncher(opts, fn) {
       workDir,
       sessionPort,
       stderr: () => log,
+      stdout: () => out,
       start: (body = START) => request(port, 'POST', '/sessions', { auth, body }),
       send: (id, text) => request(port, 'POST', `/sessions/${id}/messages`, { auth, body: { text } }),
       abort: (id) => request(port, 'POST', `/sessions/${id}/abort`, { auth }),
@@ -428,13 +431,14 @@ test('the credential never reaches session.json; the secret and the keys ride in
 
     const text = daemon.sessionFiles.c1;
     assert.deepEqual(JSON.parse(text), {
+      lane: 'agent_run',
       system_prompt: 'You help.',
       files: { 'notes.md': 'hello' },
       model: 'amazon-bedrock/global.anthropic.claude-sonnet-4-6',
       mcp_servers: START.mcp_servers,
       max_tool_calls_per_message: 40,
     });
-    for (const leak of ['test-secret', 'test-akid', 'idle_timeout_ms', 'model_cost', 'credential', 'lane']) {
+    for (const leak of ['test-secret', 'test-akid', 'idle_timeout_ms', 'model_cost', 'credential']) {
       assert.ok(!text.includes(leak), `session.json holds ${leak}`);
     }
 
@@ -624,5 +628,59 @@ test('a reply whose message_end beats the 202 does not leave the session busy (a
     assert.equal((await send(id, 'one')).status, 202);
     const read = await reader;
     assert.deepEqual(read.events, [...numbered(reply(1, 'one'), 1), { id: 5, type: 'closed', data: { reason: 'idle' } }], stderr());
+  });
+});
+
+test('an rca session may omit system_prompt, and its session.json carries the lane and the clone (an RCA session refused for the system prompt it never had, or one that never clones)', T, async () => {
+  await withSessionLauncher({}, async ({ start, daemon }) => {
+    const started = await start(RCA_START);
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+
+    assert.deepEqual(JSON.parse(daemon.sessionFiles.c1), {
+      lane: 'rca',
+      files: { 'notes.md': 'hello' },
+      model: 'amazon-bedrock/global.anthropic.claude-sonnet-4-6',
+      mcp_servers: START.mcp_servers,
+      max_tool_calls_per_message: 40,
+      clone: { url: CLONE_URL, head_sha: 'a41c0de', onset_at: '2026-10-01T09:30:00Z' },
+    });
+  });
+});
+
+test('a clone field on a triage or agent_run session is bad_request and spends no sandbox (a triage session that grows a repo)', T, async () => {
+  await withSessionLauncher({}, async ({ start, daemon }) => {
+    for (const lane of ['triage', 'agent_run']) {
+      for (const clone of [{ clone_url: CLONE_URL, head_sha: 'a41c0de' }, { onset_at: '2026-10-01T09:30:00Z' }]) {
+        const res = await start({ ...START, lane, ...clone });
+        assert.equal(res.status, 502, `${lane} ${JSON.stringify(clone)}`);
+        assert.equal(res.body.kind, 'bad_request');
+        assert.equal(res.body.detail, 'session.js: clone_url, head_sha and onset_at are for the rca lane only');
+      }
+    }
+    assert.ok(!daemon.calls.includes('POST /containers/create'), JSON.stringify(daemon.calls));
+  });
+});
+
+test('a session with a clone gets the longer ready deadline (a clone of a big repo read as a failed start)', T, async () => {
+  await withSessionLauncher({ shapes: [{ startFails: true }, { startFails: true }] }, async ({ start }) => {
+    assert.equal((await start({ ...RCA_START, system_prompt: 'You find causes.' })).body.timeout_ms, 270000);
+    assert.equal((await start({ ...RCA_START, clone_url: undefined, head_sha: undefined, onset_at: undefined })).body.timeout_ms, 90000);
+  });
+});
+
+test('the clone URL never reaches the launcher log (token in console)', T, async () => {
+  const failing = { startFails: `git clone failed: fatal: unable to access '${CLONE_URL}': 403` };
+  await withSessionLauncher({ shapes: [failing] }, async ({ start, send, stop, events, stderr, stdout }) => {
+    const failed = await start({ ...RCA_START, system_prompt: 'You find causes.' });
+    assert.equal(failed.status, 502);
+    assert.doesNotMatch(JSON.stringify(failed.body), /clonesecret/);
+
+    const id = (await start(RCA_START)).body.session_id;
+    assert.equal((await send(id, 'one')).status, 202);
+    await events(id, { after: 0, until: 4 });
+    assert.equal((await stop(id)).status, 204);
+
+    assert.match(stderr(), /x-access-token:\*\*\*@github\.com/, 'the start error is logged, scrubbed');
+    assert.doesNotMatch(stderr() + stdout(), /clonesecret/);
   });
 });

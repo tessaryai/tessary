@@ -291,6 +291,10 @@ services:
       # tag exists; set AGENT_IMAGE to a local image.
       AGENT_IMAGE: ${AGENT_IMAGE:-tessaryai/tessary:agent-sandbox-${TESSARY_VERSION:-latest}}
       SANDBOX_DOCKER_CONCURRENCY: "1"
+      # Sessions take no SANDBOX_DOCKER_CONCURRENCY slot and each container may use 2 GB, so this bounds the
+      # agent memory a small host spends on triage, RCA and authoring sessions. Above it a start is refused
+      # and the run waits in its queue.
+      SANDBOX_SESSION_CAP: ${SANDBOX_SESSION_CAP:-2}
       # Must equal the `sandbox-work` volume's `name:`; the docker backend fails at boot if unset.
       SANDBOX_WORK_VOLUME: ${SANDBOX_WORK_VOLUME:-tessary-sandbox-work}
       E2B_API_KEY: ${E2B_API_KEY:-}

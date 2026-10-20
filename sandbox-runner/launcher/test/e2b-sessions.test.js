@@ -422,13 +422,14 @@ test('on E2B the credential never reaches session.json; the secret and the keys 
     const write = control.calls.find((c) => c.op === 'write');
     assert.equal(write.path, '/home/user/session.json');
     assert.deepEqual(JSON.parse(write.content), {
+      lane: 'agent_run',
       system_prompt: 'You help.',
       files: { 'notes.md': 'hello' },
       model: 'amazon-bedrock/global.anthropic.claude-sonnet-4-6',
       mcp_servers: START.mcp_servers,
       max_tool_calls_per_message: 40,
     });
-    for (const leak of ['test-secret', 'test-akid', 'idle_timeout_ms', 'model_cost', 'credential', 'lane']) {
+    for (const leak of ['test-secret', 'test-akid', 'idle_timeout_ms', 'model_cost', 'credential']) {
       assert.ok(!write.content.includes(leak), `session.json holds ${leak}`);
     }
 
@@ -499,6 +500,23 @@ test('an E2B session with an egress credential reaches only the model, every MCP
     assert.equal(control.calls.find((c) => c.op === 'run').envs.ANTHROPIC_API_KEY, 'injected-at-egress');
     const file = control.calls.find((c) => c.op === 'write').content;
     for (const leak of ['egress_secret', 'tessary-ai-anthropic']) assert.ok(!file.includes(leak), `session.json holds ${leak}`);
+  });
+});
+
+test('on E2B an rca session\'s clone host is in the egress allow list (a clone the sandbox cannot reach)', T, async () => {
+  await withE2bLauncher({}, async ({ start, control }) => {
+    const started = await start({
+      ...START,
+      lane: 'rca',
+      system_prompt: 'You find causes.',
+      credential: { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic' },
+      model: 'claude-sonnet-5',
+      clone_url: 'https://x-access-token:ghs_clonesecret@git.example.com/acme/app.git',
+      head_sha: 'a41c0de',
+    });
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+
+    assert.deepEqual(control.calls.find((c) => c.op === 'create').network.allowOut, ['api.anthropic.com', 'tessary.example.com', 'git.example.com']);
   });
 });
 
