@@ -170,7 +170,7 @@ record RcaControllerTest(
                 .data());
         assertEquals(first.id(), whilePending.id(), "a queued analysis is handed back, not duplicated");
 
-        jobs.markFailed(first.jobId(), "launcher down", 3);
+        jobs.markFailed(first.jobId(), "launcher down");
         RcaReportView fresh = Objects.requireNonNull(controller
                 .rerun(ctx, fix.org().slug(), fix.project().slug(), first.id())
                 .data());
@@ -179,7 +179,7 @@ record RcaControllerTest(
         assertEquals("pending", fresh.status());
         assertEquals(Optional.of(findingId), reports.findingIdOf(projectId, fresh.jobId()));
 
-        jobs.markFailed(fresh.jobId(), "launcher down", 3);
+        jobs.markFailed(fresh.jobId(), "launcher down");
         jdbc.sql("UPDATE rca_report SET finding_id = NULL WHERE project_id = :pid AND job_id = :jobId")
                 .param("pid", projectId)
                 .param("jobId", fresh.jobId())

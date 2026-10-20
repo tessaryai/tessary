@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.agentrun.StepWords;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.RcaProperties.Agentic;
 import ai.tessary.git.GitCloneUrls;
@@ -176,7 +178,9 @@ public class AgenticRcaEngine {
                     JSON_SCHEMA,
                     mcpBase.replaceAll("/+$", "") + "/mcp",
                     issued.plaintext(),
-                    report.id()));
+                    report.id(),
+                    job.id(),
+                    stepWords(job.metric(), evidence)));
 
             RcaSynthesisOutput.Parsed parsed = RcaSynthesisOutput.parse(
                     mapper,
@@ -214,6 +218,22 @@ public class AgenticRcaEngine {
         } finally {
             revokeQuietly(issued.token().id(), keyPrincipal, job);
         }
+    }
+
+    /**
+     * What the run's steps call the evidence rows and how many are flagged. A job's metric is its finding's classifier
+     * key.
+     */
+    static StepWords.Context stepWords(String classifierKey, Evidence evidence) {
+        Map<String, String> nouns =
+                switch (classifierKey) {
+                    case BuiltInDetector.Kind.GROUNDEDNESS ->
+                        Map.of(FindingEvidenceRow.Role.WITNESS, "flagged answers");
+                    case BuiltInDetector.Kind.FRUSTRATION ->
+                        Map.of(FindingEvidenceRow.Role.WITNESS, "flagged sessions");
+                    default -> Map.of();
+                };
+        return new StepWords.Context(nouns, Map.of(FindingEvidenceRow.Role.WITNESS, (long) evidence.flaggedCount()));
     }
 
     private record Clone(String url, String headSha) {}

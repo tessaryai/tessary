@@ -1,21 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.agentrun.AgentRunRepository;
+import ai.tessary.agentrun.AgentRunRepository.Outcome;
+import ai.tessary.agentrun.AgentSessionClient;
 import ai.tessary.cases.CaseEventRepository;
 import ai.tessary.cases.CaseEventRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.open.errors.RcaError;
+import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.jobqueue.LeasedJobSql;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
+import ai.tessary.open.obs.StructuredLog;
 import java.net.InetAddress;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -25,7 +32,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Drains the {@code rca} queue into {@code rcaTaskExecutor}. A failure stamps the report {@code failed} so the polling
- * UI always converges.
+ * UI always converges; nothing retries or holds, since a person pressed Run RCA and re-runs it. The one exception is a
+ * launcher at its session cap, which sends the job back to the queue unspent. Each run is recorded with how it ended.
  */
 @Component
 public class RcaWorker {
@@ -43,6 +51,13 @@ public class RcaWorker {
     private final FindingRepository findings;
 
     private final CaseEventRepository caseEvents;
+
+    /** One run per attempt, closed with how it ended, so the case page can show where the RCA stands. */
+    private final AgentRunRepository runs;
+
+    /** Stops the session a crashed attempt left open, so it cannot keep spending. */
+    private final AgentSessionClient sessions;
+
     private final String leaseOwner =
             LeasedJobSql.leaseOwner(() -> InetAddress.getLocalHost().getHostName());
 
@@ -54,7 +69,9 @@ public class RcaWorker {
             TraceMdcBridge traceBridge,
             FindingRepository findings,
             CaseEventRepository caseEvents,
-            @Qualifier("rcaTaskExecutor") TaskExecutor executor) {
+            @Qualifier("rcaTaskExecutor") TaskExecutor executor,
+            AgentRunRepository runs,
+            AgentSessionClient sessions) {
         this.jobs = jobs;
         this.reports = reports;
         this.analysis = analysis;
@@ -63,6 +80,8 @@ public class RcaWorker {
         this.findings = findings;
         this.caseEvents = caseEvents;
         this.executor = executor;
+        this.runs = runs;
+        this.sessions = sessions;
     }
 
     @Scheduled(fixedDelayString = "${tessary.rca.heartbeat-ms:15000}")
@@ -106,30 +125,74 @@ public class RcaWorker {
         Map<String, String> ctx = new LinkedHashMap<>();
         ctx.put(LogContext.PROJECT_ID, job.projectId());
         ctx.put(LogContext.JOB_ID, job.id());
+        String runId = null;
         try (LogContext ignored = LogContext.put(ctx)) {
+            abandonOrphans(job);
+            runId = reports.findByJobId(job.projectId(), job.id())
+                    .map(report -> runs.open(job.projectId(), AgentRunRepository.Lane.RCA, report.id(), job.id(), null))
+                    .orElse(null);
             analysis.analyze(job);
             jobs.markDone(job.id());
+            close(runId, Outcome.DONE, null);
             appendRcaCompleted(job);
-        } catch (RuntimeException e) {
-            // Log the error CODE, which separates "launcher down" from "agent returned junk"; the message can embed
-            // model output, so it stays at DEBUG.
-            String code = e instanceof TessaryException ee
-                    ? ee.error().code()
-                    : e.getClass().getSimpleName();
-            log.error(
-                    Markers.OPS,
-                    "rca job failed job={} subject={}:{} code={}",
-                    job.id(),
-                    job.subjectKind(),
-                    job.subjectId(),
-                    code);
-            log.debug("rca job failed job={} detail", job.id(), e);
-            jobs.markFailed(job.id(), e.getMessage(), props.maxAttempts());
-            try {
-                reports.complete(job.id(), RcaJobRow.FAILED, null, e.getMessage(), null, null, null, null);
-            } catch (RuntimeException stampFailure) {
-                log.warn(Markers.OPS, "rca failed-report stamp failed job={}: {}", job.id(), stampFailure.getMessage());
+        } catch (TessaryException e) {
+            if (RcaError.SANDBOX_BUSY.equals(e.error()) && e instanceof Retryable busy) {
+                // Nothing failed and the report stays unstamped, so the case still reads Queued.
+                log.debug("rca job {} waits for a free sandbox: {}", job.id(), e.getMessage());
+                jobs.requeue(job.id(), busy.retryAfterSeconds());
+                close(runId, Outcome.RELEASED, e.error().code());
+                return;
             }
+            fail(job, runId, e, e.error().code());
+        } catch (RuntimeException e) {
+            fail(job, runId, e, RcaError.UPSTREAM_FAILED.code());
+        }
+    }
+
+    private void fail(RcaJobRow job, @Nullable String runId, RuntimeException e, String code) {
+        // Log the error CODE, which separates "launcher down" from "agent returned junk"; the message can embed model
+        // output, so it stays at DEBUG.
+        log.error(
+                Markers.OPS,
+                "rca job failed job={} subject={}:{} code={}",
+                job.id(),
+                job.subjectKind(),
+                job.subjectId(),
+                code);
+        log.debug("rca job failed job={} detail", job.id(), e);
+        jobs.markFailed(job.id(), e.getMessage());
+        close(runId, Outcome.FAILED, code);
+        try {
+            reports.complete(job.id(), RcaJobRow.FAILED, null, e.getMessage(), null, null, null, null);
+        } catch (RuntimeException stampFailure) {
+            log.warn(Markers.OPS, "rca failed-report stamp failed job={}: {}", job.id(), stampFailure.getMessage());
+        }
+    }
+
+    /**
+     * A run still open on a job just claimed belongs to an attempt whose worker died: its session may still be
+     * spending, so it is stopped and the run marked abandoned before this attempt opens its own.
+     */
+    private void abandonOrphans(RcaJobRow job) {
+        for (AgentRunRepository.RunSummary orphan : runs.openRunsOfJob(job.id())) {
+            String sessionId = orphan.sessionId();
+            if (sessionId != null) sessions.stop(sessionId);
+            runs.close(orphan.id(), Outcome.ABANDONED, null);
+        }
+    }
+
+    /** Never masks how the job ended: a run that cannot be closed only leaves the page a step behind. */
+    private void close(@Nullable String runId, Outcome outcome, @Nullable String stopCode) {
+        if (runId == null) return;
+        try {
+            runs.close(runId, outcome, stopCode);
+        } catch (RuntimeException e) {
+            StructuredLog.warn(log, Markers.OPS, "rca.run-close-failed")
+                    .message("could not close rca run " + runId + " as " + outcome.wire())
+                    .field("run", runId)
+                    .field("outcome", outcome.wire())
+                    .field("error", e.toString())
+                    .log();
         }
     }
 

@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -15,6 +16,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.agentrun.AgentRunRepository;
+import ai.tessary.agentrun.AgentSessionClient;
 import ai.tessary.cases.CaseEventRepository;
 import ai.tessary.cases.CaseEventRow;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -46,6 +49,8 @@ class RcaWorkerTickTest {
     private final FindingRepository findings = mock(FindingRepository.class);
     private final CaseEventRepository caseEvents = mock(CaseEventRepository.class);
     private final RcaProperties props = Props.of(RcaProperties.class);
+    private final AgentRunRepository runs = mock(AgentRunRepository.class);
+    private final AgentSessionClient sessions = mock(AgentSessionClient.class);
     private final RcaWorker worker = new RcaWorker(
             jobs,
             reports,
@@ -54,7 +59,9 @@ class RcaWorkerTickTest {
             new TraceMdcBridge(Tracer.NOOP),
             findings,
             caseEvents,
-            new SyncTaskExecutor());
+            new SyncTaskExecutor(),
+            runs,
+            sessions);
 
     /**
      * The exhaustion sweep's outcome, success or failure, never gates the claim: due jobs are claimed round after
@@ -110,7 +117,7 @@ class RcaWorkerTickTest {
 
         worker.run(JOB);
 
-        verify(jobs).markFailed("job-1", "launcher down", props.maxAttempts());
+        verify(jobs).markFailed("job-1", "launcher down");
         verify(jobs, never()).markDone(anyString());
     }
 
@@ -141,7 +148,36 @@ class RcaWorkerTickTest {
                         anyString(),
                         isNull(),
                         any(Instant.class));
-        verify(jobs, never()).markFailed(anyString(), any(), anyInt());
+        verify(jobs, never()).markFailed(anyString(), any());
+    }
+
+    /**
+     * An orphan reply that keeps spending: a reclaimed job stops the session its crashed attempt left open and marks
+     * that run abandoned before it opens its own.
+     */
+    @Test
+    void aReclaimedJobStopsTheSessionItsCrashedAttemptLeftOpen() {
+        AgentRunRepository.RunSummary orphan = new AgentRunRepository.RunSummary(
+                "run-old",
+                AgentRunRepository.Lane.RCA,
+                "report-1",
+                1,
+                "2026-10-20T10:00:00Z",
+                null,
+                null,
+                null,
+                4,
+                "Reading commit a41c0de",
+                "s-old");
+        when(runs.openRunsOfJob("job-1")).thenReturn(List.of(orphan));
+        when(findings.findById("proj-1", "fnd-1")).thenReturn(Optional.empty());
+
+        worker.run(JOB);
+
+        var order = inOrder(sessions, runs, analysis);
+        order.verify(sessions).stop("s-old");
+        order.verify(runs).close("run-old", AgentRunRepository.Outcome.ABANDONED, null);
+        order.verify(analysis).analyze(JOB);
     }
 
     private static FindingRow findingOnCase(String caseId) {

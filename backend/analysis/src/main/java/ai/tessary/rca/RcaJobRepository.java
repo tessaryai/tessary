@@ -102,20 +102,39 @@ public class RcaJobRepository {
     }
 
     public void markDone(String id) {
-        jdbc.sql("UPDATE job SET status = 'done', last_error = NULL, updated_at = :now WHERE id = :id")
+        jdbc.sql("UPDATE job SET status = 'done', lease_owner = NULL, last_error = NULL, updated_at = :now"
+                        + " WHERE id = :id")
                 .param("now", Instant.now().toString())
                 .param("id", id)
                 .update();
     }
 
-    public void markFailed(String id, @Nullable String error, int maxAttempts) {
-        jdbc.sql(LeasedJobSql.markFailedById("job", RcaJobRow.FAILED))
+    /** Terminal: a person re-runs a stopped RCA. */
+    public void markFailed(String id, @Nullable String error) {
+        jdbc.sql("UPDATE job SET status = '" + RcaJobRow.FAILED
+                        + "', lease_owner = NULL, last_error = :err, updated_at = :now WHERE id = :id")
                 .param("err", error)
                 .param("now", Instant.now().toString())
                 .param("id", id)
-                .param("maxAttempts", maxAttempts)
-                .query(String.class)
-                .single();
+                .update();
+    }
+
+    /**
+     * Back to the queue with no owner, so the job reads queued, and the attempt its claim took given back, since nothing
+     * failed. The lease is the delay: the claim takes an expired lease, and {@code updated_at} is kept so the job keeps
+     * its place in the queue.
+     */
+    public void requeue(String id, long delaySeconds) {
+        jdbc.sql("""
+                UPDATE job SET status = 'claimed', lease_owner = NULL, lease_expires_at = :expires,
+                               attempts = GREATEST(attempts - 1, 0)
+                 WHERE id = :id
+                """)
+                .param(
+                        "expires",
+                        Instant.now().plus(Duration.ofSeconds(delaySeconds)).toString())
+                .param("id", id)
+                .update();
     }
 
     private static RcaJobRow map(ResultSet rs) throws SQLException {
