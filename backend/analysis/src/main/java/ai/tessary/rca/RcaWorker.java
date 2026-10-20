@@ -160,24 +160,40 @@ public class RcaWorker {
                 job.subjectId(),
                 code);
         log.debug("rca job failed job={} detail", job.id(), e);
-        jobs.markFailed(job.id(), e.getMessage());
-        close(runId, Outcome.FAILED, code);
+        // The job's status is what stops the case page polling, so it changes last; a poll in between would stop
+        // reading with the report still pending.
         try {
             reports.complete(job.id(), RcaJobRow.FAILED, null, e.getMessage(), null, null, null, null);
         } catch (RuntimeException stampFailure) {
             log.warn(Markers.OPS, "rca failed-report stamp failed job={}: {}", job.id(), stampFailure.getMessage());
         }
+        close(runId, Outcome.FAILED, code);
+        jobs.markFailed(job.id(), e.getMessage());
     }
 
     /**
      * A run still open on a job just claimed belongs to an attempt whose worker died: its session may still be
-     * spending, so it is stopped and the run marked abandoned before this attempt opens its own.
+     * spending, so it is stopped and the run marked abandoned before this attempt opens its own. A launcher that cannot
+     * take the stop has lost the session already; if it is down, this attempt's own run says so a moment later.
      */
     private void abandonOrphans(RcaJobRow job) {
         for (AgentRunRepository.RunSummary orphan : runs.openRunsOfJob(job.id())) {
             String sessionId = orphan.sessionId();
-            if (sessionId != null) sessions.stop(sessionId);
+            if (sessionId != null) stopOrphan(orphan.id(), sessionId);
             runs.close(orphan.id(), Outcome.ABANDONED, null);
+        }
+    }
+
+    private void stopOrphan(String runId, String sessionId) {
+        try {
+            sessions.stop(sessionId);
+        } catch (RuntimeException e) {
+            StructuredLog.warn(log, Markers.OPS, "rca.orphan-stop-failed")
+                    .message("could not stop session " + sessionId + " of abandoned rca run " + runId)
+                    .field("run", runId)
+                    .field("session", sessionId)
+                    .field("error", e.toString())
+                    .log();
         }
     }
 
