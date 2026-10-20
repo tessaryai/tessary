@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.agentrun.AgentRunRepository;
 import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CaseRulingView;
 import ai.tessary.cases.CaseDtos.CasesPage;
@@ -57,7 +58,8 @@ record CaseServiceTest(
         CapabilityFixture capabilities,
         ToolErrorStateRepository toolErrorStates,
         MalformedOutputRateRepository malformedOutputRates,
-        JdbcClient jdbc) {
+        JdbcClient jdbc,
+        AgentRunRepository runs) {
 
     @Test
     void resolvingKeepsTheReasonGiven() {
@@ -184,6 +186,89 @@ record CaseServiceTest(
         assertEquals(finished.rcaReportId(), report.id(), "the inlined report is the one the id names");
         assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, report.verdict());
         assertEquals("## Why\nThe provider rotated the default.", report.detailedReport());
+    }
+
+    /**
+     * The cases list carries where each case's RCA stands: queued since its press, running since its run started,
+     * stopped since its run ended, and nothing for a case never analyzed or analyzed (a list that cannot tell a
+     * running RCA from a stopped one).
+     */
+    @Test
+    void theCasesListCarriesQueuedRunningAndStoppedMarks() {
+        Project p = project("svc-rca-marks");
+        CaseRow queued = openOn(p, "queued");
+        CaseRow running = openOn(p, "running");
+        CaseRow stopped = openOn(p, "stopped");
+        CaseRow analyzed = openOn(p, "analyzed");
+        CaseRow never = openOn(p, "never");
+
+        service.runRca(p.id(), queued.id(), "priya@example.com");
+        RcaReportView live = service.runRca(p.id(), running.id(), "priya@example.com");
+        jdbc.sql("UPDATE job SET status = 'claimed', lease_owner = 'rca-worker-1' WHERE id = :id")
+                .param("id", live.jobId())
+                .update();
+        String liveRun = runs.open(p.id(), AgentRunRepository.Lane.RCA, live.id(), live.jobId(), null);
+        RcaReportView failed = service.runRca(p.id(), stopped.id(), "priya@example.com");
+        String failedRun = runs.open(p.id(), AgentRunRepository.Lane.RCA, failed.id(), failed.jobId(), null);
+        runs.close(failedRun, AgentRunRepository.Outcome.FAILED, "RCA.PROVIDER_REJECTED");
+        rcaJobs.markFailed(failed.jobId(), "rejected");
+        rcaJobs.markDone(
+                service.runRca(p.id(), analyzed.id(), "priya@example.com").jobId());
+
+        List<CaseDtos.CaseView> listed = service.triage(p.id()).cases();
+
+        assertEquals("queued", listed(listed, queued).rcaRunState());
+        assertNotNull(listed(listed, queued).rcaRunSince());
+        assertEquals("running", listed(listed, running).rcaRunState());
+        assertEquals(runStartedAt(liveRun), listed(listed, running).rcaRunSince());
+        assertEquals("stopped", listed(listed, stopped).rcaRunState());
+        assertEquals(runEndedAt(failedRun), listed(listed, stopped).rcaRunSince());
+        assertNull(listed(listed, analyzed).rcaRunState());
+        assertNull(listed(listed, never).rcaRunState());
+        assertNull(listed(listed, never).rcaRunSince());
+        assertEquals(
+                "running",
+                listed(
+                                service.page(p.id(), CaseRow.State.OPEN, null, null, 50, null)
+                                        .cases(),
+                                running)
+                        .rcaRunState());
+        assertEquals("running", service.detail(p.id(), running.id()).caseView().rcaRunState());
+    }
+
+    private static CaseDtos.CaseView listed(List<CaseDtos.CaseView> views, CaseRow row) {
+        return views.stream().filter(c -> c.id().equals(row.id())).findFirst().orElseThrow();
+    }
+
+    private String runStartedAt(String runId) {
+        return jdbc.sql("SELECT started_at FROM agent_run WHERE id = :id")
+                .param("id", runId)
+                .query(String.class)
+                .single();
+    }
+
+    private String runEndedAt(String runId) {
+        return jdbc.sql("SELECT ended_at FROM agent_run WHERE id = :id")
+                .param("id", runId)
+                .query(String.class)
+                .single();
+    }
+
+    /** A classifier case on its own subject, so several can stand open in one project. */
+    private CaseRow openOn(Project p, String subject) {
+        CaseDetection detection = new CaseDetection(
+                new CaseKey(CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "subject-" + subject, "x"),
+                "subject label",
+                null,
+                findingBehind(p, subject),
+                "something happened",
+                "because the detector said so",
+                0.4,
+                Instant.parse("2026-07-01T10:00:00Z"),
+                0.55,
+                0.95,
+                -0.4);
+        return cases.open(p.id(), detection, Instant.now()).orElseThrow();
     }
 
     /** Re-pressing a locked case must not re-stamp the lock or narrate the press twice. */

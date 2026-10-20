@@ -180,6 +180,20 @@ class RcaWorkerTickTest {
         order.verify(analysis).analyze(JOB);
     }
 
+    /** A run that cannot be closed only leaves the page a step behind; the job still ends as it did. */
+    @Test
+    void aRunThatCannotBeClosedDoesNotChangeHowTheJobEnded() {
+        when(reports.findByJobId("proj-1", "job-1")).thenReturn(Optional.of(mock(RcaReportRow.class)));
+        when(runs.open(any(), any(), any(), anyString(), isNull())).thenReturn("run-1");
+        doThrow(new IllegalStateException("db down")).when(runs).close(anyString(), any(), any());
+        when(findings.findById("proj-1", "fnd-1")).thenReturn(Optional.empty());
+
+        worker.run(JOB);
+
+        verify(jobs).markDone("job-1");
+        verify(jobs, never()).markFailed(anyString(), any());
+    }
+
     private static FindingRow findingOnCase(String caseId) {
         return new FindingRow(
                 "fnd-1",

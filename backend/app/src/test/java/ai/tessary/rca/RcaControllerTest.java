@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.tessary.agentrun.AgentRunDtos.RunStepsView;
+import ai.tessary.agentrun.AgentRunDtos.StepView;
+import ai.tessary.agentrun.AgentRunRepository;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.cases.CaseDetection;
 import ai.tessary.cases.CaseKey;
@@ -14,6 +17,7 @@ import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaDtos.RcaReportView;
@@ -44,7 +48,8 @@ record RcaControllerTest(
         FindingRepository findings,
         RcaTriggerService trigger,
         RcaJobRepository jobs,
-        RcaReportRepository reports) {
+        RcaReportRepository reports,
+        AgentRunRepository runs) {
 
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
@@ -222,6 +227,79 @@ record RcaControllerTest(
                                 RcaReportRow.Verdict.CAUSES_IDENTIFIED, "A canary model served the flagged traces.")),
                 reports.leadsByCase(projectId, List.of(caseId)));
         assertEquals(Map.of(), reports.leadsByCase(projectId, List.of()));
+    }
+
+    /**
+     * A poll that resends every step: the report's steps come from its newest run, after the seq the page holds, and
+     * the report read says the run is queued until a worker takes it.
+     */
+    @Test
+    void aReportsStepsArePagedAfterASeqAndItsReadCarriesItsRun() {
+        var fix = TenantFixture.bootstrap(tenants, "rca-steps");
+        var ctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String projectId = fix.project().id();
+        RcaReportView report = cases.runRca(
+                projectId,
+                seedCase(projectId, seedFinding(projectId, "cause-steps")),
+                fix.user().id());
+        assertEquals(
+                "queued",
+                Objects.requireNonNull(controller
+                                .get(ctx, fix.org().slug(), fix.project().slug(), report.id())
+                                .data())
+                        .run()
+                        .state());
+        String runId = runs.open(projectId, AgentRunRepository.Lane.RCA, report.id(), report.jobId(), null);
+        runs.stepStarted(runId, "c-1", "Read the tool guide", "Reading the tool guide", 4);
+        runs.stepEnded(runId, "c-1", 9, true, "Read the tool guide");
+        runs.stepStarted(runId, "c-2", "Read commit a41c0de", "Reading commit a41c0de", 12);
+
+        RunStepsView all = Objects.requireNonNull(controller
+                .steps(ctx, fix.org().slug(), fix.project().slug(), report.id(), 0)
+                .data());
+        RunStepsView newer = Objects.requireNonNull(controller
+                .steps(ctx, fix.org().slug(), fix.project().slug(), report.id(), 1)
+                .data());
+
+        assertEquals(runId, all.runId());
+        assertEquals(2, all.stepCount());
+        assertEquals(List.of(1, 2), all.steps().stream().map(StepView::seq).toList());
+        assertEquals(
+                List.of(new StepView(2, "Read commit a41c0de", "Reading commit a41c0de", 12, null, null)),
+                newer.steps());
+    }
+
+    /**
+     * Steps of another project's report, of a report no run has started for, or before step zero are refused: the
+     * first two are a 404 on the report, the last a validation error.
+     */
+    @Test
+    void stepsOfAnotherProjectsReportOrOfAReportWithNoRunAreNotFound() {
+        var a = TenantFixture.bootstrap(tenants, "rca-steps-iso-a");
+        var b = TenantFixture.bootstrap(tenants, "rca-steps-iso-b");
+        var ctxA = new TenantContext(a.user().id(), a.user().email(), null, null, null, null);
+        var ctxB = new TenantContext(b.user().id(), b.user().email(), null, null, null, null);
+        String projectId = a.project().id();
+        RcaReportView report = cases.runRca(
+                projectId,
+                seedCase(projectId, seedFinding(projectId, "cause-steps-iso")),
+                a.user().id());
+
+        TessaryException noRun = assertThrows(
+                TessaryException.class,
+                () -> controller.steps(ctxA, a.org().slug(), a.project().slug(), report.id(), 0));
+        assertEquals(RcaError.SUBJECT_NOT_FOUND, noRun.error());
+
+        runs.open(projectId, AgentRunRepository.Lane.RCA, report.id(), report.jobId(), null);
+        TessaryException otherProject = assertThrows(
+                TessaryException.class,
+                () -> controller.steps(ctxB, b.org().slug(), b.project().slug(), report.id(), 0));
+        assertEquals(RcaError.SUBJECT_NOT_FOUND, otherProject.error());
+
+        TessaryException negative = assertThrows(
+                TessaryException.class,
+                () -> controller.steps(ctxA, a.org().slug(), a.project().slug(), report.id(), -1));
+        assertEquals(CommonError.VALIDATION_FAILED, negative.error());
     }
 
     @Test

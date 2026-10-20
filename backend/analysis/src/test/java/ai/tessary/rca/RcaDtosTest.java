@@ -7,12 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import ai.tessary.rca.RcaDtos.Attribution;
 import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RcaReportView;
+import ai.tessary.rca.RcaDtos.RcaRunView;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
+import ai.tessary.rca.RcaReportRepository.RunState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** How a stored report reads back onto the wire. */
@@ -212,6 +215,65 @@ class RcaDtosTest {
                 "Plain.",
                 RcaReportView.of(row(RcaReportRow.ReportKind.METRIC_MOVEMENT, "Plain.", "[]", null, cause), MAPPER)
                         .summary());
+    }
+
+    /**
+     * A finished RCA read as running, or a re-queued one read as a failure: the run's state follows its job, and a
+     * claimed job with no owner is waiting for a worker, not running.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "pending, false, queued",
+        "claimed, false, queued",
+        "claimed, true, running",
+        "failed, false, stopped",
+        "done, false, done"
+    })
+    void theRunStateFollowsTheJobAndItsLease(String jobStatus, boolean leased, String state) {
+        RcaRunView run = RcaRunView.of(new RunState(
+                "rpt-1",
+                jobStatus,
+                leased,
+                "2026-10-20T10:00:00Z",
+                "run-1",
+                "2026-10-20T10:00:05Z",
+                null,
+                3,
+                "Reading commit a41c0de",
+                null));
+
+        assertEquals(state, run.state());
+        assertEquals("2026-10-20T10:00:00Z", run.queuedAt());
+    }
+
+    /**
+     * Words of a step that is no longer running: a running run says its step, and a stopped one says its code and
+     * when it ended, but never a step it left open.
+     */
+    @Test
+    void onlyARunningRunSaysWhatItIsDoing() {
+        RunState running =
+                new RunState("rpt-1", "claimed", true, "t0", "run-1", "t1", null, 3, "Reading commit a41c0de", null);
+        RunState stopped = new RunState(
+                "rpt-1", "failed", false, "t3", "run-1", "t1", "t2", 3, "Reading commit a41c0de", "RCA.TIMED_OUT");
+
+        assertEquals(
+                new RcaRunView("running", "t0", "run-1", "t1", null, 3, "Reading commit a41c0de", null),
+                RcaRunView.of(running));
+        assertEquals(
+                new RcaRunView("stopped", "t3", "run-1", "t1", "t2", 3, null, "RCA.TIMED_OUT"), RcaRunView.of(stopped));
+    }
+
+    /**
+     * A queued RCA shown with the steps of the attempt before it: once a job is back in the queue, or claimed before
+     * its new run opens, the ended run of the earlier attempt is not this one.
+     */
+    @Test
+    void aLiveJobDoesNotShowTheEndedRunOfAnEarlierAttempt() {
+        RunState requeued =
+                new RunState("rpt-1", "claimed", false, "t0", "run-1", "t1", "t2", 4, null, "RCA.SANDBOX_BUSY");
+
+        assertEquals(new RcaRunView("queued", "t0", null, null, null, 0, null, null), RcaRunView.of(requeued));
     }
 
     private static RcaReportRow row(

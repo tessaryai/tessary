@@ -38,6 +38,7 @@ import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.jobqueue.JobRow;
 import ai.tessary.rca.RcaDtos.RcaReportView;
+import ai.tessary.rca.RcaDtos.RcaRunView;
 import ai.tessary.rca.RcaReportRepository;
 import ai.tessary.rca.RcaReportRepository.CaseLead;
 import ai.tessary.rca.RcaReportRow;
@@ -159,11 +160,14 @@ public class CaseService {
         List<CaseRow> closed = cases.listResolvedSince(projectId, Instant.now().minus(HISTORY_WINDOW));
         // Both buckets in one lookup: a closure that cannot say what it turned out to be is the least useful row.
         Map<String, CaseLead> leads = leadsFor(projectId, live, closed);
+        Map<String, RcaRunView> marks = runsFor(projectId, live, closed);
 
-        List<CaseView> open =
-                live.stream().map(row -> CaseView.of(row, lead(leads, row))).toList();
-        List<CaseView> resolved =
-                closed.stream().map(row -> CaseView.of(row, lead(leads, row))).toList();
+        List<CaseView> open = live.stream()
+                .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id())))
+                .toList();
+        List<CaseView> resolved = closed.stream()
+                .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id())))
+                .toList();
         // Rendered only when the queue is empty, so a project with open cases never pays for them.
         return new TriageView(open, resolved, watching(projectId, open.isEmpty()));
     }
@@ -174,6 +178,15 @@ public class CaseService {
         Set<String> caseIds =
                 Arrays.stream(batches).flatMap(List::stream).map(CaseRow::id).collect(Collectors.toSet());
         return rcaReports.leadsByCase(projectId, caseIds);
+    }
+
+    /** Keyed by case id: where each case's newest RCA stands. */
+    @SafeVarargs
+    private Map<String, RcaRunView> runsFor(String projectId, List<CaseRow>... batches) {
+        Set<String> caseIds =
+                Arrays.stream(batches).flatMap(List::stream).map(CaseRow::id).collect(Collectors.toSet());
+        return rcaReports.runStatesByCase(projectId, caseIds).entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> RcaRunView.of(e.getValue())));
     }
 
     private static @Nullable CaseLead lead(Map<String, CaseLead> leads, CaseRow row) {
@@ -197,9 +210,10 @@ public class CaseService {
                 cases.page(projectId, state, detector, callSiteId, pageSize + 1, CasePageCodec.decode(cursor, order));
         CasePageCodec.Page page = CasePageCodec.trim(rows, pageSize, order);
         Map<String, CaseLead> leads = leadsFor(projectId, page.rows());
+        Map<String, RcaRunView> marks = runsFor(projectId, page.rows());
         return new CasesPage(
                 page.rows().stream()
-                        .map(row -> CaseView.of(row, lead(leads, row)))
+                        .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id())))
                         .toList(),
                 page.nextCursor());
     }
@@ -234,14 +248,15 @@ public class CaseService {
         FindingRow finding = findingBehind(projectId, row);
         boolean detectorAvailable = detectorAvailable(projectId, row);
         RcaReportRow report = latestRcaReport(projectId, finding);
-        RcaReportView rca = inlinedRcaReport(report);
+        RcaReportView rca = inlinedRcaReport(projectId, report);
+        RcaRunView run = rca != null ? rca.run() : runOf(projectId, report);
         List<FindingRow> held = findings.listByCase(projectId, row.id());
         FindingRow worst = worstWindow(held, finding);
         ShiftDetail metric = shiftDetail(worst);
         RateDetail toolError = rateDetail(worst);
         return new CaseDetailView(
                 // Captioned off the report in hand, so the header cannot disagree with the analysis below it.
-                CaseView.of(row, leadOf(rca)),
+                CaseView.of(row, leadOf(rca), run),
                 events.listByCase(projectId, row.id()).stream()
                         .map(CaseEventView::of)
                         .toList(),
@@ -533,13 +548,19 @@ public class CaseService {
      * Null while running: a pending report is an empty shell that would read as "concluded nothing". Terminal reports
      * are inlined, failed ones included.
      */
-    private @Nullable RcaReportView inlinedRcaReport(@Nullable RcaReportRow report) {
+    private @Nullable RcaReportView inlinedRcaReport(String projectId, @Nullable RcaReportRow report) {
         if (report == null
                 || JobRow.Status.PENDING.equals(report.status())
                 || JobRow.Status.CLAIMED.equals(report.status())) {
             return null;
         }
-        return rcaReportViews.view(report);
+        return rcaReportViews.view(projectId, report);
+    }
+
+    /** Where a report not inlined stands: queued or running. */
+    private @Nullable RcaRunView runOf(String projectId, @Nullable RcaReportRow report) {
+        if (report == null) return null;
+        return rcaReports.runState(projectId, report.id()).map(RcaRunView::of).orElse(null);
     }
 
     private CaseRow require(String projectId, String id) {

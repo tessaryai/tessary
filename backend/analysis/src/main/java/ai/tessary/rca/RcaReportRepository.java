@@ -145,6 +145,71 @@ public class RcaReportRepository {
         return out;
     }
 
+    /**
+     * Where a report's analysis stands: its job's status, whether a worker holds its lease, and its newest agent run.
+     *
+     * @param leased a worker holds the job; a claimed job with no owner is back in the queue @param jobUpdatedAt when
+     * the job last changed state @param doing the words of the run's newest step that has not ended
+     */
+    public record RunState(
+            String reportId,
+            String jobStatus,
+            boolean leased,
+            String jobUpdatedAt,
+            @Nullable String runId,
+            @Nullable String startedAt,
+            @Nullable String endedAt,
+            int stepCount,
+            @Nullable String doing,
+            @Nullable String stopCode) {}
+
+    private static final String RUN_STATE_COLS = "r.id AS report_id, j.status AS job_status,"
+            + " j.lease_owner IS NOT NULL AS leased, j.updated_at AS job_updated_at, a.id AS run_id, a.started_at,"
+            + " a.ended_at, COALESCE(a.step_count, 0) AS step_count, a.stop_code,"
+            + " (SELECT s.doing FROM agent_run_step s WHERE s.run_id = a.id AND s.ended_ms IS NULL"
+            + " ORDER BY s.seq DESC LIMIT 1) AS doing ";
+
+    private static final String NEWEST_RUN = " LEFT JOIN LATERAL (SELECT x.id, x.started_at, x.ended_at, x.step_count,"
+            + " x.stop_code FROM agent_run x WHERE x.project_id = r.project_id AND x.lane = 'rca'"
+            + " AND x.subject_id = r.id ORDER BY x.started_at DESC, x.id DESC LIMIT 1) a ON TRUE";
+
+    public Optional<RunState> runState(String projectId, String reportId) {
+        return jdbc.sql("SELECT " + RUN_STATE_COLS + FROM + NEWEST_RUN + " WHERE r.project_id = :pid AND r.id = :id")
+                .param("pid", projectId)
+                .param("id", reportId)
+                .query((rs, n) -> runState(rs))
+                .optional();
+    }
+
+    /** Each case's newest report, any status, in one query; a case never analyzed is absent. */
+    public Map<String, RunState> runStatesByCase(String projectId, Collection<String> caseIds) {
+        if (caseIds.isEmpty()) return Map.of();
+        Map<String, RunState> out = new HashMap<>();
+        jdbc.sql("SELECT DISTINCT ON (f.case_id) f.case_id, " + RUN_STATE_COLS + FROM
+                        + " JOIN finding f ON f.id = r.finding_id" + NEWEST_RUN
+                        + " WHERE r.project_id = :pid AND f.case_id IN (:caseIds)"
+                        + " ORDER BY f.case_id, r.created_at DESC")
+                .param("pid", projectId)
+                .param("caseIds", caseIds)
+                .query((rs, n) -> out.put(rs.getString("case_id"), runState(rs)))
+                .list();
+        return out;
+    }
+
+    private static RunState runState(ResultSet rs) throws SQLException {
+        return new RunState(
+                rs.getString("report_id"),
+                rs.getString("job_status"),
+                rs.getBoolean("leased"),
+                rs.getString("job_updated_at"),
+                rs.getString("run_id"),
+                rs.getString("started_at"),
+                rs.getString("ended_at"),
+                rs.getInt("step_count"),
+                rs.getString("doing"),
+                rs.getString("stop_code"));
+    }
+
     public Optional<RcaReportRow> findByJobId(String projectId, String jobId) {
         return jdbc.sql("SELECT " + COLS + " " + FROM + " WHERE r.project_id = :pid AND r.job_id = :jobId")
                 .param("pid", projectId)

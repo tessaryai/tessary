@@ -135,6 +135,63 @@ public final class RcaDtos {
             @Nullable String commit,
             @Nullable String excerpt) {}
 
+    /**
+     * Where an analysis stands: {@code queued} until a worker holds it, {@code running}, {@code stopped} when it failed,
+     * {@code done}. A queued or running job shows no ended run, since that run belongs to an attempt before this one.
+     *
+     * @param queuedAt when the job last changed state, which for a queued job is when it was queued @param doing the
+     * step the run is on, only while it runs @param stopCode the code the run stopped on
+     */
+    public record RcaRunView(
+            String state,
+            @JsonProperty("queued_at") String queuedAt,
+            @JsonProperty("run_id") @Nullable String runId,
+            @JsonProperty("started_at") @Nullable String startedAt,
+            @JsonProperty("ended_at") @Nullable String endedAt,
+            @JsonProperty("step_count") int stepCount,
+            @Nullable String doing,
+            @JsonProperty("stop_code") @Nullable String stopCode) {
+
+        public static final String QUEUED = "queued";
+        public static final String RUNNING = "running";
+        public static final String STOPPED = "stopped";
+        public static final String DONE = "done";
+
+        public static RcaRunView of(RcaReportRepository.RunState s) {
+            String state =
+                    switch (s.jobStatus()) {
+                        case "pending" -> QUEUED;
+                        case "claimed" -> s.leased() ? RUNNING : QUEUED;
+                        case "done" -> DONE;
+                        default -> STOPPED;
+                    };
+            boolean live = QUEUED.equals(state) || RUNNING.equals(state);
+            if (s.runId() == null || (live && s.endedAt() != null)) {
+                return new RcaRunView(state, s.jobUpdatedAt(), null, null, null, 0, null, null);
+            }
+            return new RcaRunView(
+                    state,
+                    s.jobUpdatedAt(),
+                    s.runId(),
+                    s.startedAt(),
+                    s.endedAt(),
+                    s.stepCount(),
+                    RUNNING.equals(state) ? s.doing() : null,
+                    s.stopCode());
+        }
+
+        /** When the state began, for a list mark: queued since queued, running since started, stopped since ended. */
+        public static String since(RcaRunView run) {
+            String at =
+                    switch (run.state()) {
+                        case RUNNING -> run.startedAt();
+                        case STOPPED -> run.endedAt();
+                        default -> null;
+                    };
+            return at == null ? run.queuedAt() : at;
+        }
+    }
+
     public record RcaReportView(
             String id,
             @JsonProperty("job_id") String jobId,
@@ -161,9 +218,15 @@ public final class RcaDtos {
             /** Null on reports written before the column existed: unknown, not "no repository". */
             @JsonProperty("repo_available") @Nullable Boolean repoAvailable,
             @JsonProperty("created_at") String createdAt,
-            @JsonProperty("completed_at") @Nullable String completedAt) {
+            @JsonProperty("completed_at") @Nullable String completedAt,
+            /** Where the analysis stands; null only on a view built without its job. */
+            @Nullable RcaRunView run) {
 
         public static RcaReportView of(RcaReportRow r, ObjectMapper mapper) {
+            return of(r, mapper, null);
+        }
+
+        public static RcaReportView of(RcaReportRow r, ObjectMapper mapper, @Nullable RcaRunView run) {
             List<Cause> causes = causesOf(mapper, r.reportKind(), r.causes(), r.hypotheses());
             return new RcaReportView(
                     r.id(),
@@ -189,7 +252,8 @@ public final class RcaDtos {
                     r.engine(),
                     r.repoAvailable(),
                     r.createdAt(),
-                    r.completedAt());
+                    r.completedAt(),
+                    run);
         }
 
         private static <T> List<T> readList(ObjectMapper mapper, @Nullable String json, TypeReference<List<T>> type) {
