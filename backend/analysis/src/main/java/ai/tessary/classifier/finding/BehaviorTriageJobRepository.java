@@ -30,16 +30,23 @@ public class BehaviorTriageJobRepository {
 
     private static final String REVIVABLE = LeasedJobSql.deadLetterCooldownGate("job", BehaviorTriageJobRow.DEAD);
 
+    /** A job held for a person and not running: the press that follows a fix runs it again at once. */
+    private static final String HELD = "(job.hold_code IS NOT NULL AND job.lease_owner IS NULL AND job.status <> '"
+            + BehaviorTriageJobRow.DEAD + "')";
+
     /**
      * {@code CASE} rather than a WHERE: Postgres returns no row from
-     * {@code ON CONFLICT DO UPDATE ... WHERE false RETURNING}, and {@link #enqueue} needs the row back. Lease columns
-     * are left alone; {@code claimBatch} overwrites them.
+     * {@code ON CONFLICT DO UPDATE ... WHERE false RETURNING}, and {@link #enqueue} needs the row back. A held job's
+     * lease is brought forward so it is due now; every other lease is left alone, since {@code claimBatch} overwrites
+     * it.
      */
     private static final String REVIVE_IF_COOLED =
             "status = CASE WHEN " + REVIVABLE + " THEN 'pending' ELSE job.status END,"
                     + " attempts = CASE WHEN " + REVIVABLE + " THEN 0 ELSE job.attempts END,"
-                    + " last_error = CASE WHEN " + REVIVABLE + " THEN NULL ELSE job.last_error END,"
-                    + " updated_at = CASE WHEN " + REVIVABLE + " THEN :now ELSE job.updated_at END";
+                    + " last_error = CASE WHEN " + REVIVABLE + " OR " + HELD + " THEN NULL ELSE job.last_error END,"
+                    + " lease_expires_at = CASE WHEN " + HELD + " THEN :now ELSE job.lease_expires_at END,"
+                    + " hold_code = CASE WHEN " + REVIVABLE + " OR " + HELD + " THEN NULL ELSE job.hold_code END,"
+                    + " updated_at = CASE WHEN " + REVIVABLE + " OR " + HELD + " THEN :now ELSE job.updated_at END";
 
     private final JdbcClient jdbc;
     private final ClassifierProperties props;
@@ -110,32 +117,53 @@ public class BehaviorTriageJobRepository {
     }
 
     /**
-     * A dead-lettered run and an in-flight one look identical in {@code finding}, so this is read to tell them apart.
-     * Only dead rows, or the surface would flap on every retry. One query, avoiding an N+1 on the busiest page.
+     * A queued, running, retrying, held and dead-lettered run all look identical in {@code finding}, so this is read to
+     * tell them apart. One query, avoiding an N+1 on the busiest page.
      */
-    public Map<String, FailedTriage> failedByFinding(String projectId, List<String> findingIds) {
+    public Map<String, TriageJobState> statesByFinding(String projectId, List<String> findingIds) {
         if (findingIds.isEmpty()) return Map.of();
-        List<FailedTriage> rows = jdbc.sql("SELECT payload->>'finding_id' AS finding_id, attempts, last_error FROM job"
-                        + " WHERE kind = :kind AND project_id = :pid AND status = :dead"
-                        + "   AND payload->>'finding_id' IN (:findingIds)"
-                        + " ORDER BY attempts ASC, created_at ASC")
+        int maxAttempts = props.maxAttempts();
+        List<TriageJobState> rows = jdbc.sql(
+                        "SELECT payload->>'finding_id' AS finding_id, status, attempts, lease_owner,"
+                                + " hold_code, last_error, updated_at FROM job"
+                                + " WHERE kind = :kind AND project_id = :pid AND status <> 'done'"
+                                + "   AND payload->>'finding_id' IN (:findingIds)"
+                                + " ORDER BY attempts ASC, created_at ASC")
                 .param("kind", KIND)
                 .param("pid", projectId)
-                .param("dead", BehaviorTriageJobRow.DEAD)
                 .param("findingIds", findingIds)
-                .query((rs, n) ->
-                        new FailedTriage(rs.getString("finding_id"), rs.getInt("attempts"), rs.getString("last_error")))
+                .query((rs, n) -> new TriageJobState(
+                        rs.getString("finding_id"),
+                        rs.getString("status"),
+                        rs.getInt("attempts"),
+                        maxAttempts,
+                        rs.getString("lease_owner"),
+                        rs.getString("hold_code"),
+                        rs.getString("last_error"),
+                        rs.getString("updated_at")))
                 .list();
-        Map<String, FailedTriage> out = new LinkedHashMap<>();
-        for (FailedTriage row : rows) out.put(row.findingId(), row);
+        Map<String, TriageJobState> out = new LinkedHashMap<>();
+        for (TriageJobState row : rows) out.put(row.findingId(), row);
         return out;
     }
 
-    public record FailedTriage(
-            String findingId, int attempts, @Nullable String lastError) {}
+    /**
+     * {@code leaseOwner} is set only while a worker runs the job: every way a run ends clears it. {@code updatedAt} is
+     * then when the run started.
+     */
+    public record TriageJobState(
+            String findingId,
+            String status,
+            int attempts,
+            int maxAttempts,
+            @Nullable String leaseOwner,
+            @Nullable String holdCode,
+            @Nullable String lastError,
+            String updatedAt) {}
 
     public void markDone(String id) {
-        jdbc.sql("UPDATE job SET status = 'done', last_error = NULL, updated_at = :now WHERE id = :id")
+        jdbc.sql("UPDATE job SET status = 'done', last_error = NULL, hold_code = NULL, updated_at = :now"
+                        + " WHERE id = :id")
                 .param("now", Instant.now().toString())
                 .param("id", id)
                 .update();
@@ -148,8 +176,8 @@ public class BehaviorTriageJobRepository {
      */
     public void markRetryable(String id, @Nullable String error, long delaySeconds) {
         Instant now = Instant.now();
-        jdbc.sql("UPDATE job SET lease_expires_at = :expires, last_error = :error, updated_at = :now"
-                        + " WHERE id = :id")
+        jdbc.sql("UPDATE job SET lease_owner = NULL, lease_expires_at = :expires, last_error = :error,"
+                        + " hold_code = NULL, updated_at = :now WHERE id = :id")
                 .param("error", error == null ? null : error.substring(0, Math.min(error.length(), 500)))
                 .param("expires", now.plusSeconds(Math.max(0, delaySeconds)).toString())
                 .param("now", now.toString())
@@ -170,10 +198,24 @@ public class BehaviorTriageJobRepository {
      * fill {@code CLAIM_BATCH} rounds ahead of runnable findings.
      */
     public void releaseWithoutAttempt(String id, @Nullable String error, long delaySeconds) {
+        release(id, error, null, delaySeconds);
+    }
+
+    /**
+     * For a refusal only a person can clear (a missing credential, a rejected key): released unspent, re-checked after
+     * the delay, and marked with the refusal's code so the finding page can say what to fix.
+     */
+    public void holdUntilConfigured(String id, @Nullable String error, String holdCode, long delaySeconds) {
+        release(id, error, holdCode, delaySeconds);
+    }
+
+    private void release(String id, @Nullable String error, @Nullable String holdCode, long delaySeconds) {
         Instant now = Instant.now();
-        jdbc.sql("UPDATE job SET lease_expires_at = :expires, attempts = GREATEST(attempts - 1, 0),"
-                        + " last_error = :error, updated_at = :now WHERE id = :id")
+        jdbc.sql("UPDATE job SET lease_owner = NULL, lease_expires_at = :expires,"
+                        + " attempts = GREATEST(attempts - 1, 0), last_error = :error, hold_code = :holdCode,"
+                        + " updated_at = :now WHERE id = :id")
                 .param("error", error == null ? null : error.substring(0, Math.min(error.length(), 500)))
+                .param("holdCode", holdCode)
                 .param("expires", now.plusSeconds(Math.max(0, delaySeconds)).toString())
                 .param("now", now.toString())
                 .param("id", id)

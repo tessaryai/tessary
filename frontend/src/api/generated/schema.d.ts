@@ -2350,6 +2350,7 @@ export interface components {
             traceCount: number;
             triageAction: string | null;
             triageCitations: components["schemas"]["Citation"][];
+            triageProgress: components["schemas"]["TriageProgress"] | null;
             triageStatus: string;
             triageSummary: string | null;
             triageVerdict: string | null;
@@ -4184,6 +4185,14 @@ export interface components {
         TracesPage: {
             next_cursor: string | null;
             traces: components["schemas"]["TraceListItem"][];
+        };
+        TriageProgress: {
+            /** Format: int32 */
+            attempts: number;
+            heldBy: string | null;
+            /** Format: int32 */
+            maxAttempts: number;
+            startedAt: string | null;
         };
         TriageSpendRowView: {
             cost_usd: number;

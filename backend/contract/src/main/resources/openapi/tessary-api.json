@@ -2371,6 +2371,16 @@
             },
             "type" : "array"
           },
+          "triageProgress" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/TriageProgress"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "triageStatus" : {
             "type" : "string"
           },
@@ -2411,6 +2421,7 @@
           "traceCount",
           "triageAction",
           "triageCitations",
+          "triageProgress",
           "triageStatus",
           "triageSummary",
           "triageVerdict",
@@ -10563,6 +10574,37 @@
         "required" : [
           "next_cursor",
           "traces"
+        ],
+        "type" : "object"
+      },
+      "TriageProgress" : {
+        "properties" : {
+          "attempts" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "heldBy" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "maxAttempts" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "startedAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "attempts",
+          "heldBy",
+          "maxAttempts",
+          "startedAt"
         ],
         "type" : "object"
       },

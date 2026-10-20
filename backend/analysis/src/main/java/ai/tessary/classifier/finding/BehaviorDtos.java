@@ -2,7 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
-import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
+import ai.tessary.classifier.finding.BehaviorTriageJobRepository.TriageJobState;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
@@ -144,10 +144,10 @@ public final class BehaviorDtos {
                 @Nullable FrustrationDetail frustration,
                 @Nullable GroundednessDetail groundedness,
                 @Nullable ClassifierDetail classifierDetail,
-                @Nullable FailedTriage failed) {
+                @Nullable TriageJobState job) {
             String evidence = row.payloadJson();
             return new BehaviorFindingDetailView(
-                    BehaviorFindingView.of(row, failed),
+                    BehaviorFindingView.of(row, job),
                     FindingRow.Cause.DISTRIBUTION_SHIFT.equals(row.causeKind())
                             ? MetricFindingEvidence.detail(evidence)
                             : null,
@@ -195,17 +195,28 @@ public final class BehaviorDtos {
             List<BehaviorTriageVerdict.Citation> triageCitations,
             @Nullable String triagedAt,
             String triageStatus,
+            /** Where the run stands while it has not ruled; null before a run is asked for and once it rules. */
+            @Nullable TriageProgress triageProgress,
             @Nullable String humanVerdictAt,
             /** Null for a negative verdict, or a positive still waiting on {@code CaseOpener}. */
             @Nullable String caseId) {
 
-        /** A null verdict alone cannot tell "not escalated yet" from "in flight" or "gave up". */
+        /** A null verdict alone cannot tell "not escalated yet" from a run waiting, running or given up. */
         public static final class TriageStatus {
             private TriageStatus() {}
 
             public static final String PENDING = "pending";
 
+            /** Asked for, and waiting for the worker to pick it up. */
+            public static final String QUEUED = "queued";
+
             public static final String IN_FLIGHT = "in_flight";
+
+            /** A run ended without a ruling and the next attempt waits out its backoff. */
+            public static final String RETRYING = "retrying";
+
+            /** Held until a person changes a setting; {@link TriageProgress#heldBy} names the refusal. */
+            public static final String BLOCKED = "blocked";
 
             public static final String DONE = "done";
 
@@ -213,10 +224,33 @@ public final class BehaviorDtos {
             public static final String FAILED = "failed";
         }
 
-        private static String triageStatus(FindingRow row, @Nullable FailedTriage failed) {
+        /**
+         * {@code attempts} counts the run in progress; {@code startedAt} is set only while one runs. {@code heldBy} is
+         * the error code of the refusal a blocked run waits on.
+         */
+        public record TriageProgress(
+                int attempts,
+                int maxAttempts,
+                @Nullable String startedAt,
+                @Nullable String heldBy) {}
+
+        private static String triageStatus(FindingRow row, @Nullable TriageJobState job) {
             if (row.triagedAt() != null) return TriageStatus.DONE;
             if (row.escalatedAt() == null) return TriageStatus.PENDING;
-            return failed == null ? TriageStatus.IN_FLIGHT : TriageStatus.FAILED;
+            if (job == null) return TriageStatus.IN_FLIGHT;
+            if (BehaviorTriageJobRow.DEAD.equals(job.status())) return TriageStatus.FAILED;
+            if (job.leaseOwner() != null) return TriageStatus.IN_FLIGHT;
+            if (job.holdCode() != null) return TriageStatus.BLOCKED;
+            return job.lastError() != null ? TriageStatus.RETRYING : TriageStatus.QUEUED;
+        }
+
+        private static @Nullable TriageProgress triageProgress(String status, @Nullable TriageJobState job) {
+            if (job == null || TriageStatus.DONE.equals(status) || TriageStatus.PENDING.equals(status)) return null;
+            return new TriageProgress(
+                    job.attempts(),
+                    job.maxAttempts(),
+                    TriageStatus.IN_FLIGHT.equals(status) ? job.updatedAt() : null,
+                    TriageStatus.BLOCKED.equals(status) ? job.holdCode() : null);
         }
 
         /** A malformed blob degrades to none rather than failing the row. */
@@ -230,7 +264,8 @@ public final class BehaviorDtos {
         }
 
         /** Carries no evidence: the population is paged through {@code GET /findings/{id}/evidence}. */
-        public static BehaviorFindingView of(FindingRow row, @Nullable FailedTriage failed) {
+        public static BehaviorFindingView of(FindingRow row, @Nullable TriageJobState job) {
+            String triageStatus = triageStatus(row, job);
             return new BehaviorFindingView(
                     row.id(),
                     row.callSiteId(),
@@ -250,7 +285,8 @@ public final class BehaviorDtos {
                     row.triageSummary(),
                     citations(row.triageCitationsJson()),
                     row.triagedAt(),
-                    triageStatus(row, failed),
+                    triageStatus,
+                    triageProgress(triageStatus, job),
                     row.humanVerdictAt(),
                     row.caseId());
         }
@@ -282,6 +318,7 @@ public final class BehaviorDtos {
                     List.of(),
                     null,
                     triageStatus,
+                    triageProgress,
                     // Nulled with the verdict, or it would tell RCA which way a person decided.
                     null,
                     caseId);

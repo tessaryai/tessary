@@ -169,3 +169,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0047-metric-dashboard.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0048-job-hold-code.sql
+      relativeToChangelogFile: false

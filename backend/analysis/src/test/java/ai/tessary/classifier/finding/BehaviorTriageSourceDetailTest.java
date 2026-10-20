@@ -9,8 +9,9 @@ import static org.mockito.Mockito.when;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
+import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageProgress;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageStatus;
-import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
+import ai.tessary.classifier.finding.BehaviorTriageJobRepository.TriageJobState;
 import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.secretleak.SecretLeakDetailService;
@@ -19,8 +20,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * A finding's own page reads its triage status the way the findings list does.
@@ -41,20 +46,78 @@ class BehaviorTriageSourceDetailTest {
     @DisplayName("a dead-lettered triage reads as failed on the finding's page, not in flight")
     void detail_reports_a_dead_lettered_triage_as_failed() {
         stubEscalatedFinding("f1");
-        when(jobs.failedByFinding(PROJECT, List.of("f1")))
-                .thenReturn(
-                        Map.of("f1", new FailedTriage("f1", 5, "exhausted: 5 attempts (hung or crashed mid-triage)")));
+        stubJob(new TriageJobState(
+                "f1",
+                "dead",
+                5,
+                5,
+                null,
+                null,
+                "exhausted: 5 attempts (hung or crashed mid-triage)",
+                "2026-08-02T01:00Z"));
 
         assertEquals(TriageStatus.FAILED, statusOf("f1"));
     }
 
     @Test
-    @DisplayName("an escalated finding with no dead job is still in flight")
+    @DisplayName("an escalated finding with no job row is still in flight")
     void detail_reports_a_live_triage_as_in_flight() {
         stubEscalatedFinding("f1");
-        when(jobs.failedByFinding(PROJECT, List.of("f1"))).thenReturn(Map.of());
+        when(jobs.statesByFinding(PROJECT, List.of("f1"))).thenReturn(Map.of());
 
         assertEquals(TriageStatus.IN_FLIGHT, statusOf("f1"));
+    }
+
+    /**
+     * Each state the job can be in reads as its own status, with how far the run got. The bug: every one of them read
+     * as "Triaging", so a run held on a rejected key, or waiting out a retry, looked like a run going on for ever.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jobStates")
+    void detail_reports_where_the_run_stands(
+            String why, TriageJobState job, String expectedStatus, TriageProgress expectedProgress) {
+        stubEscalatedFinding("f1");
+        stubJob(job);
+
+        var finding = source().detail(PROJECT, "f1").orElseThrow().finding();
+
+        assertEquals(expectedStatus, finding.triageStatus());
+        assertEquals(expectedProgress, finding.triageProgress());
+    }
+
+    static Stream<Arguments> jobStates() {
+        String at = "2026-08-02T01:00:00Z";
+        return Stream.of(
+                Arguments.of(
+                        "asked for, never picked up",
+                        new TriageJobState("f1", "pending", 0, 5, null, null, null, at),
+                        TriageStatus.QUEUED,
+                        new TriageProgress(0, 5, null, null)),
+                Arguments.of(
+                        "a worker holds the lease",
+                        new TriageJobState("f1", "claimed", 2, 5, "worker-a", null, "kind=timeout", at),
+                        TriageStatus.IN_FLIGHT,
+                        new TriageProgress(2, 5, at, null)),
+                Arguments.of(
+                        "a run ended without a ruling and waits out its backoff",
+                        new TriageJobState("f1", "claimed", 1, 5, null, null, "kind=timeout", at),
+                        TriageStatus.RETRYING,
+                        new TriageProgress(1, 5, null, null)),
+                Arguments.of(
+                        "held until the key is fixed",
+                        new TriageJobState(
+                                "f1", "claimed", 0, 5, null, "CLASSIFIER.TRIAGE_PROVIDER_REJECTED", "invalid key", at),
+                        TriageStatus.BLOCKED,
+                        new TriageProgress(0, 5, null, "CLASSIFIER.TRIAGE_PROVIDER_REJECTED")),
+                Arguments.of(
+                        "a dead job's stale hold does not hide that it gave up",
+                        new TriageJobState("f1", "dead", 5, 5, null, "CLASSIFIER.TRIAGE_PROVIDER_REJECTED", "x", at),
+                        TriageStatus.FAILED,
+                        new TriageProgress(5, 5, null, null)));
+    }
+
+    private void stubJob(TriageJobState job) {
+        when(jobs.statesByFinding(PROJECT, List.of(job.findingId()))).thenReturn(Map.of(job.findingId(), job));
     }
 
     /**
@@ -85,7 +148,7 @@ class BehaviorTriageSourceDetailTest {
                 .build();
         when(findings.findById(PROJECT, id)).thenReturn(Optional.of(row));
         when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
-        when(jobs.failedByFinding(PROJECT, List.of(id))).thenReturn(Map.of());
+        when(jobs.statesByFinding(PROJECT, List.of(id))).thenReturn(Map.of());
     }
 
     private static ClassifierDetail detail() {

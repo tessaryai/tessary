@@ -213,6 +213,9 @@ class E2bTriageSandboxTest {
                 "502 | {\"kind\":\"script_exit\"}    | RUN",
                 "502 | {\"kind\":\"bad_output\"}     | RUN",
                 "502 | {\"kind\":\"bad_request\"}    | RUN",
+                "502 | {\"kind\":\"provider_rejected\"}    | PROVIDER_REJECTED",
+                "502 | {\"kind\":\"request_refused\"}      | REQUEST_REFUSED",
+                "502 | {\"kind\":\"provider_unavailable\"} | PROVIDER_UNAVAILABLE",
                 "502 | {\"kind\":\"orchestration\"}  | LAUNCHER_UNAVAILABLE",
                 "502 | ''                         | LAUNCHER_UNAVAILABLE",
                 "502 | <html>Bad Gateway</html>   | LAUNCHER_UNAVAILABLE",
@@ -238,6 +241,27 @@ class E2bTriageSandboxTest {
         assertEquals(ClassifierError.TRIAGE_RUN_INCOMPLETE, ex.error());
         verify(usage)
                 .recordSandboxRun(eq("proj"), any(), any(), eq(false), eq(120L), eq(40L), eq(0L), eq(0L), any(), any());
+    }
+
+    /**
+     * A provider refusal is the org's to fix, not the launcher's: read as an unknown kind it tripped the breaker and
+     * parked every org's triage.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "provider_rejected, TRIAGE_PROVIDER_REJECTED",
+        "request_refused, TRIAGE_REQUEST_REFUSED",
+        "provider_unavailable, TRIAGE_PROVIDER_UNAVAILABLE"
+    })
+    void aProviderFailureThrowsItsOwnCodeAndStillBooksUsage(String kind, ClassifierError expected) throws Exception {
+        LlmUsageAccountant usage = mock(LlmUsageAccountant.class);
+        E2bTriageSandbox sandbox = sandbox(usage, respondWith(502, errorBodyWithUsage(kind, 10, 0)));
+
+        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
+
+        assertEquals(expected, ex.error());
+        verify(usage)
+                .recordSandboxRun(eq("proj"), any(), any(), eq(false), eq(10L), eq(0L), eq(0L), eq(0L), any(), any());
     }
 
     @Test

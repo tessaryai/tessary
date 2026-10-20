@@ -44,7 +44,16 @@ public enum ClassifierError implements ErrorCode {
      * 401/403/404: a deployment mistake every identical request will hit, unlike a transient
      * {@link #TRIAGE_LAUNCHER_UNAVAILABLE}. Folded together, a key mismatch released jobs unspent at DEBUG forever.
      */
-    TRIAGE_LAUNCHER_MISCONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "The triage launcher refused the run: %s");
+    TRIAGE_LAUNCHER_MISCONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "The triage launcher refused the run: %s"),
+
+    /** The org's model provider rejected its key: every run fails the same way until a person fixes the key. */
+    TRIAGE_PROVIDER_REJECTED(HttpStatus.SERVICE_UNAVAILABLE, "The model provider rejected the key for triage: %s"),
+
+    /** Usually a model the provider does not serve; repeats until a person changes the model or the provider. */
+    TRIAGE_REQUEST_REFUSED(HttpStatus.SERVICE_UNAVAILABLE, "The model provider refused the triage request: %s"),
+
+    /** The agent gave up retrying the provider; spends an attempt like any run that produced no ruling. */
+    TRIAGE_PROVIDER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "The model provider did not answer the triage run: %s");
 
     private final HttpStatus status;
     private final String template;

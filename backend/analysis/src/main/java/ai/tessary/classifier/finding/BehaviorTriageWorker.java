@@ -81,7 +81,7 @@ public class BehaviorTriageWorker {
         this.breaker = breaker;
     }
 
-    @Scheduled(fixedDelayString = "${tessary.classifier.behavior-triage-ms:300000}")
+    @Scheduled(fixedDelayString = "${tessary.classifier.behavior-triage-ms:15000}")
     public void tick() {
         try (LogContext ignored = traceBridge.bindCurrentTrace()) {
             tickInner();
@@ -200,6 +200,10 @@ public class BehaviorTriageWorker {
                 releaseUntilConfigured(job, e, "the org has no usable provider credential");
                 return;
             }
+            if (isProviderRefusal(e)) {
+                releaseUntilConfigured(job, e, "the model provider refuses the run: " + e.getMessage());
+                return;
+            }
             if (e instanceof AwaitsConfiguration) {
                 releaseUntilConfigured(job, e, "someone acts on: " + e.getMessage());
                 return;
@@ -226,6 +230,12 @@ public class BehaviorTriageWorker {
                 || ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED.equals(e.error());
     }
 
+    /** Same reasoning as {@link #isCredentialGap}: the org's own key or model, so no other org's drain parks. */
+    private static boolean isProviderRefusal(TessaryException e) {
+        return ClassifierError.TRIAGE_PROVIDER_REJECTED.equals(e.error())
+                || ClassifierError.TRIAGE_REQUEST_REFUSED.equals(e.error());
+    }
+
     /**
      * The failure is deterministic and instant, so backoff would burn every attempt in thirty seconds and dead-letter a
      * finding nothing can reach again. WARN because it names an action a person must take.
@@ -240,7 +250,7 @@ public class BehaviorTriageWorker {
                 .field("error_code", e.error().code())
                 .field("retry_in_seconds", retrySeconds)
                 .log();
-        jobs.releaseWithoutAttempt(job.id(), e.getMessage(), retrySeconds);
+        jobs.holdUntilConfigured(job.id(), e.getMessage(), e.error().code(), retrySeconds);
     }
 
     /**

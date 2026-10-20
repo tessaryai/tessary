@@ -131,6 +131,7 @@ class FindingServiceTest {
                 null,
                 BehaviorFindingView.TriageStatus.PENDING,
                 null,
+                null,
                 null);
     }
 

@@ -164,10 +164,10 @@ public class BehaviorTriageSource implements TriageSource {
                 unavailable);
         // One evidence query per page, not one per row.
         List<String> visibleIds = visible.stream().map(FindingRow::id).toList();
-        // Without this read a dead-lettered triage looks identical to one still running.
-        Map<String, BehaviorTriageJobRepository.FailedTriage> failed = jobs.failedByFinding(projectId, visibleIds);
+        // Without this read a queued, held or dead-lettered triage looks identical to one still running.
+        Map<String, BehaviorTriageJobRepository.TriageJobState> states = jobs.statesByFinding(projectId, visibleIds);
         return visible.stream()
-                .map(f -> BehaviorFindingView.of(f, failed.get(f.id())))
+                .map(f -> BehaviorFindingView.of(f, states.get(f.id())))
                 .toList();
     }
 
@@ -176,8 +176,8 @@ public class BehaviorTriageSource implements TriageSource {
         if (findings.findById(projectId, findingId).isEmpty()) return Optional.empty();
         // A withheld classifier's finding must 404, and this source has claimed the id, so throwing is the contract.
         FindingRow finding = requireReachableFinding(projectId, findingId);
-        BehaviorTriageJobRepository.FailedTriage failed =
-                jobs.failedByFinding(projectId, List.of(findingId)).get(findingId);
+        BehaviorTriageJobRepository.TriageJobState job =
+                jobs.statesByFinding(projectId, List.of(findingId)).get(findingId);
         return Optional.of(BehaviorFindingDetailView.of(
                 finding,
                 malformedOutputs.detail(finding),
@@ -185,7 +185,7 @@ public class BehaviorTriageSource implements TriageSource {
                 frustrations.detail(finding),
                 groundednessDetail.detail(finding),
                 adapters.detail(finding).orElse(null),
-                failed));
+                job));
     }
 
     @Override

@@ -31,6 +31,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -271,6 +272,16 @@ public class E2bTriageSandbox implements TriageSandbox {
                         ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE,
                         launcherDiagnosis(resp.statusCode(), cfg.getLauncherUrl(), diag));
             }
+            ClassifierError providerError =
+                    switch (failure) {
+                        case PROVIDER_REJECTED -> ClassifierError.TRIAGE_PROVIDER_REJECTED;
+                        case REQUEST_REFUSED -> ClassifierError.TRIAGE_REQUEST_REFUSED;
+                        case PROVIDER_UNAVAILABLE -> ClassifierError.TRIAGE_PROVIDER_UNAVAILABLE;
+                        default -> null;
+                    };
+            if (providerError != null) {
+                throw new TessaryException(providerError, diag.isBlank() ? ("status " + resp.statusCode()) : diag);
+            }
             // Thrown so the dead-lettered job's last_error carries the launcher's own diagnosis.
             throw new TessaryException(
                     ClassifierError.TRIAGE_RUN_INCOMPLETE,
@@ -288,25 +299,35 @@ public class E2bTriageSandbox implements TriageSandbox {
     enum FailureClass {
         RUN,
         MISCONFIGURED,
-        LAUNCHER_UNAVAILABLE
+        LAUNCHER_UNAVAILABLE,
+        PROVIDER_REJECTED,
+        REQUEST_REFUSED,
+        PROVIDER_UNAVAILABLE
     }
 
     /** The launcher's {@code kind} values that mean the agent run failed, not the launcher. */
     private static final Set<String> RUN_FAILURE_KINDS = Set.of("timeout", "script_exit", "bad_output", "bad_request");
 
+    /** The kinds a lane names when the model provider stopped it, so none of them blames the launcher. */
+    private static final Map<String, FailureClass> PROVIDER_FAILURE_KINDS = Map.of(
+            "provider_rejected", FailureClass.PROVIDER_REJECTED,
+            "request_refused", FailureClass.REQUEST_REFUSED,
+            "provider_unavailable", FailureClass.PROVIDER_UNAVAILABLE);
+
     /**
      * Pure, so tests drive every status and kind. 401/403/404 are MISCONFIGURED; a 502 with a
-     * {@link #RUN_FAILURE_KINDS} kind is RUN; other 5xx, including a 502 with no recognized kind (a proxy's page), are
-     * LAUNCHER_UNAVAILABLE; other 4xx are RUN.
+     * {@link #RUN_FAILURE_KINDS} kind is RUN, and one with a {@link #PROVIDER_FAILURE_KINDS} kind is its own class;
+     * other 5xx, including a 502 with no recognized kind (a proxy's page), are LAUNCHER_UNAVAILABLE; other 4xx are RUN.
      */
     static FailureClass classifyFailure(int status, String body) {
         if (status == 401 || status == 403 || status == 404) {
             return FailureClass.MISCONFIGURED;
         }
         if (status / 100 == 5) {
-            return status == 502 && RUN_FAILURE_KINDS.contains(E2bAgentRunSandbox.kindOf(body))
-                    ? FailureClass.RUN
-                    : FailureClass.LAUNCHER_UNAVAILABLE;
+            if (status != 502) return FailureClass.LAUNCHER_UNAVAILABLE;
+            String kind = E2bAgentRunSandbox.kindOf(body);
+            if (RUN_FAILURE_KINDS.contains(kind)) return FailureClass.RUN;
+            return PROVIDER_FAILURE_KINDS.getOrDefault(kind, FailureClass.LAUNCHER_UNAVAILABLE);
         }
         return FailureClass.RUN;
     }

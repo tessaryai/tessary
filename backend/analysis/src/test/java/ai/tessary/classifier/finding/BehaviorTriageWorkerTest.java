@@ -99,12 +99,13 @@ class BehaviorTriageWorkerTest {
     }
 
     /**
-     * A launcher that cannot run, or an org with no usable key, fails until a person edits something. The job goes
-     * back unspent; spending attempts dead-letters it, and feeding the breaker parks every org's drain.
+     * A launcher that cannot run, or an org whose key the provider will not take, fails until a person edits
+     * something. The job goes back unspent and held with the refusal's code, so the finding page can say what to fix;
+     * spending attempts dead-letters it, and feeding the breaker parks every org's drain.
      */
     @ParameterizedTest
-    @MethodSource("refusals")
-    void aRefusalParksTheJobUnspentUntilItCanClear(TessaryException refusal, long delaySeconds) {
+    @MethodSource("holds")
+    void aRefusalHoldsTheJobUnspentWithItsCodeUntilAPersonActs(TessaryException refusal) {
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
         TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
@@ -114,25 +115,42 @@ class BehaviorTriageWorkerTest {
         tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), props)
                 .triageForTest(job("job_1", "f1"));
 
-        verify(jobs).releaseWithoutAttempt("job_1", refusal.getMessage(), delaySeconds);
+        verify(jobs)
+                .holdUntilConfigured(
+                        "job_1", refusal.getMessage(), refusal.error().code(), 1800L);
         verify(jobs, never()).markRetryable(anyString(), any(), anyLong());
         verifyNoInteractions(breaker);
     }
 
-    static Stream<Arguments> refusals() {
+    static Stream<Arguments> holds() {
         return Stream.of(
-                Arguments.of(gap(ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED), 1800L),
-                Arguments.of(gap(ModelConfigError.MISSING_CREDENTIALS), 1800L),
-                Arguments.of(gap(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED), 1800L),
-                Arguments.of(
-                        named(
-                                "a refusal waiting on a person (credit to top up) holds for the re-check window, since"
-                                        + " topping up later publishes no event that would bring it back",
-                                new OutOfCredit()),
-                        1800L),
-                Arguments.of(
-                        named("a refusal that clears on its own (a busy slot) waits the delay it names", new Busy()),
-                        60L));
+                Arguments.of(gap(ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED)),
+                Arguments.of(gap(ModelConfigError.MISSING_CREDENTIALS)),
+                Arguments.of(gap(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED)),
+                Arguments.of(gap(ClassifierError.TRIAGE_PROVIDER_REJECTED)),
+                Arguments.of(gap(ClassifierError.TRIAGE_REQUEST_REFUSED)),
+                Arguments.of(named(
+                        "a refusal waiting on a person (credit to top up) holds for the re-check window, since topping"
+                                + " up later publishes no event that would bring it back",
+                        new OutOfCredit())));
+    }
+
+    /** A refusal that clears on its own waits the delay it names, unspent and not held for a person. */
+    @Test
+    void aRefusalThatClearsOnItsOwnWaitsTheDelayItNames() {
+        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
+        BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
+        TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
+        Busy busy = new Busy();
+        when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(busy);
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "triage-config-retry-seconds", 1800);
+
+        tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), props)
+                .triageForTest(job("job_1", "f1"));
+
+        verify(jobs).releaseWithoutAttempt("job_1", busy.getMessage(), 60L);
+        verify(jobs, never()).holdUntilConfigured(anyString(), any(), anyString(), anyLong());
+        verifyNoInteractions(breaker);
     }
 
     private static TessaryException gap(ErrorCode code) {
@@ -375,6 +393,7 @@ class BehaviorTriageWorkerTest {
                     List.of(),
                     null,
                     BehaviorFindingView.TriageStatus.PENDING,
+                    null,
                     null,
                     null);
         }

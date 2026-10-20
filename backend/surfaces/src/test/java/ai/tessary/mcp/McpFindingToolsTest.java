@@ -138,6 +138,7 @@ class McpFindingToolsTest {
                         List.of(),
                         "2026-06-03T00:00:00Z",
                         f.triageStatus(),
+                        f.triageProgress(),
                         f.humanVerdictAt(),
                         f.caseId()),
                 base.metric(),
