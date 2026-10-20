@@ -75,7 +75,10 @@ narrower.
 - **Fail-closed:** transport failure, a non-zero script exit, a timeout or malformed output all reach
   the backend as a classified 502 (`kind`, `timeout`, `error_class`, `detail`), never as a silent
   success. `detail` is launcher-authored or scrubbed SDK metadata only — never the clone URL, sandbox
-  output, model output, or repo content.
+  output, model output, or repo content. A lane that stops on a model provider error names it in its
+  failure envelope, and the 502's `kind` is then `provider_rejected` (401 or 403), `request_refused`
+  (another refusal) or `provider_unavailable` (the agent gave up retrying), with the provider's HTTP
+  status in `detail`.
 - **Token scrubbing:** the short-lived clone token rides in the clone URL and is scrubbed from every
   line this launcher logs, and from the scripts' own output before it leaves the sandbox.
 - **Sessions:** a session sandbox serves `session.js` on `SESSION_PORT`, behind its own 32-byte

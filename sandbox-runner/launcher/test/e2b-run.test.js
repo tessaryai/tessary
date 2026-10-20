@@ -99,6 +99,15 @@ test('a script that exits non-zero answers script_exit with its spend and sandbo
   assert.deepEqual(calls.map((c) => c.op), ['create', 'write', 'run', 'getInfo', 'kill']);
 });
 
+test('a microVM lane that names a provider failure answers that kind, so the backend stops retrying a refused key', async () => {
+  const stdout = JSON.stringify({ is_error: true, error: 'x', kind: 'provider_unavailable' });
+  const { status, body } = await runOnce('exit', '/triage', { FAKE_E2B_FAILURE_STDOUT: stdout });
+
+  assert.equal(status, 502);
+  assert.equal(body.kind, 'provider_unavailable');
+  assert.equal(body.detail, 'the model provider did not answer');
+});
+
 test('POST /runs runs the run lane with the clone fields and system prompt on the VM disk, and the credential off it', async () => {
   const payload = {
     ...PAYLOAD,

@@ -172,6 +172,30 @@ test('a container that exits non-zero answers script_exit with its spend, and it
   );
 });
 
+test('a lane that names a provider failure answers that kind with a fixed detail and the provider status', async () => {
+  // Bug caught: a rejected key read as script_exit, so the backend retried a run that could never succeed.
+  const envelope = JSON.stringify({ is_error: true, error: 'model provider: invalid x-api-key', usage: { input_tokens: 0 }, kind: 'provider_rejected', provider_status: 401 });
+  await withLauncher({ exitCode: 1, logs: [[1, envelope]] }, {}, async ({ post }) => {
+    const { status, body } = await post({});
+
+    assert.equal(status, 502);
+    assert.equal(body.kind, 'provider_rejected');
+    assert.equal(body.timeout, false);
+    assert.equal(body.detail, 'the model provider rejected the credential (HTTP 401)');
+    assert.equal(body.exit_code, 1);
+  });
+});
+
+test('a lane cannot name a kind outside the provider failures, nor put text in the provider status', async () => {
+  const envelope = JSON.stringify({ is_error: true, error: 'x', kind: 'timeout', provider_status: 'invalid x-api-key sk-ant-123' });
+  await withLauncher({ exitCode: 1, logs: [[1, envelope]] }, {}, async ({ post }) => {
+    const { body } = await post({});
+
+    assert.equal(body.kind, 'script_exit');
+    assert.doesNotMatch(JSON.stringify(body), /sk-ant-123/);
+  });
+});
+
 test('a truncated failure envelope books no spend and still reports the exit', async () => {
   await withLauncher({ exitCode: 2, logs: [[1, '{"is_error":true,"usage":{"input_tok']] }, {}, async ({ post }) => {
     const { status, body } = await post({});

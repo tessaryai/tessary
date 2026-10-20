@@ -430,6 +430,10 @@ function safeDetail(err, cls, meta) {
       ? `deadline hit: no result after ${elapsedMs}ms of ${timeoutMs}ms`
       : `timed out after ${elapsedMs}ms (deadline ${timeoutMs}ms)`;
   }
+  if (Object.hasOwn(PROVIDER_FAILURE_DETAIL, cls.kind)) {
+    const status = err && err.providerStatus;
+    return PROVIDER_FAILURE_DETAIL[cls.kind] + (Number.isInteger(status) ? ` (HTTP ${status})` : '');
+  }
   if (cls.kind === 'script_exit') {
     return `${script || 'command'} exited ${cls.exitCode} (output withheld; see launcher logs)`;
   }
@@ -451,6 +455,27 @@ function usageFromFailureStdout(stdout) {
   }
   if (!parsed || typeof parsed !== 'object' || parsed.is_error !== true) return undefined;
   return numericUsageOnly(parsed.usage);
+}
+
+// The provider failures a lane may name. Only these values and an integer HTTP status leave: the lane's own
+// error text can quote the provider's reply.
+const PROVIDER_FAILURE_DETAIL = Object.freeze({
+  provider_rejected: 'the model provider rejected the credential',
+  request_refused: 'the model provider refused the request',
+  provider_unavailable: 'the model provider did not answer',
+});
+
+function providerFailureFromStdout(stdout) {
+  if (!stdout) return undefined;
+  let parsed;
+  try {
+    parsed = JSON.parse(String(stdout));
+  } catch {
+    return undefined;
+  }
+  if (!parsed || parsed.is_error !== true || !Object.hasOwn(PROVIDER_FAILURE_DETAIL, parsed.kind)) return undefined;
+  const status = Number.isInteger(parsed.provider_status) ? parsed.provider_status : undefined;
+  return { launcherKind: parsed.kind, providerStatus: status };
 }
 
 function numericUsageOnly(u) {
@@ -864,6 +889,7 @@ async function runScriptInDockerInner(lane, payload, timeoutMs, posture, credent
       e.exitCode = exitCode;
       const usage = usageFromFailureStdout(stdout);
       if (usage) e.usage = usage;
+      stampFailure(e, providerFailureFromStdout(stdout));
       throw e;
     }
     return parseScriptOutput(lane, stdout);
@@ -980,6 +1006,7 @@ async function runAgenticScript(lane, rawPayload) {
       await logSandboxDiagnostics(sandboxId);
       const usage = usageFromFailureStdout(stdout);
       if (usage && e && typeof e === 'object') e.usage = usage;
+      stampFailure(e, providerFailureFromStdout(stdout));
       throw e;
     }
     return parseScriptOutput(lane, res.stdout);

@@ -559,6 +559,47 @@ function remoteMcp(urls) {
   return mcp;
 }
 
+function providerFailure(kind, message, status, turns) {
+  return Object.assign(new Error(`model provider: ${scrubToken(message || kind)}`.slice(0, CAUSE_MAX)), {
+    providerKind: kind,
+    providerStatus: Number.isInteger(status) ? status : undefined,
+    turns,
+  });
+}
+
+/**
+ * opencode records a provider error on the assistant message once it stops retrying. Read here, it fails the run at
+ * once instead of reading as an empty completion that a fresh session repeats.
+ */
+function refusalOf(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = (messages[i] && messages[i].info) || messages[i];
+    if (!msg || msg.role !== 'assistant') continue;
+    const error = msg.error;
+    if (!error || error.name === 'MessageAbortedError') return null;
+    const data = error.data || {};
+    const status = Number(data.statusCode);
+    if (error.name === 'ProviderAuthError' || status === 401 || status === 403) {
+      return { kind: 'provider_rejected', message: data.message, status };
+    }
+    if (error.name !== 'APIError') return null;
+    // A retryable error recorded here is one opencode already retried, about a minute's worth, and gave up on.
+    const kind = data.isRetryable === false ? 'request_refused' : 'provider_unavailable';
+    return { kind, message: data.message, status };
+  }
+  return null;
+}
+
+/** What lane.js prints for a failed run. Every field is numeric or an enum the launcher allow-lists. */
+function failureEnvelope(e) {
+  const out = { is_error: true, error: describeError(e), usage: sumUsage(e && e.turns) };
+  if (e && e.providerKind) {
+    out.kind = e.providerKind;
+    if (Number.isInteger(e.providerStatus)) out.provider_status = e.providerStatus;
+  }
+  return JSON.stringify(out);
+}
+
 
 /**
  * spec: model (`provider/model`), prompt, jsonSchema (null asks for prose: no schema retry),
@@ -641,6 +682,10 @@ async function runAgent(spec) {
       const messages = Array.isArray(listed) ? listed : (listed && listed.data) || [];
 
       turns = toTurns(messages, prompt);
+      const refusal = refusalOf(messages);
+      if (refusal) {
+        throw providerFailure(refusal.kind, refusal.message, refusal.status, allTurns.concat(turns));
+      }
       const info = (reply && (reply.info || reply.data || reply)) || {};
       text =
         textOf(partsOf(reply && reply.parts ? reply : info)) || (turns.length ? turns[turns.length - 1].text : '');
@@ -736,6 +781,7 @@ module.exports = {
   remoteMcp,
   writeDossier,
   describeError,
+  failureEnvelope,
   quarantineRepo,
   sumUsage,
   WORK,

@@ -29,7 +29,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { git, runAgent, describeError, sumUsage, quarantineRepo, writeDossier, WORK, REPO } = require('./agent-stream');
+const { git, runAgent, describeError, failureEnvelope, quarantineRepo, writeDossier, WORK, REPO } = require('./agent-stream');
 
 const LANES = {
   rca: { clone: true, onsetCommit: true, edit: { '*': 'deny' } },
@@ -78,7 +78,7 @@ async function main() {
   } catch (e) {
     // A failing run still spent tokens: the numeric-only envelope lets the launcher carry `usage`
     // into its 502 body so the backend books what the run cost rather than $0.
-    process.stdout.write(JSON.stringify({ is_error: true, error: describeError(e), usage: sumUsage(e && e.turns) }));
+    process.stdout.write(failureEnvelope(e));
     process.exitCode = 1;
     return;
   }
