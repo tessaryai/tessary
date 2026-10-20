@@ -180,6 +180,28 @@ function quarantineRepo() {
   }
 }
 
+/** The newest commit on the clone's HEAD committed before `onsetAt`, or "unknown". */
+function onsetCommit(onsetAt) {
+  if (!onsetAt) return 'unknown';
+  try {
+    return git(['-C', REPO, 'rev-list', '-1', `--before=${onsetAt}`, 'HEAD']) || 'unknown';
+  } catch (e) {
+    console.error(`onset commit unresolved: ${describeError(e)}`);
+    return 'unknown';
+  }
+}
+
+/**
+ * The posture of each session.js lane. Edit is a blanket allow where allowed, because opencode
+ * matches an edit glob against `/` when WORK is not a git repo. rca is read-only, may clone, and
+ * runs opencode's default agent when no system prompt is given, as the one-shot rca lane does.
+ */
+const SESSION_LANES = Object.freeze({
+  agent_run: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: null, clones: false, promptOptional: false }),
+  triage: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: 'checks', clones: false, promptOptional: false }),
+  rca: Object.freeze({ edit: { '*': 'deny' }, scratchDirs: false, checksDir: null, clones: true, promptOptional: true }),
+});
+
 // --- server lifecycle --------------------------------------------------------
 //
 // Ready means opencode's own `listening on <url>` line, not an accepting port: a request in the
@@ -770,6 +792,9 @@ async function runAgent(spec) {
 
 module.exports = {
   git,
+  onsetCommit,
+  refusalOf,
+  SESSION_LANES,
   runAgent,
   startServer,
   makeFetch,

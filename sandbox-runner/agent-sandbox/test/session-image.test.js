@@ -29,6 +29,7 @@ async function sessionContainer(t, bin, token) {
   fs.chmodSync(work, 0o777);
   const secret = crypto.randomBytes(32).toString('hex');
   fs.writeFileSync(path.join(work, 'session.json'), JSON.stringify({
+    lane: 'agent_run',
     system_prompt: 'You help.',
     files: { 'a.md': 'hello' },
     model: 'anthropic/claude-sonnet-5',
