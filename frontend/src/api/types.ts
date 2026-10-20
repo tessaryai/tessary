@@ -29,6 +29,9 @@ export class ApiError extends Error {
   }
 }
 
+/** `version` is `dev` for a build no release stamped. */
+export type BuildView = S["BuildView"];
+
 // ---- Ingestion ----
 export type SubstrateStatus = S["SubstrateStatusView"];
 /** `stage` is the furthest rung reached, so it never walks backwards. */

@@ -70,6 +70,7 @@ import {
   type AlertChannel,
   type CreateAlertChannel,
   type CapabilityOverrideView,
+  type BuildView,
 } from "./types";
 import type {
   AddMemberResult,
@@ -201,6 +202,8 @@ async function doImport(url: string, init: RequestInit): Promise<ImportResult> {
 
 export const auth = {
   me: () => http<Me>("/auth/me"),
+
+  getBuild: () => http<BuildView>("/api/build"),
 
   getOrg: (orgSlug: string) => http<Organization>(`/api/orgs/${enc(orgSlug)}`),
 

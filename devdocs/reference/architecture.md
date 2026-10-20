@@ -315,7 +315,7 @@ holds. A package appears in exactly one module.
 | `config/` | `core` | cross-cutting `@ConfigurationProperties` (~25 per-feature classes) + `AsyncConfig` (bounded virtual-thread executors),… | [config-keys.md](./config-keys.md) |
 | `crypto/` | `core` | `SecretBox` (AES-GCM seal/open for at-rest secrets), `CryptoConstants`. | — |
 | `db/` | `core` | `DataSourceConfig` (HikariCP against `TESSARY_JDBC_URL`), `LiquibaseConfig`, SQL helpers (`Upsert`). | — |
-| `edition/` | `tenancy` | which edition this JVM is running (`open` is the only one this tree defines), derived from the classpath, no property/env var behind it — `Edition`, `EditionConfig`, `EditionBanner`. | — |
+| `edition/` | `tenancy` | which edition this JVM is running (`open` is the only one this tree defines), derived from the classpath, no property/env var behind it, and the build it reports (`GET /api/build`, shown at the foot of Settings → Organization) — `Edition`, `EditionConfig`, `EditionBanner`, `BuildController`. | — |
 | `featureflags/` | `tenancy` | the flag-override seam under the capability layer; holds no defaults of its own. Open adapter reads `org_feature_flag`; another build can supply its own. | — |
 | `git/` | `substrate` | Git provider SPI (GitHub first). | — |
 | `ingest/` | `substrate` | normalizing raw trace data on the write path. | `/v1/traces` |

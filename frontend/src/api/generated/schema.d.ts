@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["BuildController_build"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/link/{userCode}": {
         parameters: {
             query?: never;
@@ -1960,6 +1976,10 @@ export interface components {
             data?: components["schemas"]["BillingSummary"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseBuildView: {
+            data?: components["schemas"]["BuildView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseCapabilitiesView: {
             data?: components["schemas"]["CapabilitiesView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2368,6 +2388,9 @@ export interface components {
             org_id: string;
             plan: string;
             usage: components["schemas"]["UsageLine"][];
+        };
+        BuildView: {
+            version: string;
         };
         CallSite: {
             constraints: components["schemas"]["Constraint"][];
@@ -4345,6 +4368,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    BuildController_build: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBuildView"];
+                };
+            };
+        };
+    };
     DeviceLinkController_view: {
         parameters: {
             query?: never;
