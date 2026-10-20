@@ -531,11 +531,11 @@ test('the buffer keeps the last SANDBOX_SESSION_BUFFER events; an older after is
 test('a live session does not hold the docker run slot (one open session that freezes every one-shot run)', T, async () => {
   await withSessionLauncher({ env: { SANDBOX_DOCKER_CONCURRENCY: '1' } }, async ({ start, port }) => {
     assert.equal((await start()).status, 201);
-    const triage = await request(port, 'POST', '/triage', {
+    const run = await request(port, 'POST', '/runs', {
       auth: 'Bearer testkey',
       body: { files: [], prompt: 'x', json_schema: {}, mcp: {}, timeout_ms: 10000, credential: CREDENTIAL },
     });
-    assert.deepEqual(triage, { status: 200, body: { raw: 'fake-ok' } });
+    assert.deepEqual(run, { status: 200, body: { raw: 'fake-ok' } });
   });
 });
 

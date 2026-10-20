@@ -91,9 +91,6 @@ services:
       TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-}
       # docker-compose.yml's placeholder, so an unconfigured launcher and backend still agree.
       TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}
-      # Defaults onto the observer's launcher. Without it every "Run RCA" fails.
-      TESSARY_RCA_AGENTIC_LAUNCHER_URL: ${TESSARY_RCA_AGENTIC_LAUNCHER_URL:-${TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL:-}}
-      TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY: ${TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY:-${TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY:-Q0hBTkdFLU1FLWluc2VjdXJlLWRlZmF1bHQtbGF1bmNo}}
       # Required; blank stops both agent lanes. agents=docker overrides it to http://backend:8080. Under
       # agents=e2b the microVM cannot see localhost, so point this at a public tunnel.
       TESSARY_RCA_AGENTIC_MCP_BASE_URL: ${TESSARY_RCA_AGENTIC_MCP_BASE_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}}

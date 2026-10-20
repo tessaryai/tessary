@@ -965,7 +965,7 @@ async function runAgenticScript(lane, rawPayload) {
   if (!mcpUrl || pointsAtLocalhost(mcpUrl)) {
     const e = new Error(`${lane}: mcp.url is missing or unreachable from an E2B microVM `
       + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
-      + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
+      + 'tessary.agentrun.mcp-base-url, or switch '
       + 'SANDBOX_BACKEND to docker for development');
     e.launcherKind = 'bad_request';
     throw e;
@@ -1019,20 +1019,6 @@ async function runAgenticScript(lane, rawPayload) {
   }
 }
 
-// payload.clone_url is optional: an evidence-only project still gets its investigation.
-function runRca(payload) {
-  return runAgenticScript('rca', payload);
-}
-
-// The only agentic route with no clone: whether a claim about production traffic is true is not
-// something a repository can settle, so this route must never grow a clone_url.
-function runTriage(payload) {
-  return runAgenticScript('triage', payload);
-}
-
-function runAgentRun(payload) {
-  return runAgenticScript('run', payload);
-}
 
 // ---------------------------------------------------------------------------
 // Launcher sessions: one long-lived sandbox per session running session.js. A backend is one driver
@@ -1626,11 +1612,6 @@ async function handleSessionRoute(req, res, route) {
   return answer(res, await abortSessionReply(s));
 }
 
-const AGENTIC_ROUTES = new Map([
-  ['/rca', runRca],
-  ['/triage', runTriage],
-  ['/runs', runAgentRun],
-]);
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -1687,7 +1668,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method !== 'POST' || !AGENTIC_ROUTES.has(req.url)) {
+  if (req.method !== 'POST' || req.url !== '/runs') {
     return send(res, 404, { error: 'not found' });
   }
   if (!authorized(req)) {
@@ -1695,7 +1676,7 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     const payload = await readBody(req);
-    const out = await AGENTIC_ROUTES.get(req.url)(payload);
+    const out = await runAgenticScript('run', payload);
     return send(res, 200, out);
   } catch (e) {
     const body = buildErrorBody(e);

@@ -44,12 +44,12 @@ test('answers its health check', async () => {
 test('refuses a body that is not JSON, reads an empty one as no fields, and without echoing the input', async () => {
   const { child, port } = await startLauncher(E2B_ENV);
   try {
-    const garbled = await rawPost(port, '/rca', '{"credential": tsy_secret');
+    const garbled = await rawPost(port, '/runs', '{"credential": tsy_secret');
     assert.equal(garbled.status, 502);
     assert.equal(garbled.body.kind, 'bad_request');
     assert.equal(garbled.body.detail, 'invalid json body');
 
-    const empty = await rawPost(port, '/rca', '');
+    const empty = await rawPost(port, '/runs', '');
     assert.equal(empty.body.kind, 'bad_request');
     assert.match(empty.body.detail, /no credential object on the request/);
   } finally {
@@ -60,7 +60,7 @@ test('refuses a body that is not JSON, reads an empty one as no fields, and with
 test('cuts off a body over the size limit rather than reading it all, and keeps serving', async () => {
   const { child, port } = await startLauncher(E2B_ENV);
   try {
-    const res = await rawPost(port, '/rca', Buffer.alloc(9 * 1024 * 1024, 'a'));
+    const res = await rawPost(port, '/runs', Buffer.alloc(9 * 1024 * 1024, 'a'));
     assert.ok(res.error || res.body.detail === 'body too large', JSON.stringify(res.body ?? String(res.error)));
     assert.deepEqual(await request(port, 'GET', '/healthz'), { status: 200, body: { ok: true } });
   } finally {
@@ -68,10 +68,10 @@ test('cuts off a body over the size limit rather than reading it all, and keeps 
   }
 });
 
-test('only POST /rca, /triage and /runs reach the analyzers; every other route is 404, even one that is not a URL path (a // that crashed the launcher)', async () => {
+test('only POST /runs reaches an agent outside a session; the removed /rca and /triage and every other route are 404, even one that is not a URL path (a one-shot triage or RCA route left behind beside sessions, a // that crashed the launcher)', async () => {
   const { child, port } = await startLauncher(E2B_ENV);
   try {
-    for (const [method, urlPath] of [['GET', '/rca'], ['POST', '/grade'], ['POST', '/rca/extra'], ['PUT', '/triage'], ['GET', '/runs'], ['POST', '/runs/extra'], ['POST', '//']]) {
+    for (const [method, urlPath] of [['POST', '/rca'], ['POST', '/triage'], ['POST', '/grade'], ['GET', '/runs'], ['POST', '/runs/extra'], ['POST', '//']]) {
       assert.deepEqual(
         await request(port, method, urlPath, { auth: 'Bearer testkey' }),
         { status: 404, body: { error: 'not found' } },
@@ -88,7 +88,7 @@ test('a request without the launcher key is 401 before its body is read', async 
   try {
     for (const auth of [undefined, 'Bearer wrong', 'testkey', 'Basic testkey']) {
       assert.deepEqual(
-        await request(port, 'POST', '/rca', { auth, body: {} }),
+        await request(port, 'POST', '/runs', { auth, body: {} }),
         { status: 401, body: { error: 'unauthorized' } },
         `Authorization: ${auth}`,
       );
@@ -115,10 +115,10 @@ test('an unusable credential is the caller\'s bad_request, named, before any san
   const { child, port } = await startLauncher(E2B_ENV);
   try {
     for (const [credential, why] of BAD_CREDENTIALS) {
-      const res = await request(port, 'POST', '/rca', { auth: 'Bearer testkey', body: { mcp: MCP, credential } });
+      const res = await request(port, 'POST', '/runs', { auth: 'Bearer testkey', body: { mcp: MCP, credential } });
       assert.equal(res.status, 502);
       assert.equal(res.body.kind, 'bad_request', why);
-      assert.ok(res.body.detail.startsWith(`rca: missing or invalid credential (${why}`), res.body.detail);
+      assert.ok(res.body.detail.startsWith(`run: missing or invalid credential (${why}`), res.body.detail);
     }
   } finally {
     child.kill();
@@ -129,10 +129,10 @@ test('an egress credential on the docker backend is the caller\'s bad_request: o
   const { child, port } = await startLauncher({ SANDBOX_BACKEND: 'docker', SANDBOX_WORK_VOLUME: 'vol', SANDBOX_API_KEY: 'testkey' });
   try {
     const credential = { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic' };
-    const res = await request(port, 'POST', '/rca', { auth: 'Bearer testkey', body: { mcp: MCP, credential } });
+    const res = await request(port, 'POST', '/runs', { auth: 'Bearer testkey', body: { mcp: MCP, credential } });
     assert.equal(res.status, 502);
     assert.equal(res.body.kind, 'bad_request');
-    assert.equal(res.body.detail, 'rca: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)');
+    assert.equal(res.body.detail, 'run: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)');
   } finally {
     child.kill();
   }

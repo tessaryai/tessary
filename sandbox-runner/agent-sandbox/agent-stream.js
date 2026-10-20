@@ -16,7 +16,7 @@ const { startMcpRelay } = require('./mcp-relay');
 const TRIAGE_AGENT = 'tessary-triage';
 
 // opencode's own scratch dirs, where its bash tool tells the model it may write; denying them would
-// contradict that. Triage only.
+// contradict that. Only the run lane under a system prompt and the agent_run and triage sessions.
 const OPENCODE_TMP_GLOB = path.join(os.tmpdir(), 'opencode', '*');
 const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
   process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
@@ -194,7 +194,7 @@ function onsetCommit(onsetAt) {
 /**
  * The posture of each session.js lane. Edit is a blanket allow where allowed, because opencode
  * matches an edit glob against `/` when WORK is not a git repo. rca is read-only, may clone, and
- * runs opencode's default agent when no system prompt is given, as the one-shot rca lane does.
+ * runs opencode's default agent when no system prompt is given, as runAgent does without one.
  */
 const SESSION_LANES = Object.freeze({
   agent_run: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: null, clones: false, promptOptional: false }),
@@ -626,8 +626,8 @@ function failureEnvelope(e) {
 /**
  * spec: model (`provider/model`), prompt, jsonSchema (null asks for prose: no schema retry),
  * permission (required), mcp, timeoutMs (bounds the fetch), maxTurns (opencode steps at maxTurns - 2
- * so the forced text-only turn lands with margin), and systemPrompt (triage: puts mcp-relay in front of
- * the platform token and runs under TRIAGE_AGENT).
+ * so the forced text-only turn lands with margin), and systemPrompt (puts mcp-relay in front of the
+ * platform token and runs under TRIAGE_AGENT).
  */
 async function runAgent(spec) {
   const startMs = Date.now();
