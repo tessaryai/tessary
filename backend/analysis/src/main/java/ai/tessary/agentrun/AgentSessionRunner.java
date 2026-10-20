@@ -530,6 +530,7 @@ public class AgentSessionRunner {
         private void drainOnce(String id) {
             try (Stream<SessionEvent> events = client.events(id, lastSeq)) {
                 watch.current.set(events);
+                if (watch.expired.get()) return;
                 Iterator<SessionEvent> it = events.iterator();
                 while (!closedSeen && it.hasNext()) {
                     SessionEvent event = it.next();
