@@ -359,6 +359,22 @@ jobs:
           fi
           pnpm exec tsx build.ts --verify="${{ needs.preflight.outputs.version }}"
 
+      # The boot check above runs with no network rules. This runs each Tessary AI model through the real
+      # launcher under the egress posture, where a host opencode needs and the allowlist leaves out fails
+      # every run. The key is the tessary-ai-anthropic secret in this E2B team's own store.
+      - run: pnpm install --frozen-lockfile
+        working-directory: sandbox-runner/launcher
+      - working-directory: sandbox-runner/launcher
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${E2B_API_KEY:-}" ]; then
+            echo "::warning::E2B_API_KEY is not set, so the egress probe is skipped."
+            exit 0
+          fi
+          node probe-egress.js --template="tessary/tessary-agent-sandbox:${{ needs.preflight.outputs.version }}"
+
   # Diffs each image's exported contents against scripts/lib/open-artifact-denylist.txt before anything is
   # merged. Each arch runs on its own runner, so check-open-artifacts.sh needs no --platform.
   verify-open-artifacts:
