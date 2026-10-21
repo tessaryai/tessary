@@ -85,6 +85,9 @@ function StepsBody({ read, live }: { read: { page: StepsPage | null; error: unkn
   return <RunSteps steps={read.page.steps} stepCount={read.page.step_count} runningSeq={running} />;
 }
 
+/** How many of the newest steps the list shows. */
+const STEPS_SHOWN = 30;
+
 /**
  * Newest last; the step in progress spins, a step that failed is crossed, one still open beside it waits, one the run
  * stopped inside says it did not finish, and a cut list says so.
@@ -93,14 +96,12 @@ export function RunSteps({
   steps,
   stepCount,
   runningSeq,
-  cap = 30,
 }: {
   steps: RunStep[];
   stepCount: number;
   runningSeq?: number;
-  cap?: number;
 }) {
-  const shown = steps.slice(-cap);
+  const shown = steps.slice(-STEPS_SHOWN);
   const earlier = stepCount - shown.length;
   return (
     <>
