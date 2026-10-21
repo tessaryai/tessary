@@ -303,7 +303,8 @@ describe("a triage run that has not ruled yet", () => {
 
 const RUN: NonNullable<Finding["triageRun"]> = {
   id: "run-1", attempt: 1, startedAt: "2026-09-23T14:00:00Z", endedAt: null, stepCount: 7,
-  doing: "Reading flagged answers 51 to 58", outcome: null, stopCode: null,
+  doing: "Reading flagged answers 51 to 58", lastStep: null, lastStepMs: null, note: null, noteMs: null, outcome: null,
+  stopCode: null,
 };
 const PROGRESS: NonNullable<Finding["triageProgress"]> = {
   attempts: 1, maxAttempts: 5, startedAt: "2026-09-23T14:00:00Z", heldBy: null, queuedAt: "2026-09-23T13:59:00Z",

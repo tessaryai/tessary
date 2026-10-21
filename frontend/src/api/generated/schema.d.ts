@@ -3707,6 +3707,12 @@ export interface components {
         RcaRunView: {
             doing: string | null;
             ended_at: string | null;
+            last_step: string | null;
+            /** Format: int64 */
+            last_step_ms: number | null;
+            note: string | null;
+            /** Format: int64 */
+            note_ms: number | null;
             queued_at: string;
             run_id: string | null;
             started_at: string | null;
@@ -4273,6 +4279,12 @@ export interface components {
             doing: string | null;
             endedAt: string | null;
             id: string;
+            lastStep: string | null;
+            /** Format: int64 */
+            lastStepMs: number | null;
+            note: string | null;
+            /** Format: int64 */
+            noteMs: number | null;
             outcome: string | null;
             startedAt: string;
             /** Format: int32 */

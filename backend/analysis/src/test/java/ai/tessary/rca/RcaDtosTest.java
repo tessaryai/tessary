@@ -251,8 +251,8 @@ class RcaDtosTest {
     }
 
     /**
-     * Words of a step that is no longer running: a running run says its step, and a stopped one says its code and
-     * when it ended, but never a step it left open.
+     * Words of a step that is no longer running: a running run says its step, its newest step and the agent's note,
+     * and a stopped one says its code and when it ended, but never a step it left open or a note.
      */
     @Test
     void onlyARunningRunSaysWhatItIsDoing() {
@@ -266,10 +266,10 @@ class RcaDtosTest {
                 null,
                 3,
                 "Reading commit a41c0de",
-                null,
-                null,
-                null,
-                null,
+                "Read the tool guide",
+                9L,
+                "Let me check the history",
+                10L,
                 null);
         RunState stopped = new RunState(
                 "rpt-1",
@@ -281,17 +281,30 @@ class RcaDtosTest {
                 "t2",
                 3,
                 "Reading commit a41c0de",
-                null,
-                null,
-                null,
-                null,
+                "Read the tool guide",
+                9L,
+                "Let me check the history",
+                10L,
                 "RCA.TIMED_OUT");
 
         assertEquals(
-                new RcaRunView("running", "t0", "run-1", "t1", null, 3, "Reading commit a41c0de", null),
+                new RcaRunView(
+                        "running",
+                        "t0",
+                        "run-1",
+                        "t1",
+                        null,
+                        3,
+                        "Reading commit a41c0de",
+                        "Read the tool guide",
+                        9L,
+                        "Let me check the history",
+                        10L,
+                        null),
                 RcaRunView.of(running));
         assertEquals(
-                new RcaRunView("stopped", "t3", "run-1", "t1", "t2", 3, null, "RCA.TIMED_OUT"), RcaRunView.of(stopped));
+                new RcaRunView("stopped", "t3", "run-1", "t1", "t2", 3, null, null, null, null, null, "RCA.TIMED_OUT"),
+                RcaRunView.of(stopped));
     }
 
     /**
@@ -316,7 +329,9 @@ class RcaDtosTest {
                 null,
                 "RCA.SANDBOX_BUSY");
 
-        assertEquals(new RcaRunView("queued", "t0", null, null, null, 0, null, null), RcaRunView.of(requeued));
+        assertEquals(
+                new RcaRunView("queued", "t0", null, null, null, 0, null, null, null, null, null, null),
+                RcaRunView.of(requeued));
     }
 
     private static RcaReportRow row(

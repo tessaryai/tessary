@@ -791,7 +791,8 @@ function runOf(report: RcaReport | undefined, c: CaseDetail["case"] | undefined)
   if (report?.status === "failed") {
     return {
       state: "stopped", queued_at: report.created_at, run_id: null, started_at: null,
-      ended_at: report.completed_at, step_count: 0, doing: null, stop_code: null,
+      ended_at: report.completed_at, step_count: 0, doing: null, last_step: null, last_step_ms: null, note: null,
+      note_ms: null, stop_code: null,
     };
   }
   const state = c?.rca_run_state;
@@ -799,7 +800,7 @@ function runOf(report: RcaReport | undefined, c: CaseDetail["case"] | undefined)
     const since = c.rca_run_since ?? c.opened_at;
     return {
       state, queued_at: since, run_id: null, started_at: state === "running" ? since : null, ended_at: null,
-      step_count: 0, doing: null, stop_code: null,
+      step_count: 0, doing: null, last_step: null, last_step_ms: null, note: null, note_ms: null, stop_code: null,
     };
   }
   return null;

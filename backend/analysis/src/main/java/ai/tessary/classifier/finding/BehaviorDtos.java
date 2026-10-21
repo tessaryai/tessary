@@ -248,8 +248,10 @@ public final class BehaviorDtos {
                 long cooldownSeconds) {}
 
         /**
-         * One triage run: {@code doing} is the step running now, {@code outcome} how the run ended and
-         * {@code stopCode} the error code it ended on; all three are null while nothing applies.
+         * One triage run: {@code doing} is the step running now, {@code lastStep} the newest step's words and
+         * {@code note} the agent's newest words between tool calls, each with its time from {@code startedAt};
+         * {@code outcome} is how the run ended and {@code stopCode} the error code it ended on. Each is null while
+         * nothing applies.
          */
         public record TriageRunView(
                 String id,
@@ -258,6 +260,10 @@ public final class BehaviorDtos {
                 @Nullable String endedAt,
                 int stepCount,
                 @Nullable String doing,
+                @Nullable String lastStep,
+                @Nullable Long lastStepMs,
+                @Nullable String note,
+                @Nullable Long noteMs,
                 @Nullable String outcome,
                 @Nullable String stopCode) {
 
@@ -271,6 +277,10 @@ public final class BehaviorDtos {
                         run.endedAt(),
                         run.stepCount(),
                         run.doing(),
+                        run.lastStep(),
+                        run.lastStepMs(),
+                        run.note(),
+                        run.noteMs(),
                         outcome == null ? null : outcome.wire(),
                         run.stopCode());
             }

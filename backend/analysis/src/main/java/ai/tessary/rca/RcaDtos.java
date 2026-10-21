@@ -140,7 +140,9 @@ public final class RcaDtos {
      * {@code done}. A queued or running job shows no ended run, since that run belongs to an attempt before this one.
      *
      * @param queuedAt when the job was last asked for, kept through a claim that bounced off a full launcher @param
-     * doing the step the run is on, only while it runs @param stopCode the code the run stopped on
+     * doing the step the run is on, only while it runs @param lastStep the newest step's words, and lastStepMs when it
+     * ended or started, only while it runs @param note the agent's newest words between tool calls, and noteMs when,
+     * only while it runs; both times are from {@code startedAt} @param stopCode the code the run stopped on
      */
     public record RcaRunView(
             String state,
@@ -150,6 +152,10 @@ public final class RcaDtos {
             @JsonProperty("ended_at") @Nullable String endedAt,
             @JsonProperty("step_count") int stepCount,
             @Nullable String doing,
+            @JsonProperty("last_step") @Nullable String lastStep,
+            @JsonProperty("last_step_ms") @Nullable Long lastStepMs,
+            @Nullable String note,
+            @JsonProperty("note_ms") @Nullable Long noteMs,
             @JsonProperty("stop_code") @Nullable String stopCode) {
 
         public static final String QUEUED = "queued";
@@ -167,8 +173,9 @@ public final class RcaDtos {
                     };
             boolean live = QUEUED.equals(state) || RUNNING.equals(state);
             if (s.runId() == null || (live && s.endedAt() != null)) {
-                return new RcaRunView(state, s.jobQueuedAt(), null, null, null, 0, null, null);
+                return new RcaRunView(state, s.jobQueuedAt(), null, null, null, 0, null, null, null, null, null, null);
             }
+            boolean running = RUNNING.equals(state);
             return new RcaRunView(
                     state,
                     s.jobQueuedAt(),
@@ -176,7 +183,11 @@ public final class RcaDtos {
                     s.startedAt(),
                     s.endedAt(),
                     s.stepCount(),
-                    RUNNING.equals(state) ? s.doing() : null,
+                    running ? s.doing() : null,
+                    running ? s.lastStep() : null,
+                    running ? s.lastStepMs() : null,
+                    running ? s.note() : null,
+                    running ? s.noteMs() : null,
                     s.stopCode());
         }
 

@@ -61,7 +61,8 @@ const progress = (over: Partial<Progress> = {}): Progress => ({
 
 const run = (over: Partial<Run> = {}): Run => ({
   id: "run-1", attempt: 1, startedAt: before(134_000), endedAt: null, stepCount: 7,
-  doing: "Reading flagged answers 51 to 58", outcome: null, stopCode: null, ...over,
+  doing: "Reading flagged answers 51 to 58", lastStep: null, lastStepMs: null, note: null, noteMs: null, outcome: null,
+  stopCode: null, ...over,
 });
 
 const finding = (over: Partial<BehaviorFinding> = {}): BehaviorFinding => ({

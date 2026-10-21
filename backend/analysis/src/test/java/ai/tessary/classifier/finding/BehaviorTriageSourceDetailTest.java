@@ -191,9 +191,9 @@ class BehaviorTriageSourceDetailTest {
     }
 
     /**
-     * The finding carries its newest run's step count and the words of the step running now, and a running triage
-     * says it started when its run did, not when the job was claimed (a live line with no step, or an elapsed time that
-     * counts the queue).
+     * The finding carries its newest run's step count, the words of the step running now, its newest step and the
+     * agent's note, and a running triage says it started when its run did, not when the job was claimed (a live line
+     * with no step or stuck on "Thinking", or an elapsed time that counts the queue).
      */
     @Test
     void theFindingCarriesItsNewestRunsStepAndCurrentWords() {
@@ -216,7 +216,18 @@ class BehaviorTriageSourceDetailTest {
 
         assertEquals(
                 new TriageRunView(
-                        "run-2", 2, "2026-08-02T01:00:02Z", null, 7, "Reading flagged answers 51 to 58", null, null),
+                        "run-2",
+                        2,
+                        "2026-08-02T01:00:02Z",
+                        null,
+                        7,
+                        "Reading flagged answers 51 to 58",
+                        "Read flagged answers 1 to 50 of 58",
+                        4_000L,
+                        "Let me read the rest",
+                        5_000L,
+                        null,
+                        null),
                 finding.triageRun());
         assertEquals("2026-08-02T01:00:02Z", requireProgress(finding).startedAt());
     }
@@ -301,10 +312,10 @@ class BehaviorTriageSourceDetailTest {
                 stopCode,
                 7,
                 endedAt == null ? "Reading flagged answers 51 to 58" : null,
-                null,
-                null,
-                null,
-                null,
+                "Read flagged answers 1 to 50 of 58",
+                4_000L,
+                "Let me read the rest",
+                5_000L,
                 "s-1");
     }
 

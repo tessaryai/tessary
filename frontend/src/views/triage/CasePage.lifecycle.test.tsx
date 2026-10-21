@@ -359,7 +359,8 @@ describe("running RCA", () => {
 const rcaRun = (over: Partial<RcaRun> = {}): RcaRun => ({
   state: "running", queued_at: new Date(Date.now() - 400_000).toISOString(), run_id: "run-9",
   started_at: new Date(Date.now() - 358_000).toISOString(), ended_at: null, step_count: 13,
-  doing: "Comparing the index sources before and after commit a41c0de", stop_code: null, ...over,
+  doing: "Comparing the index sources before and after commit a41c0de", last_step: null, last_step_ms: null, note: null,
+  note_ms: null, stop_code: null, ...over,
 });
 
 /** The case while its report runs: the case read inlines no report, so the page reads it until it ends. */

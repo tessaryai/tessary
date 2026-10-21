@@ -8343,6 +8343,32 @@
               "null"
             ]
           },
+          "last_step" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "last_step_ms" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "note" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "note_ms" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "queued_at" : {
             "type" : "string"
           },
@@ -8375,6 +8401,10 @@
         "required" : [
           "doing",
           "ended_at",
+          "last_step",
+          "last_step_ms",
+          "note",
+          "note_ms",
           "queued_at",
           "run_id",
           "started_at",
@@ -10830,6 +10860,32 @@
           "id" : {
             "type" : "string"
           },
+          "lastStep" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "lastStepMs" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "note" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "noteMs" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "outcome" : {
             "type" : [
               "string",
@@ -10855,6 +10911,10 @@
           "doing",
           "endedAt",
           "id",
+          "lastStep",
+          "lastStepMs",
+          "note",
+          "noteMs",
           "outcome",
           "startedAt",
           "stepCount",
