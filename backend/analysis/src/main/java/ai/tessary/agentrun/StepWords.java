@@ -36,6 +36,21 @@ public final class StepWords {
 
     private static final int ID_CHARS = 8;
 
+    private static final int NOTE_CHARS = 160;
+
+    /** The end of a whole sentence or line: a newline, or a stop the next character proves is not a decimal point. */
+    private static final Pattern WHOLE = Pattern.compile("\n|[.!?](?=\\s)");
+
+    private static final Pattern SENTENCE_BREAK = Pattern.compile("(?<=[.!?])\\s+");
+
+    private static final Pattern MARKDOWN_LEAD = Pattern.compile("^(?:#{1,6}\\s+|[-*+>]\\s*|\\d+[.)]\\s+)+");
+
+    private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^\\]]*)]\\([^)]*\\)");
+
+    private static final Pattern MARKDOWN_MARKS = Pattern.compile("\\*\\*|__|`|\\*");
+
+    private static final Pattern CLOSING = Pattern.compile("[.,;:]+$");
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Where the sandbox's work dir sits: E2B, then docker. */
@@ -149,6 +164,48 @@ public final class StepWords {
         }
         if (PLATFORM_SERVER.equals(server)) return platform(start.callId(), tool, input, ctx, cursor);
         return used(tool);
+    }
+
+    /**
+     * The agent's newest whole sentence or line in plain text: no markdown, no token-shaped word, no closing period,
+     * cut at a word to {@link #NOTE_CHARS}. Null while the text holds no whole sentence or line with words in it.
+     */
+    static @Nullable String note(String text) {
+        Matcher whole = WHOLE.matcher(text);
+        int end = 0;
+        while (whole.find()) end = whole.end();
+        String last = null;
+        for (String line : text.substring(0, end).split("\n")) {
+            for (String sentence : SENTENCE_BREAK.split(line)) {
+                String plain = plain(sentence);
+                if (plain != null) last = plain;
+            }
+        }
+        return last;
+    }
+
+    /** True once a line starts an object or a code fence: the agent is writing its answer, not narrating. */
+    static boolean answerShaped(String text) {
+        return text.lines().map(String::strip).anyMatch(l -> l.startsWith("{") || l.startsWith("```"));
+    }
+
+    private static @Nullable String plain(String sentence) {
+        String s = MARKDOWN_LEAD.matcher(sentence.strip()).replaceFirst("");
+        s = MARKDOWN_LINK.matcher(s).replaceAll("$1");
+        s = MARKDOWN_MARKS.matcher(s).replaceAll("");
+        StringBuilder kept = new StringBuilder();
+        for (String word : s.strip().split("\\s+")) {
+            if (safe(word) == null) continue;
+            if (!kept.isEmpty()) kept.append(' ');
+            kept.append(word);
+        }
+        s = kept.toString();
+        if (s.length() > NOTE_CHARS) {
+            int cut = s.lastIndexOf(' ', NOTE_CHARS);
+            s = s.substring(0, cut > 0 ? cut : NOTE_CHARS);
+        }
+        s = CLOSING.matcher(s).replaceFirst("");
+        return s.chars().anyMatch(Character::isLetter) ? s : null;
     }
 
     public static String failed(Words w) {

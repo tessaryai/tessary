@@ -201,6 +201,9 @@ public class E2bRcaSandbox implements RcaSandbox {
 
         @Override
         public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {}
+
+        @Override
+        public void note(String words, long atMs) {}
     };
 
     /** Writes the runner's steps to the run the worker opened for this job. */
@@ -219,6 +222,11 @@ public class E2bRcaSandbox implements RcaSandbox {
         @Override
         public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {
             runs.stepEnded(runId, callId, atMs, ok, ok ? w.done() : StepWords.failed(w));
+        }
+
+        @Override
+        public void note(String words, long atMs) {
+            runs.note(runId, words, atMs);
         }
     }
 }

@@ -145,6 +145,9 @@ class AgentSessionRunnerBookingTest {
 
             @Override
             public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {}
+
+            @Override
+            public void note(String words, long atMs) {}
         };
 
         if (answers) {

@@ -39,7 +39,10 @@ record AgentRunRepositoryTest(TenantService tenants, JdbcClient jdbc, ProjectPur
         return TenantFixture.bootstrap(tenants, name).project().id();
     }
 
-    /** Repository round trip: every column of a run and of its steps reads back as written. */
+    /**
+     * Repository round trip: every column of a run and of its steps reads back as written, with the newest step's words
+     * and time and the agent's note, which the live line picks between.
+     */
     @Test
     void aRunWrittenWithEveryColumnReadsBackWhole() {
         String pid = project("agent-run-round-trip");
@@ -49,6 +52,7 @@ record AgentRunRepositoryTest(TenantService tenants, JdbcClient jdbc, ProjectPur
         runs.stepStarted(runId, "c-1", "Read the finding and its numbers", "Reading the finding and its numbers", 4);
         runs.stepStarted(runId, "c-2", "Read commit a41c0de", "Reading commit a41c0de", 2_500);
         runs.stepEnded(runId, "c-1", 1_200, true, "Read the finding and its numbers");
+        runs.note(runId, "Let me check the history", 2_000);
 
         assertEquals(
                 Optional.of(new RunSummary(
@@ -62,6 +66,10 @@ record AgentRunRepositoryTest(TenantService tenants, JdbcClient jdbc, ProjectPur
                         null,
                         2,
                         "Reading commit a41c0de",
+                        "Read commit a41c0de",
+                        2_500L,
+                        "Let me check the history",
+                        2_000L,
                         "s-1")),
                 runs.openRunOfJob(pid + "/job-1"));
 
@@ -82,6 +90,10 @@ record AgentRunRepositoryTest(TenantService tenants, JdbcClient jdbc, ProjectPur
                                 "RCA.PROVIDER_REJECTED",
                                 2,
                                 null,
+                                "Could not read commit a41c0de",
+                                3_000L,
+                                "Let me check the history",
+                                2_000L,
                                 "s-1")),
                 runs.latestBySubjects(pid, Lane.RCA, List.of("report-1")));
         assertEquals(

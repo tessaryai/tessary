@@ -27,14 +27,21 @@ public class AgentRunRepository {
 
     static final int MAX_WORDS = 200;
 
+    /** The run's newest stored step: its words and when it last moved, joined as {@code l}. */
+    private static final String LAST_STEP = """
+             LEFT JOIN LATERAL (SELECT s.words AS last_step, COALESCE(s.ended_ms, s.started_ms) AS last_step_ms
+                                  FROM agent_run_step s WHERE s.run_id = r.id
+                                 ORDER BY s.seq DESC LIMIT 1) l ON TRUE
+            """;
+
     private static final String SUMMARY = """
             SELECT r.id, r.lane, r.subject_id, r.attempt, r.started_at, r.ended_at, r.outcome, r.stop_code,
-                   r.step_count, r.session_id,
+                   r.step_count, r.session_id, r.note, r.note_ms, l.last_step, l.last_step_ms,
                    (SELECT s.doing FROM agent_run_step s
                      WHERE s.run_id = r.id AND s.ended_ms IS NULL
                      ORDER BY s.seq DESC LIMIT 1) AS doing
               FROM agent_run r
-            """;
+            """ + LAST_STEP;
 
     private final JdbcClient jdbc;
     private final Clock clock;
@@ -80,7 +87,12 @@ public class AgentRunRepository {
         }
     }
 
-    /** @param doing the words of the newest step that has not ended, null when none is running */
+    /**
+     * @param doing the words of the newest step that has not ended, null when none is running @param lastStep the
+     * words of the newest stored step @param lastStepMs when that step ended, or started while it runs, from
+     * {@code startedAt} @param note the agent's newest words between tool calls @param noteMs when it said them, from
+     * {@code startedAt}
+     */
     public record RunSummary(
             String id,
             Lane lane,
@@ -92,6 +104,10 @@ public class AgentRunRepository {
             @Nullable String stopCode,
             int stepCount,
             @Nullable String doing,
+            @Nullable String lastStep,
+            @Nullable Long lastStepMs,
+            @Nullable String note,
+            @Nullable Long noteMs,
             @Nullable String sessionId) {}
 
     /** @param startedMs from the run's {@code started_at} */
@@ -178,6 +194,15 @@ public class AgentRunRepository {
                 .update();
     }
 
+    /** @param atMs from the run's {@code started_at} */
+    public void note(String runId, String words, long atMs) {
+        jdbc.sql("UPDATE agent_run SET note = :note, note_ms = :atMs WHERE id = :id")
+                .param("note", cut(words))
+                .param("atMs", atMs)
+                .param("id", runId)
+                .update();
+    }
+
     public void close(String runId, Outcome outcome, @Nullable String stopCode) {
         jdbc.sql("UPDATE agent_run SET ended_at = :now, outcome = :outcome, stop_code = :code WHERE id = :id")
                 .param("now", clock.instant().toString())
@@ -256,6 +281,10 @@ public class AgentRunRepository {
                 rs.getString("stop_code"),
                 rs.getInt("step_count"),
                 rs.getString("doing"),
+                rs.getString("last_step"),
+                rs.getObject("last_step_ms", Long.class),
+                rs.getString("note"),
+                rs.getObject("note_ms", Long.class),
                 rs.getString("session_id"));
     }
 

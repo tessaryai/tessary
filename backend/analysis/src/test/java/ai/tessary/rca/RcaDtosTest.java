@@ -240,6 +240,10 @@ class RcaDtosTest {
                 null,
                 3,
                 "Reading commit a41c0de",
+                null,
+                null,
+                null,
+                null,
                 null));
 
         assertEquals(state, run.state());
@@ -252,10 +256,36 @@ class RcaDtosTest {
      */
     @Test
     void onlyARunningRunSaysWhatItIsDoing() {
-        RunState running =
-                new RunState("rpt-1", "claimed", true, "t0", "run-1", "t1", null, 3, "Reading commit a41c0de", null);
+        RunState running = new RunState(
+                "rpt-1",
+                "claimed",
+                true,
+                "t0",
+                "run-1",
+                "t1",
+                null,
+                3,
+                "Reading commit a41c0de",
+                null,
+                null,
+                null,
+                null,
+                null);
         RunState stopped = new RunState(
-                "rpt-1", "failed", false, "t3", "run-1", "t1", "t2", 3, "Reading commit a41c0de", "RCA.TIMED_OUT");
+                "rpt-1",
+                "failed",
+                false,
+                "t3",
+                "run-1",
+                "t1",
+                "t2",
+                3,
+                "Reading commit a41c0de",
+                null,
+                null,
+                null,
+                null,
+                "RCA.TIMED_OUT");
 
         assertEquals(
                 new RcaRunView("running", "t0", "run-1", "t1", null, 3, "Reading commit a41c0de", null),
@@ -270,8 +300,21 @@ class RcaDtosTest {
      */
     @Test
     void aLiveJobDoesNotShowTheEndedRunOfAnEarlierAttempt() {
-        RunState requeued =
-                new RunState("rpt-1", "claimed", false, "t0", "run-1", "t1", "t2", 4, null, "RCA.SANDBOX_BUSY");
+        RunState requeued = new RunState(
+                "rpt-1",
+                "claimed",
+                false,
+                "t0",
+                "run-1",
+                "t1",
+                "t2",
+                4,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "RCA.SANDBOX_BUSY");
 
         assertEquals(new RcaRunView("queued", "t0", null, null, null, 0, null, null), RcaRunView.of(requeued));
     }

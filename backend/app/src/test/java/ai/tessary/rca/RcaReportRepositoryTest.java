@@ -118,8 +118,8 @@ record RcaReportRepositoryTest(
     }
 
     /**
-     * A running RCA that cannot say where it is: a claimed job reads as leased, with its newest run, the step it is on
-     * and how many it took.
+     * A running RCA that cannot say where it is: a claimed job reads as leased, with its newest run, the step it is on,
+     * its newest step and note, and how many steps it took.
      */
     @Test
     void aRunningReportCarriesItsLeaseItsNewestRunAndItsCurrentStep() {
@@ -132,6 +132,7 @@ record RcaReportRepositoryTest(
         runs.stepStarted(runId, "c-1", "Read the tool guide", "Reading the tool guide", 4);
         runs.stepEnded(runId, "c-1", 9, true, "Read the tool guide");
         runs.stepStarted(runId, "c-2", "Read commit a41c0de", "Reading commit a41c0de", 12);
+        runs.note(runId, "Let me check the history", 10);
 
         RunState state = reports.runState(s.projectId(), report.id()).orElseThrow();
 
@@ -141,6 +142,10 @@ record RcaReportRepositoryTest(
         assertEquals(runId, state.runId());
         assertEquals(2, state.stepCount());
         assertEquals("Reading commit a41c0de", state.doing());
+        assertEquals("Read commit a41c0de", state.lastStep());
+        assertEquals(12L, state.lastStepMs());
+        assertEquals("Let me check the history", state.note());
+        assertEquals(10L, state.noteMs());
         assertNull(state.endedAt());
         assertEquals(
                 state,

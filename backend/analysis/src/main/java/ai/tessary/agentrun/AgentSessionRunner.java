@@ -65,6 +65,9 @@ public class AgentSessionRunner {
     /** How long the stop may take to reach {@code closed}; the run's lease leaves room for it past the deadline. */
     static final Duration DRAIN = Duration.ofSeconds(60);
 
+    /** The least time between two notes, so a streamed reply writes its run at most once a second. */
+    static final long NOTE_EVERY_MS = 1_000;
+
     /** Streams in a row that read nothing before the run gives up on the session. */
     static final int RECONNECTS = 4;
 
@@ -116,6 +119,9 @@ public class AgentSessionRunner {
         void started(String callId, StepWords.Words w, long atMs);
 
         void ended(String callId, long atMs, boolean ok, StepWords.Words w);
+
+        /** @param words the agent's newest sentence, or the phrase for the answer it is writing */
+        void note(String words, long atMs);
     }
 
     /**
@@ -287,6 +293,8 @@ public class AgentSessionRunner {
         private @Nullable BigDecimal costUsd;
 
         private final StringBuilder text = new StringBuilder();
+        private @Nullable String note;
+        private long noteAt;
         private SessionEvent.@Nullable EndReason endReason;
         private SessionEvent.@Nullable Failure providerFailure;
         private @Nullable String failureKind;
@@ -415,7 +423,10 @@ public class AgentSessionRunner {
         private boolean handle(SessionEvent event) {
             lastSeq = Math.max(lastSeq, event.seq());
             switch (event) {
-                case SessionEvent.Text t -> text.append(t.delta());
+                case SessionEvent.Text t -> {
+                    text.append(t.delta());
+                    note();
+                }
                 case SessionEvent.ToolStart start -> {
                     text.setLength(0);
                     toolCalls++;
@@ -466,6 +477,26 @@ public class AgentSessionRunner {
                 }
             }
             return false;
+        }
+
+        /** The agent's newest sentence, or the phrase for the answer it streams after its last tool call. */
+        private void note() {
+            long at = elapsedMs();
+            if (note != null && at - noteAt < NOTE_EVERY_MS) return;
+            String said = text.toString();
+            String words = StepWords.answerShaped(said) ? answerWords() : StepWords.note(said);
+            if (words == null || words.equals(note)) return;
+            note = words;
+            noteAt = at;
+            try {
+                sink.note(words, at);
+            } catch (RuntimeException e) {
+                unrecorded(e);
+            }
+        }
+
+        private String answerWords() {
+            return task.lane() == ModelLane.RCA ? "Writing the analysis" : "Writing the ruling";
         }
 
         private void add(AgentSpanTelemetry.AgentUsage u) {

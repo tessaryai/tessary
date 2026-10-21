@@ -310,6 +310,10 @@ class BehaviorTriageWorkerTest {
                 null,
                 3,
                 "Reading the finding",
+                null,
+                null,
+                null,
+                null,
                 sessionId);
     }
 

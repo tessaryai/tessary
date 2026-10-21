@@ -4,6 +4,7 @@ package ai.tessary.agentrun;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
@@ -391,5 +392,53 @@ class StepWordsTest {
         assertEquals("Opened a trace", all.get(6).done());
         assertEquals("Read a conversation", all.get(7).done());
         assertEquals("Read a file", all.get(8).done());
+    }
+
+    static Stream<Arguments> notes() {
+        return Stream.of(
+                Arguments.of("I'll start with the finding. Then I will", "I'll start with the finding"),
+                Arguments.of("Let me look", null),
+                Arguments.of("Version 3.", null),
+                Arguments.of("First I read it.\nNow the history is clear!\nNext", "Now the history is clear!"),
+                Arguments.of("## Plan\n- **Read** the `finding.md` file\n", "Read the finding.md file"),
+                Arguments.of("> See [the guide](https://example.com/guide) first:\n", "See the guide first"),
+                Arguments.of("Is the index stale? Checking", "Is the index stale?"),
+                Arguments.of("The key tsy_a_" + "Q".repeat(40) + " leaked here. ", "The key leaked here"),
+                Arguments.of("Done.\n---\n", "Done"),
+                Arguments.of("Thinking...\n", "Thinking"));
+    }
+
+    /**
+     * A live line that reads "Thinking" while the agent says what it is doing: its own words become a note, the newest
+     * whole sentence or line only, in plain text with no markdown and no token, with no closing period for the page's
+     * "…" to follow.
+     */
+    @ParameterizedTest
+    @MethodSource("notes")
+    void theAgentsLatestWholeSentenceIsItsNote(String text, @Nullable String note) {
+        assertEquals(note, StepWords.note(text));
+    }
+
+    /** A live line as long as a paragraph: a note is cut at a word, to at most 160 characters. */
+    @Test
+    void aLongSentenceIsCutAtAWordToAtMost160Characters() {
+        String sentence = "word ".repeat(50).strip() + ". ";
+
+        String note = StepWords.note(sentence);
+
+        assertEquals("word ".repeat(32).strip(), note);
+    }
+
+    /**
+     * The ruling's JSON shown as the live line: text that starts an object or a code fence on any line is the answer
+     * being written, while narration that only mentions braces is not.
+     */
+    @Test
+    void textThatStartsAnObjectOrAFenceOnALineIsTheAnswer() {
+        assertTrue(StepWords.answerShaped("{\"verdict\":"));
+        assertTrue(StepWords.answerShaped("  ```json\n{"));
+        assertTrue(StepWords.answerShaped("Here is the ruling.\n\n```json\n"));
+        assertFalse(StepWords.answerShaped("Let me look at {\"a\":1} first. "));
+        assertFalse(StepWords.answerShaped(""));
     }
 }

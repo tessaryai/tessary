@@ -196,5 +196,10 @@ public class E2bTriageSandbox implements TriageSandbox {
         public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {
             runs.stepEnded(runId, callId, atMs, ok, ok ? w.done() : StepWords.failed(w));
         }
+
+        @Override
+        public void note(String words, long atMs) {
+            runs.note(runId, words, atMs);
+        }
     }
 }

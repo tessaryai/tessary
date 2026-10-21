@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -97,6 +98,9 @@ class AgentSessionRunnerTest {
         public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {
             sink.add("ended " + callId + " " + (ok ? w.done() : StepWords.failed(w)));
         }
+
+        @Override
+        public void note(String words, long atMs) {}
     };
 
     private AgentSessionRunner.Answer run() {
@@ -381,7 +385,10 @@ class AgentSessionRunnerTest {
         assertEquals(List.of(), client.starts);
     }
 
-    /** A run lost to its step list: a sink that throws on the session and on each step is logged and the run answers. */
+    /**
+     * A run lost to its step list: a sink that throws on the session, on each step and on a note is logged and the run
+     * answers.
+     */
     @Test
     void aStepSinkThatThrowsIsLoggedAndTheRunStillAnswers() {
         AgentSessionRunner.StepSink throwing = new AgentSessionRunner.StepSink() {
@@ -399,8 +406,14 @@ class AgentSessionRunnerTest {
             public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {
                 throw new IllegalStateException("no run row");
             }
+
+            @Override
+            public void note(String words, long atMs) {
+                throw new IllegalStateException("no run row");
+            }
         };
         client.reply(
+                text("Let me read it. "),
                 toolStart("c-1", null, "read", "{\"filePath\":\"/home/user/repo/a.py\"}"),
                 toolEnd("c-1", true),
                 text(RULING),
@@ -435,6 +448,9 @@ class AgentSessionRunnerTest {
 
             @Override
             public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {}
+
+            @Override
+            public void note(String words, long atMs) {}
         };
 
         TessaryException e = assertThrows(TessaryException.class, () -> runner().run(task(), late));
@@ -500,5 +516,109 @@ class AgentSessionRunnerTest {
                 List.of("stop", "events 2", "close"),
                 client.calls.subList(client.calls.size() - 3, client.calls.size()));
         assertFalse(client.closedRead, "the closed event the stop wrote was never read");
+    }
+
+    /** A clock the script moves forward with {@link FakeAgentSessionClient.Do} items. */
+    private static final class MovingClock extends Clock {
+        private Instant now = Instant.parse("2026-10-20T10:00:00Z");
+
+        FakeAgentSessionClient.Do advance(long ms) {
+            return new FakeAgentSessionClient.Do(() -> now = now.plusMillis(ms));
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+
+    private final AgentSessionRunner.StepSink noting = new AgentSessionRunner.StepSink() {
+        @Override
+        public void session(String sessionId) {}
+
+        @Override
+        public void started(String callId, StepWords.Words w, long atMs) {
+            sink.add("started " + callId + " @" + atMs);
+        }
+
+        @Override
+        public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {}
+
+        @Override
+        public void note(String words, long atMs) {
+            sink.add("note " + words + " @" + atMs);
+        }
+    };
+
+    private static AgentSessionRunner.Task task(ModelLane lane) {
+        AgentSessionRunner.Task t = task();
+        return new AgentSessionRunner.Task(
+                t.projectId(),
+                lane,
+                t.subject(),
+                t.systemPrompt(),
+                t.files(),
+                t.mcp(),
+                t.repo(),
+                t.prompt(),
+                t.jsonSchema(),
+                t.deadline(),
+                t.maxToolCalls(),
+                t.words());
+    }
+
+    /**
+     * A live line stuck on "Thinking" while the agent narrates, and a database written on every streamed token: the
+     * agent's newest whole sentence is its note, written at most once a second and not again while it is unchanged,
+     * and the answer it streams after its last tool call reads "Writing the ruling" instead of its JSON.
+     */
+    @Test
+    void theAgentsWordsBecomeANoteAtMostOnceASecondAndTheAnswerReadsWritingTheRuling() {
+        MovingClock clock = new MovingClock();
+        client.reply(
+                text("I'll read the finding first. "),
+                clock.advance(400),
+                text("Then the commit history. "),
+                clock.advance(700),
+                text("Then I will rule. "),
+                clock.advance(1500),
+                text("And then"),
+                toolStart("c-1", null, "read", "{\"filePath\":\"/home/user/dossier/finding.md\"}"),
+                toolEnd("c-1", true),
+                clock.advance(2000),
+                text(RULING.substring(0, 10)),
+                clock.advance(1500),
+                text(RULING.substring(10)),
+                end());
+
+        AgentSessionRunner.Answer answer = new AgentSessionRunner(client, MAPPER, clock, deadlines).run(task(), noting);
+
+        assertEquals(RULING, answer.json());
+        assertEquals(
+                List.of(
+                        "note I'll read the finding first @0",
+                        "note Then I will rule @1100",
+                        "started c-1 @2600",
+                        "note Writing the ruling @4600"),
+                sink);
+    }
+
+    /** An RCA whose live line says it is ruling: an RCA's answer, fenced or not, reads "Writing the analysis". */
+    @Test
+    void anRcaAnswerReadsWritingTheAnalysis() {
+        client.reply(text("Here it is.\n```json\n" + RULING + "\n```"), end());
+
+        assertEquals(RULING, runner().run(task(ModelLane.RCA), noting).json());
+        assertEquals(List.of("note Writing the analysis @0"), sink);
     }
 }

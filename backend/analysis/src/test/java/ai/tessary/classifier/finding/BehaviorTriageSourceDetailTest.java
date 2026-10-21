@@ -301,6 +301,10 @@ class BehaviorTriageSourceDetailTest {
                 stopCode,
                 7,
                 endedAt == null ? "Reading flagged answers 51 to 58" : null,
+                null,
+                null,
+                null,
+                null,
                 "s-1");
     }
 

@@ -170,6 +170,10 @@ class RcaWorkerTickTest {
                 null,
                 4,
                 "Reading commit a41c0de",
+                null,
+                null,
+                null,
+                null,
                 "s-old");
         when(runs.openRunsOfJob("job-1")).thenReturn(List.of(orphan));
         when(findings.findById("proj-1", "fnd-1")).thenReturn(Optional.empty());
@@ -199,6 +203,10 @@ class RcaWorkerTickTest {
                 null,
                 4,
                 "Reading commit a41c0de",
+                null,
+                null,
+                null,
+                null,
                 "s-old");
         when(runs.openRunsOfJob("job-1")).thenReturn(List.of(orphan));
         doThrow(new TessaryException(AgentRunError.LAUNCHER_UNAVAILABLE, "unreachable"))

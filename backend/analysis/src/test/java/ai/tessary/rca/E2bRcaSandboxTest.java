@@ -118,6 +118,10 @@ class E2bRcaSandboxTest {
                 null,
                 0,
                 null,
+                null,
+                null,
+                null,
+                null,
                 null);
     }
 
@@ -167,8 +171,9 @@ class E2bRcaSandboxTest {
     }
 
     /**
-     * Each step the runner words lands on the run the worker opened for this job, and a call that failed is stored in
-     * its "Could not" form. The bug: an RCA whose step list stays empty, or says a failed read succeeded.
+     * Each step and note the runner words lands on the run the worker opened for this job, and a call that failed is
+     * stored in its "Could not" form. The bug: an RCA whose step list or live line stays empty, or says a failed read
+     * succeeded.
      */
     @Test
     void theRunsSessionAndStepsAreWrittenToTheJobsOpenRun() {
@@ -182,6 +187,7 @@ class E2bRcaSandboxTest {
             sink.ended("c1", 9, false, words);
             sink.started("c2", words, 10);
             sink.ended("c2", 12, true, words);
+            sink.note("Let me look at the history", 11);
             return new AgentSessionRunner.Answer("{}", usage(), 2);
         });
 
@@ -191,6 +197,7 @@ class E2bRcaSandboxTest {
         verify(runs).stepStarted("run-1", "c1", words.done(), words.doing(), 5);
         verify(runs).stepEnded("run-1", "c1", 9, false, "Could not read commit a41c0de");
         verify(runs).stepEnded("run-1", "c2", 12, true, words.done());
+        verify(runs).note("run-1", "Let me look at the history", 11);
     }
 
     /** A job with no open run still analyzes: a missing step list must not fail a person's RCA. */
@@ -203,6 +210,7 @@ class E2bRcaSandboxTest {
             sink.session("s-1");
             sink.started("c1", words, 5);
             sink.ended("c1", 9, true, words);
+            sink.note("Let me look", 10);
             return new AgentSessionRunner.Answer("{\"verdict\":\"x\"}", usage(), 1);
         });
 

@@ -125,8 +125,8 @@ class E2bTriageSandboxTest {
     }
 
     /**
-     * Each step the runner words lands on the run the worker opened, and a call that failed is stored in its "Could
-     * not" form. The bug: a step list that stays empty, or that says a failed read succeeded.
+     * Each step and note the runner words lands on the run the worker opened, and a call that failed is stored in its
+     * "Could not" form. The bug: a step list or live line that stays empty, or that says a failed read succeeded.
      */
     @Test
     void theRunsSessionAndStepsAreWrittenToItsRun() {
@@ -139,6 +139,7 @@ class E2bTriageSandboxTest {
             sink.ended("c1", 9, false, words);
             sink.started("c2", words, 10);
             sink.ended("c2", 12, true, words);
+            sink.note("Let me look at the history", 11);
             return new AgentSessionRunner.Answer("{}", usage(), 2);
         });
 
@@ -148,6 +149,7 @@ class E2bTriageSandboxTest {
         verify(runs).stepStarted("run-1", "c1", words.done(), words.doing(), 5);
         verify(runs).stepEnded("run-1", "c1", 9, false, "Could not read flagged answers 1 to 8");
         verify(runs).stepEnded("run-1", "c2", 12, true, words.done());
+        verify(runs).note("run-1", "Let me look at the history", 11);
     }
 
     /**
