@@ -87,7 +87,68 @@ class StepWordsTest {
                         "{\"command\":\"git -C repo diff 1234567890 abcdef1234\"}",
                         "Compared 1234567 and abcdef1",
                         "Comparing 1234567 and abcdef1"),
-                Arguments.of(null, "bash", "{\"command\":\"ls -la /home/user\"}", "Ran a command", "Running a command"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"cat /home/user/dossier/finding.md\"}",
+                        "Read the finding and its numbers",
+                        "Reading the finding and its numbers"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"cd /home/user && head -n 40 repo/src/index/build.py\"}",
+                        "Read src/index/build.py",
+                        "Reading src/index/build.py"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"tail -20 dossier/method.md\"}",
+                        "Read how the classifier measures",
+                        "Reading how the classifier measures"),
+                Arguments.of(
+                        null, "bash", "{\"command\":\"less repo/README.md\"}", "Read README.md", "Reading README.md"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"sed -n '120,180p' /home/user/repo/src/app.py\"}",
+                        "Read src/app.py",
+                        "Reading src/app.py"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"jq '.rows[0] | keys' dossier/evidence/rows.json | head\"}",
+                        "Read dossier/evidence/rows.json",
+                        "Reading dossier/evidence/rows.json"),
+                Arguments.of(
+                        null, "bash", "{\"command\":\"sed -i 's/a/b/' fix.py\"}", "Ran a command", "Running a command"),
+                Arguments.of(null, "bash", "{\"command\":\"head -n 5\"}", "Ran a command", "Running a command"),
+                Arguments.of(
+                        null, "bash", "{\"command\":\"ls -la /home/user\"}", "Listed the files", "Listing the files"),
+                Arguments.of(null, "bash", "{\"command\":\"ls repo/src\"}", "Listed src", "Listing src"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"find /home/user/repo -name '*.py'\"}",
+                        "Listed the repository",
+                        "Listing the repository"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"grep -rn \\\"load_corpus\\\" repo/src\"}",
+                        "Searched the repository for \"load_corpus\"",
+                        "Searching the repository for \"load_corpus\""),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"rg -n -A 3 -e 'retry|backoff' /home/user/dossier\"}",
+                        "Searched the dossier for \"retry|backoff\"",
+                        "Searching the dossier for \"retry|backoff\""),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"wc -l dossier/evidence/rows.json\"}",
+                        "Counted the lines in dossier/evidence/rows.json",
+                        "Counting the lines in dossier/evidence/rows.json"),
                 Arguments.of(
                         null, "bash", "{\"command\":\"python3 -c print(1)\"}", "Ran a command", "Running a command"),
                 Arguments.of(null, "bash", "{\"command\":\"git show HEAD\"}", "Read a commit", "Reading a commit"),
@@ -160,6 +221,27 @@ class StepWordsTest {
                         "Read a conversation",
                         "Reading a conversation"),
                 Arguments.of("tessary-evals", "get_session", "{}", "Read a session", "Reading a session"),
+                Arguments.of(
+                        "tessary-evals",
+                        "get_conversation",
+                        "{\"id\":\"5cf321b8-8c1d-4f7e-9a51-0e3c2a7b9d10\"}",
+                        "Read conversation 5cf321b8",
+                        "Reading conversation 5cf321b8"),
+                Arguments.of(
+                        "tessary-evals",
+                        "get_session",
+                        "{\"id\":\"sess-42\"}",
+                        "Read session sess-42",
+                        "Reading session sess-42"),
+                Arguments.of(
+                        "tessary-evals", "get_case", "{\"id\":\"C-118\"}", "Read case C-118", "Reading case C-118"),
+                Arguments.of(
+                        "tessary-evals",
+                        "get_finding",
+                        "{\"id\":\"01JA2B3C4D5E6F7G8H9J0K1M2N\"}",
+                        "Read finding 01JA2B3C",
+                        "Reading finding 01JA2B3C"),
+                Arguments.of("tessary-evals", "get_finding", "{}", "Read a finding", "Reading a finding"),
                 Arguments.of("tessary-evals", "list_traces", "{}", "Listed traces", "Listing traces"),
                 Arguments.of(
                         "tessary-evals",
@@ -175,8 +257,9 @@ class StepWordsTest {
     }
 
     /**
-     * A step that says "Read a file": each tool call is worded from its input, a repo file named without the repo
-     * prefix, a check script by its path, a commit by its short sha.
+     * A step that says "Read a file" or "Ran a command": each tool call is worded from its input, a repo file named
+     * without the repo prefix, a check script by its path, a commit by its short sha, a shell read by the file it
+     * reads, and a platform read by a short form of the id it asked for.
      */
     @ParameterizedTest
     @MethodSource("table")
@@ -293,7 +376,9 @@ class StepWordsTest {
                 words(null, "bash", "{\"command\":\"curl -H 'Authorization: Bearer " + token + "' x\"}"),
                 words(null, "bash", "{\"command\":\"python3 /home/user/checks/" + token + ".py\"}"),
                 words(null, "glob", "{\"pattern\":\"" + "A1b2C3d4".repeat(6) + "\"}"),
-                words("tessary-evals", "get_trace", "{\"trace_id\":\"" + token + "\"}"));
+                words("tessary-evals", "get_trace", "{\"trace_id\":\"" + token + "\"}"),
+                words("tessary-evals", "get_conversation", "{\"id\":\"" + token + "\"}"),
+                words(null, "bash", "{\"command\":\"cat /home/user/" + token + ".txt\"}"));
         Pattern tokenShaped = Pattern.compile("tsy_|sk-|[A-Za-z0-9_\\-]{32,}");
         for (StepWords.Words w : all) {
             for (String s : List.of(w.done(), w.doing(), w.could())) {
@@ -304,5 +389,7 @@ class StepWordsTest {
         assertEquals("Searched the files", all.get(1).done());
         assertEquals("Ran a command", all.get(4).done());
         assertEquals("Opened a trace", all.get(6).done());
+        assertEquals("Read a conversation", all.get(7).done());
+        assertEquals("Read a file", all.get(8).done());
     }
 }

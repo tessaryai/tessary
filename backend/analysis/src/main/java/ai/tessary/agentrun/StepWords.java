@@ -4,6 +4,7 @@ package ai.tessary.agentrun;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,8 @@ public final class StepWords {
 
     private static final int SHA_CHARS = 7;
 
+    private static final int ID_CHARS = 8;
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Where the sandbox's work dir sits: E2B, then docker. */
@@ -45,9 +48,23 @@ public final class StepWords {
 
     private static final Pattern SHA = Pattern.compile("[0-9a-f]{7,64}");
 
-    private static final Pattern CD_PREFIX = Pattern.compile("^cd\\s+\\S+\\s*&&\\s*");
-
     private static final Set<String> SCRIPT_RUNNERS = Set.of("python", "python3", "node", "sh", "bash");
+
+    private static final Set<String> FILE_READERS = Set.of("cat", "head", "tail", "less");
+
+    /** Flags that take the next word as their value, per command. */
+    private static final Set<String> HEAD_FLAGS = Set.of("-n", "-c");
+
+    private static final Set<String> GREP_FLAGS = Set.of("-A", "-B", "-C", "-m", "-g", "-t", "-f");
+
+    private static final Set<String> PATTERN_FLAGS = Set.of("-e", "--regexp");
+
+    /** The platform's reads of one object by its {@code id}, and what the object is called. */
+    private static final Map<String, String> BY_ID = Map.of(
+            "get_finding", "finding",
+            "get_case", "case",
+            "get_session", "session",
+            "get_conversation", "conversation");
 
     private static final Set<String> SILENT = Set.of("todowrite", "todoread");
 
@@ -171,10 +188,29 @@ public final class StepWords {
     private static Words bash(@Nullable String command) {
         Words generic = phrase("Ran", "Running", "run", "a command");
         if (command == null) return generic;
-        List<String> words = List.of(firstCommand(command).split("\\s+"));
+        List<String> words = firstCommand(command);
         if (words.isEmpty()) return generic;
-        if (SCRIPT_RUNNERS.contains(words.getFirst())) {
-            for (String word : words.subList(1, words.size())) {
+        String name = words.getFirst();
+        List<String> args = words.subList(1, words.size());
+        if (FILE_READERS.contains(name)) {
+            String path = lastOperand(args, HEAD_FLAGS, 0);
+            return path == null ? generic : read(path);
+        }
+        if (("sed".equals(name) && args.contains("-n")) || "jq".equals(name)) {
+            String path = lastOperand(args, Set.of(), 1);
+            return path == null ? generic : read(path);
+        }
+        if ("ls".equals(name) || "find".equals(name)) {
+            List<String> operands = operands(args, Set.of());
+            return phrase("Listed", "Listing", "list", place(operands.isEmpty() ? null : operands.getFirst()));
+        }
+        if ("grep".equals(name) || "rg".equals(name)) return searched(args);
+        if ("wc".equals(name)) {
+            String path = shown(lastOperand(args, Set.of(), 0));
+            return path == null ? generic : phrase("Counted", "Counting", "count", "the lines in " + path);
+        }
+        if (SCRIPT_RUNNERS.contains(name)) {
+            for (String word : args) {
                 if (word.startsWith("-") || !looksLikePath(word)) continue;
                 String path = shown(word);
                 return path == null ? generic : phrase("Ran", "Running", "run", path);
@@ -185,17 +221,83 @@ public final class StepWords {
         return generic;
     }
 
-    /** {@code cd <dir> && git ...} is how an agent most often reaches the clone. */
-    private static String firstCommand(String command) {
-        String c = command.strip();
-        Matcher cd = CD_PREFIX.matcher(c);
-        if (cd.find()) c = c.substring(cd.end());
-        int end = c.length();
-        for (String stop : List.of("&&", "||", ";", "|", "\n")) {
-            int at = c.indexOf(stop);
-            if (at >= 0) end = Math.min(end, at);
+    /**
+     * The words of the first command, unquoted, past any {@code cd <dir>} that leads it: {@code cd <dir> && git ...} is
+     * how an agent most often reaches the clone.
+     */
+    private static List<String> firstCommand(String command) {
+        List<List<String>> commands = commands(command);
+        int at = 0;
+        while (at + 1 < commands.size() && "cd".equals(commands.get(at).getFirst())) at++;
+        return commands.isEmpty() ? List.of() : commands.get(at);
+    }
+
+    /** Splits on unquoted whitespace and on unquoted {@code && || ; | newline}; drops empty commands. */
+    private static List<List<String>> commands(String command) {
+        List<List<String>> commands = new ArrayList<>();
+        List<String> words = new ArrayList<>();
+        StringBuilder word = new StringBuilder();
+        boolean inWord = false;
+        char quote = 0;
+        for (int i = 0; i < command.length(); i++) {
+            char c = command.charAt(i);
+            if (quote != 0) {
+                if (c == quote) quote = 0;
+                else word.append(c);
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+                inWord = true;
+            } else if (Character.isWhitespace(c) && c != '\n') {
+                inWord = endWord(words, word, inWord);
+            } else if (c == '&' || c == '|' || c == ';' || c == '\n') {
+                inWord = endWord(words, word, inWord);
+                if (!words.isEmpty()) commands.add(words);
+                words = new ArrayList<>();
+            } else {
+                word.append(c);
+                inWord = true;
+            }
         }
-        return c.substring(0, end).strip();
+        endWord(words, word, inWord);
+        if (!words.isEmpty()) commands.add(words);
+        return commands;
+    }
+
+    private static boolean endWord(List<String> words, StringBuilder word, boolean inWord) {
+        if (inWord) words.add(word.toString());
+        word.setLength(0);
+        return false;
+    }
+
+    /** The words that are not flags, nor the value of a flag that takes one. */
+    private static List<String> operands(List<String> args, Set<String> valueFlags) {
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < args.size(); i++) {
+            String a = args.get(i);
+            if (valueFlags.contains(a)) i++;
+            else if (!a.startsWith("-")) out.add(a);
+        }
+        return out;
+    }
+
+    /** The last operand, once the first {@code skip} of them (a sed script, a jq filter) are passed. */
+    private static @Nullable String lastOperand(List<String> args, Set<String> valueFlags, int skip) {
+        List<String> operands = operands(args, valueFlags);
+        return operands.size() > skip ? operands.getLast() : null;
+    }
+
+    /** grep and rg: the pattern is {@code -e}'s value or the first operand, and the path the operand after it. */
+    private static Words searched(List<String> args) {
+        String pattern = null;
+        List<String> rest = new ArrayList<>();
+        for (int i = 0; i < args.size(); i++) {
+            String a = args.get(i);
+            if (PATTERN_FLAGS.contains(a) && i + 1 < args.size()) pattern = args.get(++i);
+            else if (GREP_FLAGS.contains(a)) i++;
+            else if (!a.startsWith("-")) rest.add(a);
+        }
+        if (pattern == null && !rest.isEmpty()) pattern = rest.removeFirst();
+        return grep(pattern, rest.isEmpty() ? null : rest.getFirst());
     }
 
     private static boolean looksLikePath(String word) {
@@ -274,8 +376,19 @@ public final class StepWords {
                         ? phrase("Opened", "Opening", "open", "a span")
                         : phrase("Opened", "Opening", "open", "a span of trace " + trace);
             }
-            default -> PLATFORM.getOrDefault(tool, used(tool));
+            default -> {
+                String noun = BY_ID.get(tool);
+                String id = noun == null ? null : shortId(text(input, "id"));
+                yield id == null
+                        ? PLATFORM.getOrDefault(tool, used(tool))
+                        : phrase("Read", "Reading", "read", noun + " " + id);
+            }
         };
+    }
+
+    private static @Nullable String shortId(@Nullable String id) {
+        if (id == null) return null;
+        return safe(id.length() > ID_CHARS ? id.substring(0, ID_CHARS) : id);
     }
 
     private static @Nullable String traceId(@Nullable JsonNode input) {
