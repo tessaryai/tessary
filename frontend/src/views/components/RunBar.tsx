@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { cn, ErrorNote, LoadingRow, Spinner } from "../../ui";
 import { brief, clock, didSteps, RUN_POLL_MS } from "./runWords";
 
@@ -198,10 +199,11 @@ export function RunBar({
             aria-expanded={open}
             aria-controls={open ? panelId : undefined}
             onClick={() => setOpen((o) => !o)}
-            className="whitespace-nowrap bg-transparent p-0 text-small text-muted transition-colors hover:text-fg"
+            className="inline-flex items-center gap-1 whitespace-nowrap bg-transparent p-0 text-small text-muted transition-colors hover:text-fg"
             style={{ transitionDuration: "var(--duration-micro)" }}
           >
-            {open ? "Hide steps" : "Show steps"} <span aria-hidden="true">{open ? "⌃" : "⌄"}</span>
+            {open ? "Hide steps" : "Show steps"}
+            {open ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
           </button>
         )}
         {fix && (
@@ -252,9 +254,11 @@ export function RunFold({
         )}
         style={{ transitionDuration: "var(--duration-micro)" }}
       >
-        <span aria-hidden="true" className={cn("inline-block transition-transform", open && "rotate-90")}>
-          ›
-        </span>
+        <ChevronRight
+          size={12}
+          aria-hidden="true"
+          className={cn("shrink-0 transition-transform", open && "rotate-90")}
+        />
         {didSteps(stepCount, durationMs)}
       </button>
       {open && (
