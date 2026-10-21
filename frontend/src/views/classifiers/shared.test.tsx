@@ -136,20 +136,25 @@ describe("triageBar", () => {
     expect(api.getTriageSteps).toHaveBeenCalledWith("fnd-1", 3);
   });
 
-  // Bug: between two steps, or before the worker opened its run, the bar showed the last run's words or nothing.
-  it("a running run between steps says it is thinking, and before its run opens offers no steps", () => {
+  // Bug: between two steps the bar read "Thinking…" for minutes, and before the worker opened its run it showed the
+  // last run's words or nothing.
+  it("a running run between steps says what the agent did last, and before its run opens says it is starting", () => {
     expect(bar(finding({
-      triageStatus: "in_flight", triageProgress: progress({ startedAt: before(14_000) }), triageRun: run({ doing: null }),
-    }))).toMatchObject({ line: "Thinking…", meta: "step 7 · 14s" });
+      triageStatus: "in_flight", triageProgress: progress({ startedAt: before(14_000) }),
+      triageRun: run({
+        doing: null, lastStep: "Read flagged answers 51 to 58 of 58", lastStepMs: 9_000,
+        note: "The answers cite no source", noteMs: 12_000,
+      }),
+    }))).toMatchObject({ line: "The answers cite no source…", meta: "step 7 · 14s" });
 
     const opening = bar(finding({
       triageStatus: "in_flight", triageProgress: progress({ startedAt: before(3_000) }),
       triageRun: run({ endedAt: before(60_000), outcome: "retrying" }),
     }))!;
-    expect(opening).toMatchObject({ line: "Thinking…", meta: "3s" });
+    expect(opening).toMatchObject({ line: "Starting the agent…", meta: "3s" });
     expect(opening.steps).toBeUndefined();
     expect(bar(finding({ triageStatus: "in_flight", triageProgress: null, triageRun: null }))).toMatchObject({
-      state: "running", line: "Thinking…", meta: undefined,
+      state: "running", line: "Starting the agent…", meta: undefined,
     });
   });
 

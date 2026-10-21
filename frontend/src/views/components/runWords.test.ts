@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { brief, clock, didSteps, elapsed, stepMeta, stopFix, stopReason } from "./runWords";
+import { brief, clock, didSteps, elapsed, liveLine, stepMeta, stopFix, stopReason } from "./runWords";
 
 describe("run words", () => {
   // Bug: the time since a run was queued, or a step's start, reads 0:6 or 6s where the bar shows 0:06.
@@ -34,6 +34,24 @@ describe("run words", () => {
     [30, 3_900_000, "Did 30 steps in 1h 5m"],
   ])("didSteps(%i, %i) is %s", (n, ms, words) => {
     expect(didSteps(n, ms)).toBe(words);
+  });
+
+  // Bug: the live line read "Thinking…" for minutes while tool calls finished between two reads and the agent narrated
+  // or wrote its answer. A note at the same time as a step's end came after it, since the agent speaks once a call ends.
+  it.each([
+    ["the step in flight", { doing: "Reading commit a41c0de", lastStep: "Read commit a41c0de", lastStepMs: 9, note: "Let me look", noteMs: 20 },
+      "Reading commit a41c0de…"],
+    ["a note newer than the newest step", { doing: null, lastStep: "Read commit a41c0de", lastStepMs: 9, note: "Let me look", noteMs: 20 },
+      "Let me look…"],
+    ["a step newer than the note", { doing: null, lastStep: "Read commit a41c0de", lastStepMs: 30, note: "Let me look", noteMs: 20 },
+      "Read commit a41c0de"],
+    ["a note as old as the step", { doing: null, lastStep: "Read commit a41c0de", lastStepMs: 20, note: "Writing the ruling", noteMs: 20 },
+      "Writing the ruling…"],
+    ["a note before any step", { doing: null, lastStep: null, lastStepMs: null, note: "Let me look", noteMs: 20 }, "Let me look…"],
+    ["a step and no note", { doing: null, lastStep: "Read the tool guide", lastStepMs: 9, note: null, noteMs: null }, "Read the tool guide"],
+    ["nothing yet", { doing: null, lastStep: null, lastStepMs: null, note: null, noteMs: null }, "Starting the agent…"],
+  ])("the live line for %s", (_case, run, line) => {
+    expect(liveLine(run)).toBe(line);
   });
 
   // Bug: the case mark's hover shows seconds-precise times where a glance needs minutes.

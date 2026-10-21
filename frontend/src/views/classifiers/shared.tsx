@@ -5,7 +5,7 @@ import type { ProjectApi } from "../../api/client";
 import type { BehaviorFinding } from "../../api/types";
 import { cn } from "../../ui";
 import type { RunBar, StepsSource } from "../components/RunBar";
-import { clock, elapsed, QUEUED_LINE, RUN_POLL_MS, stepMeta, stopFix, stopReason, THINKING } from "../components/runWords";
+import { clock, elapsed, liveLine, QUEUED_LINE, RUN_POLL_MS, STARTING, stepMeta, stopFix, stopReason } from "../components/runWords";
 
 export const CONTAINER: React.CSSProperties = { padding: "36px 40px 56px" };
 
@@ -153,7 +153,7 @@ export function triageBar(
       return {
         kind: "Triage",
         state: "running",
-        line: open?.doing ? `${open.doing}…` : THINKING,
+        line: open ? liveLine(open) : STARTING,
         meta: ran == null ? undefined : open && open.stepCount > 0 ? stepMeta(open.stepCount, ran) : elapsed(ran),
         steps: open ? steps : undefined,
       };

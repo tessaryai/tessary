@@ -276,7 +276,7 @@ describe("a triage run that has not ruled yet", () => {
       "Queued. It starts when a worker is free."],
     ["retrying", progress({ attempts: 1 }), "Triaging…", "Attempt 1 of 5 ended with no ruling. Trying again…"],
     ["in_flight", progress({ attempts: 2, startedAt: new Date(Date.now() - 120_000).toISOString() }), "Triaging…",
-      "Thinking…"],
+      "Starting the agent…"],
   ] as const)("says where a %s run stands and keeps the button off", async (triageStatus, triageProgress, label, words) => {
     api.getBehaviorFinding.mockResolvedValue(plain({ triageStatus, triageProgress }));
     renderPage();

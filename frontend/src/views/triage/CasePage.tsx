@@ -39,7 +39,7 @@ import { useRepoPrompt } from "../components/useRepoPrompt";
 import { traceLinker } from "../traceLinker";
 import { stamp, useNow } from "../classifiers/shared";
 import { RunBar, RunFold, type StepsSource } from "../components/RunBar";
-import { clock, elapsed, QUEUED_LINE, RUN_POLL_MS, stepMeta, stopFix, stopReason, THINKING } from "../components/runWords";
+import { clock, elapsed, liveLine, QUEUED_LINE, RUN_POLL_MS, stepMeta, stopFix, stopReason } from "../components/runWords";
 import type { ProjectApi } from "../../api/client";
 import { useEffect, useRef, type ComponentProps } from "react";
 
@@ -830,7 +830,9 @@ function rcaBar(
     return {
       kind: "RCA",
       state: "running",
-      line: run.doing ? `${run.doing}…` : THINKING,
+      line: liveLine({
+        doing: run.doing, lastStep: run.last_step, lastStepMs: run.last_step_ms, note: run.note, noteMs: run.note_ms,
+      }),
       meta: ran == null ? undefined : run.step_count > 0 ? stepMeta(run.step_count, ran) : elapsed(ran),
       steps,
     };

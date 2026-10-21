@@ -5,8 +5,27 @@ export const RUN_POLL_MS = 4000;
 
 export const QUEUED_LINE = "Queued. It starts when a worker is free.";
 
-/** The live line while the agent is between steps. */
-export const THINKING = "Thinking…";
+/** The live line before the agent's first step or words. */
+export const STARTING = "Starting the agent…";
+
+/** What a running run last did, with each time counted from the run's start. */
+export type LiveRun = {
+  doing: string | null;
+  lastStep: string | null;
+  lastStepMs: number | null;
+  note: string | null;
+  noteMs: number | null;
+};
+
+/**
+ * The step in flight, else the newer of the newest step and the agent's own words. A note as old as the step comes
+ * after it: the agent speaks once a call ends.
+ */
+export function liveLine(run: LiveRun): string {
+  if (run.doing) return `${run.doing}…`;
+  if (run.note && (run.lastStepMs == null || (run.noteMs ?? 0) >= run.lastStepMs)) return `${run.note}…`;
+  return run.lastStep ?? STARTING;
+}
 
 export type RunLane = "triage" | "RCA";
 

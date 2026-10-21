@@ -390,6 +390,20 @@ describe("the RCA run bar", () => {
     expect(button("Analyzing…").disabled).toBe(true);
   });
 
+  // Bug: between two tool calls, and while the agent wrote its analysis, the bar read "Thinking…" for minutes.
+  it.each([
+    ["its newest words", { last_step: "Read commit a41c0de", last_step_ms: 9_000, note: "Writing the analysis", note_ms: 40_000 },
+      "Writing the analysis…"],
+    ["its newest step", { last_step: "Read commit a41c0de", last_step_ms: 50_000, note: "Let me compare them", note_ms: 40_000 },
+      "Read commit a41c0de"],
+  ] as const)("a running bar between steps says %s", async (_what, latest, line) => {
+    api.getCase.mockResolvedValue(runningCase());
+    api.getRcaReport.mockResolvedValue({ ...ANSWER_REPORT, status: "claimed", run: rcaRun({ doing: null, ...latest }) });
+    renderPage();
+
+    expect(await screen.findByText(line)).toBeTruthy();
+  });
+
   // Bug: the step and its time were missing from a running bar, or its steps were read before anyone asked.
   it("a running bar names its step and time, and reads steps only once opened", async () => {
     api.getCase.mockResolvedValue(runningCase());
