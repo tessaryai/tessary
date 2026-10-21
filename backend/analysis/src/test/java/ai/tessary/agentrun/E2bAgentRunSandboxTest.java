@@ -121,6 +121,19 @@ class E2bAgentRunSandboxTest {
     // ---- the request --------------------------------------------------------------------------------
 
     /** A missing or misspelled field is a run the launcher refuses, or starts without the repo or the door. */
+    /**
+     * AgentRunService picks its sandbox by the configured key, and the key's default is e2b. A sandbox built the way
+     * Spring builds it, under any other key, leaves every agent run with no sandbox.
+     */
+    @Test
+    void theSandboxSpringBuildsAnswersUnderTheDefaultSandboxKey() {
+        AgentRunProperties defaults = Props.of(AgentRunProperties.class);
+        E2bAgentRunSandbox built =
+                new E2bAgentRunSandbox(defaults, observer("", ""), usage, OpenTelemetry.noop(), MAPPER);
+
+        assertEquals(defaults.sandbox(), built.key());
+    }
+
     @Test
     void postsTriagesBodyPlusTheCloneAndTheSystemPrompt() throws Exception {
         ScriptedHttpClient client = ScriptedHttpClient.answering(200, envelope(Map.of("result", "ok")));
