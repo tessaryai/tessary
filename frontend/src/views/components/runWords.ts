@@ -56,13 +56,6 @@ export function brief(ms: number): string {
   return m > 0 ? `${m}m` : `${s}s`;
 }
 
-/** `Did 12 steps in 4m`: the fold under a ruling or an analysis. */
-export function didSteps(n: number, ms: number): string {
-  const { h, m, s } = parts(ms);
-  const took = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m` : `${s}s`;
-  return `Did ${n} ${n === 1 ? "step" : "steps"} in ${took}`;
-}
-
 export function stepMeta(step: number, ms: number): string {
   return `step ${step} · ${elapsed(ms)}`;
 }

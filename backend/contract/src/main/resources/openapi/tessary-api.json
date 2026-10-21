@@ -10886,12 +10886,6 @@
               "null"
             ]
           },
-          "outcome" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
           "startedAt" : {
             "type" : "string"
           },
@@ -10915,7 +10909,6 @@
           "lastStepMs",
           "note",
           "noteMs",
-          "outcome",
           "startedAt",
           "stepCount",
           "stopCode"

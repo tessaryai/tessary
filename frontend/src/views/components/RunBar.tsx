@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn, ErrorNote, LoadingRow, Spinner } from "../../ui";
-import { brief, clock, didSteps, RUN_POLL_MS } from "./runWords";
+import { brief, clock, RUN_POLL_MS } from "./runWords";
 
 /** One step of a triage or RCA run, as the steps endpoints send it. Times are offsets from the run's start. */
 export type RunStep = {
@@ -77,12 +77,12 @@ export function useRunSteps(
   return read;
 }
 
-function StepsBody({ read, live, cap }: { read: { page: StepsPage | null; error: unknown }; live: boolean; cap?: number }) {
+function StepsBody({ read, live }: { read: { page: StepsPage | null; error: unknown }; live: boolean }) {
   if (read.error != null) return <ErrorNote error={read.error} />;
   if (!read.page) return <LoadingRow label="Loading steps…" />;
   if (read.page.steps.length === 0) return <span className="text-small text-subtle">No steps yet.</span>;
   const running = live ? read.page.steps.filter((s) => s.ended_ms == null).at(-1)?.seq : undefined;
-  return <RunSteps steps={read.page.steps} stepCount={read.page.step_count} runningSeq={running} cap={cap} />;
+  return <RunSteps steps={read.page.steps} stepCount={read.page.step_count} runningSeq={running} />;
 }
 
 /**
@@ -223,50 +223,6 @@ export function RunBar({
         </div>
       )}
     </div>
-  );
-}
-
-/** `› Did 12 steps in 4m` under a ruling or an analysis: opens every step of the run that ended. */
-export function RunFold({
-  stepCount,
-  durationMs,
-  steps,
-  className,
-}: {
-  stepCount: number;
-  durationMs: number;
-  steps: StepsSource;
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const panelId = useId();
-  const read = useRunSteps(steps, open);
-  return (
-    <>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        onClick={() => setOpen((o) => !o)}
-        className={cn(
-          "inline-flex items-center gap-1 self-start bg-transparent p-0 text-small text-muted transition-colors hover:text-fg",
-          className,
-        )}
-        style={{ transitionDuration: "var(--duration-micro)" }}
-      >
-        <ChevronRight
-          size={12}
-          aria-hidden="true"
-          className={cn("shrink-0 transition-transform", open && "rotate-90")}
-        />
-        {didSteps(stepCount, durationMs)}
-      </button>
-      {open && (
-        <div id={panelId} className="flex flex-col gap-1.25 border-l border-border pl-3">
-          <StepsBody read={read} live={steps.live} cap={Infinity} />
-        </div>
-      )}
-    </>
   );
 }
 

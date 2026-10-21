@@ -7,12 +7,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
-import type { ProjectApi } from "../../api/client";
 import { useCapabilities } from "../../capabilities/useCapabilities";
-import { RunBar, RunFold } from "../components/RunBar";
+import { RunBar } from "../components/RunBar";
 import {
   CONTAINER, FindingKicker, ResolveVerbs, RunTriageButton, TRIAGE_POLL_MS, TriageAction, chainWords, detectorLabel,
-  isTriageWaiting, stamp, triageBar, triageState, triageSteps, useNow,
+  isTriageWaiting, stamp, triageBar, triageState, useNow,
 } from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
@@ -204,7 +203,6 @@ export function FindingPage() {
               Opened case →
             </Link>
           )}
-          <RulingFold finding={finding} api={api} />
         </div>
       )}
 
@@ -361,7 +359,7 @@ export function FindingPage() {
         </p>
       )}
 
-      {triaged && !story && <TriageRuling finding={finding} basePath={basePath} api={api} />}
+      {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
       {!frustration && !groundedness && !classifierDetail && (
         <section className="mt-7">
@@ -462,21 +460,7 @@ export function FindingPage() {
   }
 }
 
-/** `› Did 12 steps in 4m` under a ruling, for the run that made it. */
-function RulingFold({ finding, api, className }: { finding: Detail["finding"]; api: ProjectApi; className?: string }) {
-  const run = finding.triageRun;
-  if (!run?.endedAt || run.outcome !== "done" || run.stepCount === 0) return null;
-  return (
-    <RunFold
-      stepCount={run.stepCount}
-      durationMs={Date.parse(run.endedAt) - Date.parse(run.startedAt)}
-      steps={triageSteps(api, finding)}
-      className={className}
-    />
-  );
-}
-
-function TriageRuling({ finding, basePath, api }: { finding: Detail["finding"]; basePath: string; api: ProjectApi }) {
+function TriageRuling({ finding, basePath }: { finding: Detail["finding"]; basePath: string }) {
   const scripts = finding.triageCitations.filter((c) => c.stdout !== null);
   const pointers = finding.triageCitations.filter((c) => c.stdout === null);
   return (
@@ -507,7 +491,6 @@ function TriageRuling({ finding, basePath, api }: { finding: Detail["finding"]; 
           {finding.triageSummary}
         </p>
       )}
-      <RulingFold finding={finding} api={api} className="mt-2.5" />
 
       {pointers.length > 0 && (
         <>

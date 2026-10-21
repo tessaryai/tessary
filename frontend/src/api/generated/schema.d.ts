@@ -4285,7 +4285,6 @@ export interface components {
             note: string | null;
             /** Format: int64 */
             noteMs: number | null;
-            outcome: string | null;
             startedAt: string;
             /** Format: int32 */
             stepCount: number;

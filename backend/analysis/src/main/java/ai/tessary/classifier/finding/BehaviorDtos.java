@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
-import ai.tessary.agentrun.AgentRunRepository;
 import ai.tessary.agentrun.AgentRunRepository.RunSummary;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.TriageJobState;
@@ -250,8 +249,7 @@ public final class BehaviorDtos {
         /**
          * One triage run: {@code doing} is the step running now, {@code lastStep} the newest step's words and
          * {@code note} the agent's newest words between tool calls, each with its time from {@code startedAt};
-         * {@code outcome} is how the run ended and {@code stopCode} the error code it ended on. Each is null while
-         * nothing applies.
+         * {@code stopCode} is the error code the run ended on. Each is null while nothing applies.
          */
         public record TriageRunView(
                 String id,
@@ -264,12 +262,10 @@ public final class BehaviorDtos {
                 @Nullable Long lastStepMs,
                 @Nullable String note,
                 @Nullable Long noteMs,
-                @Nullable String outcome,
                 @Nullable String stopCode) {
 
             static @Nullable TriageRunView of(@Nullable RunSummary run) {
                 if (run == null) return null;
-                AgentRunRepository.Outcome outcome = run.outcome();
                 return new TriageRunView(
                         run.id(),
                         run.attempt(),
@@ -281,7 +277,6 @@ public final class BehaviorDtos {
                         run.lastStepMs(),
                         run.note(),
                         run.noteMs(),
-                        outcome == null ? null : outcome.wire(),
                         run.stopCode());
             }
         }

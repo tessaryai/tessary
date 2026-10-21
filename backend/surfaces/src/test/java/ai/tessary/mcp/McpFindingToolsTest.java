@@ -150,7 +150,6 @@ class McpFindingToolsTest {
                                 4_000L,
                                 "Let me read the rest",
                                 5_000L,
-                                "done",
                                 null),
                         f.humanVerdictAt(),
                         f.caseId()),

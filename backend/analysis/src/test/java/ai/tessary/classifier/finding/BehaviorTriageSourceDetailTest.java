@@ -226,7 +226,6 @@ class BehaviorTriageSourceDetailTest {
                         4_000L,
                         "Let me read the rest",
                         5_000L,
-                        null,
                         null),
                 finding.triageRun());
         assertEquals("2026-08-02T01:00:02Z", requireProgress(finding).startedAt());
@@ -257,9 +256,6 @@ class BehaviorTriageSourceDetailTest {
         var finding = source().detail(PROJECT, "f1").orElseThrow().finding();
 
         assertEquals("2026-08-02T01:00:00Z", requireProgress(finding).startedAt());
-        assertEquals(
-                "retrying",
-                java.util.Objects.requireNonNull(finding.triageRun()).outcome());
         assertEquals(
                 "CLASSIFIER.TRIAGE_RUN_INCOMPLETE",
                 java.util.Objects.requireNonNull(finding.triageRun()).stopCode());

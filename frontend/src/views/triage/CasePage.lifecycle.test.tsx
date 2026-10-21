@@ -482,9 +482,8 @@ describe("the RCA run bar", () => {
     }
   });
 
-  // Bug: once the analysis landed, the steps that reached it were gone with the bar.
-  it("an analyzed case keeps a fold with its step count", async () => {
-    api.getRcaSteps.mockResolvedValue(stepsPage(TRIAGE_STEPS.map((step) => ({ ...step, ended_ms: 500_000, ok: true })), { runId: "run-9" }));
+  // Bug: once the analysis landed, a "Did 23 steps" fold stayed beside it, which nobody needs once the analysis is in.
+  it("an analyzed case shows no steps once the run ends", async () => {
     api.getCase.mockResolvedValue(plainCase({
       rca_report_id: "rca-1",
       rca: {
@@ -496,12 +495,11 @@ describe("the RCA run bar", () => {
     }));
     renderPage();
 
-    const fold = await screen.findByRole("button", { name: "Did 23 steps in 9m" });
-    expect(follows(screen.getByRole("link", { name: "Read the full analysis" }), fold)).toBe(true);
+    expect(await screen.findByRole("link", { name: "Read the full analysis" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Did \d+ steps?/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show steps" })).toBeNull();
     expect(screen.queryByRole("img", { name: markName })).toBeNull();
-    fireEvent.click(fold);
-    expect(await screen.findByText("Ran checks/unsupported_terms.py")).toBeTruthy();
-    expect(api.getRcaSteps).toHaveBeenCalledWith("rca-1", 0);
+    expect(api.getRcaSteps).not.toHaveBeenCalled();
   });
 
   // Bug: the page changed when nothing runs.

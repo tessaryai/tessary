@@ -61,7 +61,7 @@ const progress = (over: Partial<Progress> = {}): Progress => ({
 
 const run = (over: Partial<Run> = {}): Run => ({
   id: "run-1", attempt: 1, startedAt: before(134_000), endedAt: null, stepCount: 7,
-  doing: "Reading flagged answers 51 to 58", lastStep: null, lastStepMs: null, note: null, noteMs: null, outcome: null,
+  doing: "Reading flagged answers 51 to 58", lastStep: null, lastStepMs: null, note: null, noteMs: null,
   stopCode: null, ...over,
 });
 
@@ -149,7 +149,7 @@ describe("triageBar", () => {
 
     const opening = bar(finding({
       triageStatus: "in_flight", triageProgress: progress({ startedAt: before(3_000) }),
-      triageRun: run({ endedAt: before(60_000), outcome: "retrying" }),
+      triageRun: run({ endedAt: before(60_000) }),
     }))!;
     expect(opening).toMatchObject({ line: "Starting the agent…", meta: "3s" });
     expect(opening.steps).toBeUndefined();
@@ -162,7 +162,7 @@ describe("triageBar", () => {
   it("a retrying run's bar says which attempt ended and which runs next", () => {
     const props = bar(finding({
       triageStatus: "retrying", triageProgress: progress({ attempts: 1, retryAt: before(-30_000) }),
-      triageRun: run({ endedAt: before(1000), outcome: "retrying", doing: null }),
+      triageRun: run({ endedAt: before(1000), doing: null }),
     }))!;
 
     expect(props).toMatchObject({
@@ -175,7 +175,7 @@ describe("triageBar", () => {
   it("a blocked run's bar names the fix and links to Providers", () => {
     const blocked = finding({
       triageStatus: "blocked", triageProgress: progress({ heldBy: "CLASSIFIER.TRIAGE_PROVIDER_REJECTED" }),
-      triageRun: run({ endedAt: before(1000), outcome: "held", stopCode: "CLASSIFIER.TRIAGE_PROVIDER_REJECTED" }),
+      triageRun: run({ endedAt: before(1000), stopCode: "CLASSIFIER.TRIAGE_PROVIDER_REJECTED" }),
     });
     const props = bar(blocked)!;
     render(<MemoryRouter><RunBar {...props} /></MemoryRouter>);
@@ -191,7 +191,7 @@ describe("triageBar", () => {
   it("a failed run's bar says when it can run again", () => {
     const props = bar(finding({
       triageStatus: "failed", triageProgress: progress({ attempts: 5, revivableAt: before(-60_000), cooldownSeconds: 1800 }),
-      triageRun: run({ endedAt: before(1000), outcome: "dead" }),
+      triageRun: run({ endedAt: before(1000) }),
     }))!;
 
     expect(props).toMatchObject({

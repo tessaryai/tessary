@@ -303,7 +303,7 @@ describe("a triage run that has not ruled yet", () => {
 
 const RUN: NonNullable<Finding["triageRun"]> = {
   id: "run-1", attempt: 1, startedAt: "2026-09-23T14:00:00Z", endedAt: null, stepCount: 7,
-  doing: "Reading flagged answers 51 to 58", lastStep: null, lastStepMs: null, note: null, noteMs: null, outcome: null,
+  doing: "Reading flagged answers 51 to 58", lastStep: null, lastStepMs: null, note: null, noteMs: null,
   stopCode: null,
 };
 const PROGRESS: NonNullable<Finding["triageProgress"]> = {
@@ -369,43 +369,26 @@ describe("the run bar under the header", () => {
     expect(api.getTriageSteps).toHaveBeenCalledWith("fnd-1", 0);
   });
 
-  // Bug: once the run ruled, its steps were gone with the bar, so nobody could see how the ruling was reached.
+  // Bug: once the run ruled, a "Did 12 steps" fold stayed under the ruling, which nobody needs once the ruling is in.
   it.each([
     ["the groundedness story's ruling card", GROUNDEDNESS_FINDING_DETAIL],
     ["the generic layout's ruling", plain()],
-  ])("the ruling keeps a fold that reopens the steps once the run ends (%s)", async (_layout, detail) => {
-    api.getTriageSteps.mockResolvedValue(stepsPage(TRIAGE_STEPS.map((step) => ({ ...step, ended_ms: 180_000, ok: true }))));
+  ])("the ruling shows no steps once the run ends (%s)", async (_layout, detail) => {
     api.getBehaviorFinding.mockResolvedValue({
       ...detail,
       finding: {
         ...detail.finding, triageStatus: "done", triageVerdict: "positive", triageAction: "opened_case",
         triageSummary: "Confirmed.", caseId: "case-1",
-        triageRun: { ...RUN, stepCount: 12, endedAt: "2026-09-23T14:04:00Z", outcome: "done", doing: null },
-      },
-    });
-    renderPage();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Did 12 steps in 4m" }));
-
-    expect(await screen.findByText("Ran checks/unsupported_terms.py")).toBeTruthy();
-    expect(api.getTriageSteps).toHaveBeenCalledWith("fnd-1", 0);
-    expect(screen.queryByRole("img", { name: /^(Queued|Running|Stopped)$/ })).toBeNull();
-  });
-
-  // Bug: a ruling a person made, after a run that stopped, claimed the stopped run's steps as how it was reached.
-  it("a ruling no run made has no fold", async () => {
-    api.getBehaviorFinding.mockResolvedValue({
-      ...GROUNDEDNESS_FINDING_DETAIL,
-      finding: {
-        ...GROUNDEDNESS_FINDING_DETAIL.finding, triageStatus: "done", triageVerdict: "positive", triageSummary: "Confirmed.",
-        humanVerdictAt: "2026-09-23T14:30:00Z",
-        triageRun: { ...RUN, endedAt: "2026-09-23T14:04:00Z", outcome: "held", stopCode: "CLASSIFIER.TRIAGE_PROVIDER_REJECTED" },
+        triageRun: { ...RUN, stepCount: 12, endedAt: "2026-09-23T14:04:00Z", doing: null },
       },
     });
     renderPage();
 
     expect(await screen.findByText("Confirmed.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Did / })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Did \d+ steps?/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show steps" })).toBeNull();
+    expect(screen.queryByRole("img", { name: /^(Queued|Running|Stopped)$/ })).toBeNull();
+    expect(api.getTriageSteps).not.toHaveBeenCalled();
   });
 });
 

@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import { numberedSteps, stepsPage, TRIAGE_STEPS } from "../../test/runFixtures";
-import { RunBar, RunFold, RunMark, RunSteps } from "./RunBar";
+import { RunBar, RunMark, RunSteps } from "./RunBar";
 import { QUEUED_LINE, RUN_POLL_MS, stopFix } from "./runWords";
 
 const BASE = "/orgs/acme/projects/default";
@@ -213,27 +213,6 @@ describe("RunSteps", () => {
 
     rerender(<RunSteps steps={numberedSteps(1, 30)} stepCount={30} />);
     expect(screen.queryByText(/earlier step/)).toBeNull();
-  });
-});
-
-describe("RunFold", () => {
-  // Bug: an ended run loses its steps, or the fold cuts them as the live list does.
-  it("the fold says how many steps and how long, and opens every step", async () => {
-    vi.useFakeTimers();
-    const load = vi.fn().mockResolvedValue(stepsPage(numberedSteps(1, 35)));
-    render(<RunFold stepCount={35} durationMs={250_000} steps={{ load, live: false }} />);
-    const fold = screen.getByRole("button", { name: "Did 35 steps in 4m" });
-    expect(fold.getAttribute("aria-expanded")).toBe("false");
-    expect(load).not.toHaveBeenCalled();
-
-    fireEvent.click(fold);
-    await settle();
-    expect(fold.getAttribute("aria-expanded")).toBe("true");
-    expect(rows()).toHaveLength(35);
-    expect(screen.queryByText(/earlier step/)).toBeNull();
-
-    await settle(RUN_POLL_MS * 2);
-    expect(load).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { brief, clock, didSteps, elapsed, liveLine, stepMeta, stopFix, stopReason } from "./runWords";
+import { brief, clock, elapsed, liveLine, stepMeta, stopFix, stopReason } from "./runWords";
 
 describe("run words", () => {
   // Bug: the time since a run was queued, or a step's start, reads 0:6 or 6s where the bar shows 0:06.
@@ -24,16 +24,6 @@ describe("run words", () => {
     [-1_000, "0s"],
   ])("elapsed(%i) is %s", (ms, words) => {
     expect(elapsed(ms)).toBe(words);
-  });
-
-  // Bug: the fold says "1 steps", or a short run reads "in 0m".
-  it.each([
-    [12, 250_000, "Did 12 steps in 4m"],
-    [23, 540_000, "Did 23 steps in 9m"],
-    [1, 40_000, "Did 1 step in 40s"],
-    [30, 3_900_000, "Did 30 steps in 1h 5m"],
-  ])("didSteps(%i, %i) is %s", (n, ms, words) => {
-    expect(didSteps(n, ms)).toBe(words);
   });
 
   // Bug: the live line read "Thinking…" for minutes while tool calls finished between two reads and the agent narrated

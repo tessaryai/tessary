@@ -38,7 +38,7 @@ import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
 import { traceLinker } from "../traceLinker";
 import { stamp, useNow } from "../classifiers/shared";
-import { RunBar, RunFold, type StepsSource } from "../components/RunBar";
+import { RunBar, type StepsSource } from "../components/RunBar";
 import { clock, elapsed, liveLine, QUEUED_LINE, RUN_POLL_MS, stepMeta, stopFix, stopReason } from "../components/runWords";
 import type { ProjectApi } from "../../api/client";
 import { useEffect, useRef, type ComponentProps } from "react";
@@ -289,7 +289,6 @@ export function CasePage() {
         <Why
           report={report}
           analysing={analysing}
-          steps={steps}
           actions={
             live && detail.detector_available ? (
               <>
@@ -619,12 +618,9 @@ function Why({
   affected,
   basePath,
   show,
-  steps,
 }: {
   report: RcaReport | undefined;
   analysing: boolean;
-  /** The finished run's steps, behind the fold under the analysis. */
-  steps?: StepsSource;
   /** Close and Absorb. Shown only beside a finished analysis, never while one runs. */
   actions?: React.ReactNode;
   kind: CauseKind;
@@ -678,7 +674,6 @@ function Why({
         <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
           Read the full analysis
         </Link>
-        {steps && <AnalysisFold run={report.run} steps={steps} />}
       </div>
     </Block>
   );
@@ -812,7 +807,7 @@ function rcaSteps(api: ProjectApi, reportId: string, run: RcaRun): StepsSource |
   return { load: (after) => api.getRcaSteps(reportId, after), live: run.state === "running" };
 }
 
-/** The bar after the header while an RCA waits, runs or stopped; a finished one has its fold instead. */
+/** The bar after the header while an RCA waits, runs or stopped; a finished one has none. */
 function rcaBar(
   run: RcaRun,
   steps: StepsSource | undefined,
@@ -846,19 +841,6 @@ function rcaBar(
     fix: stopFix(run.stop_code, basePath, canProviders),
     steps,
   };
-}
-
-/** `› Did 23 steps in 9m` beside the link to the full analysis, for the run that wrote it. */
-function AnalysisFold({ run, steps }: { run: RcaRun | null; steps: StepsSource }) {
-  if (run?.state !== "done" || !run.started_at || !run.ended_at || run.step_count === 0) return null;
-  return (
-    <RunFold
-      stepCount={run.step_count}
-      durationMs={Date.parse(run.ended_at) - Date.parse(run.started_at)}
-      steps={steps}
-      className="ml-4"
-    />
-  );
 }
 
 function RcaErrorNote({ error }: { error: unknown }) {
