@@ -314,6 +314,22 @@ class E2bAgentRunSandboxTest {
         assertEquals(message, ex.getMessage());
     }
 
+    /**
+     * A launcher failure logged without the sandbox it died in or how long it ran: the diagnosis names the sandbox and
+     * the elapsed time when the launcher sends them, even with no kind or detail.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "{\"kind\":\"script_exit\",\"detail\":\"exit 1\",\"sandbox_id\":\"sbx-1\",\"elapsed_ms\":42} | kind=script_exit detail=exit 1 sandbox=sbx-1 elapsed_ms=42",
+                "{\"sandbox_id\":\"sbx-1\"}                                                          | sandbox=sbx-1",
+                "{\"elapsed_ms\":7}                                                                    | elapsed_ms=7"
+            })
+    void theDiagnosisNamesTheSandboxAndTheElapsedTime(String body, String expected) {
+        assertEquals(expected, E2bAgentRunSandbox.describeLauncherError(body));
+    }
+
     /** A launcher that never answered is unreachable; one that answered the connection and then stalled timed out. */
     @Test
     void transportFailuresSplitIntoUnreachableAndTimedOut() {
