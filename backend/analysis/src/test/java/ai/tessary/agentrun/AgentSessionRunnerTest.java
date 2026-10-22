@@ -346,7 +346,7 @@ class AgentSessionRunnerTest {
                 end());
 
         assertEquals(AgentRunError.TIMED_OUT, fails().error());
-        assertEquals(List.of("session s-1", "started c-1 Running sleep 9999"), sink);
+        assertEquals(List.of("session s-1", "started c-1 Running a command"), sink);
         assertFalse(client.closedRead);
     }
 

@@ -122,12 +122,8 @@ class StepWordsTest {
                         "Read dossier/evidence/rows.json",
                         "Reading dossier/evidence/rows.json"),
                 Arguments.of(
-                        null,
-                        "bash",
-                        "{\"command\":\"sed -i 's/a/b/' fix.py\"}",
-                        "Ran sed -i 's/a/b/' fix.py",
-                        "Running sed -i 's/a/b/' fix.py"),
-                Arguments.of(null, "bash", "{\"command\":\"head -n 5\"}", "Ran head -n 5", "Running head -n 5"),
+                        null, "bash", "{\"command\":\"sed -i 's/a/b/' fix.py\"}", "Edited fix.py", "Editing fix.py"),
+                Arguments.of(null, "bash", "{\"command\":\"head -n 5\"}", "Ran a command", "Running a command"),
                 Arguments.of(
                         null, "bash", "{\"command\":\"ls -la /home/user\"}", "Listed the files", "Listing the files"),
                 Arguments.of(null, "bash", "{\"command\":\"ls repo/src\"}", "Listed src", "Listing src"),
@@ -159,8 +155,8 @@ class StepWordsTest {
                         null,
                         "bash",
                         "{\"command\":\"python3 -c print(1)\"}",
-                        "Ran python3 -c print(1)",
-                        "Running python3 -c print(1)"),
+                        "Ran a short Python script",
+                        "Running a short Python script"),
                 Arguments.of(null, "bash", "{\"command\":\"git show HEAD\"}", "Read a commit", "Reading a commit"),
                 Arguments.of(
                         null,
@@ -168,13 +164,18 @@ class StepWordsTest {
                         "{\"command\":\"git diff main\"}",
                         "Compared two versions",
                         "Comparing two versions"),
-                Arguments.of(null, "bash", "{\"command\":\"git status\"}", "Ran git status", "Running git status"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"git status\"}",
+                        "Checked the repository's changes",
+                        "Checking the repository's changes"),
                 Arguments.of(
                         null,
                         "bash",
                         "{\"command\":\"cd /home/user/repo && awk -F, '{print $2}' /home/user/dossier/rows.csv | sort | uniq -c\\nhead x\"}",
-                        "Ran awk -F, '{print $2}' dossier/rows.csv | sort | uniq -c",
-                        "Running awk -F, '{print $2}' dossier/rows.csv | sort | uniq -c"),
+                        "Counted the values in dossier/rows.csv",
+                        "Counting the values in dossier/rows.csv"),
                 Arguments.of(
                         null,
                         "grep",
@@ -306,34 +307,46 @@ class StepWordsTest {
                 words(null, "bash", "{\"command\":\"node checks/scan.js\"}").done());
     }
 
-    /**
-     * A step that says "Ran a command": a command no rule words is shown as the agent wrote its first line, without the
-     * leading cd, without the work dir, and cut to a readable length.
-     */
-    @Test
-    void aCommandNoRuleWordsIsShownAsWrittenAndCutShort() {
-        String loop =
-                "for f in dossier/evidence/*.json; do python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' $f; done";
-        StepWords.Words w = words(null, "bash", commandInput(loop));
-        assertTrue(w.done().startsWith("Ran for f in dossier/evidence/*.json; do python3"), w.done());
-        assertTrue(w.done().endsWith("..."), w.done());
-        assertTrue(w.done().length() <= "Ran ".length() + 80, w.done());
-        assertEquals("Could not run " + w.done().substring("Ran ".length()), StepWords.failed(w));
+    static Stream<Arguments> titles() {
+        return Stream.of(
+                Arguments.of(
+                        "awk -F, '{print $3}' dossier/evidence/rows.csv",
+                        "Pulled columns from dossier/evidence/rows.csv"),
+                Arguments.of("cut -d, -f2 dossier/rows.csv | sort | uniq -c", "Counted the values in dossier/rows.csv"),
+                Arguments.of("sort -u /home/user/dossier/ids.txt", "Sorted dossier/ids.txt"),
+                Arguments.of("sed 's/a/b/' repo/src/app.py", "Read src/app.py"),
+                Arguments.of("perl -pi -e 's/a/b/' repo/src/app.py", "Edited src/app.py"),
+                Arguments.of("diff repo/a.json repo/b.json", "Compared a.json and b.json"),
+                Arguments.of("diff <(echo a) <(echo b)", "Compared two files"),
+                Arguments.of("curl -s https://example.com/status", "Fetched a web address"),
+                Arguments.of("mkdir -p /home/user/checks", "Made a folder"),
+                Arguments.of("cp repo/a.py checks/a.py", "Copied a.py"),
+                Arguments.of("rm -f checks/out.json", "Removed checks/out.json"),
+                Arguments.of("echo done", "Printed a note"),
+                Arguments.of("pip install pandas", "Installed packages"),
+                Arguments.of("cd repo && python3 -m pytest tests/test_retry.py", "Ran the tests"),
+                Arguments.of("npm test", "Ran the tests"),
+                Arguments.of("python3 - <<'EOF'\nprint(1)\nEOF", "Ran a short Python script"),
+                Arguments.of("node -e 'console.log(1)'", "Ran a short Node script"),
+                Arguments.of("bash -c 'ls'", "Ran a short shell script"),
+                Arguments.of("for f in dossier/*.md; do wc -l $f; done", "Ran a loop"),
+                Arguments.of("sqlite3 checks/db.sqlite 'select 1'", "Queried a database"),
+                Arguments.of("tree repo/src", "Listed src"),
+                Arguments.of("git blame repo/src/app.py", "Read the history of src/app.py"),
+                Arguments.of("touch checks/out.json", "Made checks/out.json"),
+                Arguments.of("mv checks/a.txt checks/b.txt", "Moved checks/a.txt"),
+                Arguments.of("git stash", "Ran a command"),
+                Arguments.of("tr a b", "Ran a command"));
     }
 
-    /** A secret in the step list: a command that names a credential is never shown, even a short one. */
-    @Test
-    void aCommandThatNamesACredentialIsNotShown() {
-        for (String command : List.of(
-                "curl -H 'Authorization: Bearer abc123' https://x",
-                "PGPASSWORD=hunter2 psql -h db",
-                "export API_KEY=abc",
-                "echo $OPENAI_API_KEY",
-                "env | grep -i token",
-                "mysql --password=abc")) {
-            assertEquals(
-                    "Ran a command", words(null, "bash", commandInput(command)).done(), command);
-        }
+    /**
+     * A step that says "Ran a command": a shell command a rule knows gets a short title of what it does, never the
+     * command itself.
+     */
+    @ParameterizedTest
+    @MethodSource("titles")
+    void aKnownShellCommandGetsATitleOfWhatItDoes(String command, String done) {
+        assertEquals(done, words(null, "bash", commandInput(command)).done());
     }
 
     private static String commandInput(String command) {

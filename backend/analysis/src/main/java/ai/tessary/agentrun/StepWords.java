@@ -38,16 +38,6 @@ public final class StepWords {
 
     private static final int NOTE_CHARS = 160;
 
-    private static final int COMMAND_CHARS = 80;
-
-    private static final Pattern LEADING_CD = Pattern.compile("^cd\\s+(?:\"[^\"]*\"|'[^']*'|\\S+)\\s*(?:&&|;)\\s*");
-
-    private static final Pattern WORK_DIR = Pattern.compile("(?<![\\w/])(?:/home/user|/work)/(?:repo/)?");
-
-    /** A command that names a credential is never shown, however short the value. */
-    private static final Pattern CREDENTIAL =
-            Pattern.compile("(?i)authorization|bearer|passw|secret|token|api_?key|credential");
-
     /** The end of a whole sentence or line: a newline, or a stop the next character proves is not a decimal point. */
     private static final Pattern WHOLE = Pattern.compile("\n|[.!?](?=\\s)");
 
@@ -76,6 +66,17 @@ public final class StepWords {
     private static final Set<String> SCRIPT_RUNNERS = Set.of("python", "python3", "node", "sh", "bash");
 
     private static final Set<String> FILE_READERS = Set.of("cat", "head", "tail", "less");
+
+    private static final Set<String> TEST_RUNNERS = Set.of("pytest", "tox", "jest", "vitest");
+
+    private static final Set<String> PACKAGE_TOOLS =
+            Set.of("pip", "pip3", "npm", "pnpm", "yarn", "uv", "poetry", "go", "cargo", "mvn");
+
+    private static final Pattern FILE_NAME = Pattern.compile("[\\w./-]+");
+
+    private static final Set<String> INSTALLS = Set.of("install", "add", "sync");
+
+    private static final Set<String> CUT_FLAGS = Set.of("-d", "-f", "-c", "-F", "-v");
 
     /** Flags that take the next word as their value, per command. */
     private static final Set<String> HEAD_FLAGS = Set.of("-n", "-c");
@@ -255,57 +256,94 @@ public final class StepWords {
     private static Words bash(@Nullable String command) {
         Words generic = phrase("Ran", "Running", "run", "a command");
         if (command == null) return generic;
-        Words written = written(command, generic);
         List<String> words = firstCommand(command);
-        if (words.isEmpty()) return written;
+        if (words.isEmpty()) return generic;
         String name = words.getFirst();
         List<String> args = words.subList(1, words.size());
+        boolean counts = command.contains("uniq -c");
         if (FILE_READERS.contains(name)) {
             String path = lastOperand(args, HEAD_FLAGS, 0);
-            return path == null ? written : read(path);
+            return path == null ? generic : read(path);
         }
-        if (("sed".equals(name) && args.contains("-n")) || "jq".equals(name)) {
+        if ("sed".equals(name) || "perl".equals(name)) {
+            String path = lastOperand(args, Set.of("-e"), "sed".equals(name) ? 1 : 0);
+            if (path == null) return generic;
+            boolean inPlace = args.stream().anyMatch(a -> a.matches("-[a-z]*i.*"));
+            return inPlace ? phrase("Edited", "Editing", "edit", place(path)) : read(path);
+        }
+        if ("jq".equals(name)) {
             String path = lastOperand(args, Set.of(), 1);
-            return path == null ? written : read(path);
+            return path == null ? generic : read(path);
         }
-        if ("ls".equals(name) || "find".equals(name)) {
+        if ("ls".equals(name) || "find".equals(name) || "tree".equals(name)) {
             List<String> operands = operands(args, Set.of());
             return phrase("Listed", "Listing", "list", place(operands.isEmpty() ? null : operands.getFirst()));
         }
         if ("grep".equals(name) || "rg".equals(name)) return searched(args);
         if ("wc".equals(name)) {
             String path = shown(lastOperand(args, Set.of(), 0));
-            return path == null ? written : phrase("Counted", "Counting", "count", "the lines in " + path);
+            return path == null ? generic : phrase("Counted", "Counting", "count", "the lines in " + path);
         }
-        if (SCRIPT_RUNNERS.contains(name)) {
-            for (String word : args) {
-                if (word.startsWith("-") || !looksLikePath(word)) continue;
-                String path = shown(word);
-                return path == null ? written : phrase("Ran", "Running", "run", path);
+        if ("awk".equals(name) || "cut".equals(name)) {
+            String path = shown(lastOperand(args, CUT_FLAGS, "awk".equals(name) ? 1 : 0));
+            if (counts) return counted(path);
+            return phrase("Pulled", "Pulling", "pull", "columns from " + (path == null ? "the output" : path));
+        }
+        if ("sort".equals(name) || "uniq".equals(name)) {
+            String path = shown(lastOperand(args, Set.of("-k", "-t"), 0));
+            return counts ? counted(path) : phrase("Sorted", "Sorting", "sort", path == null ? "the output" : path);
+        }
+        if (SCRIPT_RUNNERS.contains(name)) return script(name, args, generic);
+        if ("git".equals(name)) return git(words, generic);
+        if (TEST_RUNNERS.contains(name) || (PACKAGE_TOOLS.contains(name) && args.contains("test"))) {
+            return phrase("Ran", "Running", "run", "the tests");
+        }
+        if (PACKAGE_TOOLS.contains(name) && args.stream().anyMatch(INSTALLS::contains)) {
+            return phrase("Installed", "Installing", "install", "packages");
+        }
+        List<String> operands = operands(args, Set.of());
+        String first = operands.isEmpty() ? null : shown(operands.getFirst());
+        return switch (name) {
+            case "diff", "cmp" -> {
+                List<String> files = operands.stream()
+                        .filter(o -> FILE_NAME.matcher(o).matches())
+                        .toList();
+                String one = files.size() == 2 ? shown(files.get(0)) : null;
+                String other = files.size() == 2 ? shown(files.get(1)) : null;
+                yield one == null || other == null
+                        ? phrase("Compared", "Comparing", "compare", "two files")
+                        : phrase("Compared", "Comparing", "compare", one + " and " + other);
             }
-            return written;
-        }
-        if ("git".equals(words.getFirst())) return git(words, written);
-        return written;
+            case "curl", "wget" -> phrase("Fetched", "Fetching", "fetch", "a web address");
+            case "mkdir" -> phrase("Made", "Making", "make", "a folder");
+            case "touch" -> phrase("Made", "Making", "make", first == null ? "a file" : first);
+            case "cp" -> phrase("Copied", "Copying", "copy", first == null ? "a file" : first);
+            case "mv" -> phrase("Moved", "Moving", "move", first == null ? "a file" : first);
+            case "rm" -> phrase("Removed", "Removing", "remove", first == null ? "a file" : first);
+            case "echo", "printf" -> phrase("Printed", "Printing", "print", "a note");
+            case "sqlite3", "psql", "duckdb", "mysql" -> phrase("Queried", "Querying", "query", "a database");
+            case "for", "while" -> phrase("Ran", "Running", "run", "a loop");
+            default -> generic;
+        };
     }
 
-    /**
-     * The command as the agent wrote its first line, past any leading {@code cd}, without the work dir, cut to a readable
-     * length; the generic words when it names a credential or carries a token-shaped value.
-     */
-    private static Words written(String command, Words generic) {
-        String line = command.strip();
-        for (Matcher cd = LEADING_CD.matcher(line); cd.lookingAt(); cd = LEADING_CD.matcher(line)) {
-            line = line.substring(cd.end());
+    private static Words counted(@Nullable String path) {
+        return phrase("Counted", "Counting", "count", path == null ? "the values" : "the values in " + path);
+    }
+
+    /** A script runner names the script it ran, the tests a {@code -m pytest} ran, or the kind of inline script. */
+    private static Words script(String name, List<String> args, Words generic) {
+        int module = args.indexOf("-m");
+        if (module >= 0 && module + 1 < args.size() && TEST_RUNNERS.contains(args.get(module + 1))) {
+            return phrase("Ran", "Running", "run", "the tests");
         }
-        int newline = line.indexOf('\n');
-        if (newline >= 0) line = line.substring(0, newline);
-        line = WORK_DIR.matcher(line).replaceAll("").replaceAll("\\s+", " ").strip();
-        if (line.isEmpty() || CREDENTIAL.matcher(line).find()) return generic;
-        if (line.length() > COMMAND_CHARS)
-            line = line.substring(0, COMMAND_CHARS - 3).stripTrailing() + "...";
-        String shown = safe(line);
-        return shown == null ? generic : phrase("Ran", "Running", "run", shown);
+        for (String word : args) {
+            if (word.startsWith("-") || !looksLikePath(word)) continue;
+            String path = shown(word);
+            return path == null ? generic : phrase("Ran", "Running", "run", path);
+        }
+        String kind = name.startsWith("python") ? "Python" : "node".equals(name) ? "Node" : "shell";
+        return phrase("Ran", "Running", "run", "a short " + kind + " script");
     }
 
     /**
@@ -401,6 +439,11 @@ public final class StepWords {
                 .toList();
         return switch (sub) {
             case "log" -> phrase("Read", "Reading", "read", "the commit history");
+            case "status" -> phrase("Checked", "Checking", "check", "the repository's changes");
+            case "blame" -> {
+                String path = args.isEmpty() ? null : shown(args.getLast());
+                yield phrase("Read", "Reading", "read", "the history of " + (path == null ? "a file" : path));
+            }
             case "show" -> {
                 String sha = args.isEmpty() ? null : sha(args.getFirst());
                 yield sha == null
