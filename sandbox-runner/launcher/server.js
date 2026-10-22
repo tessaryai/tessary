@@ -304,6 +304,10 @@ function hostOf(url) {
   return url && URL.canParse(url) ? new URL(url).hostname : null;
 }
 
+// opencode resolves a model id against this list at run time; its bundled copy lags new models, so
+// with this host blocked a model such as claude-sonnet-5-5 is "not found" and the run fails with a 500.
+const OPENCODE_MODEL_LIST_HOST = 'models.opencode.ai';
+
 /**
  * Set only for an egress credential. A rule's host must also be allowed or the provider is
  * unreachable, which is why it leads `allowOut`.
@@ -311,7 +315,7 @@ function hostOf(url) {
 function egressNetwork(credential, urls) {
   if (!credential.egress_secret) return {};
   const modelHost = hostOf((credential.base_url || '').trim() || defaultBaseUrlFor(ANTHROPIC_MODE));
-  const hosts = [modelHost, ...urls.map(hostOf), ...EGRESS_EXTRA_ALLOW];
+  const hosts = [modelHost, OPENCODE_MODEL_LIST_HOST, ...urls.map(hostOf), ...EGRESS_EXTRA_ALLOW];
   return {
     network: {
       allowOut: [...new Set(hosts.filter(Boolean))],

@@ -399,6 +399,27 @@
         ],
         "type" : "object"
       },
+      "ApiResponseBuildView" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/BuildView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponseCapabilitiesView" : {
         "properties" : {
           "data" : {
@@ -2515,6 +2536,17 @@
           "org_id",
           "plan",
           "usage"
+        ],
+        "type" : "object"
+      },
+      "BuildView" : {
+        "properties" : {
+          "version" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "version"
         ],
         "type" : "object"
       },
@@ -11518,6 +11550,26 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
+    "/api/build" : {
+      "get" : {
+        "operationId" : "BuildController_build",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseBuildView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "build-controller"
+        ]
+      }
+    },
     "/api/link/{userCode}" : {
       "get" : {
         "operationId" : "DeviceLinkController_view",

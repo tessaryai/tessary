@@ -12,6 +12,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/sandbox-runner/launcher"
 
 node --check server.js
+# The release-only egress probe (release.yml's verify-agent-template) never runs here; this keeps it parsing.
+node --check probe-egress.js
 
 # node:test, zero new dependency — same constraint the docker backend itself holds to (no
 # docker-cli, no Engine API SDK; see server.js's Docker-backend header comment). Spins up a fake

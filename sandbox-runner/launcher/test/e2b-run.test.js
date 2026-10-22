@@ -172,6 +172,15 @@ test('a sandbox that is never created is an orchestration failure with no sandbo
   assert.deepEqual(calls.map((c) => c.op), ['create']);
 });
 
+test('an egress credential lets opencode reach its model list (blocked, opencode does not know claude-sonnet-5-5 and every lane fails with a 500 UnknownError)', async () => {
+  const egress = { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic', platform_funded: true };
+  const { status, calls } = await runOnce('ok', {}, { ...PAYLOAD, model: 'claude-sonnet-5-5', credential: egress });
+
+  assert.equal(status, 200);
+  assert.ok(calls[0].network.allowOut.includes('models.opencode.ai'), JSON.stringify(calls[0].network.allowOut));
+  assert.deepEqual(Object.keys(calls[0].network.rules), ['api.anthropic.com'], 'the key is injected only on the model host');
+});
+
 test('a post-mortem lookup that fails never replaces the run\'s own failure', async () => {
   const { status, body } = await runOnce('exit', { FAKE_E2B_GETINFO: 'fail' });
 
@@ -188,7 +197,7 @@ test('an egress credential creates the sandbox with the key injected at its egre
 
   assert.equal(status, 200);
   assert.deepEqual(calls[0].network, {
-    allowOut: ['api.anthropic.com', 'tessary.example.com', 'github.com'],
+    allowOut: ['api.anthropic.com', 'models.opencode.ai', 'tessary.example.com', 'github.com'],
     denyOut: ['0.0.0.0/0'],
     rules: {
       'api.anthropic.com': [{ transform: { headers: { 'x-api-key': '${e2b.secrets.tessary-ai-anthropic}' } } }],
@@ -198,5 +207,5 @@ test('an egress credential creates the sandbox with the key injected at its egre
   assert.ok(!calls[1].content.includes('egress_secret'), 'the credential never reaches the sandbox filesystem');
 
   const scp = await runOnce('ok', {}, { ...payload, clone_url: 'git@github.com:acme/app.git' });
-  assert.deepEqual([scp.status, scp.calls[0].network.allowOut], [200, ['api.anthropic.com', 'tessary.example.com']], 'a clone_url that is not a URL opens no host and fails no run');
+  assert.deepEqual([scp.status, scp.calls[0].network.allowOut], [200, ['api.anthropic.com', 'models.opencode.ai', 'tessary.example.com']], 'a clone_url that is not a URL opens no host and fails no run');
 });

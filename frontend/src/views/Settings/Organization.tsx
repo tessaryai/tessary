@@ -42,6 +42,7 @@ export function Organization() {
     refetchInterval: (query) => (query.state.data?.some((p) => p.deleting_at) ? 3000 : false),
   });
   const members = useQuery({ queryKey: ["org-members", orgSlug], queryFn: () => auth.listMembers(orgSlug) });
+  const build = useQuery({ queryKey: ["build"], queryFn: () => auth.getBuild(), staleTime: Infinity });
 
   const me = members.data?.find((m: OrgMember) => m.user_id === user?.id);
   const canManage = me?.role === "owner";
@@ -245,6 +246,12 @@ export function Organization() {
           />
         </div>
       </Section>
+
+      {build.data && (
+        <p className="mt-10 text-small text-subtle">
+          Tessary {build.data.version === "dev" ? "dev build" : build.data.version}
+        </p>
+      )}
     </PageBody>
   );
 }

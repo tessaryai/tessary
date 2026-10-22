@@ -12,6 +12,7 @@ import type { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, EmptyState, ErrorNote, IconButton, PageHeader, Skeleton, useToast } from "../../ui";
 import { LG_QUERY, useMediaQuery } from "../../ui/useMediaQuery";
+import { ChartPaletteMenu } from "./ChartPaletteMenu";
 import { DashboardGrid } from "./DashboardGrid";
 import { DashboardModals, type ModalState } from "./DashboardModals";
 import { DashboardSwitcher } from "./DashboardSwitcher";
@@ -239,6 +240,7 @@ function DashboardPage({ id }: { id: string }) {
         actions={
           <>
             <RangeControl range={range} onChange={setRange} />
+            {!editing && <ChartPaletteMenu />}
             {canEdit &&
               (editing ? (
                 <Button variant="primary" loading={update.isPending} onClick={() => done(dashboard, draft!)}>

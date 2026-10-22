@@ -67,8 +67,9 @@ narrower.
   - An **egress credential** (`credential.egress_secret`, Anthropic only, E2B backend only) carries
     no key: it names a secret in E2B's own store, which E2B's egress proxy injects as the provider's
     `x-api-key` outside the microVM. The agent gets a placeholder, and that run's or session's
-    egress is limited to the model provider, the MCP door, the clone host and `EGRESS_EXTRA_ALLOW`;
-    for a session the MCP door is every `mcp_servers` host.
+    egress is limited to the model provider, opencode's model list (`models.opencode.ai`), the MCP
+    door, the clone host and `EGRESS_EXTRA_ALLOW`; for a session the MCP door is every
+    `mcp_servers` host.
   - The other posture, UNTRUSTED_POSTURE (empty env, `NetworkMode: 'none'`), has **no route today**:
     its callers were `/grade` and `/lint`. It is kept deliberately — the pair exists so that a
     future untrusted-content route cannot default into the full credential set, and one legal value
@@ -373,7 +374,7 @@ secret, in two jobs either side of the commit point:
 | job | writes | undone by |
 |---|---|---|
 | `build-agent-template` | `<version>` and `recipe-<hash>` — and **only builds if the recipe changed** | `cleanup` |
-| `verify-agent-template` | nothing; boots `tessary/tessary-agent-sandbox:<version>` and runs four checks through it | n/a |
+| `verify-agent-template` | nothing; boots `tessary/tessary-agent-sandbox:<version>` and runs its checks through it, then runs `launcher/probe-egress.js` | n/a |
 | `finalize` | moves `latest` and `default` onto that build | nothing (this is the commit point) |
 
 `recipe-<hash>` is a digest of the real build inputs — `template.ts`, the agent scripts
@@ -388,6 +389,15 @@ two mistakes — a missing `bash` (this SDK hardcodes `cmd: "/bin/bash"`) and a 
 `{ user: 'root' }` — that both produce a template which BUILDS CLEANLY and then fails on every run.
 It runs on the dedup path too: "the recipe did not change" says nothing about whether the published
 build still boots.
+
+The boot checks apply no network rules, so the job then runs `launcher/probe-egress.js`: one `/rca`
+through the real launcher for each Tessary AI model in `ModelCatalog.java`, under the egress posture,
+with the key from the team's `tessary-ai-anthropic` E2B secret. The unit tests fake E2B and opencode,
+so a host opencode needs at run time and the allowlist leaves out fails only there. To run it by hand:
+
+```bash
+cd sandbox-runner/launcher && pnpm install && E2B_API_KEY=<team key> node probe-egress.js --template=tessary/tessary-agent-sandbox:<version>
+```
 
 To build it by hand (a dev template, or a first build in a fresh E2B project):
 
