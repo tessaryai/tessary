@@ -3,7 +3,8 @@
 --changeset evals:0049-agent-run
 -- One triage or RCA agent run and its tool calls in plain words, so a page can show what the agent is doing while
 -- it works and what it did after. A subject keeps its newest run and the one before it; the store prunes the rest
--- when it opens a run. Raw tool input and output are never stored.
+-- when it opens a run. Raw tool input and output are never stored. A run's note is what the agent last said in its
+-- own words, markdown and token-shaped words removed, or a fixed phrase while it writes its answer.
 CREATE TABLE agent_run (
     id          text PRIMARY KEY,
     project_id  text NOT NULL REFERENCES project(id) ON DELETE CASCADE,
@@ -16,7 +17,9 @@ CREATE TABLE agent_run (
     ended_at    text,
     outcome     text CHECK (outcome IN ('done','retrying','held','dead','failed','released','abandoned')),
     stop_code   text,                   -- ErrorCode wire code, e.g. CLASSIFIER.TRIAGE_PROVIDER_REJECTED
-    step_count  integer NOT NULL DEFAULT 0
+    step_count  integer NOT NULL DEFAULT 0,
+    note        text,                   -- the agent's newest sentence between tool calls, at most 160 chars
+    note_ms     bigint                  -- offset from started_at when the note was written
 );
 CREATE INDEX ix_agent_run_subject ON agent_run (project_id, lane, subject_id, started_at DESC);
 CREATE INDEX ix_agent_run_open_job ON agent_run (job_id) WHERE ended_at IS NULL;
