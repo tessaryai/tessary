@@ -464,6 +464,7 @@ class StepWordsTest {
                 Arguments.of("First I read it.\nNow the history is clear!\nNext", "Now the history is clear!"),
                 Arguments.of("## Plan\n- **Read** the `finding.md` file\n", "Read the finding.md file"),
                 Arguments.of("> See [the guide](https://example.com/guide) first:\n", "See the guide first"),
+                Arguments.of("Rows [1] and [2](a) match [3] (b).\n", "Rows [1] and 2 match [3] (b)"),
                 Arguments.of("Is the index stale? Checking", "Is the index stale?"),
                 Arguments.of("The key tsy_a_" + "Q".repeat(40) + " leaked here. ", "The key leaked here"),
                 Arguments.of("Done.\n---\n", "Done"),

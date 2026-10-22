@@ -45,8 +45,6 @@ public final class StepWords {
 
     private static final Pattern MARKDOWN_LEAD = Pattern.compile("^(?:#{1,6}\\s+|[-*+>]\\s*|\\d+[.)]\\s+)+");
 
-    private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^\\]]*)]\\([^)]*\\)");
-
     private static final Pattern MARKDOWN_MARKS = Pattern.compile("\\*\\*|__|`|\\*");
 
     private static final Pattern CLOSING = Pattern.compile("[.,;:]+$");
@@ -202,7 +200,7 @@ public final class StepWords {
 
     private static @Nullable String plain(String sentence) {
         String s = MARKDOWN_LEAD.matcher(sentence.strip()).replaceFirst("");
-        s = MARKDOWN_LINK.matcher(s).replaceAll("$1");
+        s = unlinked(s);
         s = MARKDOWN_MARKS.matcher(s).replaceAll("");
         StringBuilder kept = new StringBuilder();
         for (String word : s.strip().split("\\s+")) {
@@ -325,6 +323,21 @@ public final class StepWords {
             case "for", "while" -> phrase("Ran", "Running", "run", "a loop");
             default -> generic;
         };
+    }
+
+    /** A markdown link {@code [text](url)} keeps only its text; a bracket that opens no link stays as written. */
+    private static String unlinked(String s) {
+        StringBuilder out = new StringBuilder();
+        int at = 0;
+        for (int open = s.indexOf('['); open >= 0; open = s.indexOf('[', open + 1)) {
+            int mid = s.indexOf(']', open);
+            int close = mid < 0 || !s.startsWith("(", mid + 1) ? -1 : s.indexOf(')', mid + 2);
+            if (close < 0) continue;
+            out.append(s, at, open).append(s, open + 1, mid);
+            at = close + 1;
+            open = close;
+        }
+        return out.append(s.substring(at)).toString();
     }
 
     private static Words counted(@Nullable String path) {
