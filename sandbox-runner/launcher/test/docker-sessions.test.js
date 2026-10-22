@@ -312,7 +312,8 @@ test('idle never closes a session while a reply runs (a long reply cut by the id
     const read = await reader;
     assert.deepEqual(read.events.map((e) => [e.id, e.type]), [[1, 'text'], [2, 'message_end'], [3, 'closed']]);
     assert.deepEqual(read.events[2].data, { reason: 'idle' });
-    assert.ok(read.times[2] - read.times[1] >= 200, `idle counts from the reply's end (${read.times[2] - read.times[1]}ms)`);
+    // A timer can fire a few ms early against the reader's clock; idle counted from the reply's start would show ~0ms.
+    assert.ok(read.times[2] - read.times[1] >= 180, `idle counts from the reply's end (${read.times[2] - read.times[1]}ms)`);
   });
 });
 
