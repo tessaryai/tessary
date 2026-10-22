@@ -1,11 +1,11 @@
 ---
 title: "MCP Server"
-description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 20 tools with their arguments, and how to configure a client."
+description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 22 tools with their arguments, and how to configure a client."
 ---
 
 Tessary speaks MCP (Model Context Protocol) at `POST /mcp` on the same service that serves the web UI and the REST API. It ships with the backend, so there is no separate server to install or version.
 
-The tools read the project the token is bound to: its cases, its findings, the evidence behind them, and the traces and spans underneath.
+The tools read the project the token is bound to: its cases, its findings, the evidence behind them, the traces and spans underneath, and its prompts.
 
 ## The endpoint
 
@@ -79,7 +79,7 @@ A groundedness finding goes through triage like any other, so its ruling is stri
 
 ## The tools
 
-Tessary offers all 20 tools to every organization, so `tools/list` returns the whole catalog for any valid token.
+Tessary lists all 22 tools for every organization, so `tools/list` returns the whole catalog for any valid token. The two prompt tools also check on each call that prompt management is on for the organization.
 
 `tools/list` is the authoritative schema. The tables below name each tool's arguments so you can see the shape of the surface; they are not a schema copy.
 
@@ -165,6 +165,21 @@ Four things constrain these tools:
 
 `filters` is a flat map of allow-listed field to value, applied as equality.
 
+### Prompts
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `list_prompts` | none | `folder`, `label` | Up to 100 [prompts](/prompts/overview), most recently changed first, each with `name`, `type`, `tags`, `latest_version`, `version_count`, its deployment labels, and `updated_at` |
+| `get_prompt` | `name` | `version` or `label` | One prompt version with its `body`, `config`, `labels`, `commit_message`, `created_by`, `created_by_label` (the author's name or email), and `created_at` |
+
+`folder` keeps prompts whose name starts with that folder path, such as `team/billing`. `label` keeps prompts that have that deployment label on some version. `list_prompts` takes no `limit` or `cursor`, so narrow with `folder` when a project has more than 100 prompts.
+
+`get_prompt` takes `version` or `label`, not both. With neither, it reads the version labeled `production`, and `label: "latest"` reads the highest version number. A text prompt's `body` is a string, and a chat prompt's `body` is an array of messages and placeholders.
+
+The fields are snake_case, like every other tool. The [prompts API](/reference/prompts-api) returns the same prompts with camelCase field names instead.
+
+While prompt management is off for the organization, both tools return a tool error saying the `prompt_management_enabled` capability is not available.
+
 ## Client configuration
 
 <Steps>
@@ -195,7 +210,7 @@ Four things constrain these tools:
   <Step title="Restart the client">
     Restart Claude Code so it reads the new configuration.
 
-    <Check>`tools/list` returns 20 tools, and `get_project` names the project the token is bound to.</Check>
+    <Check>`tools/list` returns 22 tools, and `get_project` names the project the token is bound to.</Check>
   </Step>
 </Steps>
 

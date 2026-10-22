@@ -92,7 +92,8 @@ record TraceDetectionRepositoryTest(
     }
 
     private List<String> listedBy(String pid, String classifierId) {
-        var query = new TraceV2Repository.TraceQuery(null, null, null, null, null, null, null, null, classifierId);
+        var query = new TraceV2Repository.TraceQuery(
+                null, null, null, null, null, null, null, null, classifierId, null, null);
         return traces.list(pid, query, null, 10, null, null, null).stream()
                 .map(TraceV2Repository.Summary::id)
                 .toList();

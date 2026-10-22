@@ -5,7 +5,7 @@ description: "Look up every wire field the Tessary ingestion pipeline consumes, 
 
 Tessary reads these fields off every span you send. Anything not listed here is still carried verbatim into the attribute bag and is queryable, but it drives no ingest-time processing.
 
-The contract is standard first. The platform reads OTel (OpenTelemetry) and gen_ai semantic-convention names wherever one exists, accepts third-party dialects for compatibility, and defines exactly one attribute of its own: `tessary.call_site.id`.
+The contract is standard first. The platform reads OTel (OpenTelemetry) and gen_ai semantic-convention names wherever one exists, accepts third-party dialects for compatibility, and defines two attributes of its own: `tessary.call_site.id`, and `tessary.prompt.name` with its companion `tessary.prompt.version`.
 
 <Note>
   For the practical subset, meaning what you have to emit to get a working project, read [Span requirements](/instrument/span-requirements). This page is the exhaustive lookup behind it.
@@ -159,9 +159,20 @@ Ingest needs none of these fields. Groundedness needs `.content` to compare an a
 | --- | --- | --- | --- |
 | `tessary.call_site.id` | Binds the span to its call site, and is denormalized onto its trace. Unseen call sites are materialized automatically | always | Tessary |
 
-This is the only sanctioned Tessary overlay attribute, and the dotted spelling roots a `tessary.call_site.*` namespace. Any producer can set it as a plain attribute, or a Collector `attributes` or `transform` rule can add it. No SDK is required.
+This is one of the two sanctioned Tessary overlays, and the dotted spelling roots a `tessary.call_site.*` namespace. Any producer can set it as a plain attribute, or a Collector `attributes` or `transform` rule can add it. No SDK is required.
 
 Without it, a span still lands and is still queryable, but it belongs to no call site, and the connect gate on a new project does not open on it. An untagged span carries a null `call_site_id`, so a filter on any call site excludes it outright.
+
+## Prompt
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `tessary.prompt.name` | Links the span to the managed prompt it was produced from. Feeds the prompt's usage counts and the traces filter by prompt | always. Usage counts read `llm` spans only | Tessary |
+| `tessary.prompt.version` | The version of that prompt, stored as the text sent: `3` is stored as `"3"`, and a label such as `prod` is kept as sent | read only with `tessary.prompt.name` | Tessary |
+| Third-party observation-scoped prompt name and version | The same link, read when the `tessary.prompt.*` pair is absent | always | Third-party SDKs |
+| Third-party short prompt name and version | The same link, read when neither pair above names a prompt | always | Third-party SDKs |
+
+The first pair that names a prompt wins, and the version is read only from that pair. A name or a version longer than 512 characters drops that part of the link and keeps the span; a dropped name drops the version with it. Ingest never looks the name up, so a span can name a prompt that does not exist in the project. `gen_ai.prompt.*` is never read as a prompt link: it is the flattened message family listed under Content.
 
 ## Everything else
 
@@ -184,7 +195,7 @@ These arrive without being rejected and survive verbatim in the attribute bag. T
 
 ## Attributes with no reader
 
-The consumed `tessary.*` surface is exactly one attribute. Every other `tessary.*` spelling has no reader anywhere on the platform, and its content belongs on the standard field instead.
+The consumed `tessary.*` surface is `tessary.call_site.id` and the `tessary.prompt.*` pair. Every other `tessary.*` spelling has no reader anywhere on the platform, and its content belongs on the standard field instead.
 
 | Do not emit | Use instead |
 | --- | --- |

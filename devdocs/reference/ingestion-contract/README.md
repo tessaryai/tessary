@@ -52,7 +52,7 @@ tagging, and canonical gen_ai normalization at the edge. Deeper mapping detail:
 | Model | `gen_ai.request.model` | `span.provided_model_name`, resolved to `span.model_id` for pricing; presence backstops kind→llm | llm-family | gen_ai semconv |
 | Model | `llm.model_name` | OI-dialect model (same role as above) | OI-dialect spans | OpenInference |
 | Content | `gen_ai.input.messages` / `gen_ai.output.messages` | the canonical role-tagged arrays, stored whole in `span_payload.input` / `.output` (never truncated) | chat-family | gen_ai semconv |
-| Content | `gen_ai.prompt.<N>.role/.content` / `gen_ai.completion.<N>.*` | flattened-dialect messages, reconstructed when the structured arrays are absent | OpenLLMetry spans | Traceloop |
+| Content | `gen_ai.prompt.<N>.role/.content` / `gen_ai.completion.<N>.*` | flattened-dialect messages, reconstructed when the structured arrays are absent. A message prefix, never a prompt reference: the managed-prompt link is the Prompt rows below | OpenLLMetry spans | Traceloop |
 | Content | `llm.input_messages` / `llm.output_messages` (+ `message.role/.content/.contents[]`, `message.tool_calls[]`) | OI-dialect messages; first tool call lifted to `gen_ai.tool.name`/`gen_ai.tool.call.id` | OI-dialect spans | OpenInference |
 | Content | `input` / `output` | generic verbatim carriers (tool args/results, non-chat steps) when messages absent | always | carrier (extension) |
 | Content | `traceloop.entity.input` / `.output` | last-resort input/output for foreign framework spans | OpenLLMetry spans | Traceloop |
@@ -65,7 +65,10 @@ tagging, and canonical gen_ai normalization at the edge. Deeper mapping detail:
 | Cost | `llm.cost.prompt` / `.completion` / `.prompt_details.cache_read` / `.prompt_details.cache_write` | the producer's own per-bucket USD cost, stored verbatim with `cost_source='provided'` and never re-priced (`IngestPricer.providedCost`). Per-bucket figures win over any total | llm-family | OpenInference |
 | Cost | `gen_ai.usage.cost` / `gen_ai.usage.total_cost` / `llm.cost.total` | the producer's own TOTAL cost, read in that precedence when no per-bucket figure is present. A lone total lands in `input_cost`, because `span.total_cost` is generated from the four buckets and splitting it ourselves would be a derivation | llm-family | gen_ai semconv · Traceloop · OpenInference |
 | Retrieval | `retrieval.documents.<N>.document.id` / `.content` / `.score` / `.metadata` | first-class `retrieved_doc` rows (1-based rank) | spans carrying these OI-indexed attributes (no kind gate — extraction runs on every span and is a no-op absent the prefix) | OpenInference |
-| Call site | `tessary.call_site.id` | binds the span to its call site (and is denormalized onto its trace); auto-materializes unseen call sites. The dotted spelling roots the `tessary.call_site.*` namespace we will expand. Settable by ANY producer (plain attr) or a Collector attributes/transform rule — no SDK required | always | **Tessary (the ONLY sanctioned overlay)** |
+| Call site | `tessary.call_site.id` | binds the span to its call site (and is denormalized onto its trace); auto-materializes unseen call sites. The dotted spelling roots the `tessary.call_site.*` namespace we will expand. Settable by ANY producer (plain attr) or a Collector attributes/transform rule — no SDK required | always | **Tessary (one of the two sanctioned overlays)** |
+| Prompt | `tessary.prompt.name` / `tessary.prompt.version` | the managed prompt the span was produced from, written verbatim as text to `span.prompt_name` / `span.prompt_version` (an integer version is stored as its decimal string; a label such as `prod` is kept as sent). Feeds the prompt usage counts and the traces `promptName` filter. Read first; the version comes only from the pair that supplied the name. A name or version longer than 512 characters drops the link, never the span. No lookup against the prompt tables at ingest | always (usage counts read `kind = 'llm'` only) | **Tessary (one of the two sanctioned overlays)** |
+| Prompt | third-party observation-scoped prompt name / version (`GenAiAttributes.OBSERVATION_PROMPT_NAME_DIALECT`) | the same link, read when the canonical pair is absent | always (usage counts read `kind = 'llm'` only) | third-party SDKs |
+| Prompt | third-party short prompt name / version (`GenAiAttributes.SHORT_PROMPT_NAME_DIALECT`) | the same link, read when neither pair above names a prompt | always (usage counts read `kind = 'llm'` only) | third-party SDKs |
 | Bag | *(all remaining attributes, resource + span)* | carried **verbatim** into `span_payload.attributes` (never clipped) — queryable, but drives no processing | always | any |
 
 ## Handoffs are structural, not an attribute
@@ -100,8 +103,9 @@ never a `tessary.*` attribute.
 
 ## Do not emit (no readers exist)
 
-The consumed `tessary.*` surface is exactly one attribute: `tessary.call_site.id`. Any other
-`tessary.*` attribute has no reader; the content belongs on the standard field instead:
+The consumed `tessary.*` surface is exactly two overlays: `tessary.call_site.id`, and
+`tessary.prompt.name` with its companion `tessary.prompt.version`. Any other `tessary.*` attribute has no
+reader; the content belongs on the standard field instead:
 
 - `tessary.session.id` → use `session.id`
 - `tessary.turn.index` → turns are positional (no attribute)

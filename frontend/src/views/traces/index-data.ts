@@ -19,6 +19,10 @@ export type TraceFilters = {
   to?: string | null;
   /** A classifier id, or "any": traces a classifier flagged. */
   detectedBy?: string;
+  /** Traces holding a span produced from this managed prompt. */
+  promptName?: string;
+  /** Sent only with promptName. */
+  promptVersion?: string;
 };
 
 /** The filters as the traces and sessions reads take them. */
@@ -32,6 +36,8 @@ export function filterParams(filters: TraceFilters): TraceFilterParams {
     fromTimestamp: filters.from ?? undefined,
     toTimestamp: filters.to ?? undefined,
     detectedBy: filters.detectedBy,
+    promptName: filters.promptName,
+    promptVersion: filters.promptName ? filters.promptVersion : undefined,
   };
 }
 

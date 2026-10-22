@@ -124,8 +124,8 @@ class SessionsControllerTest {
         fx.withUsage(
                 fx.span(pid, second, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(60), null), 10L, 5L);
 
-        var detail =
-                ok(controller.detail(ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null));
+        var detail = ok(controller.detail(
+                ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(sessionId, detail.id());
         assertEquals(2, detail.traceCount());
         assertEquals(1, detail.unsettledTraces(), "one trace is still receiving spans, so the sum is a lower bound");
@@ -157,8 +157,52 @@ class SessionsControllerTest {
                                         null,
                                         null,
                                         null,
+                                        null,
+                                        null,
                                         null))
                         .getStatusCode());
+    }
+
+    @Test
+    @DisplayName("the sessions list keeps a session when one of its traces holds a span of the prompt")
+    void sessionsListNarrowsOnPromptName() {
+        // Bug: the sessions list ignores promptName while the traces list honours it, so the two views disagree.
+        Instant t0 = Instant.parse("2026-10-01T12:00:00Z");
+        String linked = SubstrateV2Fixtures.sessionId();
+        String other = SubstrateV2Fixtures.sessionId();
+        fx.spanSeed(pid).sessionId(linked).prompt("p", "1").at(t0).write();
+        fx.spanSeed(pid).sessionId(other).at(t0.plusSeconds(10)).write();
+
+        var page = ok(controller.list(
+                ctx, org, proj, 50, null, null, null, null, null, null, null, null, null, null, null, "p", null));
+
+        assertEquals(
+                List.of(linked),
+                page.sessions().stream().map(SessionDtos.SessionListItem::id).toList());
+    }
+
+    @Test
+    @DisplayName("a span view carries the prompt it was produced from, and null for an unlinked span")
+    void spanViewCarriesThePromptFields() {
+        // Bug: the prompt link is stored but never reaches the wire, so the span chip has nothing to show.
+        Instant t0 = Instant.parse("2026-10-01T12:00:00Z");
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        SpanRow root =
+                fx.spanSeed(pid).sessionId(sessionId).prompt("p", "1").at(t0).write();
+        fx.spanSeed(pid)
+                .traceId(root.traceId())
+                .sessionId(sessionId)
+                .parentSpanId(root.id())
+                .at(t0.plusSeconds(1))
+                .write();
+
+        var views = ok(controller.spans(ctx, org, proj, sessionId)).spans();
+
+        assertEquals(
+                List.of(List.of("p", "1"), java.util.Arrays.asList(null, null)),
+                views.stream()
+                        .map(v -> java.util.Arrays.asList(v.promptName(), v.promptVersion()))
+                        .toList());
     }
 
     @Test
@@ -170,8 +214,8 @@ class SessionsControllerTest {
         fx.session(pid, older, t0);
         fx.session(pid, newer, t0.plusSeconds(600));
 
-        var first = ok(
-                controller.list(ctx, org, proj, 1, null, null, null, null, null, null, null, null, null, null, null));
+        var first = ok(controller.list(
+                ctx, org, proj, 1, null, null, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(newer),
                 first.sessions().stream().map(SessionDtos.SessionListItem::id).toList(),
@@ -180,7 +224,23 @@ class SessionsControllerTest {
         assertNull(first.sessions().get(0).traceCount(), "totals are not computed unless include=totals is asked for");
 
         var second = ok(controller.list(
-                ctx, org, proj, 1, first.nextCursor(), null, null, null, null, null, null, null, null, null, null));
+                ctx,
+                org,
+                proj,
+                1,
+                first.nextCursor(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null));
         assertEquals(
                 List.of(older),
                 second.sessions().stream().map(SessionDtos.SessionListItem::id).toList());
@@ -240,7 +300,7 @@ class SessionsControllerTest {
         fx.rollup(pid, t3, t0.plusSeconds(60), null, true);
 
         var page = ok(controller.list(
-                ctx, org, proj, 50, null, "totals", null, null, null, null, null, null, null, null, null));
+                ctx, org, proj, 50, null, "totals", null, null, null, null, null, null, null, null, null, null, null));
         SessionDtos.SessionListItem item = page.sessions().stream()
                 .filter(s -> s.id().equals(sessionId))
                 .findFirst()
@@ -435,8 +495,8 @@ class SessionsControllerTest {
         spans.upsertAll(spanRows);
         String trimmedTrace = traceRows.get(cap).id();
 
-        var detail =
-                ok(controller.detail(ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null));
+        var detail = ok(controller.detail(
+                ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(cap, detail.traces().size());
         assertTrue(detail.tracesTruncated(), "one trace past the cap is a truncated session, not a full one");
         var conversation = reads.conversation(pid, sessionId).orElseThrow();
@@ -496,7 +556,9 @@ class SessionsControllerTest {
                 null,
                 null,
                 null,
-                frustration.id()));
+                frustration.id(),
+                null,
+                null));
         assertEquals(
                 List.of(sessionB, sessionA),
                 flagged.sessions().stream().map(SessionDtos.SessionListItem::id).toList(),
@@ -522,7 +584,9 @@ class SessionsControllerTest {
                 null,
                 "error",
                 null,
-                frustration.id()));
+                frustration.id(),
+                null,
+                null));
         assertEquals(
                 List.of(sessionA),
                 erroredAndFlagged.sessions().stream()
@@ -552,13 +616,27 @@ class SessionsControllerTest {
         var mark =
                 new TraceDtos.DetectionMark(frustration.id(), frustration.name(), flaggedTrace, "span-scored", "trace");
         var filtered = ok(controller.detail(
-                fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, frustration.id()));
+                fctx,
+                forg,
+                fproj,
+                sessionId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                frustration.id(),
+                null,
+                null));
         assertEquals(List.of(flaggedTrace), filtered.matchedTraceIds());
         assertEquals(List.of(mark), filtered.detections());
         assertEquals(2, filtered.traces().size(), "the detail still lists every trace of the session");
 
-        var unfiltered = ok(
-                controller.detail(fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, null));
+        var unfiltered = ok(controller.detail(
+                fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, null, null, null));
         assertNull(unfiltered.matchedTraceIds(), "no filter, so nothing to match against");
         assertEquals(List.of(mark), unfiltered.detections());
     }

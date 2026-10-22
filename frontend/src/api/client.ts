@@ -72,6 +72,18 @@ import {
   type CreateAlertChannel,
   type CapabilityOverrideView,
   type BuildView,
+  type CreatePromptRequest,
+  type CreateVersionRequest,
+  type DeleteResponse,
+  type FolderDeleteResponse,
+  type PlaygroundRunRequest,
+  type PlaygroundRunView,
+  type PromptDetail,
+  type PromptPage,
+  type PromptType,
+  type PromptUsage,
+  type PromptUsageSummary,
+  type PromptVersionView,
 } from "./types";
 import type {
   AddMemberResult,
@@ -330,6 +342,21 @@ export type TraceFilterParams = {
   callSite?: string;
   hasCallSite?: boolean;
   detectedBy?: string;
+  promptName?: string;
+  /** Sent only with promptName; the server ignores it alone. */
+  promptVersion?: string;
+};
+
+/** `name` is an exact match (at most one item); `folder` keeps the names under that prefix. */
+export type PromptListParams = {
+  q?: string;
+  name?: string;
+  folder?: string;
+  label?: string;
+  tag?: string;
+  type?: PromptType;
+  page?: number;
+  limit?: number;
 };
 
 export function projectApi(orgSlug: string, projectSlug: string) {
@@ -464,6 +491,9 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       hasCallSite?: boolean;
       /** A classifier id, or "any". */
       detectedBy?: string;
+      promptName?: string;
+      /** Sent only with promptName; the server ignores it alone. */
+      promptVersion?: string;
       sort?: string;
     }) =>
       http<TracesPageView>(withQuery(`${base}/traces`, params)),
@@ -583,6 +613,37 @@ export function projectApi(orgSlug: string, projectSlug: string) {
 
     previewRedaction: (body: RedactionPreviewRequest) =>
       send<RedactionPreviewView>("POST", `${base}/redaction/preview`, body),
+
+    // Prompts. Routes take the prompt id, so a name with a / never meets a path segment.
+    listPrompts: (params?: PromptListParams) => http<PromptPage>(withQuery(`${base}/prompts`, params)),
+    /** Every prompt name with at least one call in the window; the list page joins it by name. */
+    getPromptUsageSummary: (days?: number) =>
+      http<PromptUsageSummary>(withQuery(`${base}/prompts/usage/summary`, { days })),
+    /** 409 PROMPTS.NAME_EXISTS when the name is taken. */
+    createPrompt: (body: CreatePromptRequest) => send<PromptDetail>("POST", `${base}/prompts`, body),
+    getPrompt: (id: string) => http<PromptDetail>(`${base}/prompts/${enc(id)}`),
+    updatePromptTags: (id: string, tags: string[]) =>
+      send<PromptDetail>("PATCH", `${base}/prompts/${enc(id)}`, { tags }),
+    deletePrompt: (id: string) => send<DeleteResponse>("DELETE", `${base}/prompts/${enc(id)}`),
+    /** Deletes every prompt whose name sits under `path/`. */
+    deletePromptFolder: (path: string) =>
+      send<FolderDeleteResponse>("DELETE", withQuery(`${base}/prompts/folders`, { path })),
+    getPromptVersion: (id: string, version: number) =>
+      http<PromptVersionView>(`${base}/prompts/${enc(id)}/versions/${enc(version)}`),
+    /** The server numbers the version; `labels` move to it. */
+    createPromptVersion: (id: string, body: CreateVersionRequest) =>
+      send<PromptVersionView>("POST", `${base}/prompts/${enc(id)}/versions`, body),
+    /** 409 while the version carries a label, or when it is the only version. */
+    deletePromptVersion: (id: string, version: number) =>
+      send<DeleteResponse>("DELETE", `${base}/prompts/${enc(id)}/versions/${enc(version)}`),
+    /** Replaces the version's labels: each listed label moves here, and an unlisted one leaves it. Never `latest`. */
+    setPromptVersionLabels: (id: string, version: number, labels: string[]) =>
+      send<PromptVersionView>("PUT", `${base}/prompts/${enc(id)}/versions/${enc(version)}/labels`, { labels }),
+    getPromptUsage: (id: string, days?: number) =>
+      http<PromptUsage>(withQuery(`${base}/prompts/${enc(id)}/usage`, { days })),
+    /** One chat call on the org's own provider key; not recorded as a trace. */
+    runPlayground: (body: PlaygroundRunRequest) =>
+      send<PlaygroundRunView>("POST", `${base}/prompts/playground/runs`, body),
 
   };
 }

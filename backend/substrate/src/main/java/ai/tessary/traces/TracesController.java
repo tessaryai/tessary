@@ -118,6 +118,8 @@ public class TracesController {
             @Nullable String level,
             @JsonProperty("error_type") @Nullable String errorType,
             @JsonProperty("call_site_id") @Nullable String callSiteId,
+            @JsonProperty("prompt_name") @Nullable String promptName,
+            @JsonProperty("prompt_version") @Nullable String promptVersion,
             @JsonProperty("input_tokens") @Nullable Long inputTokens,
             @JsonProperty("output_tokens") @Nullable Long outputTokens,
             @JsonProperty("cache_read_tokens") @Nullable Long cacheReadTokens,
@@ -165,13 +167,27 @@ public class TracesController {
             // trace that has not rolled up sorts to the end rather than to either extreme.
             @RequestParam(required = false) @Nullable String sort,
             // A classifier id, or "any": keeps a trace a classifier flagged.
-            @RequestParam(required = false) @Nullable String detectedBy) {
+            @RequestParam(required = false) @Nullable String detectedBy,
+            // Keeps a trace when any of its spans was produced from this managed prompt.
+            @RequestParam(required = false) @Nullable String promptName,
+            // Narrows promptName to the spans that sent this version; ignored without promptName.
+            @RequestParam(required = false) @Nullable String promptVersion) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view traces");
 
         TracePageCodec.Key before = TracePageCodec.decode(cursor);
         var query = new TraceV2Repository.TraceQuery(
-                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
+                model,
+                kind,
+                callSite,
+                hasCallSite,
+                fromTimestamp,
+                toTimestamp,
+                status,
+                q,
+                detectedBy,
+                promptName,
+                promptVersion);
         int pageSize = TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT);
         String projectId = r.project().id();
 
@@ -288,6 +304,8 @@ public class TracesController {
                 s.level(),
                 s.errorType(),
                 s.callSiteId(),
+                s.promptName(),
+                s.promptVersion(),
                 s.inputTokens(),
                 s.outputTokens(),
                 s.cacheReadTokens(),

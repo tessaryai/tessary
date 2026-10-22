@@ -17,6 +17,17 @@ There is one key store behind all of them. The keys on **Settings → API keys**
 
 Admin is the superset family. Write and query are strictly least privilege: the query API refuses a write key, and ingest refuses a query key. Only an admin key satisfies `/mcp`, and it satisfies the other two surfaces as well, so a single `tsy_a_` key works when an application wants one credential instead of three.
 
+### Scopes on prompt routes
+
+Prompt routes accept a key only for the scope the method needs. A write key reaches no prompt route, reads included, so a leaked ingest key cannot read a prompt body or move the `production` label.
+
+| Route family | Reads (`GET`) need | Writes need |
+| --- | --- | --- |
+| The prompts API, `/v1/prompts/**` | `query` or `admin` | `admin` |
+| The Prompts page API, `/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/**` | `query` or `admin` | `admin` |
+
+The [prompts API reference](/reference/prompts-api) lists each route.
+
 <Note>
   The scope letter in the prefix is a readability aid so a write-only key is recognizable at a glance. The stored `scope` column is what the server enforces.
 </Note>
@@ -118,6 +129,8 @@ Each surface answers a missing or wrongly scoped credential in its own idiom. Al
 | Query API | `401` | A failure envelope carrying `UNAUTHORIZED` and `no tenant context` | No bearer header, or a token that fails verification |
 | Query API | `403` | `the query API requires a project-scoped token` | The credential is a cookie session or otherwise carries no project |
 | Query API | `403` | `this API key is not scoped for the query API (needs a query or admin key)` | A write-scoped key |
+| Prompts API | `403` | `the prompts API requires a project-scoped API key` | The credential is a cookie session or otherwise carries no project |
+| Any prompt route | `403` | `this API key cannot read prompts (reads need a query or admin key, writes an admin key)` | A write-scoped key on any prompt route, or a query-scoped key on a write. The message says `change` instead of `read` on a write |
 | MCP endpoint | `401` | `{"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "unauthorized"}}`, with `WWW-Authenticate: Bearer realm="tessary-mcp"` | No bearer header, or a token that fails verification |
 | MCP endpoint | `403` | A JSON-RPC error body carrying `this API key is not scoped for MCP tool access` | A write- or query-scoped key. `/mcp` requires `admin` |
 | Key management | `400` | `unknown key scope '<value>'` | `scope` is not `write`, `query`, or `admin` |
