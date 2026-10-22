@@ -112,7 +112,7 @@ class McpFindingToolsTest {
                 "{\"cause_kind\":\"" + FindingRow.Cause.MALFORMED_RATE + "\",\"workflow_key\":\"workflow-1\","
                         + "\"native_cause_key\":\"cause-key-1\"}");
         // No evidence on the detail: get_finding returns the claim and get_finding_evidence pages the population.
-        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null, null);
     }
 
     /** The same finding after triage ruled, which must never reach an agent. */
@@ -138,6 +138,19 @@ class McpFindingToolsTest {
                         List.of(),
                         "2026-06-03T00:00:00Z",
                         f.triageStatus(),
+                        f.triageProgress(),
+                        new BehaviorFindingView.TriageRunView(
+                                "run-1",
+                                1,
+                                "2026-06-03T00:00:00Z",
+                                "2026-06-03T00:04:00Z",
+                                12,
+                                "Reading flagged answers 51 to 58",
+                                "Read flagged answers 1 to 50 of 58",
+                                4_000L,
+                                "Let me read the rest",
+                                5_000L,
+                                null),
                         f.humanVerdictAt(),
                         f.caseId()),
                 base.metric(),
@@ -169,6 +182,8 @@ class McpFindingToolsTest {
         // A person's ruling uses the same columns, so humanVerdictAt would still tell RCA that a person decided.
         assertTrue(finding.get("humanVerdictAt").isNull(), "humanVerdictAt reached an agent");
         assertEquals(0, finding.get("triageCitations").size(), "triage citations reached an agent");
+        // The run's step words say what triage read, which is triage leaking into RCA.
+        assertTrue(finding.get("triageRun").isNull(), "the triage run reached an agent");
         assertFalse(
                 finding.toString().contains("the claim is sound"),
                 "the triage summary's text is still somewhere on the wire");
@@ -272,7 +287,7 @@ class McpFindingToolsTest {
                         + "\"failures\":{\"cur\":8},"
                         + "\"failing_traces\":[\"trace-secret-1\",\"trace-secret-2\"],"
                         + "\"onset_at\":\"2026-06-01T00:00:00Z\",\"window\":{\"kind\":\"recomputed\"}}");
-        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null, null);
     }
 
     /** The summary carries every R3 number, and the agent view still drops {@code failing_traces}. */
@@ -326,7 +341,7 @@ class McpFindingToolsTest {
                 List.of(),
                 2L,
                 1L);
-        return BehaviorFindingDetailView.of(row, malformed, null, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, malformed, null, null, null, null, null, null);
     }
 
     @Test
@@ -367,7 +382,7 @@ class McpFindingToolsTest {
                 86_400L,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
-        return BehaviorFindingDetailView.of(row, null, secretLeak, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, null, secretLeak, null, null, null, null, null);
     }
 
     /**
@@ -405,7 +420,7 @@ class McpFindingToolsTest {
                 "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\",\"basis\":\"event_count\","
                         + "\"observed\":7,\"threshold\":5,\"window_seconds\":86400,"
                         + "\"window_start\":\"2026-06-01T00:00:00Z\",\"window_end\":\"2026-06-02T00:00:00Z\"}");
-        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null, null);
     }
 
     /**

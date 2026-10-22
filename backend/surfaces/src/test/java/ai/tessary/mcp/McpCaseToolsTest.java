@@ -311,7 +311,8 @@ class McpCaseToolsTest {
                 "agentic",
                 true,
                 "2026-08-15T01:00:00Z",
-                "2026-08-15T01:20:00Z");
+                "2026-08-15T01:20:00Z",
+                null);
     }
 
     private static CaseView sampleCase(String id, String reference, String state) {
@@ -342,7 +343,9 @@ class McpCaseToolsTest {
                 1L,
                 "fnd-1",
                 null,
-                // cause + rca_verdict: an unanalysed case, like most in the queue.
+                // cause, rca_verdict and the run mark: an unanalysed case, like most in the queue.
+                null,
+                null,
                 null,
                 null);
     }

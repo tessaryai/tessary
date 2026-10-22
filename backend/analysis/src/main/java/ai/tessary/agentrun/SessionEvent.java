@@ -30,7 +30,10 @@ public sealed interface SessionEvent {
     /** The reply ended; its usage is what it spent. */
     record MessageEnd(long seq, AgentSpanTelemetry.AgentUsage usage, EndReason reason) implements SessionEvent {}
 
-    /** @param kind {@code start}, {@code agent} or {@code opencode_exit} */
+    /**
+     * @param kind {@code start}, {@code agent} or {@code opencode_exit}, or for a model provider that stopped the reply
+     * {@code provider_rejected}, {@code request_refused} or {@code provider_unavailable}
+     */
     record Failure(long seq, String kind, String detail) implements SessionEvent {}
 
     /**

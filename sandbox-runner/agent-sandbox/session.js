@@ -22,7 +22,13 @@ const {
   remoteMcp,
   writeDossier,
   describeError,
+  git,
+  quarantineRepo,
+  onsetCommit,
+  refusalOf,
+  SESSION_LANES,
   WORK,
+  REPO,
 } = require('./agent-stream');
 const { startMcpRelay } = require('./mcp-relay');
 
@@ -38,6 +44,8 @@ const MAX_BODY_BYTES = 1 << 20;
 const MIN_SECRET_CHARS = 32;
 const MAX_TOOL_CALLS = 1000;
 const SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
+const HEAD_SHA = /^[0-9a-f]{7,64}$/;
+const LANE_NAMES = Object.keys(SESSION_LANES).join(', ');
 
 function readSessionFile(file) {
   if (!file) throw new Error('session.json: no path given');
@@ -54,8 +62,22 @@ function readSessionFile(file) {
     throw new Error('session.json: not valid JSON');
   }
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('session.json: not an object');
-  const { system_prompt: systemPrompt, files = {}, model, mcp_servers: servers, max_tool_calls_per_message: maxToolCalls } = input;
-  if (typeof systemPrompt !== 'string' || !systemPrompt) throw new Error('session.json: system_prompt must be a non-empty string');
+  const { lane, system_prompt: systemPrompt, files = {}, model, mcp_servers: servers, max_tool_calls_per_message: maxToolCalls, clone } = input;
+  const posture = Object.hasOwn(SESSION_LANES, lane) ? SESSION_LANES[lane] : null;
+  if (!posture) throw new Error(`session.json: lane must be one of ${LANE_NAMES}`);
+  const promptAbsent = systemPrompt === undefined || systemPrompt === null;
+  if (!(posture.promptOptional && promptAbsent) && (typeof systemPrompt !== 'string' || !systemPrompt)) {
+    throw new Error('session.json: system_prompt must be a non-empty string');
+  }
+  if (clone !== undefined && clone !== null) {
+    if (!posture.clones) throw new Error('session.json: only the rca lane clones');
+    if (typeof clone !== 'object' || typeof clone.url !== 'string' || !clone.url || typeof clone.head_sha !== 'string' || !HEAD_SHA.test(clone.head_sha)) {
+      throw new Error(`session.json: clone needs a url and a head_sha matching ${HEAD_SHA.source}`);
+    }
+    if (clone.onset_at !== undefined && clone.onset_at !== null && typeof clone.onset_at !== 'string') {
+      throw new Error('session.json: clone.onset_at must be a string');
+    }
+  }
   if (!files || typeof files !== 'object' || Array.isArray(files) || Object.values(files).some((c) => typeof c !== 'string')) {
     throw new Error('session.json: files must map relative paths to strings');
   }
@@ -75,7 +97,15 @@ function readSessionFile(file) {
   if (!Number.isInteger(maxToolCalls) || maxToolCalls < 1 || maxToolCalls > MAX_TOOL_CALLS) {
     throw new Error(`session.json: max_tool_calls_per_message must be an integer from 1 to ${MAX_TOOL_CALLS}`);
   }
-  return { systemPrompt, files, model, servers, maxToolCalls };
+  return {
+    posture,
+    systemPrompt: promptAbsent ? null : systemPrompt,
+    files,
+    model,
+    servers,
+    maxToolCalls,
+    clone: clone ? { url: clone.url, headSha: clone.head_sha, onsetAt: clone.onset_at || null } : null,
+  };
 }
 
 /** OpenCode names an MCP tool `<server>_<tool>`; server names hold no `_`, so the first one splits. */
@@ -305,6 +335,8 @@ function createReplyTracker({ log, serverNames, steps, maxToolCalls }) {
           }
         }
       }
+      const refusal = refusalOf(own);
+      if (refusal) log.emit('error', { kind: refusal.kind, detail: providerDetail(refusal) });
       const usage = sumUsage(own.map((m) => ({ usage: usageOf(m.info) })));
       const stepsTaken = own.filter((m) => !m.info.summary).length;
       const reason = reply.limitHit ? 'limit' : reply.abortRequested ? 'aborted' : stepsTaken >= steps ? 'limit' : 'done';
@@ -312,6 +344,11 @@ function createReplyTracker({ log, serverNames, steps, maxToolCalls }) {
       reply = null;
     },
   };
+}
+
+function providerDetail({ kind, message, status }) {
+  const suffix = Number.isInteger(status) ? ` (HTTP ${status})` : '';
+  return scrubToken(`model provider: ${message || kind}${suffix}`).slice(0, DETAIL_CHARS);
 }
 
 function readBody(req, limit) {
@@ -418,6 +455,8 @@ async function main() {
   let tracker = null;
   let sessionId = null;
   let model = null;
+  let agent = null;
+  let onset = null;
   let stopping = false;
   let lost = false;
   let settleTimer = null;
@@ -530,10 +569,11 @@ async function main() {
   async function onMessage(text) {
     if (tracker.open) return { status: 409, body: { kind: 'busy' } };
     tracker.begin();
+    const sent = onset === null ? text : text.split('{onset_commit}').join(onset);
     try {
       await client.session.promptAsync({
         path: { id: sessionId },
-        body: { agent: SESSION_AGENT, model, parts: [{ type: 'text', text }] },
+        body: { ...(agent ? { agent } : {}), model, parts: [{ type: 'text', text: sent }] },
       });
       return { status: 202 };
     } catch (e) {
@@ -574,14 +614,25 @@ async function main() {
   try {
     if (loaded.error) throw loaded.error;
     const { input } = loaded;
+    const { posture } = input;
+    if (input.clone) {
+      git(['clone', '--quiet', '--', input.clone.url, REPO]);
+      git(['-C', REPO, 'checkout', '--quiet', input.clone.headSha]);
+      quarantineRepo();
+      onset = onsetCommit(input.clone.onsetAt);
+    }
     writeDossier(path.join(WORK, 'dossier'), input.files);
+    if (posture.checksDir) fs.mkdirSync(path.join(WORK, posture.checksDir), { recursive: true });
     relay = await startMcpRelay({ servers: input.servers, workDir: WORK });
     const steps = input.maxToolCalls + 1;
+    agent = input.systemPrompt ? SESSION_AGENT : null;
     server = await startServer({
-      permission: basePermission({ edit: { '*': 'allow' } }, { scratchDirs: true }),
+      permission: basePermission({ edit: posture.edit }, { scratchDirs: posture.scratchDirs }),
       lsp: {},
       mcp: remoteMcp(relay.urls),
-      agent: { [SESSION_AGENT]: customAgent({ prompt: input.systemPrompt, steps }) },
+      agent: agent
+        ? { [SESSION_AGENT]: customAgent({ prompt: input.systemPrompt, steps }) }
+        : { build: { maxSteps: steps } },
     });
     const { createOpencodeClient } = await import('@opencode-ai/sdk');
     client = createOpencodeClient({ baseUrl: server.url, fetch: makeFetch(REQUEST_MS), throwOnError: true });

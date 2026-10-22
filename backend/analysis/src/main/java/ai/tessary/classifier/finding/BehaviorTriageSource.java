@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.agentrun.AgentRunRepository;
+import ai.tessary.agentrun.StepWords;
 import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierService;
@@ -32,6 +34,7 @@ import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -105,6 +108,9 @@ public class BehaviorTriageSource implements TriageSource {
     /** Empty in the open edition. */
     private final FindingAdapters adapters;
 
+    /** Each finding's newest triage run, so a page can show the step a run is on and how many it took. */
+    private final AgentRunRepository runs;
+
     public BehaviorTriageSource(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -124,7 +130,8 @@ public class BehaviorTriageSource implements TriageSource {
             FrustrationDetailService frustrations,
             GroundednessRateRepository groundednessRates,
             GroundednessDetailService groundednessDetail,
-            FindingAdapters adapters) {
+            FindingAdapters adapters,
+            AgentRunRepository runs) {
         this.findings = findings;
         this.evidence = evidence;
         this.signals = signals;
@@ -144,6 +151,7 @@ public class BehaviorTriageSource implements TriageSource {
         this.groundednessRates = groundednessRates;
         this.groundednessDetail = groundednessDetail;
         this.adapters = adapters;
+        this.runs = runs;
     }
 
     @Override
@@ -164,10 +172,12 @@ public class BehaviorTriageSource implements TriageSource {
                 unavailable);
         // One evidence query per page, not one per row.
         List<String> visibleIds = visible.stream().map(FindingRow::id).toList();
-        // Without this read a dead-lettered triage looks identical to one still running.
-        Map<String, BehaviorTriageJobRepository.FailedTriage> failed = jobs.failedByFinding(projectId, visibleIds);
+        // Without this read a queued, held or dead-lettered triage looks identical to one still running.
+        Map<String, BehaviorTriageJobRepository.TriageJobState> states = jobs.statesByFinding(projectId, visibleIds);
+        Map<String, AgentRunRepository.RunSummary> latest =
+                runs.latestBySubjects(projectId, AgentRunRepository.Lane.TRIAGE, visibleIds);
         return visible.stream()
-                .map(f -> BehaviorFindingView.of(f, failed.get(f.id())))
+                .map(f -> BehaviorFindingView.of(f, states.get(f.id()), latest.get(f.id())))
                 .toList();
     }
 
@@ -176,8 +186,8 @@ public class BehaviorTriageSource implements TriageSource {
         if (findings.findById(projectId, findingId).isEmpty()) return Optional.empty();
         // A withheld classifier's finding must 404, and this source has claimed the id, so throwing is the contract.
         FindingRow finding = requireReachableFinding(projectId, findingId);
-        BehaviorTriageJobRepository.FailedTriage failed =
-                jobs.failedByFinding(projectId, List.of(findingId)).get(findingId);
+        BehaviorTriageJobRepository.TriageJobState job =
+                jobs.statesByFinding(projectId, List.of(findingId)).get(findingId);
         return Optional.of(BehaviorFindingDetailView.of(
                 finding,
                 malformedOutputs.detail(finding),
@@ -185,7 +195,9 @@ public class BehaviorTriageSource implements TriageSource {
                 frustrations.detail(finding),
                 groundednessDetail.detail(finding),
                 adapters.detail(finding).orElse(null),
-                failed));
+                job,
+                runs.latestBySubjects(projectId, AgentRunRepository.Lane.TRIAGE, List.of(findingId))
+                        .get(findingId)));
     }
 
     @Override
@@ -259,7 +271,23 @@ public class BehaviorTriageSource implements TriageSource {
         // spends a run.
         return findings.findById(job.projectId(), job.findingId())
                 .filter(finding -> FindingRow.Status.OPEN.equals(finding.status()) && finding.triageVerdict() == null)
-                .map(finding -> new TriageBrief(engine.dossier(job, finding), engine.buildPrompt(job, finding)));
+                .map(finding -> new TriageBrief(
+                        engine.dossier(job, finding), engine.buildPrompt(job, finding), stepWords(finding)));
+    }
+
+    /** What the run's steps call the finding's evidence rows, and how many of each the finding cites. */
+    static StepWords.Context stepWords(FindingRow finding) {
+        Map<String, Long> totals = new LinkedHashMap<>();
+        for (String role : FindingEvidenceRow.Role.ALL) totals.put(role, finding.evidenceCount(role));
+        Map<String, String> nouns =
+                switch (finding.classifierKey()) {
+                    case BuiltInDetector.Kind.GROUNDEDNESS ->
+                        Map.of(FindingEvidenceRow.Role.WITNESS, "flagged answers");
+                    case BuiltInDetector.Kind.FRUSTRATION ->
+                        Map.of(FindingEvidenceRow.Role.WITNESS, "flagged sessions");
+                    default -> Map.of();
+                };
+        return new StepWords.Context(nouns, totals);
     }
 
     /**

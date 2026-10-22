@@ -16,7 +16,7 @@ const { startMcpRelay } = require('./mcp-relay');
 const TRIAGE_AGENT = 'tessary-triage';
 
 // opencode's own scratch dirs, where its bash tool tells the model it may write; denying them would
-// contradict that. Triage only.
+// contradict that. Only the run lane under a system prompt and the agent_run and triage sessions.
 const OPENCODE_TMP_GLOB = path.join(os.tmpdir(), 'opencode', '*');
 const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
   process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
@@ -179,6 +179,28 @@ function quarantineRepo() {
     }
   }
 }
+
+/** The newest commit on the clone's HEAD committed before `onsetAt`, or "unknown". */
+function onsetCommit(onsetAt) {
+  if (!onsetAt) return 'unknown';
+  try {
+    return git(['-C', REPO, 'rev-list', '-1', `--before=${onsetAt}`, 'HEAD']) || 'unknown';
+  } catch (e) {
+    console.error(`onset commit unresolved: ${describeError(e)}`);
+    return 'unknown';
+  }
+}
+
+/**
+ * The posture of each session.js lane. Edit is a blanket allow where allowed, because opencode
+ * matches an edit glob against `/` when WORK is not a git repo. rca is read-only, may clone, and
+ * runs opencode's default agent when no system prompt is given, as runAgent does without one.
+ */
+const SESSION_LANES = Object.freeze({
+  agent_run: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: null, clones: false, promptOptional: false }),
+  triage: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: 'checks', clones: false, promptOptional: false }),
+  rca: Object.freeze({ edit: { '*': 'deny' }, scratchDirs: false, checksDir: null, clones: true, promptOptional: true }),
+});
 
 // --- server lifecycle --------------------------------------------------------
 //
@@ -559,12 +581,53 @@ function remoteMcp(urls) {
   return mcp;
 }
 
+function providerFailure(kind, message, status, turns) {
+  return Object.assign(new Error(`model provider: ${scrubToken(message || kind)}`.slice(0, CAUSE_MAX)), {
+    providerKind: kind,
+    providerStatus: Number.isInteger(status) ? status : undefined,
+    turns,
+  });
+}
+
+/**
+ * opencode records a provider error on the assistant message once it stops retrying. Read here, it fails the run at
+ * once instead of reading as an empty completion that a fresh session repeats.
+ */
+function refusalOf(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = (messages[i] && messages[i].info) || messages[i];
+    if (!msg || msg.role !== 'assistant') continue;
+    const error = msg.error;
+    if (!error || error.name === 'MessageAbortedError') return null;
+    const data = error.data || {};
+    const status = Number(data.statusCode);
+    if (error.name === 'ProviderAuthError' || status === 401 || status === 403) {
+      return { kind: 'provider_rejected', message: data.message, status };
+    }
+    if (error.name !== 'APIError') return null;
+    // A retryable error recorded here is one opencode already retried, about a minute's worth, and gave up on.
+    const kind = data.isRetryable === false ? 'request_refused' : 'provider_unavailable';
+    return { kind, message: data.message, status };
+  }
+  return null;
+}
+
+/** What lane.js prints for a failed run. Every field is numeric or an enum the launcher allow-lists. */
+function failureEnvelope(e) {
+  const out = { is_error: true, error: describeError(e), usage: sumUsage(e && e.turns) };
+  if (e && e.providerKind) {
+    out.kind = e.providerKind;
+    if (Number.isInteger(e.providerStatus)) out.provider_status = e.providerStatus;
+  }
+  return JSON.stringify(out);
+}
+
 
 /**
  * spec: model (`provider/model`), prompt, jsonSchema (null asks for prose: no schema retry),
  * permission (required), mcp, timeoutMs (bounds the fetch), maxTurns (opencode steps at maxTurns - 2
- * so the forced text-only turn lands with margin), and systemPrompt (triage: puts mcp-relay in front of
- * the platform token and runs under TRIAGE_AGENT).
+ * so the forced text-only turn lands with margin), and systemPrompt (puts mcp-relay in front of the
+ * platform token and runs under TRIAGE_AGENT).
  */
 async function runAgent(spec) {
   const startMs = Date.now();
@@ -641,6 +704,10 @@ async function runAgent(spec) {
       const messages = Array.isArray(listed) ? listed : (listed && listed.data) || [];
 
       turns = toTurns(messages, prompt);
+      const refusal = refusalOf(messages);
+      if (refusal) {
+        throw providerFailure(refusal.kind, refusal.message, refusal.status, allTurns.concat(turns));
+      }
       const info = (reply && (reply.info || reply.data || reply)) || {};
       text =
         textOf(partsOf(reply && reply.parts ? reply : info)) || (turns.length ? turns[turns.length - 1].text : '');
@@ -725,6 +792,9 @@ async function runAgent(spec) {
 
 module.exports = {
   git,
+  onsetCommit,
+  refusalOf,
+  SESSION_LANES,
   runAgent,
   startServer,
   makeFetch,
@@ -736,6 +806,7 @@ module.exports = {
   remoteMcp,
   writeDossier,
   describeError,
+  failureEnvelope,
   quarantineRepo,
   sumUsage,
   WORK,

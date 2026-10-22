@@ -9,6 +9,7 @@ which its `FindingAdapter` supplies ([below](#method-text-from-a-findingadapter)
 |---|---|---|
 | `analysis` · `triage/` | `classifier/finding/BehaviorTriageEngine` | Layer-2: is a detector's claim about production traffic true? |
 | `analysis` · `rca/` | `rca/AgenticRcaEngine` | Layer-3: why does a confirmed finding happen? One prompt for every classifier. |
+| `analysis` · `agent/` | `agentrun/AgentSessionRunner` | Any task run over a launcher session that ends in one JSON answer (triage, RCA): the schema instruction appended to the first message, and the one correction a reply without a usable answer gets. The same words the one-shot lanes sent, so moving a lane onto sessions does not change what the model reads. |
 
 ### The RCA files
 

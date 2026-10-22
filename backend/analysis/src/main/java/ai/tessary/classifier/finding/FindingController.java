@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.agentrun.AgentRunDtos.RunStepsView;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
@@ -76,6 +77,21 @@ public class FindingController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         return ApiResponse.ok(service.findingEvidenceSpans(
                 r.project().id(), id, role, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
+    }
+
+    /**
+     * The newest triage run's steps after step {@code after}, oldest first. A client that holds a running step passes
+     * {@code after} one below it, so the step comes back with its end.
+     */
+    @GetMapping("/{id}/triage-steps")
+    public ApiResponse<RunStepsView> triageSteps(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @RequestParam(defaultValue = "0") int after) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        return ApiResponse.ok(service.triageSteps(r.project().id(), id, after));
     }
 
     /**

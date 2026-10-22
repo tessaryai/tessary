@@ -28,7 +28,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { startLauncher, postJson, tempDir } = require('./fixtures/launcher-harness');
 
-// Every /rca and /triage request now carries its own `credential` object — the launcher
+// Every /runs request carries its own `credential` object: the launcher
 // no longer reads a provider secret from process.env, so every payload below needs one. A BEDROCK
 // credential mirrors what these tests' AWS_REGION env var used to feed providerConfig() directly.
 const BEDROCK_CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
@@ -140,7 +140,7 @@ test('docker backend: container-create carries the required hardening flags', as
   });
 
   try {
-    const res = await postJson(port, '/triage', {
+    const res = await postJson(port, '/runs', {
       files: [], prompt: 'x', json_schema: {}, mcp: {}, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
     }, 'testkey');
     assert.equal(res.status, 200);
@@ -192,8 +192,8 @@ test('docker backend: SANDBOX_DOCKER_CONCURRENCY=1 serializes two concurrent run
   try {
     const payload = { files: [], prompt: 'x', json_schema: {}, mcp: {}, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL };
     const [a, b] = await Promise.all([
-      postJson(port, '/triage', payload, 'testkey'),
-      postJson(port, '/triage', payload, 'testkey'),
+      postJson(port, '/runs', payload, 'testkey'),
+      postJson(port, '/runs', payload, 'testkey'),
     ]);
     assert.equal(a.status, 200);
     assert.equal(b.status, 200);
@@ -233,7 +233,7 @@ test('docker backend: pulls AGENT_IMAGE when the daemon does not already have it
   });
 
   try {
-    const res = await postJson(port, '/triage', {
+    const res = await postJson(port, '/runs', {
       files: [], prompt: 'x', json_schema: {}, mcp: {}, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
     }, 'testkey');
     assert.equal(res.status, 200, `expected the pull-then-create path to succeed, got: ${res.body}`);
@@ -273,7 +273,7 @@ test('docker backend: is the ACTUAL default when SANDBOX_BACKEND is unset', asyn
   });
 
   try {
-    const res = await postJson(port, '/triage', {
+    const res = await postJson(port, '/runs', {
       files: [], prompt: 'x', json_schema: {}, mcp: {}, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
     }, 'testkey');
     assert.equal(res.status, 200, `default backend must be docker with no cloud creds set, got: ${res.body}`);
@@ -289,44 +289,6 @@ test('docker backend: is the ACTUAL default when SANDBOX_BACKEND is unset', asyn
 // NetworkMode:'none' — and were removed along with their routes. The posture constant survives with no
 // caller (see server.js) and test/sandbox-posture.test.js covers it at the unit level; there is no
 // route left to drive it through this fake daemon.
-
-test('docker backend: two agentic routes share the SAME semaphore under concurrency=1', async () => {
-  const scratch = tempDir('docker-backend-test-');
-  const socketPath = path.join(scratch, 'docker.sock');
-  const workDir = path.join(scratch, 'work');
-  fs.mkdirSync(workDir, { recursive: true });
-
-  const WAIT_MS = 200;
-  const daemon = await startFakeDaemon(socketPath, { waitDelayMs: WAIT_MS });
-  const { child, port } = await startLauncher({
-    SANDBOX_BACKEND: 'docker',
-    DOCKER_SOCKET_PATH: socketPath,
-    AGENT_IMAGE: 'test-agent:latest',
-    LAUNCHER_WORK_DIR: workDir,
-    SANDBOX_WORK_VOLUME: 'test-work-volume',
-    SANDBOX_API_KEY: 'testkey',
-    SANDBOX_DOCKER_CONCURRENCY: '1',
-    AWS_REGION: 'us-east-1',
-  });
-
-  try {
-    const [rca, triage] = await Promise.all([
-      postJson(port, '/rca', { files: {}, prompt: 'x', json_schema: {}, mcp: { url: 'https://example.test/mcp' }, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL }, 'testkey'),
-      postJson(port, '/triage', { files: {}, prompt: 'x', json_schema: {}, mcp: { url: 'https://example.test/mcp' }, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL }, 'testkey'),
-    ]);
-    assert.equal(rca.status, 200);
-    assert.equal(triage.status, 200);
-    assert.equal(daemon.createTimestamps.length, 2);
-    // If either route held a second, independent limiter (the bug this test guards against), both
-    // creates would land back-to-back instead of serializing.
-    const gap = daemon.createTimestamps[1] - daemon.createTimestamps[0];
-    assert.ok(gap >= WAIT_MS * 0.8, `expected /rca and /triage to serialize through one semaphore (gap=${gap}ms, want >= ~${WAIT_MS}ms)`);
-  } finally {
-    child.kill();
-    daemon.server.close();
-    fs.rmSync(scratch, { recursive: true, force: true });
-  }
-});
 
 // ---- SANDBOX_NETWORK_ISOLATION -------------------------------------------------------------
 // Every sibling used to run on a dedicated bridge, "never the tessary service network". That is now
@@ -354,7 +316,7 @@ async function runOneAgentJob(env, daemonOpts) {
     ...env,
   });
   try {
-    const res = await postJson(port, '/triage', {
+    const res = await postJson(port, '/runs', {
       files: [], prompt: 'x', json_schema: {}, mcp: {}, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
     }, 'testkey');
     assert.equal(res.status, 200);

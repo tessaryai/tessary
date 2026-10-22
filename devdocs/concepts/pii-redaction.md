@@ -63,9 +63,10 @@ for the one narrow exception, an anonymous heartbeat that never carries content)
 | **Bundle / manual import** (the `.tessary/` bundle from the evals plugin) | `pipeline/ImportController.java` → `PipelineService` | **No.** The controller does not reference redaction, and it does not go through `SubstrateWriter`. Whatever free text the bundle carries — grader and SOP prose, examples, call-site descriptions — is stored as authored. It also carries no capability gate |
 | **Slack mention relay** | *(not in this tree — see [`devdocs/reference/architecture.md`](../reference/architecture.md)'s `slack/` row)*. The paid platform code posts the raw message `text` to the platform's mention endpoint | **No** |
 | **Sandbox-authored triage / RCA output** | `rca/E2bRcaSandbox.java`, `classifier/finding/E2bTriageSandbox.java` | **No.** Neither file references `redact`. The report text an agent writes back can quote the evidence it was given, and it is stored as written |
+| **Triage / RCA step words** | `agentrun/StepWords.java` → `agentrun/AgentRunRepository.java` (`agent_run_step`) | **No.** A step's words come from the tool call's input only (a path, a search pattern cut to 40 characters, a short sha) and drop a value shaped like a token, but a search pattern the agent typed can still hold text from the evidence, and it is stored as written |
 
 Only the first row passes through the guard. `SubstrateWriter.enqueue` has exactly one production
-caller. A Controller who needs redaction on the other three should redact client-side, before
+caller. A Controller who needs redaction on the others should redact client-side, before
 transmission (layer 2).
 
 ### What redaction does not catch, on the path where it does run

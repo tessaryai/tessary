@@ -147,6 +147,13 @@ class LauncherAgentSessionClientTest {
                         new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.GROK, "grok-4.6", "xai/grok-4.6")));
     }
 
+    private void aGrokLaneWithItsCredential(ModelLane lane) {
+        when(modelSettings.resolveAgenticModel(PROJECT, lane))
+                .thenReturn(Optional.of(
+                        new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.GROK, "grok-4.6", "xai/grok-4.6")));
+        when(credentials.resolve(PROJECT, ModelProvider.GROK)).thenReturn(START_CRED);
+    }
+
     private void aGrokLaneWithItsCredential() {
         aGrokLane();
         when(credentials.resolve(PROJECT, ModelProvider.GROK)).thenReturn(START_CRED);
@@ -273,6 +280,86 @@ class LauncherAgentSessionClientTest {
             for (String secret : List.of("xai-key", MCP_TOKEN, LAUNCHER_KEY)) {
                 assertFalse(line.contains(secret), secret + " leaked into: " + line);
             }
+        }
+    }
+
+    private static final String CLONE_URL = "https://x-access-token:ghs_clonetoken@github.example/acme/app.git";
+
+    private static AgentSessionClient.Start rcaStart() {
+        return new AgentSessionClient.Start(
+                PROJECT,
+                ModelLane.RCA,
+                null,
+                Map.of("notes.md", "read me"),
+                List.of(),
+                120_000L,
+                38,
+                SUBJECT,
+                new AgentSessionClient.Clone(CLONE_URL, "a41c0de9f2", "2026-10-19T08:00:00Z"));
+    }
+
+    /**
+     * An RCA session that never gets its repository, or that is given up while a big repository still clones: a start
+     * with a clone sends clone_url, head_sha and onset_at, sends no system prompt when it has none, and waits the
+     * longer start timeout.
+     */
+    @Test
+    void aStartWithACloneSendsCloneUrlHeadShaAndOnsetAtAndWaitsTheLongerTimeout() throws Exception {
+        aGrokLaneWithItsCredential(ModelLane.RCA);
+        aGrokLane();
+        fake.answer("POST", "/sessions", 201, "{\"session_id\":\"s-1\"}");
+        fake.answer("POST", "/sessions", 502, "{\"kind\":\"timeout\"}");
+
+        client().start(rcaStart());
+
+        ObjectNode body = (ObjectNode) MAPPER.readTree(fake.seen().getFirst().body());
+        assertEquals(
+                List.of(CLONE_URL, "a41c0de9f2", "2026-10-19T08:00:00Z"),
+                List.of(
+                        body.path("clone_url").asText(),
+                        body.path("head_sha").asText(),
+                        body.path("onset_at").asText()));
+        assertFalse(body.has("system_prompt"), "a start with no system prompt sends none");
+
+        TessaryException withClone = assertThrows(TessaryException.class, () -> client().start(rcaStart()));
+        TessaryException without = assertThrows(TessaryException.class, () -> client().start(START));
+        assertEquals("The agent run hit its 300000ms wall clock", withClone.getMessage());
+        assertEquals("The agent run hit its 120000ms wall clock", without.getMessage());
+    }
+
+    /** A start without a clone sends no clone field, so the launcher never treats a triage session as an RCA one. */
+    @Test
+    void aStartWithoutACloneSendsNoCloneField() throws Exception {
+        aGrokLaneWithItsCredential();
+        fake.answer("POST", "/sessions", 201, "{\"session_id\":\"s-1\"}");
+
+        client().start(START);
+
+        ObjectNode body = (ObjectNode) MAPPER.readTree(fake.seen().getFirst().body());
+        assertEquals(
+                List.of(false, false, false),
+                List.of(body.has("clone_url"), body.has("head_sha"), body.has("onset_at")));
+    }
+
+    /** A clone token in the session log: the clone URL is not in any log line, exception or record string. */
+    @Test
+    void theCloneUrlIsNotInAnyLogLineOrException() {
+        aGrokLaneWithItsCredential(ModelLane.RCA);
+        fake.answer("POST", "/sessions", 201, "{\"session_id\":\"s-1\"}");
+        fake.answer("POST", "/sessions", 502, "{\"kind\":\"script_exit\",\"detail\":\"x\"}");
+        client().start(rcaStart());
+
+        TessaryException ex = assertThrows(TessaryException.class, () -> client().start(rcaStart()));
+
+        List<String> rendered = new java.util.ArrayList<>();
+        rendered.add(String.valueOf(ex.getMessage()));
+        rendered.add(rcaStart().toString());
+        for (ILoggingEvent event : log.events()) {
+            rendered.add(event.getFormattedMessage() + " " + event.getKeyValuePairs());
+        }
+        for (String line : rendered) {
+            assertFalse(line.contains("ghs_clonetoken"), "the clone token leaked into: " + line);
+            assertFalse(line.contains("github.example"), "the clone URL leaked into: " + line);
         }
     }
 

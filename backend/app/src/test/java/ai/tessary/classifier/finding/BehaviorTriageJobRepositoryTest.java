@@ -5,13 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
+import ai.tessary.classifier.finding.BehaviorTriageJobRepository.TriageJobState;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -87,7 +88,7 @@ record BehaviorTriageJobRepositoryTest(BehaviorTriageJobRepository jobs, TenantS
 
     /**
      * A run that exhausted its attempts is reported per finding with its attempts and the last error it
-     * recorded, so the findings page can say it failed and why; a finding with no dead run is absent.
+     * recorded, so the findings page can say it failed and why; a finding with no job is absent.
      */
     @Test
     void aDeadLetteredTriageIsReportedWithItsAttemptsAndLastError() {
@@ -99,14 +100,147 @@ record BehaviorTriageJobRepositoryTest(BehaviorTriageJobRepository jobs, TenantS
         jobs.markRetryable(jobId, "kind=timeout", 0);
         jobs.failExhausted(1);
 
+        Map<String, TriageJobState> states = jobs.statesByFinding(pid, List.of(findingId, Ids.ulid()));
+
+        assertEquals(List.of(findingId), List.copyOf(states.keySet()));
+        TriageJobState dead = Objects.requireNonNull(states.get(findingId));
+        assertEquals("dead", dead.status());
+        assertEquals(1, dead.attempts());
+        assertEquals(MAX_ATTEMPTS, dead.maxAttempts());
+        assertEquals("exhausted: 1 attempts (hung or crashed mid-triage); last: kind=timeout", dead.lastError());
+    }
+
+    /**
+     * Only a running job carries a lease owner. The bug: a release or a retry kept the owner, so a run waiting out
+     * its backoff, or held on a missing key, read as running.
+     */
+    @Test
+    void onlyARunningJobCarriesItsLeaseOwner() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "triage-job-owner").project().id();
+        String findingId = Ids.ulid();
+        String jobId = jobs.enqueue(pid, findingId, Instant.now().toString()).jobId();
+
+        claimMine(pid);
+        assertEquals("owner-a", state(pid, findingId).leaseOwner());
+
+        jobs.markRetryable(jobId, "kind=timeout", 0);
+        assertNull(state(pid, findingId).leaseOwner(), "a run waiting out its backoff is not running");
+
+        claimMine(pid);
+        jobs.releaseWithoutAttempt(jobId, "launcher down");
+        assertNull(state(pid, findingId).leaseOwner(), "a released run is not running");
+    }
+
+    /**
+     * A refusal only a person can clear holds the job with its code, refunds the attempt, and waits out the re-check
+     * window. The press that follows the fix runs it again at once rather than after that window, and clears what
+     * held it. The bug: a fixed key still waited half an hour, because the press landed on the held job and did
+     * nothing.
+     */
+    @Test
+    void aHeldJobKeepsItsCodeAndRunsAgainWhenSomeonePressesRunTriage() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "triage-job-held").project().id();
+        String findingId = Ids.ulid();
+        String jobId = jobs.enqueue(pid, findingId, Instant.now().toString()).jobId();
+        claimMine(pid);
+
+        jobs.holdUntilConfigured(jobId, "invalid x-api-key", "CLASSIFIER.TRIAGE_PROVIDER_REJECTED", 1800);
+        TriageJobState held = state(pid, findingId);
+        assertEquals("CLASSIFIER.TRIAGE_PROVIDER_REJECTED", held.holdCode());
+        assertEquals(0, held.attempts(), "holding refunds the attempt");
+        assertNull(held.leaseOwner());
+        assertEquals(List.of(), mine(pid), "a held job waits out its re-check window");
+
+        jobs.enqueue(pid, findingId, Instant.now().toString());
+        TriageJobState rearmed = state(pid, findingId);
+        assertNull(rearmed.holdCode());
+        assertNull(rearmed.lastError());
+        assertEquals(1, claimMine(pid).attempts(), "the press makes the held job due at once");
+
+        jobs.markDone(jobId);
+        assertEquals(Map.of(), jobs.statesByFinding(pid, List.of(findingId)), "a finished job reports no state");
+    }
+
+    /** A press on a job waiting out an ordinary retry changes nothing: only a hold is brought forward. */
+    @Test
+    void aPressDoesNotBringForwardAnOrdinaryRetry() {
+        String pid = TenantFixture.bootstrap(tenants, "triage-job-retry-press")
+                .project()
+                .id();
+        String findingId = Ids.ulid();
+        String jobId = jobs.enqueue(pid, findingId, Instant.now().toString()).jobId();
+        claimMine(pid);
+        jobs.markRetryable(jobId, "kind=timeout", 600);
+
+        jobs.enqueue(pid, findingId, Instant.now().toString());
+
+        assertEquals(List.of(), mine(pid));
+        assertEquals("kind=timeout", state(pid, findingId).lastError());
+    }
+
+    /**
+     * A job's state reads back every column the finding page words it from: a queued job has no due time, a retrying
+     * one carries when it is due, and each carries the dead-letter cooldown (a retry that cannot say when, or a failed
+     * triage that cannot say when it can run again).
+     */
+    @Test
+    void aJobsStateReadsBackWhenItIsDueAndTheCooldown() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "triage-job-due").project().id();
+        String findingId = Ids.ulid();
+        String queuedAt = Instant.now().toString();
+        String jobId = jobs.enqueue(pid, findingId, queuedAt).jobId();
         assertEquals(
-                Map.of(
-                        findingId,
-                        new FailedTriage(
-                                findingId,
-                                1,
-                                "exhausted: 1 attempts (hung or crashed mid-triage); last: kind=timeout")),
-                jobs.failedByFinding(pid, List.of(findingId, Ids.ulid())));
+                new TriageJobState(
+                        findingId, "pending", 0, MAX_ATTEMPTS, null, null, null, queuedAt, queuedAt, null, 1800),
+                state(pid, findingId));
+
+        claimMine(pid);
+        jobs.markRetryable(jobId, "kind=timeout", 30);
+        Row retried = row(jobId);
+        TriageJobState retrying = state(pid, findingId);
+
+        assertEquals(retried.leaseExpiresAt(), retrying.leaseExpiresAt());
+        assertEquals(1800, retrying.cooldownSeconds());
+    }
+
+    /**
+     * A queued job keeps the time it was asked for through a claim that bounced off a full launcher, and a press that
+     * runs a held job again starts its clock again (a queued clock reset to 0:00 on every bounce).
+     */
+    @Test
+    void aJobKeepsTheTimeItWasQueuedThroughABounceAndAPressRestartsIt() {
+        String pid = TenantFixture.bootstrap(tenants, "triage-job-queued-at")
+                .project()
+                .id();
+        String findingId = Ids.ulid();
+        String queuedAt = "2026-09-01T00:00:00Z";
+        String jobId = jobs.enqueue(pid, findingId, queuedAt).jobId();
+
+        claimMine(pid);
+        jobs.releaseWithoutAttempt(jobId, null, 0);
+
+        assertEquals(queuedAt, state(pid, findingId).queuedAt());
+
+        claimMine(pid);
+        jobs.holdUntilConfigured(jobId, "invalid key", "CLASSIFIER.TRIAGE_PROVIDER_REJECTED", 600);
+        String pressedAt = Instant.now().toString();
+        jobs.enqueue(pid, findingId, pressedAt);
+
+        assertEquals(pressedAt, state(pid, findingId).queuedAt());
+    }
+
+    private TriageJobState state(String pid, String findingId) {
+        return Objects.requireNonNull(
+                jobs.statesByFinding(pid, List.of(findingId)).get(findingId));
+    }
+
+    private List<BehaviorTriageJobRow> mine(String pid) {
+        return jobs.claimBatch("owner-a", 500, 600, MAX_ATTEMPTS).stream()
+                .filter(j -> j.projectId().equals(pid))
+                .toList();
     }
 
     private BehaviorTriageJobRow claimMine(String pid) {

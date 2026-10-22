@@ -1683,6 +1683,27 @@
         ],
         "type" : "object"
       },
+      "ApiResponseRunStepsView" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/RunStepsView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponseSearchView" : {
         "properties" : {
           "data" : {
@@ -2392,6 +2413,26 @@
             },
             "type" : "array"
           },
+          "triageProgress" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/TriageProgress"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "triageRun" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/TriageRunView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "triageStatus" : {
             "type" : "string"
           },
@@ -2432,6 +2473,8 @@
           "traceCount",
           "triageAction",
           "triageCitations",
+          "triageProgress",
+          "triageRun",
           "triageStatus",
           "triageSummary",
           "triageVerdict",
@@ -3235,6 +3278,18 @@
           "opened_at" : {
             "type" : "string"
           },
+          "rca_run_since" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "rca_run_state" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "rca_verdict" : {
             "type" : [
               "string",
@@ -3305,6 +3360,8 @@
           "metric",
           "onset_at",
           "opened_at",
+          "rca_run_since",
+          "rca_run_state",
           "rca_verdict",
           "reference",
           "resolution",
@@ -8231,6 +8288,16 @@
             },
             "type" : "array"
           },
+          "run" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/RcaRunView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "status" : {
             "type" : "string"
           },
@@ -8281,6 +8348,7 @@
           "repo_available",
           "report_kind",
           "ruled_out",
+          "run",
           "status",
           "subject_id",
           "subject_kind",
@@ -8290,6 +8358,91 @@
           "window_from",
           "window_split",
           "window_to"
+        ],
+        "type" : "object"
+      },
+      "RcaRunView" : {
+        "properties" : {
+          "doing" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "ended_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "last_step" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "last_step_ms" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "note" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "note_ms" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "queued_at" : {
+            "type" : "string"
+          },
+          "run_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "started_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "step_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "stop_code" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "doing",
+          "ended_at",
+          "last_step",
+          "last_step_ms",
+          "note",
+          "note_ms",
+          "queued_at",
+          "run_id",
+          "started_at",
+          "state",
+          "step_count",
+          "stop_code"
         ],
         "type" : "object"
       },
@@ -8582,6 +8735,29 @@
           "measurement",
           "passed",
           "question"
+        ],
+        "type" : "object"
+      },
+      "RunStepsView" : {
+        "properties" : {
+          "run_id" : {
+            "type" : "string"
+          },
+          "step_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "steps" : {
+            "items" : {
+              "$ref" : "#/components/schemas/StepView"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "run_id",
+          "step_count",
+          "steps"
         ],
         "type" : "object"
       },
@@ -9936,6 +10112,46 @@
         ],
         "type" : "object"
       },
+      "StepView" : {
+        "properties" : {
+          "doing" : {
+            "type" : "string"
+          },
+          "ended_ms" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "ok" : {
+            "type" : [
+              "boolean",
+              "null"
+            ]
+          },
+          "seq" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "started_ms" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "words" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "doing",
+          "ended_ms",
+          "ok",
+          "seq",
+          "started_ms",
+          "words"
+        ],
+        "type" : "object"
+      },
       "SubstrateStatusView" : {
         "properties" : {
           "has_live" : {
@@ -10595,6 +10811,139 @@
         "required" : [
           "next_cursor",
           "traces"
+        ],
+        "type" : "object"
+      },
+      "TriageProgress" : {
+        "properties" : {
+          "attempts" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "cooldownSeconds" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "heldBy" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "maxAttempts" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "queuedAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "retryAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "revivableAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "startedAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "attempts",
+          "cooldownSeconds",
+          "heldBy",
+          "maxAttempts",
+          "queuedAt",
+          "retryAt",
+          "revivableAt",
+          "startedAt"
+        ],
+        "type" : "object"
+      },
+      "TriageRunView" : {
+        "properties" : {
+          "attempt" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "doing" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "endedAt" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "lastStep" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "lastStepMs" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "note" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "noteMs" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "startedAt" : {
+            "type" : "string"
+          },
+          "stepCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "stopCode" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "attempt",
+          "doing",
+          "endedAt",
+          "id",
+          "lastStep",
+          "lastStepMs",
+          "note",
+          "noteMs",
+          "startedAt",
+          "stepCount",
+          "stopCode"
         ],
         "type" : "object"
       },
@@ -14933,6 +15282,70 @@
         ]
       }
     },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/triage-steps" : {
+      "get" : {
+        "operationId" : "FindingController_triageSteps",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "after",
+            "required" : false,
+            "schema" : {
+              "default" : 0,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseRunStepsView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "finding-controller"
+        ]
+      }
+    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/git" : {
       "delete" : {
         "operationId" : "GitIntegrationController_disconnect",
@@ -16313,6 +16726,70 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiResponseRcaReportView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "rca-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/rca/{id}/steps" : {
+      "get" : {
+        "operationId" : "RcaController_steps",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "after",
+            "required" : false,
+            "schema" : {
+              "default" : 0,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseRunStepsView"
                 }
               }
             },

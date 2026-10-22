@@ -50,7 +50,7 @@ export const GROUNDEDNESS_FINDING_DETAIL: BehaviorFindingDetail = {
     callSiteId: "support-agent", caseId: null, causeKey: "groundedness_rate:support-agent",
     causeKind: "groundedness_rate", firstSeenAt: "2026-09-23T13:40:00Z", lastSeenAt: "2026-09-23T13:40:00Z",
     humanVerdictAt: null, status: "open", traceCount: 58, triageAction: null, triageCitations: [],
-    triageStatus: "pending", triageSummary: null, triageVerdict: null, triagedAt: null, workflowKey: "support-agent",
+    triageStatus: "pending", triageProgress: null, triageRun: null, triageSummary: null, triageVerdict: null, triagedAt: null, workflowKey: "support-agent",
   },
   armedWindow: null, frustration: null, groundedness: GROUNDEDNESS_DETAIL, classifierDetail: null,
   malformedOutput: null, metric: null, secretLeak: null, toolError: null,
@@ -62,7 +62,7 @@ export const GROUNDEDNESS_REPORT: RcaReport = {
   subject_id: "support-agent", subject_kind: "call_site", subject_label: "support-agent", metric: "groundedness_rate",
   current_value: 0.064, prior_value: 0.021, delta: 0.043, window_from: "2026-09-22T09:12:00Z",
   window_split: "2026-09-23T09:12:00Z", window_to: "2026-09-23T15:00:00Z", created_at: "2026-09-23T14:20:00Z",
-  completed_at: "2026-09-23T14:30:00Z", repo_available: true, ruled_out: [],
+  completed_at: "2026-09-23T14:30:00Z", repo_available: true, ruled_out: [], run: null,
   causes: [
     {
       title: "The retriever still serves the old pricing and policy pages", confidence: "high", change: null,
@@ -124,7 +124,8 @@ export const GROUNDEDNESS_CASE_DETAIL: CaseDetail = {
     basis: "The flagged-answer rate rose above this call site's learned rate.", cause: null, baseline_value: 0.021,
     current_value: 0.064, delta: 0.043, disposition: null, finding_count: 1, last_seen_at: "2026-09-23T15:00:00Z",
     latest_finding_id: "fnd-1", locked_at: null, metric: "groundedness_rate", onset_at: "2026-09-23T09:12:00Z",
-    opened_at: "2026-09-23T13:52:00Z", rca_verdict: "causes_identified", resolution: null, resolution_reason: null,
+    opened_at: "2026-09-23T13:52:00Z", rca_verdict: "causes_identified", rca_run_state: null, rca_run_since: null,
+    resolution: null, resolution_reason: null,
     resolved_at: null, resolved_by: null, severity: 1, state: "open", subject_id: "support-agent",
     subject_kind: "call_site", subject_label: "support-agent",
   },

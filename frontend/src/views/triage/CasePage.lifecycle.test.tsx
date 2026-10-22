@@ -10,19 +10,21 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
-  CaseDetail, ClassifierDetail, FlaggedAnswer, FrustratedConversation, FrustrationDetail, RcaReport,
+  CaseDetail, ClassifierDetail, FlaggedAnswer, FrustratedConversation, FrustrationDetail, RcaReport, RcaRun,
 } from "../../api/types";
 import { ApiError } from "../../api/types";
 import type { CapabilitiesView, Me } from "../../api/types-auth";
 import { AuthProvider } from "../../auth/AuthContext";
 import { renderRoute } from "../../test/render";
 import { CasePage } from "./CasePage";
+import { RUN_POLL_MS } from "../components/runWords";
 import { stamp } from "../classifiers/shared";
 import { FLAGGED_LIST_ID } from "../classifiers/classifierStory";
 import {
   CURRENT_GROUNDEDNESS_REPORT, FLAGGED_ANSWER, GROUNDEDNESS_CASE_DETAIL, GROUNDEDNESS_DETAIL, GROUNDEDNESS_REPORT,
 } from "../../test/groundednessFixtures";
 import { api, auth } from "../../test/api";
+import { stepsPage, TRIAGE_STEPS } from "../../test/runFixtures";
 
 const OWNER: Me = {
   id: "user-1", email: "owner@example.com", orgs: [{ id: "org-1", slug: "acme", name: "Acme", role: "owner" }],
@@ -293,7 +295,6 @@ describe("running RCA", () => {
 
     await waitFor(() => expect(api.runCaseRca).toHaveBeenCalledWith("case-1"));
     expect(button("Analyzing…").disabled).toBe(true);
-    expect(screen.getByText("Reading the evidence and looking for the cause.")).toBeTruthy();
   });
 
   /** Catches "Re-run RCA" coalescing onto the finished report, so the press starts nothing. */
@@ -328,7 +329,7 @@ describe("running RCA", () => {
     try {
       api.getCase.mockResolvedValue(plainCase({ rca_report_id: "rca-1" }));
       api.getRcaReport
-        .mockResolvedValueOnce({ ...ANSWER_REPORT, status: "pending" })
+        .mockResolvedValueOnce({ ...ANSWER_REPORT, status: "pending", run: rcaRun({ state: "queued" }) })
         .mockResolvedValue(ANSWER_REPORT);
       renderPage();
       await heading(BASE.case.title);
@@ -352,6 +353,164 @@ describe("running RCA", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Connect repository" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+const rcaRun = (over: Partial<RcaRun> = {}): RcaRun => ({
+  state: "running", queued_at: new Date(Date.now() - 400_000).toISOString(), run_id: "run-9",
+  started_at: new Date(Date.now() - 358_000).toISOString(), ended_at: null, step_count: 13,
+  doing: "Comparing the index sources before and after commit a41c0de", last_step: null, last_step_ms: null, note: null,
+  note_ms: null, stop_code: null, ...over,
+});
+
+/** The case while its report runs: the case read inlines no report, so the page reads it until it ends. */
+const runningCase = () => plainCase({ rca_report_id: "rca-1" }, { rca_run_state: "running" });
+
+const markName = /^(Queued|Running|Stopped)$/;
+const theBar = () => screen.getByRole("img", { name: markName }).closest("div.rounded-card")!;
+const follows = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+describe("the RCA run bar", () => {
+  // Bug: the bar sat somewhere other than after the header, or the old Analyzing card stayed beside it.
+  it.each([
+    ["queued", { ...ANSWER_REPORT, status: "pending", run: rcaRun({ state: "queued", run_id: null, started_at: null, step_count: 0, doing: null }) },
+      "Queued", "Queued. It starts when a worker is free."],
+    ["running", { ...ANSWER_REPORT, status: "claimed", run: rcaRun() }, "Running",
+      "Comparing the index sources before and after commit a41c0de…"],
+  ] as const)("the bar shows after the header while RCA is %s", async (_state, polled, mark, line) => {
+    api.getCase.mockResolvedValue(runningCase());
+    api.getRcaReport.mockResolvedValue(polled);
+    renderPage();
+
+    expect(await screen.findByText(line)).toBeTruthy();
+    expect(screen.getByRole("img", { name: mark })).toBeTruthy();
+    expect(follows(screen.getByRole("banner"), theBar())).toBe(true);
+    expect(follows(theBar(), screen.getByRole("heading", { name: "How big" }))).toBe(true);
+    expect(screen.queryByText("Reading the evidence and looking for the cause.")).toBeNull();
+    expect(button("Analyzing…").disabled).toBe(true);
+  });
+
+  // Bug: between two tool calls, and while the agent wrote its analysis, the bar read "Thinking…" for minutes.
+  it.each([
+    ["its newest words", { last_step: "Read commit a41c0de", last_step_ms: 9_000, note: "Writing the analysis", note_ms: 40_000 },
+      "Writing the analysis…"],
+    ["its newest step", { last_step: "Read commit a41c0de", last_step_ms: 50_000, note: "Let me compare them", note_ms: 40_000 },
+      "Read commit a41c0de"],
+  ] as const)("a running bar between steps says %s", async (_what, latest, line) => {
+    api.getCase.mockResolvedValue(runningCase());
+    api.getRcaReport.mockResolvedValue({ ...ANSWER_REPORT, status: "claimed", run: rcaRun({ doing: null, ...latest }) });
+    renderPage();
+
+    expect(await screen.findByText(line)).toBeTruthy();
+  });
+
+  // Bug: the step and its time were missing from a running bar, or its steps were read before anyone asked.
+  it("a running bar names its step and time, and reads steps only once opened", async () => {
+    api.getCase.mockResolvedValue(runningCase());
+    api.getRcaReport.mockResolvedValue({ ...ANSWER_REPORT, status: "claimed", run: rcaRun() });
+    api.getRcaSteps.mockResolvedValue(stepsPage(TRIAGE_STEPS, { runId: "run-9" }));
+    renderPage();
+
+    expect(await screen.findByText("step 13 · 5m 58s")).toBeTruthy();
+    expect(api.getRcaSteps).not.toHaveBeenCalled();
+    fireEvent.click(button("Show steps"));
+    expect(await screen.findByText("Read the finding and its numbers")).toBeTruthy();
+    expect(api.getRcaSteps).toHaveBeenCalledWith("rca-1", 0);
+  });
+
+  // Bug: the page said nothing while the report's first read was still on its way.
+  it("says the run is queued from the case read before the report arrives", async () => {
+    api.getCase.mockResolvedValue(plainCase({ rca_report_id: "rca-1" }, {
+      rca_run_state: "queued", rca_run_since: new Date(Date.now() - 4_000).toISOString(),
+    }));
+    api.getRcaReport.mockReturnValue(new Promise(() => {}));
+    renderPage();
+
+    expect(await screen.findByText("Queued. It starts when a worker is free.")).toBeTruthy();
+    expect(screen.getByText("0:04")).toBeTruthy();
+  });
+
+  // Bug: a stopped RCA could not say why, nor where to fix it.
+  it("a stopped RCA names its cause and the fix", async () => {
+    auth.getCapabilities.mockResolvedValue({
+      capabilities: { rca_enabled: true, byo_provider_keys_enabled: true } as CapabilitiesView["capabilities"],
+    });
+    api.getRcaSteps.mockResolvedValue(stepsPage(TRIAGE_STEPS.slice(0, 6), { runId: "run-9" }));
+    api.getCase.mockResolvedValue(plainCase({
+      rca_report_id: "rca-1",
+      rca: {
+        ...ANSWER_REPORT, status: "failed",
+        run: rcaRun({ state: "stopped", step_count: 6, doing: null, ended_at: new Date().toISOString(), stop_code: "RCA.PROVIDER_REJECTED" }),
+      },
+    }));
+    renderPage();
+
+    expect(
+      await screen.findByText("Stopped at step 6: the provider rejected the stored key. Fix the key, then run RCA again."),
+    ).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Stopped" })).toBeTruthy();
+    expect((await screen.findByRole("link", { name: "Open Providers" })).getAttribute("href")).toBe(
+      "/orgs/acme/projects/default/settings/providers",
+    );
+    expect(button("Re-run RCA").disabled).toBe(false);
+    fireEvent.click(button("Show steps"));
+    expect(await screen.findByText("Wrote checks/unsupported_terms.py")).toBeTruthy();
+    expect(api.getRcaSteps).toHaveBeenCalledWith("rca-1", 0);
+  });
+
+  // Bug: the page kept reading the report every few seconds after the run ended, and the list kept its stale mark.
+  it("the case page stops reading the report once the run ends", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.getCase.mockResolvedValueOnce(runningCase()).mockResolvedValue(plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1" }));
+      api.getRcaReport
+        .mockResolvedValueOnce({ ...ANSWER_REPORT, status: "claimed", run: rcaRun() })
+        .mockResolvedValue({ ...ANSWER_REPORT, run: rcaRun({ state: "done", ended_at: new Date().toISOString(), doing: null }) });
+      renderPage();
+      expect(await screen.findByRole("img", { name: "Running" })).toBeTruthy();
+
+      await act(() => vi.advanceTimersByTimeAsync(RUN_POLL_MS));
+
+      expect(await screen.findByText("The serving model changed under the call site")).toBeTruthy();
+      await waitFor(() => expect(api.getCase).toHaveBeenCalledTimes(2));
+      expect(screen.queryByRole("img", { name: markName })).toBeNull();
+      const reads = api.getRcaReport.mock.calls.length;
+      await act(() => vi.advanceTimersByTimeAsync(RUN_POLL_MS * 3));
+      expect(api.getRcaReport.mock.calls.length).toBe(reads);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Bug: once the analysis landed, a "Did 23 steps" fold stayed beside it, which nobody needs once the analysis is in.
+  it("an analyzed case shows no steps once the run ends", async () => {
+    api.getCase.mockResolvedValue(plainCase({
+      rca_report_id: "rca-1",
+      rca: {
+        ...ANSWER_REPORT,
+        run: rcaRun({
+          state: "done", step_count: 23, doing: null, started_at: "2026-09-23T14:00:00Z", ended_at: "2026-09-23T14:09:00Z",
+        }),
+      },
+    }));
+    renderPage();
+
+    expect(await screen.findByRole("link", { name: "Read the full analysis" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Did \d+ steps?/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show steps" })).toBeNull();
+    expect(screen.queryByRole("img", { name: markName })).toBeNull();
+    expect(api.getRcaSteps).not.toHaveBeenCalled();
+  });
+
+  // Bug: the page changed when nothing runs.
+  it("a case never analyzed shows no bar", async () => {
+    api.getCase.mockResolvedValue(plainCase());
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.queryByRole("img", { name: markName })).toBeNull();
+    expect(button("Run RCA").disabled).toBe(false);
+    expect(api.getRcaReport).not.toHaveBeenCalled();
   });
 });
 
@@ -416,13 +575,17 @@ describe("the answer and the working behind it", () => {
     expect(screen.queryByText("What else was checked")).toBeNull();
   });
 
+  // Bug: a failed run read as an empty answer. A report that failed before runs were recorded carries no run or code,
+  // so its bar says the agent ended without an answer.
   it("says a failed run did not finish, rather than showing an empty answer", async () => {
     api.getCase.mockResolvedValue(plainCase({ rca: { ...ANSWER_REPORT, status: "failed" }, rca_report_id: "rca-1" }));
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.getByText(/The analysis did not finish/)).toBeTruthy();
+    expect(screen.getByText("Stopped: the agent ended without an answer. Run RCA again.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /steps/ })).toBeNull();
     expect(screen.queryByText("The serving model changed under the call site")).toBeNull();
+    expect(screen.queryByText("What else was checked")).toBeNull();
   });
 
   /** Catches the summary repeated under the headline, where it competed with the Why block. */

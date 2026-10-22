@@ -108,8 +108,6 @@ These are the ones a self-hosted install normally sets:
 | `EVALS_RETENTION_DETECTION_TTL_DAYS` | `TESSARY_RETENTION_DETECTION_TTL_DAYS` |
 | `EVALS_INGEST_SPOOL_MODE` | `TESSARY_INGEST_SPOOL_MODE` |
 | `EVALS_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS` | `TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS` |
-| `EVALS_RCA_AGENTIC_LAUNCHER_URL` | `TESSARY_RCA_AGENTIC_LAUNCHER_URL` |
-| `EVALS_RCA_AGENTIC_LAUNCHER_API_KEY` | `TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY` |
 | `EVALS_RCA_AGENTIC_MCP_BASE_URL` | `TESSARY_RCA_AGENTIC_MCP_BASE_URL` |
 | `EVALS_CLASSIFIER_TRIAGE_MCP_BASE_URL` | `TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL` |
 | `EVALS_OBSERVER_ENCODER_URL` | `TESSARY_OBSERVER_ENCODER_URL` |
@@ -178,6 +176,10 @@ Every project gains a `frustration` classifier, and it starts switched off becau
 ## One-time: a groundedness classifier appears, switched off
 
 From v1.3.0, every project gains a `groundedness` classifier, and it starts switched off because it needs a model running on a GPU you provide: a Mac with Apple silicon, or a GPU instance on AWS. Nothing changes until you turn it on under **Classifiers** and set up the model. See [Catch answers your documents don't support](/classifiers/groundedness).
+
+## One-time: RCA uses the shared launcher settings
+
+RCA no longer has launcher settings of its own. `TESSARY_RCA_AGENTIC_LAUNCHER_URL` and `TESSARY_RCA_AGENTIC_LAUNCHER_API_KEY` are gone, and RCA now runs on the same launcher as triage: `TESSARY_OBSERVER_AGENTIC_LAUNCHER_URL` and `TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY`. `docker-compose.yml` sets both, so a default install needs no change. If you set only the RCA pair, set the shared pair to the same values, or every RCA stops before it starts.
 
 ## How migrations work
 

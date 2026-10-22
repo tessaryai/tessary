@@ -20,8 +20,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { startLauncher, postJson, tempDir } = require('./fixtures/launcher-harness');
 
-// Every /rca and /triage request now carries its own `credential` object — see
-// docker-backend.test.js's identical constant for why.
+// Every /runs request carries its own `credential` object; see docker-backend.test.js's identical
+// constant for why.
 const BEDROCK_CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
 
 const LOCALHOST_URLS = [
@@ -33,44 +33,42 @@ const LOCALHOST_URLS = [
   'http://[::ffff:127.0.0.1]:8000', // Node's URL parser normalizes this to [::ffff:7f00:1]
 ];
 
-for (const route of ['/rca', '/triage']) {
-  test(`e2b backend: ${route} rejects a localhost mcp.url before creating a sandbox`, async () => {
-    const { child, port } = await startLauncher({
-      SANDBOX_BACKEND: 'e2b',
-      E2B_API_KEY: 'fake-e2b-key',
-      SANDBOX_API_KEY: 'testkey',
-    });
-
-    try {
-      const payload = { files: {}, prompt: 'x', json_schema: {}, mcp: { url: 'http://localhost:8000', token: 't' }, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL };
-      const res = await postJson(port, route, payload, 'testkey');
-      assert.equal(res.status, 502, `expected the pre-flight reject, got: ${res.body}`);
-      const parsed = JSON.parse(res.body);
-      assert.equal(parsed.kind, 'bad_request');
-      assert.match(parsed.detail, /localhost|unreachable|mcp\.url/i);
-    } finally {
-      child.kill();
-    }
+test('e2b backend: /runs rejects a localhost mcp.url before creating a sandbox', async () => {
+  const { child, port } = await startLauncher({
+    SANDBOX_BACKEND: 'e2b',
+    E2B_API_KEY: 'fake-e2b-key',
+    SANDBOX_API_KEY: 'testkey',
   });
 
-  test(`e2b backend: ${route} rejects a missing mcp.url before creating a sandbox`, async () => {
-    const { child, port } = await startLauncher({
-      SANDBOX_BACKEND: 'e2b',
-      E2B_API_KEY: 'fake-e2b-key',
-      SANDBOX_API_KEY: 'testkey',
-    });
+  try {
+    const payload = { files: {}, prompt: 'x', json_schema: {}, mcp: { url: 'http://localhost:8000', token: 't' }, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL };
+    const res = await postJson(port, '/runs', payload, 'testkey');
+    assert.equal(res.status, 502, `expected the pre-flight reject, got: ${res.body}`);
+    const parsed = JSON.parse(res.body);
+    assert.equal(parsed.kind, 'bad_request');
+    assert.match(parsed.detail, /localhost|unreachable|mcp\.url/i);
+  } finally {
+    child.kill();
+  }
+});
 
-    try {
-      const payload = { files: {}, prompt: 'x', json_schema: {}, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL }; // no mcp at all
-      const res = await postJson(port, route, payload, 'testkey');
-      assert.equal(res.status, 502, `expected the pre-flight reject, got: ${res.body}`);
-      const parsed = JSON.parse(res.body);
-      assert.equal(parsed.kind, 'bad_request');
-    } finally {
-      child.kill();
-    }
+test('e2b backend: /runs rejects a missing mcp.url before creating a sandbox', async () => {
+  const { child, port } = await startLauncher({
+    SANDBOX_BACKEND: 'e2b',
+    E2B_API_KEY: 'fake-e2b-key',
+    SANDBOX_API_KEY: 'testkey',
   });
-}
+
+  try {
+    const payload = { files: {}, prompt: 'x', json_schema: {}, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL }; // no mcp at all
+    const res = await postJson(port, '/runs', payload, 'testkey');
+    assert.equal(res.status, 502, `expected the pre-flight reject, got: ${res.body}`);
+    const parsed = JSON.parse(res.body);
+    assert.equal(parsed.kind, 'bad_request');
+  } finally {
+    child.kill();
+  }
+});
 
 for (const rawUrl of LOCALHOST_URLS) {
   test(`e2b backend: rejects ${rawUrl} as a localhost form`, async () => {
@@ -81,7 +79,7 @@ for (const rawUrl of LOCALHOST_URLS) {
     });
 
     try {
-      const res = await postJson(port, '/triage', {
+      const res = await postJson(port, '/runs', {
         files: {}, prompt: 'x', json_schema: {}, mcp: { url: rawUrl, token: 't' }, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
       }, 'testkey');
       assert.equal(res.status, 502, `expected the pre-flight reject for ${rawUrl}, got: ${res.body}`);
@@ -99,7 +97,7 @@ test('docker backend: the SAME localhost mcp.url is accepted unchanged (guard is
   fs.mkdirSync(workDir, { recursive: true });
 
   // Minimal fake Docker Engine API — enough of the shapes runScriptInDockerInner needs to
-  // complete one /triage round trip, mirroring docker-backend.test.js's own fake daemon.
+  // complete one /runs round trip, mirroring docker-backend.test.js's own fake daemon.
   const server = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
@@ -146,7 +144,7 @@ test('docker backend: the SAME localhost mcp.url is accepted unchanged (guard is
 
   try {
     // docker-compose.dev.yml's own default (http://localhost) — must keep working unchanged.
-    const res = await postJson(port, '/triage', {
+    const res = await postJson(port, '/runs', {
       files: [], prompt: 'x', json_schema: {}, mcp: { url: 'http://localhost', token: 't' }, timeout_ms: 10000, credential: BEDROCK_CREDENTIAL,
     }, 'testkey');
     assert.equal(res.status, 200, `expected the docker backend to accept a localhost mcp.url unchanged, got: ${res.body}`);

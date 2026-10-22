@@ -576,6 +576,25 @@ describe("a drift classifier's findings, detections and reset", () => {
     expect(api.resolveBehaviorFinding.mock.calls[0]).toEqual(["f-1", "expected"]);
   });
 
+  // Bug: once the button lost its inline words, a blocked or failed finding here read the same as one never triaged;
+  // the row says so in red text, with no icon, and still offers the run again.
+  it("a blocked finding on the configure page says so in red text with no icon", async () => {
+    api.listClassifiers.mockResolvedValue([COST]);
+    api.listBehaviorFindings.mockResolvedValue({
+      findings: [finding("f-b", { triageStatus: "blocked" }), finding("f-x", { triageStatus: "failed" }), finding("f-q", { triageStatus: "queued" })],
+    });
+    renderPage("clf-c");
+
+    const row = async (id: string) => (await screen.findByText(`Cost rose on ${id}`)).parentElement!;
+    for (const [id, words] of [["f-b", "Triage blocked"], ["f-x", "Triage failed"]]) {
+      const r = await row(id);
+      expect(within(r).getByText(words).className).toContain("text-error");
+      expect(r.querySelector("svg")).toBeNull();
+      expect((within(r).getByRole("button", { name: "Run triage again" }) as HTMLButtonElement).disabled).toBe(false);
+    }
+    expect(within(await row("f-q")).queryByText("Queued")).toBeNull();
+  });
+
   // Bug: Triage, reached from the breadcrumb within the staleTime, still lists a finding just ruled or triaged here.
   it("marks Triage's findings stale when a finding is triaged or ruled here", async () => {
     api.listClassifiers.mockResolvedValue([COST]);

@@ -274,8 +274,8 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     /**
      * Pure so a table can drive every status/kind pair. A 502 with {@code timeout}, {@code script_exit},
-     * {@code bad_request} or {@code bad_output} is this run's; any other or missing kind is the launcher's. Other 4xx
-     * are facts about this request.
+     * {@code bad_request}, {@code bad_output} or a model provider's failure is this run's; any other or missing kind is
+     * the launcher's. Other 4xx are facts about this request.
      */
     static AgentRunError classify(int status, String body) {
         if (status == 401 || status == 403 || status == 404) return AgentRunError.LAUNCHER_MISCONFIGURED;
@@ -283,7 +283,8 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
             if (status != 502) return AgentRunError.LAUNCHER_UNAVAILABLE;
             return switch (kindOf(body)) {
                 case "timeout" -> AgentRunError.TIMED_OUT;
-                case "script_exit", "bad_request" -> AgentRunError.RUN_FAILED;
+                case "script_exit", "bad_request", "provider_rejected", "request_refused", "provider_unavailable" ->
+                    AgentRunError.RUN_FAILED;
                 case "bad_output" -> AgentRunError.BAD_OUTPUT;
                 default -> AgentRunError.LAUNCHER_UNAVAILABLE;
             };

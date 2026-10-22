@@ -10,6 +10,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.agentrun.StepWords;
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.git.GitIntegrationRepository;
 import ai.tessary.git.GitIntegrationRow;
@@ -175,12 +177,33 @@ class AgenticRcaEngineTest {
                         AgenticRcaEngine.JSON_SCHEMA,
                         "https://tessary.test/mcp",
                         "tsk_plain",
-                        "rpt-1")),
+                        "rpt-1",
+                        "job-1",
+                        new StepWords.Context(Map.of(), Map.of("witness", 2L)))),
                 sandbox.requests);
         assertEquals(
                 new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.NO_CAUSE_FOUND, "s", List.of(), List.of(), "## d", false),
                 result);
+    }
+
+    /**
+     * The steps of a groundedness or frustration RCA call the flagged rows what they are and count pages against the
+     * flagged total; any other classifier keeps the generic noun (a step that says "Read flagged rows 1 to 100" of
+     * answers, or reads past the evidence).
+     */
+    @ParameterizedTest
+    @CsvSource({
+        BuiltInDetector.Kind.GROUNDEDNESS + ", flagged answers",
+        BuiltInDetector.Kind.FRUSTRATION + ", flagged sessions",
+        BuiltInDetector.Kind.TOOL_ERROR + ","
+    })
+    void theStepWordsNameTheClassifiersFlaggedRowsAndTheirTotal(String classifierKey, @Nullable String noun) {
+        StepWords.Context words = AgenticRcaEngine.stepWords(
+                classifierKey, new AgenticRcaEngine.Evidence(Set.of("t1"), Set.of(), false, 58, "traces"));
+
+        assertEquals(noun == null ? Map.of() : Map.of("witness", noun), words.roleNouns());
+        assertEquals(Map.of("witness", 58L), words.roleTotals());
     }
 
     /** No method file in the dossier (a user or regex classifier): the prompt does not point at one. */

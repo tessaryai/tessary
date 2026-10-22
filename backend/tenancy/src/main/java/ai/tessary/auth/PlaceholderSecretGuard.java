@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.auth;
 
-import ai.tessary.config.RcaProperties;
+import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TessaryProperties;
 import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
@@ -42,12 +42,13 @@ public class PlaceholderSecretGuard {
 
     private final TessaryProperties tessary;
     private final AuthProperties auth;
-    private final RcaProperties rca;
+    /** Holds the launcher key every agent lane shares. */
+    private final ObserverProperties observer;
 
-    public PlaceholderSecretGuard(TessaryProperties tessary, AuthProperties auth, RcaProperties rca) {
+    public PlaceholderSecretGuard(TessaryProperties tessary, AuthProperties auth, ObserverProperties observer) {
         this.tessary = tessary;
         this.auth = auth;
-        this.rca = rca;
+        this.observer = observer;
     }
 
     @PostConstruct
@@ -59,7 +60,7 @@ public class PlaceholderSecretGuard {
         if (SEALING_PLACEHOLDER.equals(tessary.getSecretKey())) {
             stillDefault.add("TESSARY_SECRET_KEY");
         }
-        if (LAUNCHER_PLACEHOLDER.equals(rca.agentic().launcherApiKey())) {
+        if (LAUNCHER_PLACEHOLDER.equals(observer.getAgentic().getLauncherApiKey())) {
             stillDefault.add("TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY");
         }
         if (stillDefault.isEmpty()) {

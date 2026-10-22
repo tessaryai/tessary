@@ -1,0 +1,1 @@
+You have no tool budget left. Do NOT call any tool. Using only the evidence you have already read, reply now with the ruling JSON object and nothing else.

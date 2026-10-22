@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.agentrun.AgentRunDtos.RunStepsView;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.open.errors.RcaError;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -63,6 +65,21 @@ public class RcaController {
         String findingId = reports.findingIdOf(projectId, existing.jobId())
                 .orElseThrow(() -> new TessaryException(RcaError.SUBJECT_NOT_FOUND, existing.subjectId()));
         return ApiResponse.ok(trigger.trigger(projectId, findingId, ctx.userId(), Ids.ulid()));
+    }
+
+    /**
+     * The report's newest run's steps after step {@code after}, oldest first. A client that holds a running step passes
+     * {@code after} one below it, so the step comes back with its end.
+     */
+    @GetMapping("/{id}/steps")
+    public ApiResponse<RunStepsView> steps(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @RequestParam(defaultValue = "0") int after) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        return ApiResponse.ok(reportReads.steps(r.project().id(), id, after));
     }
 
     @GetMapping("/{id}")

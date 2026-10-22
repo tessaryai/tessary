@@ -1,0 +1,3 @@
+Respond with ONLY a single JSON object that validates against this JSON Schema. No prose, no markdown fence, no commentary before or after it.
+
+{schema}

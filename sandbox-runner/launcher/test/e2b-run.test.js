@@ -20,7 +20,7 @@ const FAKE_E2B = path.join(__dirname, 'fixtures', 'fake-e2b');
 const CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
 const PAYLOAD = { prompt: 'why?', mcp: { url: 'https://tessary.example.com/mcp', token: 't' }, timeout_ms: 10000, credential: CREDENTIAL };
 
-async function runOnce(mode, route = '/rca', extraEnv = {}, payload = PAYLOAD) {
+async function runOnce(mode, extraEnv = {}, payload = PAYLOAD) {
   const logPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fake-e2b-')), 'calls.jsonl');
   fs.writeFileSync(logPath, '');
   const child = spawn('node', [SERVER_JS], {
@@ -50,7 +50,7 @@ async function runOnce(mode, route = '/rca', extraEnv = {}, payload = PAYLOAD) {
     const res = await new Promise((resolve, reject) => {
       const data = Buffer.from(JSON.stringify(payload));
       const req = http.request(
-        { host: '127.0.0.1', port, path: route, method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer testkey' } },
+        { host: '127.0.0.1', port, path: '/runs', method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer testkey' } },
         (r) => {
           const chunks = [];
           r.on('data', (c) => chunks.push(c));
@@ -76,7 +76,7 @@ test('a successful E2B run keeps the credential off the microVM disk, returns th
   assert.equal(calls[1].path, '/home/user/input.json');
   assert.ok(!calls[1].content.includes('test-secret'), 'the credential must never be written to the sandbox filesystem');
   assert.equal(JSON.parse(calls[1].content).credential, undefined);
-  assert.equal(calls[2].cmd, 'node /home/user/lane.js rca /home/user/input.json');
+  assert.equal(calls[2].cmd, 'node /home/user/lane.js run /home/user/input.json');
   assert.ok(Object.values(calls[2].envs).includes('test-secret'), 'the credential reaches the agent through its env');
 });
 
@@ -89,14 +89,23 @@ test('a script that exits non-zero answers script_exit with its spend and sandbo
     kind: 'script_exit',
     timeout: false,
     error_class: 'CommandExitError',
-    detail: 'rca exited 1 (output withheld; see launcher logs)',
+    detail: 'run exited 1 (output withheld; see launcher logs)',
     exit_code: 1,
-    script: 'rca',
+    script: 'run',
     timeout_ms: 10000,
     sandbox_id: 'sbx-fake-1',
     usage: { input_tokens: 120, output_tokens: 7 },
   });
   assert.deepEqual(calls.map((c) => c.op), ['create', 'write', 'run', 'getInfo', 'kill']);
+});
+
+test('a microVM lane that names a provider failure answers that kind, so the backend stops retrying a refused key', async () => {
+  const stdout = JSON.stringify({ is_error: true, error: 'x', kind: 'provider_unavailable' });
+  const { status, body } = await runOnce('exit', { FAKE_E2B_FAILURE_STDOUT: stdout });
+
+  assert.equal(status, 502);
+  assert.equal(body.kind, 'provider_unavailable');
+  assert.equal(body.detail, 'the model provider did not answer');
 });
 
 test('POST /runs runs the run lane with the clone fields and system prompt on the VM disk, and the credential off it', async () => {
@@ -108,7 +117,7 @@ test('POST /runs runs the run lane with the clone fields and system prompt on th
     files: { 'brief.md': 'find timeouts' },
   };
 
-  const { status, body, calls } = await runOnce('ok', '/runs', {}, payload);
+  const { status, body, calls } = await runOnce('ok', {}, payload);
 
   assert.deepEqual({ status, body }, { status: 200, body: { verdict: 'supported' } });
   assert.equal(calls[2].cmd, 'node /home/user/lane.js run /home/user/input.json');
@@ -122,7 +131,7 @@ test('POST /runs runs the run lane with the clone fields and system prompt on th
 });
 
 test('a severed command stream still books the spend the launcher captured off the stream', async () => {
-  const { status, body } = await runOnce('severed', '/triage');
+  const { status, body } = await runOnce('severed');
 
   assert.equal(status, 502);
   assert.deepEqual(withoutElapsed(body), {
@@ -131,7 +140,7 @@ test('a severed command stream still books the spend the launcher captured off t
     timeout: false,
     error_class: 'SandboxError',
     detail: '[unknown] terminated',
-    script: 'triage',
+    script: 'run',
     timeout_ms: 10000,
     sandbox_id: 'sbx-fake-1',
     usage: { input_tokens: 120, output_tokens: 7 },
@@ -157,7 +166,7 @@ test('a sandbox that is never created is an orchestration failure with no sandbo
     timeout: false,
     error_class: 'NotFoundError',
     detail: 'template not found',
-    script: 'rca',
+    script: 'run',
     timeout_ms: 10000,
   });
   assert.deepEqual(calls.map((c) => c.op), ['create']);
@@ -165,7 +174,7 @@ test('a sandbox that is never created is an orchestration failure with no sandbo
 
 test('an egress credential lets opencode reach its model list (blocked, opencode does not know claude-sonnet-5-5 and every lane fails with a 500 UnknownError)', async () => {
   const egress = { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic', platform_funded: true };
-  const { status, calls } = await runOnce('ok', '/triage', {}, { ...PAYLOAD, model: 'claude-sonnet-5-5', credential: egress });
+  const { status, calls } = await runOnce('ok', {}, { ...PAYLOAD, model: 'claude-sonnet-5-5', credential: egress });
 
   assert.equal(status, 200);
   assert.ok(calls[0].network.allowOut.includes('models.opencode.ai'), JSON.stringify(calls[0].network.allowOut));
@@ -173,7 +182,7 @@ test('an egress credential lets opencode reach its model list (blocked, opencode
 });
 
 test('a post-mortem lookup that fails never replaces the run\'s own failure', async () => {
-  const { status, body } = await runOnce('exit', '/rca', { FAKE_E2B_GETINFO: 'fail' });
+  const { status, body } = await runOnce('exit', { FAKE_E2B_GETINFO: 'fail' });
 
   assert.equal(status, 502);
   assert.equal(body.kind, 'script_exit');
@@ -184,7 +193,7 @@ test('an egress credential creates the sandbox with the key injected at its egre
   const egress = { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic', platform_funded: true };
   const payload = { ...PAYLOAD, model: 'claude-sonnet-5', clone_url: 'https://x-access-token:t@github.com/acme/app.git', credential: egress };
 
-  const { status, calls } = await runOnce('ok', '/rca', {}, payload);
+  const { status, calls } = await runOnce('ok', {}, payload);
 
   assert.equal(status, 200);
   assert.deepEqual(calls[0].network, {
@@ -197,6 +206,6 @@ test('an egress credential creates the sandbox with the key injected at its egre
   assert.equal(calls[2].envs.ANTHROPIC_API_KEY, 'injected-at-egress');
   assert.ok(!calls[1].content.includes('egress_secret'), 'the credential never reaches the sandbox filesystem');
 
-  const scp = await runOnce('ok', '/rca', {}, { ...payload, clone_url: 'git@github.com:acme/app.git' });
+  const scp = await runOnce('ok', {}, { ...payload, clone_url: 'git@github.com:acme/app.git' });
   assert.deepEqual([scp.status, scp.calls[0].network.allowOut], [200, ['api.anthropic.com', 'models.opencode.ai', 'tessary.example.com']], 'a clone_url that is not a URL opens no host and fails no run');
 });
