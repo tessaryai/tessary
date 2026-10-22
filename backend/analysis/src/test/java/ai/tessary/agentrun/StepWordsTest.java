@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -121,8 +122,12 @@ class StepWordsTest {
                         "Read dossier/evidence/rows.json",
                         "Reading dossier/evidence/rows.json"),
                 Arguments.of(
-                        null, "bash", "{\"command\":\"sed -i 's/a/b/' fix.py\"}", "Ran a command", "Running a command"),
-                Arguments.of(null, "bash", "{\"command\":\"head -n 5\"}", "Ran a command", "Running a command"),
+                        null,
+                        "bash",
+                        "{\"command\":\"sed -i 's/a/b/' fix.py\"}",
+                        "Ran sed -i 's/a/b/' fix.py",
+                        "Running sed -i 's/a/b/' fix.py"),
+                Arguments.of(null, "bash", "{\"command\":\"head -n 5\"}", "Ran head -n 5", "Running head -n 5"),
                 Arguments.of(
                         null, "bash", "{\"command\":\"ls -la /home/user\"}", "Listed the files", "Listing the files"),
                 Arguments.of(null, "bash", "{\"command\":\"ls repo/src\"}", "Listed src", "Listing src"),
@@ -151,7 +156,11 @@ class StepWordsTest {
                         "Counted the lines in dossier/evidence/rows.json",
                         "Counting the lines in dossier/evidence/rows.json"),
                 Arguments.of(
-                        null, "bash", "{\"command\":\"python3 -c print(1)\"}", "Ran a command", "Running a command"),
+                        null,
+                        "bash",
+                        "{\"command\":\"python3 -c print(1)\"}",
+                        "Ran python3 -c print(1)",
+                        "Running python3 -c print(1)"),
                 Arguments.of(null, "bash", "{\"command\":\"git show HEAD\"}", "Read a commit", "Reading a commit"),
                 Arguments.of(
                         null,
@@ -159,7 +168,13 @@ class StepWordsTest {
                         "{\"command\":\"git diff main\"}",
                         "Compared two versions",
                         "Comparing two versions"),
-                Arguments.of(null, "bash", "{\"command\":\"git status\"}", "Ran a command", "Running a command"),
+                Arguments.of(null, "bash", "{\"command\":\"git status\"}", "Ran git status", "Running git status"),
+                Arguments.of(
+                        null,
+                        "bash",
+                        "{\"command\":\"cd /home/user/repo && awk -F, '{print $2}' /home/user/dossier/rows.csv | sort | uniq -c\\nhead x\"}",
+                        "Ran awk -F, '{print $2}' dossier/rows.csv | sort | uniq -c",
+                        "Running awk -F, '{print $2}' dossier/rows.csv | sort | uniq -c"),
                 Arguments.of(
                         null,
                         "grep",
@@ -289,6 +304,40 @@ class StepWordsTest {
         assertEquals(
                 "Ran checks/scan.js",
                 words(null, "bash", "{\"command\":\"node checks/scan.js\"}").done());
+    }
+
+    /**
+     * A step that says "Ran a command": a command no rule words is shown as the agent wrote its first line, without the
+     * leading cd, without the work dir, and cut to a readable length.
+     */
+    @Test
+    void aCommandNoRuleWordsIsShownAsWrittenAndCutShort() {
+        String loop =
+                "for f in dossier/evidence/*.json; do python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' $f; done";
+        StepWords.Words w = words(null, "bash", commandInput(loop));
+        assertTrue(w.done().startsWith("Ran for f in dossier/evidence/*.json; do python3"), w.done());
+        assertTrue(w.done().endsWith("..."), w.done());
+        assertTrue(w.done().length() <= "Ran ".length() + 80, w.done());
+        assertEquals("Could not run " + w.done().substring("Ran ".length()), StepWords.failed(w));
+    }
+
+    /** A secret in the step list: a command that names a credential is never shown, even a short one. */
+    @Test
+    void aCommandThatNamesACredentialIsNotShown() {
+        for (String command : List.of(
+                "curl -H 'Authorization: Bearer abc123' https://x",
+                "PGPASSWORD=hunter2 psql -h db",
+                "export API_KEY=abc",
+                "echo $OPENAI_API_KEY",
+                "env | grep -i token",
+                "mysql --password=abc")) {
+            assertEquals(
+                    "Ran a command", words(null, "bash", commandInput(command)).done(), command);
+        }
+    }
+
+    private static String commandInput(String command) {
+        return "{\"command\":" + JsonNodeFactory.instance.textNode(command) + "}";
     }
 
     /**

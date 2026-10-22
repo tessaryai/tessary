@@ -38,6 +38,16 @@ public final class StepWords {
 
     private static final int NOTE_CHARS = 160;
 
+    private static final int COMMAND_CHARS = 80;
+
+    private static final Pattern LEADING_CD = Pattern.compile("^cd\\s+(?:\"[^\"]*\"|'[^']*'|\\S+)\\s*(?:&&|;)\\s*");
+
+    private static final Pattern WORK_DIR = Pattern.compile("(?<![\\w/])(?:/home/user|/work)/(?:repo/)?");
+
+    /** A command that names a credential is never shown, however short the value. */
+    private static final Pattern CREDENTIAL =
+            Pattern.compile("(?i)authorization|bearer|passw|secret|token|api_?key|credential");
+
     /** The end of a whole sentence or line: a newline, or a stop the next character proves is not a decimal point. */
     private static final Pattern WHOLE = Pattern.compile("\n|[.!?](?=\\s)");
 
@@ -245,17 +255,18 @@ public final class StepWords {
     private static Words bash(@Nullable String command) {
         Words generic = phrase("Ran", "Running", "run", "a command");
         if (command == null) return generic;
+        Words written = written(command, generic);
         List<String> words = firstCommand(command);
-        if (words.isEmpty()) return generic;
+        if (words.isEmpty()) return written;
         String name = words.getFirst();
         List<String> args = words.subList(1, words.size());
         if (FILE_READERS.contains(name)) {
             String path = lastOperand(args, HEAD_FLAGS, 0);
-            return path == null ? generic : read(path);
+            return path == null ? written : read(path);
         }
         if (("sed".equals(name) && args.contains("-n")) || "jq".equals(name)) {
             String path = lastOperand(args, Set.of(), 1);
-            return path == null ? generic : read(path);
+            return path == null ? written : read(path);
         }
         if ("ls".equals(name) || "find".equals(name)) {
             List<String> operands = operands(args, Set.of());
@@ -264,18 +275,37 @@ public final class StepWords {
         if ("grep".equals(name) || "rg".equals(name)) return searched(args);
         if ("wc".equals(name)) {
             String path = shown(lastOperand(args, Set.of(), 0));
-            return path == null ? generic : phrase("Counted", "Counting", "count", "the lines in " + path);
+            return path == null ? written : phrase("Counted", "Counting", "count", "the lines in " + path);
         }
         if (SCRIPT_RUNNERS.contains(name)) {
             for (String word : args) {
                 if (word.startsWith("-") || !looksLikePath(word)) continue;
                 String path = shown(word);
-                return path == null ? generic : phrase("Ran", "Running", "run", path);
+                return path == null ? written : phrase("Ran", "Running", "run", path);
             }
-            return generic;
+            return written;
         }
-        if ("git".equals(words.getFirst())) return git(words, generic);
-        return generic;
+        if ("git".equals(words.getFirst())) return git(words, written);
+        return written;
+    }
+
+    /**
+     * The command as the agent wrote its first line, past any leading {@code cd}, without the work dir, cut to a readable
+     * length; the generic words when it names a credential or carries a token-shaped value.
+     */
+    private static Words written(String command, Words generic) {
+        String line = command.strip();
+        for (Matcher cd = LEADING_CD.matcher(line); cd.lookingAt(); cd = LEADING_CD.matcher(line)) {
+            line = line.substring(cd.end());
+        }
+        int newline = line.indexOf('\n');
+        if (newline >= 0) line = line.substring(0, newline);
+        line = WORK_DIR.matcher(line).replaceAll("").replaceAll("\\s+", " ").strip();
+        if (line.isEmpty() || CREDENTIAL.matcher(line).find()) return generic;
+        if (line.length() > COMMAND_CHARS)
+            line = line.substring(0, COMMAND_CHARS - 3).stripTrailing() + "...";
+        String shown = safe(line);
+        return shown == null ? generic : phrase("Ran", "Running", "run", shown);
     }
 
     /**
