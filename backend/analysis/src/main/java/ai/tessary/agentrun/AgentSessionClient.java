@@ -42,8 +42,7 @@ public interface AgentSessionClient {
     Stream<SessionEvent> events(String sessionId, long afterSeq);
 
     /**
-     * @param systemPrompt null only on the RCA lane, which runs the agent's default prompt @param files relative path to
-     * content, written under the sandbox's {@code dossier/} @param mcpServers their tokens go to the launcher only
+     * @param files relative path to content, written under the sandbox's {@code dossier/} @param mcpServers their tokens go to the launcher only
      * @param idleTimeoutMs the launcher closes the session after this long with no message; no default @param
      * maxToolCallsPerMessage the agent's step cap per reply @param repo the repository the sandbox clones before it is
      * ready, RCA only
@@ -51,7 +50,7 @@ public interface AgentSessionClient {
     record Start(
             String projectId,
             ModelLane lane,
-            @Nullable String systemPrompt,
+            String systemPrompt,
             Map<String, String> files,
             List<McpServer> mcpServers,
             long idleTimeoutMs,
@@ -62,7 +61,7 @@ public interface AgentSessionClient {
         public Start(
                 String projectId,
                 ModelLane lane,
-                @Nullable String systemPrompt,
+                String systemPrompt,
                 Map<String, String> files,
                 List<McpServer> mcpServers,
                 long idleTimeoutMs,

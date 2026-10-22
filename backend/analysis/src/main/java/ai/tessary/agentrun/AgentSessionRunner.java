@@ -92,7 +92,7 @@ public class AgentSessionRunner {
     }
 
     /**
-     * @param systemPrompt null runs the agent's default prompt (RCA) @param repo the repository the sandbox clones
+     * @param repo the repository the sandbox clones
      * first, RCA only @param jsonSchema the answer's schema; its top-level {@code required} keys are checked @param
      * deadline from the moment {@link #run} is entered, start included @param maxToolCalls the agent's step cap per
      * reply
@@ -101,7 +101,7 @@ public class AgentSessionRunner {
             String projectId,
             ModelLane lane,
             LlmUsageAccountant.Subject subject,
-            @Nullable String systemPrompt,
+            String systemPrompt,
             Map<String, String> files,
             List<AgentSessionClient.McpServer> mcp,
             AgentSessionClient.@Nullable Clone repo,

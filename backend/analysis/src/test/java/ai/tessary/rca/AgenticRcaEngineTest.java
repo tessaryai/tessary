@@ -135,8 +135,9 @@ class AgenticRcaEngineTest {
     }
 
     /**
-     * Catches a run handed a prompt other than the one investigative prompt, or another schema: every report kind
-     * sends the same prompt, filled from the run's evidence, the dossier and the configured time budget.
+     * Catches a run handed a prompt other than the one investigative prompt, or another schema, or sent without the
+     * fixed system prompt: every report kind sends the same system prompt, and a message filled from the run's
+     * evidence, the dossier and the configured time budget.
      */
     @ParameterizedTest
     @ValueSource(
@@ -166,6 +167,7 @@ class AgenticRcaEngineTest {
                         null,
                         null,
                         dossier,
+                        AgenticRcaEngine.SYSTEM_PROMPT,
                         AgenticRcaEngine.buildPrompt(
                                 subject(report),
                                 false,

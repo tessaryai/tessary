@@ -220,7 +220,6 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                         choice.provider(),
                         credential.platformFunded(),
                         start.subject()));
-        String systemPrompt = start.systemPrompt();
         long fileBytes = start.files().values().stream()
                 .mapToLong(LauncherAgentSessionClient::utf8Bytes)
                 .sum();
@@ -239,7 +238,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 .field("session", sessionId)
                 .field("files", start.files().size())
                 .field("fileBytes", fileBytes)
-                .field("systemPromptBytes", systemPrompt == null ? 0 : utf8Bytes(systemPrompt))
+                .field("systemPromptBytes", utf8Bytes(start.systemPrompt()))
                 .field("clone", start.repo() != null)
                 .field("mcpServers", start.mcpServers().size())
                 .field("durationMs", Duration.between(began, clock.instant()).toMillis())
@@ -637,8 +636,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
             Start start, AgentModels.Choice choice, AgenticCredentialResolver.Credential credential) {
         ObjectNode body = mapper.createObjectNode();
         body.put("lane", start.lane().wire());
-        String systemPrompt = start.systemPrompt();
-        if (systemPrompt != null) body.put("system_prompt", systemPrompt);
+        body.put("system_prompt", start.systemPrompt());
         ObjectNode files = body.putObject("files");
         start.files().forEach(files::put);
         body.put("model", choice.model());

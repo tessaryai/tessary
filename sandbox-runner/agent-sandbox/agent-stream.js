@@ -193,13 +193,12 @@ function onsetCommit(onsetAt) {
 
 /**
  * The posture of each session.js lane. Edit is a blanket allow where allowed, because opencode
- * matches an edit glob against `/` when WORK is not a git repo. rca is read-only, may clone, and
- * runs opencode's default agent when no system prompt is given, as runAgent does without one.
+ * matches an edit glob against `/` when WORK is not a git repo. rca is read-only and may clone.
  */
 const SESSION_LANES = Object.freeze({
-  agent_run: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: null, clones: false, promptOptional: false }),
-  triage: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: 'checks', clones: false, promptOptional: false }),
-  rca: Object.freeze({ edit: { '*': 'deny' }, scratchDirs: false, checksDir: null, clones: true, promptOptional: true }),
+  agent_run: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: null, clones: false }),
+  triage: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: 'checks', clones: false }),
+  rca: Object.freeze({ edit: { '*': 'deny' }, scratchDirs: false, checksDir: null, clones: true }),
 });
 
 // --- server lifecycle --------------------------------------------------------

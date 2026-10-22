@@ -102,6 +102,7 @@ class AgenticRcaPromptTest {
     /** Every text the agent reads besides the dossier's own finding and numbers, by name. */
     private static Map<String, String> everyAgentText() {
         Map<String, String> texts = new LinkedHashMap<>();
+        texts.put("system prompt", AgenticRcaEngine.SYSTEM_PROMPT);
         runs().forEach(a -> {
             Object[] f = a.get();
             texts.put(
@@ -164,9 +165,35 @@ class AgenticRcaPromptTest {
         assertTrue(prompt.contains("last seen: 2026-05-08T00:00:00Z"), prompt);
         assertTrue(prompt.contains("flagged traces in the evidence: 12"), prompt);
         assertTrue(prompt.contains("time budget: 15 minutes"), prompt);
-        assertTrue(prompt.contains("`dossier/tools.md`"), "tools.md is a first read");
-        assertTrue(prompt.contains("`dossier/findings/<n>-<id>/evidence.md`"), "evidence.md is a first read");
         assertFalse(prompt.contains("\n\n\n"), "a snippet left out leaves no blank gap");
+    }
+
+    /** The fixed part names the dossier files every run ships. */
+    @Test
+    void theSystemPromptSendsTheAgentToTheDossierFirst() {
+        assertTrue(AgenticRcaEngine.SYSTEM_PROMPT.contains("`dossier/tools.md`"), "tools.md is a first read");
+        assertTrue(
+                AgenticRcaEngine.SYSTEM_PROMPT.contains("`dossier/findings/<n>-<id>/evidence.md`"),
+                "evidence.md is a first read");
+    }
+
+    /** Nothing fills a placeholder in the fixed part, so the agent would read a literal one on every run. */
+    @Test
+    void theSystemPromptHasNothingToFill() {
+        assertFalse(PLACEHOLDER.matcher(AgenticRcaEngine.SYSTEM_PROMPT).find(), AgenticRcaEngine.SYSTEM_PROMPT);
+    }
+
+    /** Fixed instructions repeated in the run's message are paid for on every run instead of read from the cache. */
+    @ParameterizedTest(name = "repo={0} baseline={1} method={2}")
+    @MethodSource("runs")
+    void theRunMessageCarriesOnlyThisRunsFacts(boolean repo, boolean baseline, boolean method) {
+        String prompt = prompt(repo, baseline, method);
+
+        for (String section : List.of("## Read first", "## Investigate", "## Grade", "## Report")) {
+            assertFalse(prompt.contains(section), section + " is fixed text, sent again in the message");
+            assertTrue(
+                    AgenticRcaEngine.SYSTEM_PROMPT.contains(section), section + " is missing from the system prompt");
+        }
     }
 
     /** A case's run names every finding it reads, oldest first, over the span they cover together. */
@@ -222,7 +249,9 @@ class AgenticRcaPromptTest {
         String prompt = prompt(repo, baseline, method);
 
         assertEquals(baseline, prompt.contains("are the traffic before the onset"));
-        assertTrue(prompt.contains("`member` rows are not\na comparison side"), "said whether or not there is one");
+        assertTrue(
+                AgenticRcaEngine.SYSTEM_PROMPT.contains("`member` rows are not\na comparison side"),
+                "said whether or not there is one");
     }
 
     /** No repo is a lower ceiling, not a refusal: the agent is told the code side is unread and to attribute nothing. */

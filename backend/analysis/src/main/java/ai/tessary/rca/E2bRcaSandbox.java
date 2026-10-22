@@ -31,10 +31,10 @@ import org.springframework.stereotype.Service;
 
 /**
  * RCA over a launcher session: the dossier, this platform's MCP surface and, when the project has one, a read-only
- * clone. The agent gets RCA's prompt as its first message and no system prompt, so it reads exactly what it always
- * did. The session client books each reply on the report; this class words the run's steps into the job's
- * {@code agent_run} and names each way a run ends, so a stopped RCA can say why. Every failure throws: a
- * user-triggered RCA must stop rather than degrade to a bogus "no cause found".
+ * clone. The agent runs under RCA's system prompt and gets the run's facts as its first message. The session client
+ * books each reply on the report; this class words the run's steps into the job's {@code agent_run} and names each
+ * way a run ends, so a stopped RCA can say why. Every failure throws: a user-triggered RCA must stop rather than
+ * degrade to a bogus "no cause found".
  */
 @Service
 public class E2bRcaSandbox implements RcaSandbox {
@@ -108,7 +108,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                             req.projectId(),
                             ModelLane.RCA,
                             new LlmUsageAccountant.Subject(SUBJECT_KIND, req.reportId()),
-                            null,
+                            req.systemPrompt(),
                             req.files(),
                             List.of(new AgentSessionClient.McpServer(
                                     StepWords.PLATFORM_SERVER, req.mcpUrl(), req.mcpToken())),

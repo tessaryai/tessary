@@ -281,6 +281,8 @@ test('POST /sessions refuses a bad body before any sandbox is spent (a caller er
       [{ system_prompt: undefined }, 'session.js: system_prompt must be a non-empty string'],
       [{ system_prompt: '' }, 'session.js: system_prompt must be a non-empty string'],
       [{ lane: 'triage', system_prompt: null }, 'session.js: system_prompt must be a non-empty string'],
+      [{ lane: 'rca', system_prompt: undefined }, 'session.js: system_prompt must be a non-empty string'],
+      [{ lane: 'rca', system_prompt: null }, 'session.js: system_prompt must be a non-empty string'],
       [{ lane: 'rca', system_prompt: '' }, 'session.js: system_prompt must be a non-empty string'],
       [{ lane: 'triage', clone_url: 'https://git.example.com/a.git', head_sha: 'a41c0de' }, 'session.js: clone_url, head_sha and onset_at are for the rca lane only'],
       [{ lane: 'rca', clone_url: 'https://git.example.com/a.git' }, 'session.js: clone_url and head_sha go together'],

@@ -1072,7 +1072,6 @@ function newSessionRecord({ lane, idleTimeoutMs, createdAt }) {
 
 // session.js's own checks, repeated so a bad session.json spends no sandbox; the two images share no code.
 const SESSION_LANES = ['agent_run', 'triage', 'rca'];
-const SESSION_PROMPT_OPTIONAL = new Set(['rca']);
 const SESSION_CLONES = new Set(['rca']);
 const SESSION_HEAD_SHA = /^[0-9a-f]{7,64}$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
@@ -1109,10 +1108,7 @@ function parseSessionStart(rawBody) {
   if (!Number.isSafeInteger(body.idle_timeout_ms) || body.idle_timeout_ms <= 0) bad('idle_timeout_ms must be a positive integer');
   if (body.idle_timeout_ms > SESSION_MAX_IDLE_MS) bad(`idle_timeout_ms must be at most ${SESSION_MAX_IDLE_MS}`);
   if (body.credential.egress_secret && BACKEND !== 'e2b') bad(`an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
-  const promptAbsent = body.system_prompt === undefined || body.system_prompt === null;
-  if (!(SESSION_PROMPT_OPTIONAL.has(body.lane) && promptAbsent) && (typeof body.system_prompt !== 'string' || !body.system_prompt)) {
-    bad('system_prompt must be a non-empty string');
-  }
+  if (typeof body.system_prompt !== 'string' || !body.system_prompt) bad('system_prompt must be a non-empty string');
   const clone = parseSessionClone(body, bad);
   const files = body.files === undefined ? {} : body.files;
   if (!files || typeof files !== 'object' || Array.isArray(files) || Object.values(files).some((c) => typeof c !== 'string')) {
@@ -1146,7 +1142,7 @@ function parseSessionStart(rawBody) {
     readyMs: clone ? SESSION_START_MS + SESSION_CLONE_MS : SESSION_START_MS,
     sessionFile: {
       lane: body.lane,
-      ...(promptAbsent ? {} : { system_prompt: body.system_prompt }),
+      system_prompt: body.system_prompt,
       files,
       model,
       mcp_servers: body.mcp_servers,

@@ -45,6 +45,8 @@ public class AgenticRcaEngine {
 
     static final String JSON_SCHEMA = PromptCraft.text(RCA, "response_schema.json");
 
+    static final String SYSTEM_PROMPT = PromptCraft.text(RCA, "system_prompt.md");
+
     private static final String PROMPT = PromptCraft.text(RCA, "prompt.md");
     private static final String REPO_PRESENT = PromptCraft.text(RCA, "repo_present.md");
     private static final String REPO_ABSENT = PromptCraft.text(RCA, "repo_absent.md");
@@ -174,6 +176,7 @@ public class AgenticRcaEngine {
                     clone.map(Clone::headSha).orElse(null),
                     clone.isPresent() ? subject.onsetAt() : null,
                     dossierFiles,
+                    SYSTEM_PROMPT,
                     prompt,
                     JSON_SCHEMA,
                     mcpBase.replaceAll("/+$", "") + "/mcp",
@@ -272,7 +275,10 @@ public class AgenticRcaEngine {
         return Math.max(1, timeoutMs * 4 / 5 / 60_000);
     }
 
-    /** {@code {onset_commit}} is left in place: the sandbox resolves it after the clone. */
+    /**
+     * Only this run's facts: the instructions are in {@link #SYSTEM_PROMPT}, so they stay cacheable. {@code
+     * {onset_commit}} is left in place: the sandbox resolves it after the clone.
+     */
     static String buildPrompt(
             Subject subject,
             boolean repoCloned,
@@ -284,7 +290,7 @@ public class AgenticRcaEngine {
         String prompt = PROMPT;
         prompt = baselinePresent
                 ? prompt.replace("{baseline}", BASELINE_PRESENT.stripTrailing())
-                : prompt.replace("{baseline}\n\n", "");
+                : prompt.replace("\n\n{baseline}", "");
         prompt = methodPresent ? prompt.replace("{method_line}", METHOD_LINE) : prompt.replace("{method_line}\n", "");
         String ids = subject.findingIds().stream().map(id -> "`" + id + "`").collect(Collectors.joining(", "));
         return prompt.replace("{finding_ids}", ids)

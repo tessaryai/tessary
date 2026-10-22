@@ -586,7 +586,7 @@ function makeRepo(t) {
 
 test('an rca session clones the repo at head_sha before it reports ready, with the repo\'s AGENTS.md quarantined (an RCA session that reads a customer\'s agent instructions)', async (t) => {
   const repo = makeRepo(t);
-  const { session } = await readySession(t, { input: { lane: 'rca', system_prompt: undefined, clone: { url: `file://${repo.dir}`, head_sha: repo.first } } });
+  const { session } = await readySession(t, { input: { lane: 'rca', clone: { url: `file://${repo.dir}`, head_sha: repo.first } } });
 
   const clone = path.join(session.workDir, 'repo');
   assert.equal(git(clone, 'rev-parse', 'HEAD'), repo.first);
@@ -610,7 +610,7 @@ test('an rca session puts the onset commit into each message (a prompt that tell
   const script = { replies: [{ steps: [{ text: ['one'], usage: usage(1, 1, 0, 0, 0) }] }, { steps: [{ text: ['two'], usage: usage(1, 1, 0, 0, 0) }] }] };
   const { session } = await readySession(t, {
     script,
-    input: { lane: 'rca', system_prompt: undefined, clone: { url: `file://${dir}`, head_sha: head, onset_at: '2026-09-05T00:00:00Z' } },
+    input: { lane: 'rca', clone: { url: `file://${dir}`, head_sha: head, onset_at: '2026-09-05T00:00:00Z' } },
   });
 
   await send(session, 'commit {onset_commit}; again {onset_commit}');
@@ -619,20 +619,6 @@ test('an rca session puts the onset commit into each message (a prompt that tell
   await session.readEvents(0, 'message_end', 2);
 
   assert.deepEqual(session.records()[0].prompts.map((p) => p.parts[0].text), [`commit ${live}; again ${live}`, `still ${live}`]);
-});
-
-test('an rca session denies edits and runs the default agent when no system prompt is given (an RCA session that can write to the clone)', async (t) => {
-  const { session } = await readySession(t, { input: { lane: 'rca', system_prompt: undefined } });
-
-  await send(session, 'find the angry traces');
-  await session.readEvents(0, 'message_end', 1);
-
-  const [record] = session.records();
-  assert.deepEqual(record.config.permission.edit, { '*': 'deny' });
-  assert.deepEqual(record.config.permission.external_directory, { '*': 'deny' });
-  assert.deepEqual(record.config.agent, { build: { maxSteps: 3 } });
-  assert.match(record.config.mcp.alpha.url, /\/mcp\/alpha$/);
-  assert.equal(record.prompts[0].agent, undefined);
 });
 
 test('an rca session with a system prompt runs it as the session agent and is still read-only (a system prompt that reopens edits)', async (t) => {
@@ -644,6 +630,8 @@ test('an rca session with a system prompt runs it as the session agent and is st
   const [record] = session.records();
   assert.equal(record.config.agent['tessary-session'].prompt, SYSTEM_PROMPT);
   assert.deepEqual(record.config.permission.edit, { '*': 'deny' });
+  assert.deepEqual(record.config.permission.external_directory, { '*': 'deny' });
+  assert.match(record.config.mcp.alpha.url, /\/mcp\/alpha$/);
   assert.equal(record.prompts[0].agent, 'tessary-session');
 });
 
@@ -734,6 +722,8 @@ describe('session starts that fail on the exit timer', { concurrency: true }, ()
       [{ lane: undefined }, 'session.json: lane must be one of agent_run, triage, rca'],
       [{ lane: 'review' }, 'session.json: lane must be one of agent_run, triage, rca'],
       [{ lane: 'triage', system_prompt: undefined }, 'session.json: system_prompt must be a non-empty string'],
+      [{ lane: 'rca', system_prompt: undefined }, 'session.json: system_prompt must be a non-empty string'],
+      [{ lane: 'rca', system_prompt: null }, 'session.json: system_prompt must be a non-empty string'],
       [{ lane: 'rca', system_prompt: '' }, 'session.json: system_prompt must be a non-empty string'],
       [{ lane: 'triage', clone }, 'session.json: only the rca lane clones'],
       [{ lane: 'rca', clone: { ...clone, head_sha: '--upload-pack=x' } }, 'session.json: clone needs a url and a head_sha matching ^[0-9a-f]{7,64}$'],
