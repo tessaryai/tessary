@@ -1,0 +1,1 @@
+Your previous reply could not be parsed as a single JSON object. Do NOT investigate further — you already have what you need. Reply with the JSON object and nothing else: no prose, no markdown fence, nothing before or after it. Keep every string field short enough that the whole object fits in one reply.

@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import type { Case, MetricsQueryResult } from "../../api/types";
+import type { Case, MetricsQueryResult, TriageView } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, PageHeader, Section, TableSkeleton } from "../../ui";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, timeAgo } from "./bits";
@@ -16,6 +16,8 @@ import { useCapabilities } from "../../capabilities/useCapabilities";
 import { casesQuery } from "../../shell/shellQueries";
 import { pulseQueries } from "../metrics/metricsQueries";
 import { deltaText, formatValue } from "../metrics/metricsRules";
+import { RunMark, type RunState } from "../components/RunBar";
+import { RUN_POLL_MS } from "../components/runWords";
 
 type Lens = "open" | "resolved";
 
@@ -24,7 +26,11 @@ export function Triage() {
   const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
   const navigate = useNavigate();
 
-  const triageQ = useQuery(casesQuery(api));
+  // The shell's badge shares this read, so it follows a waiting RCA too.
+  const triageQ = useQuery({
+    ...casesQuery(api),
+    refetchInterval: (q) => (anyRcaWaiting(q.state.data) ? RUN_POLL_MS : false),
+  });
   // The pulse strip is counted, never judged and never paged.
   const pulse = pulseQueries(api, Date.now());
   const spendQ = useQuery(pulse.spend);
@@ -122,9 +128,23 @@ function EmptyRow({ lens }: { lens: Lens }) {
   );
 }
 
+const MARKED = new Set<string>(["queued", "running", "stopped"]);
+
+/** The RCA mark a case row carries; a case never analyzed, or analyzed, carries none. */
+function rcaMark(item: Case): RunState | null {
+  const state = item.rca_run_state;
+  return state && MARKED.has(state) ? (state as RunState) : null;
+}
+
+/** An RCA that can still end on its own, so the list keeps reading the queue. */
+function anyRcaWaiting(view: TriageView | undefined): boolean {
+  return (view?.cases ?? []).some((c) => c.rca_run_state === "queued" || c.rca_run_state === "running");
+}
+
 function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void }) {
   const resolved = item.state === "resolved";
   const cause = causeLine(item);
+  const mark = rcaMark(item);
 
   return (
     <button
@@ -157,6 +177,7 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
           <span>{resolved ? `closed ${timeAgo(item.resolved_at ?? item.opened_at)}` : timeAgo(item.opened_at)}</span>
         </span>
       </span>
+      {mark && <RunMark state={mark} since={item.rca_run_since} />}
     </button>
   );
 }

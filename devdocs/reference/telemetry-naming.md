@@ -22,9 +22,10 @@ conventions*.
 3. **Entity identity goes in attributes / observation metadata**, not the name.
    Prefer `langfuse.observation.metadata.<key>` and
    `tessary.project.id` / `langfuse.observation.metadata.project_id`.
-4. **Carve-out — agentic child turns:** the sandbox lanes emit a dotted child
-   `agent.llm_request`, one per agent turn (`agent.author`/`agent.codegen` were
-   retired — see Inventory below). The dotted form is the carve-out;
+4. **Carve-out — agentic child turns:** the `/runs` lane (`E2bAgentRunSandbox`) emits a dotted
+   child `agent.llm_request`, one per agent turn (`agent.author`/`agent.codegen` were
+   retired — see Inventory below). Triage and RCA run on launcher sessions, which report no
+   turns, so their roots carry the run's usage and `tessary.agent.steps` and have no turn children. The dotted form is the carve-out;
    the prefix deliberately names the ROLE, not the harness, so swapping the
    coding agent out again never renames a span customers have dashboards on.
    (These were `claude_code.*` while Claude Code was the harness.) Document any
@@ -45,10 +46,10 @@ A new non-LLM product span that should reach Langfuse **must** stamp
 
 | Emitter | OTel span name | `langfuse.trace.name` | Notes |
 |---|---|---|---|
-| `E2bRcaSandbox` | `agentic-rca` | `agentic-rca` | |
-| `E2bTriageSandbox` | `layer2-triage` | `layer2-triage` | The Layer-2 ruling, on `ModelLane.TRIAGE`. Metadata: `tessary.triage.finding_id`, which is also the ledger subject the run's spend is booked against, so a cost per ruling is a join rather than an estimate. There is no lane attribute: the repo-grounded lane is gone and every run now rules on the evidence, so recording it would stamp a constant. |
+| `E2bRcaSandbox` | `agentic-rca` | `agentic-rca` | The RCA run, on a launcher session. Metadata: `tessary.rca.subject_id` (the report, also the ledger subject the run's spend is booked against) and `tessary.head_sha`. Carries the usage of every reply and `tessary.agent.steps`, the tool calls the run made; no turn children. |
+| `E2bTriageSandbox` | `layer2-triage` | `layer2-triage` | The Layer-2 ruling, on `ModelLane.TRIAGE`. Metadata: `tessary.triage.finding_id`, which is also the ledger subject the run's spend is booked against, so a cost per ruling is a join rather than an estimate. There is no lane attribute: the repo-grounded lane is gone and every run now rules on the evidence, so recording it would stamp a constant. Runs on a launcher session: carries the usage of every reply and `tessary.agent.steps`, the tool calls the run made; no turn children. |
 | `E2bAgentRunSandbox` | `agent-run` | `agent-run` | The generic agent run (`agentrun/`), on whichever lane the caller named: `tessary.agentrun.lane` carries it, since this emitter is not one lane. Metadata: `tessary.agentrun.subject_kind` / `subject_id`, the ledger subject the run's spend is booked against. |
-| `AgentSpanTelemetry` | `agent.llm_request` | — | Per-turn child under agentic roots (carve-out) |
+| `AgentSpanTelemetry` | `agent.llm_request` | — | Per-turn child under the `agent-run` root (carve-out) |
 | `JevDecisionClient` | `decision-call` | — | One hosted decision-model call. Sets `gen_ai.operation.name=decision`, so Alloy admits it. Metadata: `lane`, `provider` (the gateway), `project_id`. No message content on the span. |
 | `PlaygroundService` | `playground-run` | — | One prompt-playground chat call on the org's own key. Sets `gen_ai.operation.name=chat`. Metadata: `lane`, `provider`, `project_id`, `prompt_version_id`. No message content on the span; nothing is ingested into the project's traces. |
 

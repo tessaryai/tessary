@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.agentrun.StepWords;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
@@ -19,7 +20,8 @@ public interface RcaSandbox {
      * @param cloneUrl embeds a short-lived token, never logged; null means an evidence-only run with no clone @param
      * headSha null with {@code cloneUrl} @param onsetAt the sandbox resolves the commit live at the onset; null with
      * {@code cloneUrl} @param mcpToken sent to the launcher, never logged @param reportId the ledger subject, so an
-     * RCA's cost is attributable to its report; never null
+     * RCA's cost is attributable to its report; never null @param jobId finds the run the worker opened, so the steps
+     * land on it @param words how the steps word the finding's evidence
      */
     record SandboxRequest(
             String projectId,
@@ -28,11 +30,14 @@ public interface RcaSandbox {
             @Nullable String headSha,
             @Nullable String onsetAt,
             Map<String, String> files,
+            String systemPrompt,
             String prompt,
             String jsonSchema,
             String mcpUrl,
             String mcpToken,
-            String reportId) {}
+            String reportId,
+            String jobId,
+            StepWords.Context words) {}
 
     /** {@code resultText} is the schema-constrained JSON. */
     record SandboxRun(String resultText) {}

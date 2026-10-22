@@ -195,6 +195,7 @@ describe("reading", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.queryByRole("button", { name: "New dashboard" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Dashboard actions" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Chart colors" })).toBeTruthy();
   });
 
   // Bug: a phone reader gets the drag grid and an Edit that cannot work.
@@ -451,6 +452,19 @@ describe("editing", () => {
     expect(regions()).toEqual(["A", "B"]);
     expect(screen.queryByRole("group", { name: "Edit dashboard" })).toBeNull();
     expect(api.updateMetricDashboard).not.toHaveBeenCalled();
+  });
+
+  // Bug: the chart palette, a per-browser choice, sits in the edit toolbar or stays in the header while editing.
+  it("theChartPaletteShowsInViewModeOnly", async () => {
+    renderPage(`${BASE}/metrics/01JCOST`);
+    const edit = await screen.findByRole("button", { name: "Edit" });
+    fireEvent.click(screen.getByRole("button", { name: "Chart colors" }));
+    expect(screen.getByRole("dialog", { name: "Chart colors" })).toBeTruthy();
+    fireEvent.click(edit);
+    expect(screen.queryByRole("button", { name: "Chart colors" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Chart colors" })).toBeNull();
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Chart colors" })).toBeTruthy();
   });
 
   // Bug: a new widget is lost, or a thirteenth is offered that the server refuses.

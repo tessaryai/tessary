@@ -12,6 +12,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.agentrun.AgentRunRepository;
+import ai.tessary.agentrun.AgentRunRepository.Outcome;
 import ai.tessary.cases.CaseDetection;
 import ai.tessary.cases.CaseKey;
 import ai.tessary.cases.CaseRepository;
@@ -64,7 +66,8 @@ record RcaWorkerTest(
         TenantService tenants,
         JdbcClient jdbc,
         AgenticRcaEngine engine,
-        CaseRepository cases) {
+        CaseRepository cases,
+        AgentRunRepository runs) {
 
     private static final Instant TO = Instant.parse("2026-07-15T12:00:00Z");
     private static final Instant SPLIT = TO.minus(Duration.ofHours(24));
@@ -228,6 +231,91 @@ record RcaWorkerTest(
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("failed", report.status());
         assertNotNull(report.summary());
+    }
+
+    /** A run's newest record for the report the job writes. */
+    private AgentRunRepository.RunSummary runOf(String pid, RcaJobRow job) {
+        String reportId = reports.findByJobId(pid, job.id()).orElseThrow().id();
+        return Objects.requireNonNull(runs.latestBySubjects(pid, AgentRunRepository.Lane.RCA, List.of(reportId))
+                .get(reportId));
+    }
+
+    /** A stopped bar with no reason: a run that fails records the code it stopped on, ended, as its job's first. */
+    @Test
+    void aFailedRunRecordsItsCodeOnTheRun() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "rca-run-failed").project().id();
+        String failingTrace = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
+        when(engine.run(any(), any(), any(), anyMap(), any()))
+                .thenThrow(new TessaryException(RcaError.PROVIDER_REJECTED, "invalid key (HTTP 401)"));
+
+        RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of(failingTrace)));
+        worker.run(job);
+
+        AgentRunRepository.RunSummary run = runOf(pid, job);
+        assertEquals(Outcome.FAILED, run.outcome());
+        assertEquals("RCA.PROVIDER_REJECTED", run.stopCode());
+        assertEquals(1, run.attempt());
+        assertNotNull(run.endedAt());
+        assertEquals("failed", reports.findByJobId(pid, job.id()).orElseThrow().status());
+    }
+
+    /** A SUBJECT_NOT_FOUND RCA with no stop reason: a failure before the sandbox still leaves a run with its code. */
+    @Test
+    void aFailureBeforeTheSandboxStillLeavesARunWithItsCode() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "rca-run-no-subject").project().id();
+
+        RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of()));
+        worker.run(job);
+
+        AgentRunRepository.RunSummary run = runOf(pid, job);
+        assertEquals(Outcome.FAILED, run.outcome());
+        assertEquals("RCA.SUBJECT_NOT_FOUND", run.stopCode());
+    }
+
+    /** A finished RCA still shown as running: a run that answers closes its run as done. */
+    @Test
+    void aRunThatAnswersClosesItsRunAsDone() {
+        String pid = TenantFixture.bootstrap(tenants, "rca-run-done").project().id();
+        String failingTrace = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
+        stubEngine();
+
+        RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of(failingTrace)));
+        worker.run(job);
+
+        AgentRunRepository.RunSummary run = runOf(pid, job);
+        assertEquals(Outcome.DONE, run.outcome());
+        assertNull(run.stopCode());
+    }
+
+    /**
+     * A busy sandbox read as a failure: a launcher at its session cap sends the job back to the queue with no owner
+     * and its attempt given back, leaves the report unstamped, and closes the run as released.
+     */
+    @Test
+    void aFullLauncherRequeuesTheJobUnspentAndLeavesTheReportPending() {
+        String pid = TenantFixture.bootstrap(tenants, "rca-run-busy").project().id();
+        String failingTrace = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
+        when(engine.run(any(), any(), any(), anyMap(), any()))
+                .thenThrow(new E2bRcaSandbox.SandboxBusy(new TessaryException(RcaError.SANDBOX_BUSY, "4 sessions")));
+
+        RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of(failingTrace)));
+        worker.run(job);
+
+        Map<String, Object> row = jdbc.sql("SELECT j.status, j.lease_owner, j.attempts, r.status AS report_status,"
+                        + " r.completed_at FROM job j JOIN rca_report r ON r.job_id = j.id WHERE j.id = :id")
+                .param("id", job.id())
+                .query()
+                .singleRow();
+        assertEquals("claimed", row.get("status"));
+        assertNull(row.get("lease_owner"));
+        assertEquals(0, ((Number) row.get("attempts")).intValue());
+        assertEquals("pending", row.get("report_status"));
+        assertNull(row.get("completed_at"));
+        AgentRunRepository.RunSummary run = runOf(pid, job);
+        assertEquals(Outcome.RELEASED, run.outcome());
+        assertEquals("RCA.SANDBOX_BUSY", run.stopCode());
     }
 
     /**

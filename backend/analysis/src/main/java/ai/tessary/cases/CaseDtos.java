@@ -9,6 +9,7 @@ import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import ai.tessary.rca.RcaDtos.RcaReportView;
+import ai.tessary.rca.RcaDtos.RcaRunView;
 import ai.tessary.rca.RcaReportRepository.CaseLead;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Pattern;
@@ -65,13 +66,23 @@ public final class CaseDtos {
              * Carried beside {@code cause} because they can disagree: an {@code inconclusive} run still summarizes its
              * leads.
              */
-            @JsonProperty("rca_verdict") @Nullable String rcaVerdict) {
+            @JsonProperty("rca_verdict") @Nullable String rcaVerdict,
+            /** {@code queued}, {@code running} or {@code stopped} from the newest report; null when none is waiting. */
+            @JsonProperty("rca_run_state") @Nullable String rcaRunState,
+            /** When that state began. */
+            @JsonProperty("rca_run_since") @Nullable String rcaRunSince) {
 
         public static CaseView of(CaseRow row) {
             return of(row, null);
         }
 
         public static CaseView of(CaseRow row, @Nullable CaseLead lead) {
+            return of(row, lead, null);
+        }
+
+        /** @param run where the newest report's analysis stands; a done one leaves no mark */
+        public static CaseView of(CaseRow row, @Nullable CaseLead lead, @Nullable RcaRunView run) {
+            RcaRunView mark = run != null && !RcaRunView.DONE.equals(run.state()) ? run : null;
             return new CaseView(
                     row.id(),
                     row.reference(),
@@ -100,7 +111,9 @@ public final class CaseDtos {
                     row.latestFindingId(),
                     row.lockedAt(),
                     lead == null ? null : lead.summary(),
-                    lead == null ? null : lead.verdict());
+                    lead == null ? null : lead.verdict(),
+                    mark == null ? null : mark.state(),
+                    mark == null ? null : RcaRunView.since(mark));
         }
     }
 

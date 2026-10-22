@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Measure, then workload, then decomposition: the order the ruling is made in. The ruling's citations
 // are shown in full, check scripts included, since they are the part a reader can re-run.
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
+import { useCapabilities } from "../../capabilities/useCapabilities";
+import { RunBar } from "../components/RunBar";
 import {
-  CONTAINER, FindingKicker, ResolveVerbs, RunTriageButton, TriageAction, chainWords, detectorLabel, stamp, triageState,
+  CONTAINER, FindingKicker, ResolveVerbs, RunTriageButton, TRIAGE_POLL_MS, TriageAction, chainWords, detectorLabel,
+  isTriageWaiting, stamp, triageBar, triageState, useNow,
 } from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
@@ -52,7 +56,17 @@ export function FindingPage() {
     queryKey: ["behavior-finding", api.base, findingId],
     queryFn: () => api.getBehaviorFinding(findingId),
     enabled: findingId !== "",
+    refetchInterval: (q) => (isTriageWaiting(q.state.data?.finding) ? TRIAGE_POLL_MS : false),
   });
+  const triageStatus = detailQ.data?.finding.triageStatus;
+  const canProviders = useCapabilities().isEnabled("byo_provider_keys_enabled");
+  const now = useNow(triageStatus === "queued" || triageStatus === "in_flight");
+  /* The lists cache this finding's row; a run that moves on here would read as stuck there until they go stale. */
+  useEffect(() => {
+    if (triageStatus === undefined) return;
+    void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
+    void qc.invalidateQueries({ queryKey: ["classifier-findings", api.base] });
+  }, [qc, api.base, triageStatus]);
 
   const done = () => {
     void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
@@ -75,6 +89,9 @@ export function FindingPage() {
   const triaged = finding.triageStatus === "done";
   const busy = resolveM.isPending || analyzeM.isPending;
   const state = triageState(finding);
+  const bar = triageBar(finding, basePath, canProviders, now, api);
+  /* A ruling, or a run under the header, sets the first section apart from what sits above it. */
+  const divided = triaged || bar != null;
 
   const shift = detail.metric;
   const rate = detail.toolError;
@@ -166,12 +183,7 @@ export function FindingPage() {
 
       {resolveM.isError && <ErrorNote error={resolveM.error} />}
       {analyzeM.isError && <ErrorNote error={analyzeM.error} />}
-      {/* A dead-lettered run revives only after its cooldown; before that the press lands on the dead job. */}
-      {analyzeM.data?.jobStatus === "dead" && (
-        <p className="text-muted text-small mt-2 mb-0">
-          Triage gave up on this finding recently. It can run again once its cooldown has passed.
-        </p>
-      )}
+      {bar && <RunBar {...bar} />}
 
       {/* The ruling sits above the evidence; its receipts come after. A frustration finding states its ruling
          in its own header. */}
@@ -196,8 +208,8 @@ export function FindingPage() {
 
       {shift && (
         <section
-          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+          style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
         >
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
@@ -213,8 +225,8 @@ export function FindingPage() {
 
       {rate && (
         <section
-          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+          style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
         >
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
@@ -230,8 +242,8 @@ export function FindingPage() {
 
       {secretLeak && (
         <section
-          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+          style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
         >
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-label uppercase text-muted">When it leaked</h2>
@@ -245,8 +257,8 @@ export function FindingPage() {
       {malformedOutput && (
         <>
           <section
-            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+            className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+            style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
           >
             <div className="flex items-baseline gap-3">
               <h2 className="font-mono text-label uppercase text-muted">What moved</h2>
@@ -269,8 +281,8 @@ export function FindingPage() {
       {frustration && (
         <>
           <section
-            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+            className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+            style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
           >
             <div className="flex items-baseline gap-3">
               <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
@@ -301,8 +313,8 @@ export function FindingPage() {
       {groundedness && (
         <>
           <section
-            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+            className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+            style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
           >
             <div className="flex items-baseline gap-3">
               <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
@@ -329,8 +341,8 @@ export function FindingPage() {
 
       {classifierDetail && (
         <section
-          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
-          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          className={cn("flex flex-col gap-2.75", divided && "border-t border-border")}
+          style={{ marginTop: divided ? 28 : 24, paddingTop: divided ? 22 : 0 }}
         >
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-label uppercase text-muted">What changed</h2>

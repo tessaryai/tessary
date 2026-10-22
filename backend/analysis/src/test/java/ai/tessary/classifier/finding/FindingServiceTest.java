@@ -108,7 +108,7 @@ class FindingServiceTest {
      */
     @SuppressWarnings("NullAway") // the repositories are unreachable here
     private static FindingService service(List<TriageSource> sources) {
-        return new FindingService(null, null, null, sources, null, null, null); // detail services unreached
+        return new FindingService(null, null, null, sources, null, null, null, null); // detail services unreached
     }
 
     private static BehaviorFindingView view(String id) {
@@ -130,6 +130,8 @@ class FindingServiceTest {
                 List.of(),
                 null,
                 BehaviorFindingView.TriageStatus.PENDING,
+                null,
+                null,
                 null,
                 null);
     }

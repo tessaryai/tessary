@@ -5,6 +5,9 @@ import static java.util.Objects.requireNonNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.tessary.agentrun.AgentRunDtos.RunStepsView;
+import ai.tessary.agentrun.AgentRunDtos.StepView;
+import ai.tessary.agentrun.AgentRunRepository;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
@@ -13,6 +16,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.frustration.FrustrationEvidence;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.open.errors.ClassifierError;
+import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
@@ -46,7 +50,8 @@ record FindingControllerTest(
         FindingEvidenceRepository evidence,
         TenantService tenants,
         OrgMembershipRepository memberships,
-        CapabilityFixture capabilities) {
+        CapabilityFixture capabilities,
+        AgentRunRepository runs) {
 
     /**
      * An unruled finding lists only when every finding is asked for; its pages read through the path's project, and
@@ -166,6 +171,84 @@ record FindingControllerTest(
                                         "total",
                                         10,
                                         ""))
+                        .error());
+    }
+
+    /**
+     * A finding's triage steps read through its own project's path, from the newest run, after the step the client
+     * already holds. The bugs: another project's finding answering with its steps, a finding no run has started for
+     * answering an empty run, and a negative cursor read as zero.
+     */
+    @Test
+    void aFindingsTriageStepsReadThroughItsOwnProjectsPathOnly() {
+        var fix = TenantFixture.bootstrap(tenants, "finding-api-steps");
+        var other = TenantFixture.bootstrap(tenants, "finding-api-steps-other");
+        String org = fix.org().slug();
+        String project = fix.project().slug();
+        String id = finding(fix, BuiltInDetector.Kind.TOOL_ERROR, "{\"cause_kind\":\"rate_shift\"}");
+        String quiet = finding(fix, BuiltInDetector.Kind.REGEX, "{\"cause_kind\":\"armed_window\"}");
+        String older = runs.open(fix.project().id(), AgentRunRepository.Lane.TRIAGE, id, "job-1", 1);
+        runs.stepStarted(older, "c0", "Read the finding and its numbers", "Reading the finding and its numbers", 4);
+        runs.close(older, AgentRunRepository.Outcome.RETRYING, "CLASSIFIER.TRIAGE_RUN_INCOMPLETE");
+        String run = runs.open(fix.project().id(), AgentRunRepository.Lane.TRIAGE, id, "job-1", 2);
+        runs.stepStarted(run, "c1", "Read the finding and its numbers", "Reading the finding and its numbers", 4);
+        runs.stepEnded(run, "c1", 9, true, "Read the finding and its numbers");
+        runs.stepStarted(run, "c2", "Counted the evidence", "Counting the evidence", 10);
+
+        assertEquals(
+                new RunStepsView(
+                        run,
+                        2,
+                        List.of(new StepView(2, "Counted the evidence", "Counting the evidence", 10, null, null))),
+                controller.triageSteps(owner(fix), org, project, id, 1).data());
+        assertEquals(
+                2,
+                requireNonNull(controller
+                                .triageSteps(owner(fix), org, project, id, 0)
+                                .data())
+                        .steps()
+                        .size());
+        assertEquals(
+                ClassifierError.FINDING_NOT_FOUND,
+                assertThrows(
+                                TessaryException.class,
+                                () -> controller.triageSteps(
+                                        owner(other),
+                                        other.org().slug(),
+                                        other.project().slug(),
+                                        id,
+                                        0))
+                        .error(),
+                "another project's finding");
+        assertEquals(
+                ClassifierError.FINDING_NOT_FOUND,
+                assertThrows(TessaryException.class, () -> controller.triageSteps(owner(fix), org, project, quiet, 0))
+                        .error(),
+                "a finding no run has started for");
+        assertEquals(
+                CommonError.VALIDATION_FAILED,
+                assertThrows(TessaryException.class, () -> controller.triageSteps(owner(fix), org, project, id, -1))
+                        .error());
+    }
+
+    /** A withheld classifier's finding 404s on its steps too (steps of a hidden finding). */
+    @Test
+    void aWithheldClassifiersFindingIsNotFoundThroughItsTriageSteps() {
+        var fix = TenantFixture.bootstrap(tenants, "finding-api-steps-withheld");
+        String id = finding(fix, BuiltInDetector.Kind.TOOL_ERROR, "{\"cause_kind\":\"rate_shift\"}");
+        runs.open(fix.project().id(), AgentRunRepository.Lane.TRIAGE, id, "job-1", 1);
+        capabilities.withhold(fix.org().id(), Capability.TOOL_ERROR);
+
+        assertEquals(
+                ClassifierError.FINDING_NOT_FOUND,
+                assertThrows(
+                                TessaryException.class,
+                                () -> controller.triageSteps(
+                                        owner(fix),
+                                        fix.org().slug(),
+                                        fix.project().slug(),
+                                        id,
+                                        0))
                         .error());
     }
 

@@ -5,13 +5,15 @@
  * printed as a certainty, a pulse strip that disagrees with Metrics about spend or latency, and a
  * findings list that shows a finding already in Cases, drops one that is not, or opens the wrong page.
  */
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BehaviorFinding, Case, MetricsQueryRequest, TriageView } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_CASE_DETAIL } from "../../test/groundednessFixtures";
 import { totalResult } from "../../test/metricsFixtures";
 import { Triage } from "./Triage";
+import { TRIAGE_POLL_MS } from "../classifiers/shared";
+import { RUN_POLL_MS } from "../components/runWords";
 import { api } from "../../test/api";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
@@ -159,6 +161,51 @@ describe("the open cases", () => {
   });
 });
 
+describe("the case marks", () => {
+  afterEach(() => vi.useRealTimers());
+
+  // Bug: a case whose RCA waits, runs or stopped looked the same in the list as one never analyzed.
+  it("a case row shows a ring while RCA is queued, a spinner while it runs and a red dot when it stopped; nothing otherwise", async () => {
+    const since = new Date(Date.now() - 3 * 60_000).toISOString();
+    api.getTriage.mockResolvedValue(triage({
+      cases: [
+        kase("q", { rca_run_state: "queued", rca_run_since: since }),
+        kase("r", { rca_run_state: "running", rca_run_since: since }),
+        kase("s", { rca_run_state: "stopped", rca_run_since: since }),
+        kase("n", { rca_run_state: null, rca_verdict: null }),
+        kase("d", { rca_run_state: null }),
+      ],
+    }));
+    renderPage();
+
+    const row = async (id: string) => (await screen.findByText(`Case ${id}`)).closest("button")!;
+    expect(within(await row("q")).getByRole("img", { name: "RCA queued" })).toBeTruthy();
+    const running = within(await row("r")).getByRole("img", { name: "RCA running" });
+    expect(within(await row("s")).getByRole("img", { name: "RCA stopped" })).toBeTruthy();
+    for (const id of ["n", "d"]) expect(within(await row(id)).queryByRole("img", { name: /^RCA / })).toBeNull();
+
+    fireEvent.mouseEnter(running.parentElement!);
+    expect(screen.getByRole("tooltip").textContent).toBe("RCA running · 3m");
+  });
+
+  // Bug: the list kept a running mark after the RCA ended, or read the queue every few seconds for ever.
+  it("the cases list reads again while an RCA is queued or running and stops when none is", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.getTriage
+      .mockResolvedValueOnce(triage({ cases: [kase("a", { rca_run_state: "running" })] }))
+      .mockResolvedValue(triage({ cases: [kase("a", { rca_run_state: null })] }));
+    renderPage();
+    expect(await screen.findByRole("img", { name: "RCA running" })).toBeTruthy();
+
+    await act(() => vi.advanceTimersByTimeAsync(RUN_POLL_MS));
+
+    await waitFor(() => expect(screen.queryByRole("img", { name: "RCA running" })).toBeNull());
+    const reads = api.getTriage.mock.calls.length;
+    await act(() => vi.advanceTimersByTimeAsync(RUN_POLL_MS * 3));
+    expect(api.getTriage.mock.calls.length).toBe(reads);
+  });
+});
+
 describe("the lenses", () => {
   it("switches to the closed bucket and back, pressed while it shows", async () => {
     renderPage();
@@ -254,6 +301,8 @@ const finding = (id: string, over: Partial<BehaviorFinding> = {}) =>
   }) as BehaviorFinding;
 
 describe("the findings", () => {
+  afterEach(() => vi.useRealTimers());
+
   // Findings is drawn once the case queue has said something is open, so wait for the cases first.
   const renderLoaded = async () => {
     renderPage();
@@ -297,11 +346,48 @@ describe("the findings", () => {
     expect(within(findings).queryByText("Finding d")).toBeNull();
     expect(within(findings).getByText("Finding e").closest("tr")!.textContent).toContain("Positive");
     expect(within(findings).getByText("Finding f").closest("tr")!.textContent).toContain("Triaging");
-    // The tool-error sentinel is not a call site, and red is too faint at table size: grey words beside a red icon.
     const c = within(findings).getByText("Finding c").closest("tr")!;
     expect(within(c).getAllByRole("cell")[2].textContent).toBe("–");
-    expect(within(c).getByText("Triage failed").className).not.toContain("text-error");
     expect(api.listBehaviorFindings).toHaveBeenCalledWith();
+  });
+
+  // Bug: an icon in the triage column, where the design reads the state as text only, red for a run that stopped.
+  it("the triage column is text only, red for blocked and failed", async () => {
+    api.listBehaviorFindings.mockResolvedValue({
+      findings: [
+        finding("p"),
+        finding("r", { triageStatus: "retrying" }),
+        finding("b", { triageStatus: "blocked" }),
+        finding("x", { triageStatus: "failed" }),
+      ],
+    });
+    await renderLoaded();
+
+    const findings = section("Findings");
+    await within(findings).findByText("Finding x");
+    const triageCell = (id: string) => within(within(findings).getByText(`Finding ${id}`).closest("tr")!).getAllByRole("cell")[3];
+    expect(triageCell("p").querySelector("svg")).toBeNull();
+    expect(within(triageCell("p")).getByText("Pending").className).toContain("text-muted");
+    expect(within(triageCell("r")).getByText("Retrying").className).toContain("text-muted");
+    for (const [id, words] of [["b", "Triage blocked"], ["x", "Triage failed"]]) {
+      expect(triageCell(id).querySelector("svg")).toBeNull();
+      expect(within(triageCell(id)).getByText(words).className).toContain("text-error");
+    }
+  });
+
+  // Bug: a run that ruled, or was held on a rejected key, still read "Triaging" here until the page was reloaded.
+  it("keeps reading the findings while a run waits, and shows where it ended", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.listBehaviorFindings
+      .mockResolvedValueOnce({ findings: [finding("q", { triageStatus: "queued" })] })
+      .mockResolvedValue({ findings: [finding("q", { triageStatus: "blocked" })] });
+    await renderLoaded();
+    const row = () => within(section("Findings")).getByText("Finding q").closest("tr")!;
+    expect((await within(section("Findings")).findByText("Finding q")).closest("tr")!.textContent).toContain("Queued");
+
+    await act(() => vi.advanceTimersByTimeAsync(TRIAGE_POLL_MS));
+
+    expect(await within(row()).findByText("Triage blocked")).toBeTruthy();
   });
 
   // Bug: a finding row that opens the case list, or a path that breaks on an id with a slash in it.

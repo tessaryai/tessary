@@ -57,9 +57,9 @@ public class BehaviorTriageEngine {
 
     /**
      * opencode reserves a couple of turns to force a text-only final answer at the cap, so the number stated to the
-     * agent is the turns it actually gets.
+     * agent is the turns it actually gets, and the session's tool-call cap.
      */
-    private static final int TURN_RESERVE = 2;
+    static final int TURN_RESERVE = 2;
 
     private final Map<String, TriageSandbox> sandboxes;
     private final ClassifierProperties props;
@@ -109,9 +109,10 @@ public class BehaviorTriageEngine {
 
     /**
      * Throws when the run did not produce a cited ruling, so the job dead-letters and {@code triage_verdict} stays
-     * NULL. The key goes to the org owner, since triage is scheduled rather than pressed by a person.
+     * NULL. The key goes to the org owner, since triage is scheduled rather than pressed by a person. @param runId the
+     * {@code agent_run} the worker opened for this attempt; the run's steps are written to it
      */
-    public BehaviorTriageVerdict rule(String projectId, String findingId, Map<String, String> dossier, String prompt) {
+    public BehaviorTriageVerdict rule(String projectId, String findingId, TriageBrief brief, String runId) {
         String mcpBase = props.triageMcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
             // Without the MCP door the agent cannot open a single row, so dead-letter as a visible misconfiguration
@@ -138,12 +139,14 @@ public class BehaviorTriageEngine {
             TriageSandbox.SandboxRequest req = new TriageSandbox.SandboxRequest(
                     projectId,
                     findingId,
-                    dossier,
-                    prompt,
+                    brief.dossier(),
+                    brief.prompt(),
                     BehaviorTriageVerdict.JSON_SCHEMA,
                     mcpBase.replaceAll("/+$", "") + "/mcp",
                     issued.plaintext(),
-                    SYSTEM_PROMPT);
+                    SYSTEM_PROMPT,
+                    runId,
+                    brief.words());
 
             Optional<TriageSandbox.SandboxRun> run = sandbox.run(req);
             if (run.isEmpty()) {

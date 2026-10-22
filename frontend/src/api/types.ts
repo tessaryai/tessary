@@ -166,6 +166,10 @@ export type ModelRateView = S["ModelRateView"];
 
 // ---- RCA: root-cause analysis of one finding ----
 export type RcaReport = S["RcaReportView"];
+/** Where a report's run stands: `queued`, `running`, `stopped` or `done`. */
+export type RcaRun = S["RcaRunView"];
+/** A page of a triage or RCA run's steps, each in plain words, read past a step number. */
+export type RunSteps = S["RunStepsView"];
 export type RcaRuledOutCheck = S["RuledOutCheck"];
 /** One cause an RCA found, the same shape for every case type: what changed, how it caused this, what next. */
 export type RcaCause = S["Cause"];
@@ -234,7 +238,7 @@ type TriageAction = "opened_case" | "closed";
  * `pending` is un-scheduled, not un-ruled. `failed` comes from the triage job: a run that gave up
  * leaves the finding identical to one still running.
  */
-type TriageStatus = "pending" | "in_flight" | "done" | "failed";
+type TriageStatus = "pending" | "queued" | "in_flight" | "retrying" | "blocked" | "done" | "failed";
 
 /** A second press lands on the existing job. */
 export type BehaviorAnalysis = S["BehaviorAnalysisView"];
@@ -294,6 +298,9 @@ export type BehaviorFinding = Omit<
   triageAction: TriageAction | null;
   triageStatus: TriageStatus;
 };
+
+/** The finding's newest triage run: its step count, the words of the step it is on, and how it ended. */
+export type TriageRun = S["TriageRunView"];
 
 /** `stdout` is set only for a check-script citation: what running it printed. */
 export type TriageCitation = S["Citation"];

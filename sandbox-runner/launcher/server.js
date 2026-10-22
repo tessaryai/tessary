@@ -91,6 +91,8 @@ const SANDBOX_SESSION_BUFFER = positiveIntEnv('SANDBOX_SESSION_BUFFER', 5000);
 const SANDBOX_SESSION_MAX_MS = positiveIntEnv('SANDBOX_SESSION_MAX_MS', 7200000);
 const SANDBOX_SESSION_PORT = positiveIntEnv('SANDBOX_SESSION_PORT', 9400);
 const SESSION_START_MS = 90_000;
+// The sandbox's own GIT_TIMEOUT_MS default: a start that clones may spend this long on the clone.
+const SESSION_CLONE_MS = 180_000;
 const SESSION_POLL_MS = 250;
 const SESSION_REQUEST_MS = 10_000;
 const SESSION_CLOSE_GRACE_MS = 5_000;
@@ -434,6 +436,10 @@ function safeDetail(err, cls, meta) {
       ? `deadline hit: no result after ${elapsedMs}ms of ${timeoutMs}ms`
       : `timed out after ${elapsedMs}ms (deadline ${timeoutMs}ms)`;
   }
+  if (Object.hasOwn(PROVIDER_FAILURE_DETAIL, cls.kind)) {
+    const status = err && err.providerStatus;
+    return PROVIDER_FAILURE_DETAIL[cls.kind] + (Number.isInteger(status) ? ` (HTTP ${status})` : '');
+  }
   if (cls.kind === 'script_exit') {
     return `${script || 'command'} exited ${cls.exitCode} (output withheld; see launcher logs)`;
   }
@@ -455,6 +461,27 @@ function usageFromFailureStdout(stdout) {
   }
   if (!parsed || typeof parsed !== 'object' || parsed.is_error !== true) return undefined;
   return numericUsageOnly(parsed.usage);
+}
+
+// The provider failures a lane may name. Only these values and an integer HTTP status leave: the lane's own
+// error text can quote the provider's reply.
+const PROVIDER_FAILURE_DETAIL = Object.freeze({
+  provider_rejected: 'the model provider rejected the credential',
+  request_refused: 'the model provider refused the request',
+  provider_unavailable: 'the model provider did not answer',
+});
+
+function providerFailureFromStdout(stdout) {
+  if (!stdout) return undefined;
+  let parsed;
+  try {
+    parsed = JSON.parse(String(stdout));
+  } catch {
+    return undefined;
+  }
+  if (!parsed || parsed.is_error !== true || !Object.hasOwn(PROVIDER_FAILURE_DETAIL, parsed.kind)) return undefined;
+  const status = Number.isInteger(parsed.provider_status) ? parsed.provider_status : undefined;
+  return { launcherKind: parsed.kind, providerStatus: status };
 }
 
 function numericUsageOnly(u) {
@@ -868,6 +895,7 @@ async function runScriptInDockerInner(lane, payload, timeoutMs, posture, credent
       e.exitCode = exitCode;
       const usage = usageFromFailureStdout(stdout);
       if (usage) e.usage = usage;
+      stampFailure(e, providerFailureFromStdout(stdout));
       throw e;
     }
     return parseScriptOutput(lane, stdout);
@@ -941,7 +969,7 @@ async function runAgenticScript(lane, rawPayload) {
   if (!mcpUrl || pointsAtLocalhost(mcpUrl)) {
     const e = new Error(`${lane}: mcp.url is missing or unreachable from an E2B microVM `
       + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
-      + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
+      + 'tessary.agentrun.mcp-base-url, or switch '
       + 'SANDBOX_BACKEND to docker for development');
     e.launcherKind = 'bad_request';
     throw e;
@@ -984,6 +1012,7 @@ async function runAgenticScript(lane, rawPayload) {
       await logSandboxDiagnostics(sandboxId);
       const usage = usageFromFailureStdout(stdout);
       if (usage && e && typeof e === 'object') e.usage = usage;
+      stampFailure(e, providerFailureFromStdout(stdout));
       throw e;
     }
     return parseScriptOutput(lane, res.stdout);
@@ -994,20 +1023,6 @@ async function runAgenticScript(lane, rawPayload) {
   }
 }
 
-// payload.clone_url is optional: an evidence-only project still gets its investigation.
-function runRca(payload) {
-  return runAgenticScript('rca', payload);
-}
-
-// The only agentic route with no clone: whether a claim about production traffic is true is not
-// something a repository can settle, so this route must never grow a clone_url.
-function runTriage(payload) {
-  return runAgenticScript('triage', payload);
-}
-
-function runAgentRun(payload) {
-  return runAgenticScript('run', payload);
-}
 
 // ---------------------------------------------------------------------------
 // Launcher sessions: one long-lived sandbox per session running session.js. A backend is one driver
@@ -1056,22 +1071,45 @@ function newSessionRecord({ lane, idleTimeoutMs, createdAt }) {
 }
 
 // session.js's own checks, repeated so a bad session.json spends no sandbox; the two images share no code.
+const SESSION_LANES = ['agent_run', 'triage', 'rca'];
+const SESSION_CLONES = new Set(['rca']);
+const SESSION_HEAD_SHA = /^[0-9a-f]{7,64}$/;
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 const SESSION_SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 const SESSION_MAX_TOOL_CALLS = 1000;
 // Node fires a setTimeout longer than 2^31-1 ms at once, so a huge idle timeout would close a session at birth.
 const SESSION_MAX_IDLE_MS = 24 * 60 * 60 * 1000;
 
-// Only these five fields reach session.json; the credential reaches the sandbox through its env alone.
+function parseSessionClone(body, bad) {
+  const present = ['clone_url', 'head_sha', 'onset_at'].filter((k) => body[k] !== undefined && body[k] !== null);
+  if (present.length === 0) return null;
+  if (!SESSION_CLONES.has(body.lane)) bad('clone_url, head_sha and onset_at are for the rca lane only');
+  const hasUrl = present.includes('clone_url');
+  if (hasUrl !== present.includes('head_sha')) bad('clone_url and head_sha go together');
+  if (!hasUrl) bad('onset_at needs clone_url and head_sha');
+  if (typeof body.clone_url !== 'string' || !body.clone_url) bad('clone_url must be a non-empty string');
+  if (typeof body.head_sha !== 'string' || !SESSION_HEAD_SHA.test(body.head_sha)) bad(`head_sha must match ${SESSION_HEAD_SHA.source}`);
+  const onsetAt = present.includes('onset_at') ? body.onset_at : null;
+  if (onsetAt !== null && (typeof onsetAt !== 'string' || !ISO_TIME.test(onsetAt) || Number.isNaN(Date.parse(onsetAt)))) {
+    bad('onset_at must be an ISO 8601 time');
+  }
+  return { url: body.clone_url, head_sha: body.head_sha, onset_at: onsetAt };
+}
+
+// The credential reaches the sandbox through its env alone. The clone URL carries a token: it lives in
+// session.json until session.js reads and deletes it, and is never logged.
 function parseSessionStart(rawBody) {
   const body = rawBody && typeof rawBody === 'object' ? rawBody : {};
   const bad = (why) => { throw sessionFailure(`${SESSION_SCRIPT}: ${why}`, 'bad_request'); };
   if (typeof body.lane !== 'string' || !body.lane) bad('lane must be a non-empty string');
+  if (!SESSION_LANES.includes(body.lane)) bad(`lane must be one of ${SESSION_LANES.join(', ')}`);
   requireCredential(body.credential, SESSION_SCRIPT);
   if (typeof body.model !== 'string' || !body.model) bad('model must be a non-empty string');
   if (!Number.isSafeInteger(body.idle_timeout_ms) || body.idle_timeout_ms <= 0) bad('idle_timeout_ms must be a positive integer');
   if (body.idle_timeout_ms > SESSION_MAX_IDLE_MS) bad(`idle_timeout_ms must be at most ${SESSION_MAX_IDLE_MS}`);
   if (body.credential.egress_secret && BACKEND !== 'e2b') bad(`an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
   if (typeof body.system_prompt !== 'string' || !body.system_prompt) bad('system_prompt must be a non-empty string');
+  const clone = parseSessionClone(body, bad);
   const files = body.files === undefined ? {} : body.files;
   if (!files || typeof files !== 'object' || Array.isArray(files) || Object.values(files).some((c) => typeof c !== 'string')) {
     bad('files must map relative paths to strings');
@@ -1101,12 +1139,15 @@ function parseSessionStart(rawBody) {
     model,
     modelCost: body.model_cost,
     idleTimeoutMs: body.idle_timeout_ms,
+    readyMs: clone ? SESSION_START_MS + SESSION_CLONE_MS : SESSION_START_MS,
     sessionFile: {
+      lane: body.lane,
       system_prompt: body.system_prompt,
       files,
       model,
       mcp_servers: body.mcp_servers,
       max_tool_calls_per_message: body.max_tool_calls_per_message,
+      ...(clone ? { clone } : {}),
     },
   };
 }
@@ -1237,11 +1278,11 @@ function waitUntil(condition, ms) {
   });
 }
 
-async function waitSessionReady(s, startedAt) {
+async function waitSessionReady(s, startedAt, readyMs = SESSION_START_MS) {
   for (;;) {
     if (s.exited) throw sessionFailure(`${SESSION_SCRIPT} did not become ready (sandbox exited)`, 'orchestration');
-    if (Date.now() - startedAt >= SESSION_START_MS) {
-      throw sessionFailure(`${SESSION_SCRIPT} did not become ready in ${SESSION_START_MS}ms`, 'timeout');
+    if (Date.now() - startedAt >= readyMs) {
+      throw sessionFailure(`${SESSION_SCRIPT} did not become ready in ${readyMs}ms`, 'timeout');
     }
     let answer = null;
     try {
@@ -1383,11 +1424,12 @@ async function followSessionCommand(s, sbx, command) {
 const e2bSessionDriver = {
   async start(s, { sessionFile, credential, model, modelCost }) {
     const mcpUrls = Array.isArray(sessionFile.mcp_servers) ? sessionFile.mcp_servers.map((m) => m && m.url) : [];
+    const cloneUrls = sessionFile.clone ? [sessionFile.clone.url] : [];
     const sbx = await Sandbox().create(ANALYZER_TEMPLATE, {
       apiKey: E2B_API_KEY,
       timeoutMs: SANDBOX_SESSION_MAX_MS + SESSION_E2B_GRACE_MS,
       metadata: { [SANDBOX_LABEL_SESSION]: s.id },
-      ...egressNetwork(credential, mcpUrls),
+      ...egressNetwork(credential, [...mcpUrls, ...cloneUrls]),
     });
     s.handle = { sbx, sandboxId: sbx.sandboxId };
     const file = `${SESSION_E2B_HOME}/session.json`;
@@ -1441,12 +1483,12 @@ async function startSession(body) {
     s.handle = started.handle;
     s.address = started.address;
     started.exited.then(() => onSandboxExit(s));
-    await waitSessionReady(s, arrivedAt);
+    await waitSessionReady(s, arrivedAt, p.readyMs);
   } catch (e) {
     await logStartFailure(s);
     await abandonStart(s);
     const sandbox = s.handle && s.handle.sandboxId ? { sandbox_id: s.handle.sandboxId } : {};
-    throw stampFailure(e, { launcherMeta: { script: SESSION_SCRIPT, elapsed_ms: Date.now() - arrivedAt, timeout_ms: SESSION_START_MS, ...sandbox } });
+    throw stampFailure(e, { launcherMeta: { script: SESSION_SCRIPT, elapsed_ms: Date.now() - arrivedAt, timeout_ms: p.readyMs, ...sandbox } });
   }
   s.state = 'live';
   s.readerDone = readSessionEvents(s);
@@ -1570,11 +1612,6 @@ async function handleSessionRoute(req, res, route) {
   return answer(res, await abortSessionReply(s));
 }
 
-const AGENTIC_ROUTES = new Map([
-  ['/rca', runRca],
-  ['/triage', runTriage],
-  ['/runs', runAgentRun],
-]);
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -1631,7 +1668,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method !== 'POST' || !AGENTIC_ROUTES.has(req.url)) {
+  if (req.method !== 'POST' || req.url !== '/runs') {
     return send(res, 404, { error: 'not found' });
   }
   if (!authorized(req)) {
@@ -1639,7 +1676,7 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     const payload = await readBody(req);
-    const out = await AGENTIC_ROUTES.get(req.url)(payload);
+    const out = await runAgenticScript('run', payload);
     return send(res, 200, out);
   } catch (e) {
     const body = buildErrorBody(e);

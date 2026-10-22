@@ -51,7 +51,7 @@ An answer is taken from the first of these that has one: the environment, `.env`
 
 The non-interactive default for agents is what the stack did before these were questions, so CI is unaffected — agents defaults to `off` outside a terminal, not `docker`, so a headless invocation never triggers an unexpected image build.
 
-With `agents=docker`, `task dev` builds the `sandbox-runner/agent-sandbox/` image before the stack comes up (`docker build`, cached on repeat runs) rather than pulling the published `tessaryai/tessary:agent-sandbox-*` tag — a boot-time failure there stops the whole run rather than surfacing as an opaque 502 on the first `/rca` or `/triage`. Set `AGENT_IMAGE` yourself to skip the checkout build and pin a published tag instead.
+With `agents=docker`, `task dev` builds the `sandbox-runner/agent-sandbox/` image before the stack comes up (`docker build`, cached on repeat runs) rather than pulling the published `tessaryai/tessary:agent-sandbox-*` tag, so a boot-time failure there stops the whole run rather than surfacing as a failed start on the first triage or RCA session. Set `AGENT_IMAGE` yourself to skip the checkout build and pin a published tag instead.
 
 Secrets need no setup: `TESSARY_SECRET_KEY`, `TESSARY_AUTH_COOKIE_PASSWORD` and the launcher key default to the same placeholders `docker-compose.yml` ships. Set real ones in `.env` for anything beyond local development.
 

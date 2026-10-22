@@ -42,7 +42,7 @@ class BehaviorDtosTest {
                         + "\"bucket\":{\"kind\":\"call_site\",\"key\":\"summarize\"},\"ratio\":2.4}")
                 .build();
 
-        BehaviorFindingDetailView view = BehaviorFindingDetailView.of(row, null, null, null, null, null, null);
+        BehaviorFindingDetailView view = BehaviorFindingDetailView.of(row, null, null, null, null, null, null, null);
 
         assertEquals(
                 "summarize", java.util.Objects.requireNonNull(view.metric()).bucketKey());

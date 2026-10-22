@@ -50,6 +50,21 @@ it("the other paged finding reads: name their filters and cursors as FindingCont
 });
 
 
+// Bug: a steps read that drops `after`, or names it otherwise, makes the server send every step on each poll, and an
+// open steps list grows the same steps again every four seconds.
+it("the run steps reads: send the step to read after as the controllers read it", async () => {
+  vi.stubGlobal("fetch", fetchMock);
+  const api = projectApi("acme", "default");
+
+  await api.getTriageSteps("fnd-1", 0);
+  await api.getRcaSteps("rca-2", 7);
+
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    "/api/orgs/acme/projects/default/findings/fnd-1/triage-steps?after=0",
+    "/api/orgs/acme/projects/default/rca/rca-2/steps?after=7",
+  ]);
+});
+
 // Bug: a scope or range sent under another name than ClassifierChartController reads (`callSiteId`, `tool`,
 // `days`) answers 422 CLASSIFIER.CHART_SCOPE, or the default range, for every card on the page.
 it("the classifier chart reads: name the scope and the range as the controller reads them", async () => {

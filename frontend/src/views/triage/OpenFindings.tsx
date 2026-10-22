@@ -4,11 +4,11 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { AlertCircle, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import type { BehaviorFinding } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, Section, Table, TableSkeleton, TBody, TD, TH, THead, TR } from "../../ui";
-import { ago, detectorLabel, isClosedByTriage, triageState } from "../classifiers/shared";
+import { TriageStateText, ago, detectorLabel, isClosedByTriage, triagePoll } from "../classifiers/shared";
 import { displayCallSite } from "./bits";
 
 /** Open, and not yet the case Cases lists. */
@@ -25,6 +25,7 @@ export function OpenFindings({ basePath }: { basePath: string }) {
   const findingsQ = useQuery({
     queryKey: ["behavior-findings", api.base, "all"],
     queryFn: () => api.listBehaviorFindings(),
+    refetchInterval: (q) => triagePoll(q.state.data?.findings),
   });
   const open = useMemo(() => (findingsQ.data?.findings ?? []).filter(awaitsCase), [findingsQ.data]);
   const findingPath = (id: string) => `${basePath}/classifiers/findings/${encodeURIComponent(id)}`;
@@ -69,7 +70,7 @@ export function OpenFindings({ basePath }: { basePath: string }) {
                   {displayCallSite(f.callSiteId) ?? "–"}
                 </TD>
                 <TD>
-                  <TriageCell finding={f} />
+                  <TriageStateText finding={f} />
                 </TD>
                 <TD className="text-subtle whitespace-nowrap" title={new Date(f.firstSeenAt).toLocaleString()}>
                   {ago(f.firstSeenAt)}
@@ -83,21 +84,5 @@ export function OpenFindings({ basePath }: { basePath: string }) {
         </Table>
       )}
     </Section>
-  );
-}
-
-/** Where triage left the finding. A run that gave up gets a red icon beside grey words; red text fails contrast. */
-function TriageCell({ finding }: { finding: BehaviorFinding }) {
-  const state = triageState(finding);
-  if (state.tone === "failed") {
-    return (
-      <span className="flex items-center gap-1.5 whitespace-nowrap">
-        <AlertCircle size={13} strokeWidth={1.75} className="text-error shrink-0" aria-hidden="true" />
-        <span className="text-fg-secondary">{state.label}</span>
-      </span>
-    );
-  }
-  return (
-    <span className={`${state.tone === "positive" ? "text-fg" : "text-muted"} whitespace-nowrap`}>{state.label}</span>
   );
 }

@@ -2,98 +2,66 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.config.ModelsDevProperties;
+import ai.tessary.agentrun.AgentModels;
+import ai.tessary.agentrun.AgentRunRepository;
+import ai.tessary.agentrun.AgentSessionClient;
+import ai.tessary.agentrun.AgentSessionRunner;
+import ai.tessary.agentrun.ProviderStop;
+import ai.tessary.agentrun.StepWords;
 import ai.tessary.config.ObserverProperties;
-import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
-import ai.tessary.llm.ModelsDevRates;
-import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.ClassifierError;
+import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.ModelConfigError;
+import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.sandbox.AgentSpanTelemetry;
 import ai.tessary.testsupport.Props;
-import ai.tessary.testsupport.ScriptedHttpClient;
 import ai.tessary.usage.LlmUsageAccountant;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.api.OpenTelemetry;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanBuilder;
+import io.opentelemetry.api.trace.Tracer;
 import java.math.BigDecimal;
-import java.net.ConnectException;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.net.http.HttpTimeoutException;
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
+import java.time.Duration;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import org.jspecify.annotations.Nullable;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.NullSource;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 
 /**
- * The launcher-envelope handling in {@link E2bTriageSandbox} — same seam pattern as
- * {@code E2bRcaSandboxTest}, but stubbed one layer deeper: overriding {@code send} substitutes only
- * the socket round-trip postLauncher makes, so the actual status/kind classification and
- * usage-booking this class exists to pin stay real. Pins decision 3 of the triage-fixes plan: a
- * run failure spends the finding's attempt ({@code TRIAGE_RUN_INCOMPLETE}), and only an actual
- * launcher fault trips the breaker ({@code TRIAGE_LAUNCHER_UNAVAILABLE} /
- * {@code TRIAGE_LAUNCHER_MISCONFIGURED}).
+ * {@link E2bTriageSandbox} over a stubbed {@link AgentSessionRunner}: what the session is started with, where the
+ * run's steps are written, and the code each way a run ends maps to. The codes decide whether the worker holds the job,
+ * spends an attempt, releases it unspent or parks the drain, so each row of that table is a test here.
  */
 class E2bTriageSandboxTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** The real lookup over the bundled models.dev copy; a blank URL never fetches. */
-    private static final ModelsDevRates RATES = bundledRates();
+    private static final StepWords.Context WORDS =
+            new StepWords.Context(Map.of("witness", "flagged answers"), Map.of("witness", 58L));
 
-    private static ModelsDevRates bundledRates() {
-        ModelsDevProperties p = Props.of(ModelsDevProperties.class, "url", "");
-        return new ModelsDevRates(new ObjectMapper(), p);
-    }
-
-    private static ObserverProperties props() {
-        return launcherAt("http://launcher");
-    }
-
-    private static ObserverProperties launcherAt(@Nullable String url) {
-        return Props.of(ObserverProperties.class, "agentic.launcher-url", url, "agentic.launcher-api-key", "k");
-    }
-
-    /** A project that has not pinned the TRIAGE lane — the sandbox falls back to the observer's model. */
-    private static ProjectModelSettings noLaneSetting() {
-        ProjectModelSettings s = mock(ProjectModelSettings.class);
-        when(s.resolveAgenticModel(any(), any())).thenReturn(Optional.empty());
-        return s;
-    }
-
-    private static AgenticCredentialResolver credentials() {
-        AgenticCredentialResolver c = mock(AgenticCredentialResolver.class);
-        when(c.resolve(any(), any()))
-                .thenReturn(new AgenticCredentialResolver.Credential(
-                        ModelProvider.BEDROCK, null, null, null, "us-east-1", "ak", "sk"));
-        return c;
-    }
+    private final AgentSessionRunner runner = mock(AgentSessionRunner.class);
+    private final AgentRunRepository runs = mock(AgentRunRepository.class);
+    private final Span span = mock(Span.class);
 
     private static TriageSandbox.SandboxRequest request() {
         return new TriageSandbox.SandboxRequest(
@@ -101,371 +69,218 @@ class E2bTriageSandboxTest {
                 "f1",
                 Map.of("finding.md", "the finding"),
                 "rule on it",
-                "{}",
+                "{\"type\":\"object\",\"required\":[\"verdict\"]}",
                 "https://api.example/mcp",
                 "tsy_a_secret",
-                "system prompt");
+                "system prompt",
+                "run-1",
+                WORDS);
     }
 
-    /** A launcher error body in server.js's {@code buildErrorBody} shape. */
-    private static String errorBodyWithUsage(String kind, long inputTokens, long outputTokens) throws Exception {
-        return MAPPER.writeValueAsString(Map.of(
-                "kind",
-                kind,
-                "detail",
-                "the agent burned tokens before it failed",
-                "usage",
-                Map.of("input_tokens", inputTokens, "output_tokens", outputTokens)));
-    }
-
-    /** A stubbed non-2xx {@code HttpResponse<String>} — {@code java.net.http.HttpResponse} is an
-     *  interface, so Mockito can stand one in without a socket. */
-    @SuppressWarnings("unchecked")
-    private static HttpResponse<String> respondWith(int status, String body) {
-        HttpResponse<String> resp = mock(HttpResponse.class);
-        when(resp.statusCode()).thenReturn(status);
-        when(resp.body()).thenReturn(body);
-        return resp;
-    }
-
-    private static E2bTriageSandbox sandbox(LlmUsageAccountant usage, HttpResponse<String> canned) {
-        return sandbox(credentials(), usage, req -> canned);
-    }
-
-    private interface Transport {
-        HttpResponse<String> send(HttpRequest req) throws IOException, InterruptedException;
-    }
-
-    private static E2bTriageSandbox sandbox(
-            AgenticCredentialResolver resolver, LlmUsageAccountant usage, Transport transport) {
-        return new E2bTriageSandbox(props(), noLaneSetting(), resolver, usage, RATES, OpenTelemetry.noop(), MAPPER) {
-            @Override
-            HttpResponse<String> send(HttpRequest req) throws IOException, InterruptedException {
-                return transport.send(req);
-            }
-        };
-    }
-
-    // ---- release: the run's credential is handed back however the run ends --------------------
-
-    private static final AgenticCredentialResolver.Credential LEASED = new AgenticCredentialResolver.Credential(
-            ModelProvider.ANTHROPIC, null, null, null, null, null, null, true, "secret", "lease-1");
-
-    /**
-     * A resolver that reserves something per run (a slot) frees it in {@code release}. A run that ends
-     * any other way than success must still release it, or the reservation leaks until it expires.
-     */
-    @ParameterizedTest
-    @CsvSource(
-            delimiter = '|',
-            value = {
-                "502 | {\"kind\":\"script_exit\"}    ",
-                "502 | {\"kind\":\"orchestration\"}  ",
-                "400 | ''                         ",
-                "200 | {}                         "
-            })
-    void theRunsCredentialIsReleasedHoweverTheRunEnds(int status, String body) {
-        AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
-        when(resolver.resolve(any(), any())).thenReturn(LEASED);
-        E2bTriageSandbox sandbox = sandbox(resolver, mock(LlmUsageAccountant.class), req -> respondWith(status, body));
-
-        try {
-            sandbox.run(request());
-        } catch (TessaryException expectedForSomeRows) {
-            // The outcome is not this test's subject; the release is.
-        }
-
-        verify(resolver, times(1)).release(LEASED);
-    }
-
-    @Test
-    void aCredentialThatNeverResolvedReleasesNothing() {
-        AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
-        when(resolver.resolve(any(), any()))
-                .thenThrow(new TessaryException(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.BEDROCK));
-        E2bTriageSandbox sandbox = new E2bTriageSandbox(
-                props(),
-                noLaneSetting(),
-                resolver,
-                mock(LlmUsageAccountant.class),
-                RATES,
-                OpenTelemetry.noop(),
-                MAPPER);
-
-        assertThrows(TessaryException.class, () -> sandbox.run(request()));
-        verify(resolver, never()).release(any());
-    }
-
-    // ---- classifyFailure: the pure split -------------------------------------------------------
-
-    /**
-     * 401, 403, and 404 are always misconfiguration. Only a 502 carries the launcher's run-versus-launcher split, so a
-     * 502 without a known run kind (a proxy's own page) and any other 5xx are the launcher's fault.
-     */
-    @ParameterizedTest
-    @CsvSource(
-            delimiter = '|',
-            value = {
-                "401 | ''                         | MISCONFIGURED",
-                "403 | ''                         | MISCONFIGURED",
-                "404 | {\"kind\":\"orchestration\"}  | MISCONFIGURED",
-                "502 | {\"kind\":\"timeout\"}        | RUN",
-                "502 | {\"kind\":\"script_exit\"}    | RUN",
-                "502 | {\"kind\":\"bad_output\"}     | RUN",
-                "502 | {\"kind\":\"bad_request\"}    | RUN",
-                "502 | {\"kind\":\"orchestration\"}  | LAUNCHER_UNAVAILABLE",
-                "502 | ''                         | LAUNCHER_UNAVAILABLE",
-                "502 | <html>Bad Gateway</html>   | LAUNCHER_UNAVAILABLE",
-                "502 | {\"kind\":\"something_new\"}  | LAUNCHER_UNAVAILABLE",
-                "500 | {\"kind\":\"script_exit\"}    | LAUNCHER_UNAVAILABLE",
-                "503 | {\"kind\":\"timeout\"}        | LAUNCHER_UNAVAILABLE",
-                "400 | ''                         | RUN",
-                "422 | {}                         | RUN"
-            })
-    void classifyFailureSplitsTheRunFromTheLauncher(int status, String body, E2bTriageSandbox.FailureClass expected) {
-        assertEquals(expected, E2bTriageSandbox.classifyFailure(status, body));
-    }
-
-    // ---- run(): the classification wired into an actual thrown ruling -------------------------
-
-    @Test
-    void aScriptExitBodyThrowsARunFailureAndStillBooksUsage() throws Exception {
-        LlmUsageAccountant usage = mock(LlmUsageAccountant.class);
-        E2bTriageSandbox sandbox = sandbox(usage, respondWith(502, errorBodyWithUsage("script_exit", 120, 40)));
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
-
-        assertEquals(ClassifierError.TRIAGE_RUN_INCOMPLETE, ex.error());
-        verify(usage)
-                .recordSandboxRun(eq("proj"), any(), any(), eq(false), eq(120L), eq(40L), eq(0L), eq(0L), any(), any());
-    }
-
-    @Test
-    void a401ThrowsLauncherMisconfigured() throws Exception {
-        E2bTriageSandbox sandbox = sandbox(mock(LlmUsageAccountant.class), respondWith(401, "unauthorized"));
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
-
-        assertEquals(ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED, ex.error());
-    }
-
-    // ---- run(): the launcher's answer read back into a ruling -----------------------------------
-
-    /** An unset launcher is a misconfiguration somebody has to see, not a run that found nothing. */
-    @ParameterizedTest
-    @NullSource
-    @ValueSource(strings = {"  "})
-    void anUnsetLauncherThrowsLauncherUnavailableBeforeAnyCall(String launcherUrl) {
-        ObserverProperties bare = launcherAt(launcherUrl);
-        E2bTriageSandbox sandbox = new E2bTriageSandbox(
-                bare,
-                noLaneSetting(),
-                credentials(),
-                mock(LlmUsageAccountant.class),
-                RATES,
-                OpenTelemetry.noop(),
-                MAPPER);
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
-
-        assertEquals(ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, ex.error());
+    private E2bTriageSandbox sandbox() {
+        AgentModels models = mock(AgentModels.class);
+        when(models.resolve("proj", ModelLane.TRIAGE))
+                .thenReturn(new AgentModels.Choice("grok-4.6", null, ModelProvider.GROK));
+        SpanBuilder builder = mock(SpanBuilder.class, RETURNS_SELF);
+        when(builder.startSpan()).thenReturn(span);
+        Tracer tracer = mock(Tracer.class);
+        when(tracer.spanBuilder(anyString())).thenReturn(builder);
+        OpenTelemetry otel = mock(OpenTelemetry.class);
+        when(otel.getTracer(anyString())).thenReturn(tracer);
+        ObserverProperties props =
+                Props.of(ObserverProperties.class, "agentic.timeout-ms", 1_800_000, "agentic.max-turns", 52);
+        return new E2bTriageSandbox(props, runner, runs, models, otel, MAPPER);
     }
 
     /**
-     * A completed run over a real loopback socket: the ruling text comes out of the {@code raw} envelope's
-     * {@code result}, and the envelope's usage is booked against the finding. Missing either is a ruling
-     * that never reaches the worker, or a triage agent whose spend the ledger never sees.
+     * The triage session runs on the finding's own ledger subject and the triage lane, with the shared system prompt,
+     * the dossier, the platform's MCP door, no clone, the observer's wall clock and the turn count the prompt states.
+     * The bug: a run booked on another lane or subject, or a session with a cap the prompt does not promise.
      */
     @Test
-    void aCompletedRunReturnsTheAgentsResultAndBooksItsUsage() throws Exception {
-        LlmUsageAccountant usage = mock(LlmUsageAccountant.class);
-        String raw = MAPPER.writeValueAsString(Map.of(
-                "result",
-                "{\"verdict\":\"positive\"}",
-                "usage",
-                Map.of("input_tokens", 100, "output_tokens", 20, "cost_usd", 0.5)));
-        try (ServerSocket launcher =
-                launcherAnswering(200, MAPPER.writeValueAsString(Map.of("raw", raw, "startMs", 0)))) {
-            ObserverProperties live = launcherAt("http://127.0.0.1:" + launcher.getLocalPort());
-            E2bTriageSandbox sandbox = new E2bTriageSandbox(
-                    live, noLaneSetting(), credentials(), usage, RATES, OpenTelemetry.noop(), MAPPER);
+    void theSessionRunsOnTheFindingsSubjectWithTheDossierTheDoorAndTheCapThePromptStates() {
+        when(runner.run(any(), any())).thenReturn(new AgentSessionRunner.Answer("{\"verdict\":\"real\"}", usage(), 3));
 
-            assertEquals(
-                    Optional.of(new TriageSandbox.SandboxRun("{\"verdict\":\"positive\"}")), sandbox.run(request()));
-        }
-        verify(usage)
-                .recordSandboxRun(
-                        eq("proj"),
-                        any(),
-                        any(),
-                        eq(false),
-                        eq(100L),
-                        eq(20L),
-                        eq(0L),
-                        eq(0L),
-                        eq(new BigDecimal("0.5")),
-                        eq(new LlmUsageAccountant.Subject(E2bTriageSandbox.SUBJECT_KIND, "f1")));
-    }
+        TriageSandbox.SandboxRun run = sandbox().run(request()).orElseThrow();
 
-    /** A pinned TRIAGE lane runs its own provider and model, at that model's rates, not the deployment default's. */
-    @Test
-    void aPinnedLaneSendsItsProviderModelAndRates() throws Exception {
-        ProjectModelSettings settings = mock(ProjectModelSettings.class);
-        when(settings.resolveAgenticModel("proj", ModelLane.TRIAGE))
-                .thenReturn(Optional.of(
-                        new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.GROK, "grok-4.6", "xai/grok-4.6")));
-        StringBuilder posted = new StringBuilder();
-        new E2bTriageSandbox(
-                props(), settings, credentials(), mock(LlmUsageAccountant.class), RATES, OpenTelemetry.noop(), MAPPER) {
-            @Override
-            HttpResponse<String> send(HttpRequest req) {
-                posted.append(ScriptedHttpClient.body(req));
-                return respondWith(200, "{}");
-            }
-        }.run(request());
-
-        JsonNode body = MAPPER.readTree(posted.toString());
-        assertEquals("grok-4.6", body.path("model").asText());
-        assertEquals("GROK", body.path("provider").asText());
+        assertEquals("{\"verdict\":\"real\"}", run.resultText());
+        ArgumentCaptor<AgentSessionRunner.Task> task = ArgumentCaptor.forClass(AgentSessionRunner.Task.class);
+        verify(runner).run(task.capture(), any());
         assertEquals(
-                MAPPER.readTree(MAPPER.writeValueAsString(
-                        RATES.cost("xai/grok-4.6").orElseThrow().toOpencodeCost(MAPPER))),
-                body.path("model_cost"));
+                new AgentSessionRunner.Task(
+                        "proj",
+                        ModelLane.TRIAGE,
+                        new LlmUsageAccountant.Subject(E2bTriageSandbox.SUBJECT_KIND, "f1"),
+                        "system prompt",
+                        Map.of("finding.md", "the finding"),
+                        List.of(new AgentSessionClient.McpServer(
+                                "tessary-evals", "https://api.example/mcp", "tsy_a_secret")),
+                        null,
+                        "rule on it",
+                        "{\"type\":\"object\",\"required\":[\"verdict\"]}",
+                        Duration.ofMillis(1_800_000),
+                        50,
+                        WORDS),
+                task.getValue());
     }
 
     /**
-     * A 2xx that carries no ruling is an empty run, never a thrown one: no {@code raw} (a run-level failure
-     * body), a {@code raw} with a blank {@code result}, or a body that is not JSON at all.
-     */
-    @ParameterizedTest
-    @ValueSource(strings = {"{\"kind\":\"timeout\"}", "{\"raw\":\"{\\\"result\\\":\\\"\\\"}\"}", "<html>proxy</html>"})
-    void aSuccessfulAnswerWithNoRulingIsAnEmptyRun(String body) {
-        E2bTriageSandbox sandbox = sandbox(mock(LlmUsageAccountant.class), respondWith(200, body));
-
-        assertEquals(Optional.empty(), sandbox.run(request()));
-    }
-
-    /**
-     * A read timeout is this run taking too long, so it is an empty run the finding's own attempts absorb.
-     * A connect failure reached nothing, so it is the launcher's fault and feeds the breaker.
+     * Each step and note the runner words lands on the run the worker opened, and a call that failed is stored in its
+     * "Could not" form. The bug: a step list or live line that stays empty, or that says a failed read succeeded.
      */
     @Test
-    void aTimeoutIsAnEmptyRunAndAConnectFailureIsTheLaunchers() {
-        E2bTriageSandbox timesOut = throwing(new HttpTimeoutException("request timed out"));
-        assertEquals(Optional.empty(), timesOut.run(request()));
-
-        TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> throwing(new ConnectException("refused")).run(request()));
-        assertEquals(ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, ex.error());
-        assertEquals(
-                "The triage launcher is not answering: unreachable at http://launcher (ConnectException)",
-                ex.getMessage());
-    }
-
-    /** Cancellation propagates as the thread's interrupt, never swallowed as "no ruling". */
-    @Test
-    void anInterruptedRunIsEmptyAndKeepsTheInterrupt() {
-        try {
-            assertEquals(Optional.empty(), throwing(new InterruptedException()).run(request()));
-            assertTrue(Thread.interrupted(), "the interrupt is restored for the caller to see");
-        } finally {
-            Thread.interrupted();
-        }
-    }
-
-    /**
-     * A 404 is a launcher image older than the backend: the refusal says so, since no retry ships a new
-     * image. The launcher's own diagnosis names the sandbox when it has one, alone or after kind and detail.
-     */
-    @Test
-    void theRefusalsNameTheirRemedyAndTheSandbox() throws Exception {
-        TessaryException notFound = assertThrows(
-                TessaryException.class,
-                () -> sandbox(mock(LlmUsageAccountant.class), respondWith(404, ""))
-                        .run(request()));
-        assertEquals(ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED, notFound.error());
-        assertEquals(
-                "The triage launcher refused the run: status 404 from http://launcher — no /triage route; the"
-                        + " launcher image is older than this backend",
-                notFound.getMessage());
-
-        TessaryException scriptExit = assertThrows(
-                TessaryException.class,
-                () -> sandbox(
-                                mock(LlmUsageAccountant.class),
-                                respondWith(
-                                        502,
-                                        MAPPER.writeValueAsString(Map.of(
-                                                "kind", "script_exit", "detail", "exit 1", "sandbox_id", "sb-1"))))
-                        .run(request()));
-        assertEquals(
-                "Triage of finding 'f1' produced no ruling: kind=script_exit detail=exit 1 sandbox=sb-1",
-                scriptExit.getMessage());
-
-        TessaryException sandboxOnly = assertThrows(
-                TessaryException.class,
-                () -> sandbox(mock(LlmUsageAccountant.class), respondWith(400, "{\"sandbox_id\":\"sb-2\"}"))
-                        .run(request()));
-        assertEquals("Triage of finding 'f1' produced no ruling: sandbox=sb-2", sandboxOnly.getMessage());
-    }
-
-    private static E2bTriageSandbox throwing(Exception failure) {
-        return sandbox(credentials(), mock(LlmUsageAccountant.class), req -> {
-            if (failure instanceof IOException io) throw io;
-            throw (InterruptedException) failure;
+    void theRunsSessionAndStepsAreWrittenToItsRun() {
+        StepWords.Words words = new StepWords.Words(
+                "Read flagged answers 1 to 8 of 58", "Reading flagged answers 1 to 8", "read flagged answers 1 to 8");
+        when(runner.run(any(), any())).thenAnswer(inv -> {
+            AgentSessionRunner.StepSink sink = inv.getArgument(1);
+            sink.session("s-1");
+            sink.started("c1", words, 5);
+            sink.ended("c1", 9, false, words);
+            sink.started("c2", words, 10);
+            sink.ended("c2", 12, true, words);
+            sink.note("Let me look at the history", 11);
+            return new AgentSessionRunner.Answer("{}", usage(), 2);
         });
+
+        sandbox().run(request());
+
+        verify(runs).attachSession("run-1", "s-1");
+        verify(runs).stepStarted("run-1", "c1", words.done(), words.doing(), 5);
+        verify(runs).stepEnded("run-1", "c1", 9, false, "Could not read flagged answers 1 to 8");
+        verify(runs).stepEnded("run-1", "c2", 12, true, words.done());
+        verify(runs).note("run-1", "Let me look at the history", 11);
     }
 
     /**
-     * A one-shot loopback launcher: reads one request and answers it with {@code status} and {@code body}.
-     * forbidden-apis bans {@code com.sun.net.httpserver}, so this is a bare socket.
+     * The spend reaches the span from the runner's summed usage, with the step count. The session client books it;
+     * this class holds no ledger, so it cannot book it a second time (double-booked spend).
      */
-    private static ServerSocket launcherAnswering(int status, String body) throws IOException {
-        ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
-        Thread responder = new Thread(
-                () -> {
-                    try (Socket client = socket.accept()) {
-                        InputStream in = client.getInputStream();
-                        int contentLength = 0;
-                        for (String line : readHead(in).split("\r\n")) {
-                            if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) {
-                                contentLength = Integer.parseInt(line.substring("content-length:".length())
-                                        .trim());
-                            }
-                        }
-                        in.readNBytes(contentLength);
-                        byte[] payload = body.getBytes(StandardCharsets.UTF_8);
-                        OutputStream out = client.getOutputStream();
-                        out.write(("HTTP/1.1 " + status + " Stub\r\n"
-                                        + "Content-Type: application/json\r\n"
-                                        + "Content-Length: " + payload.length + "\r\n"
-                                        + "Connection: close\r\n\r\n")
-                                .getBytes(StandardCharsets.UTF_8));
-                        out.write(payload);
-                        out.flush();
-                    } catch (IOException e) {
-                        // The socket closed first; the test's own assertions report what went wrong.
-                    }
-                },
-                "stub-triage-launcher");
-        responder.setDaemon(true);
-        responder.start();
-        return socket;
+    @Test
+    void theRunsUsageAndStepCountReachTheSpan() {
+        when(runner.run(any(), any())).thenReturn(new AgentSessionRunner.Answer("{}", usage(), 7));
+
+        sandbox().run(request());
+
+        verify(span).setAttribute("gen_ai.usage.input_tokens", 1200L);
+        verify(span).setAttribute("gen_ai.usage.output_tokens", 80L);
+        verify(span).setAttribute("gen_ai.usage.cost", 0.0123);
+        verify(span).setAttribute("gen_ai.request.model", "grok-4.6");
+        verify(span).setAttribute("tessary.agent.steps", 7L);
+        verify(span).end();
     }
 
-    /** Read up to and including the blank line ending the request head. */
-    private static String readHead(InputStream in) throws IOException {
-        ByteArrayOutputStream head = new ByteArrayOutputStream();
-        int c;
-        while ((c = in.read()) != -1) {
-            head.write(c);
-            byte[] seen = head.toByteArray();
-            int n = seen.length;
-            if (n >= 4 && seen[n - 4] == '\r' && seen[n - 3] == '\n' && seen[n - 2] == '\r' && seen[n - 1] == '\n') {
-                break;
-            }
-        }
-        return head.toString(StandardCharsets.UTF_8);
+    /**
+     * One row per way a run can end, each to the code that makes the worker do the right thing: a rejected key or a
+     * refused request holds the job instead of spending an attempt; a launcher down parks the drain unspent; a launcher
+     * that refuses holds; a provider that did not answer, a timeout and an answerless run spend an attempt.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("endings")
+    void eachWayARunEndsMapsToTheCodeTheWorkerActsOn(String why, TessaryException thrown, ErrorCode expected) {
+        when(runner.run(any(), any())).thenThrow(thrown);
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> sandbox().run(request()));
+
+        assertEquals(expected, e.error(), why);
+        verify(span).end();
+    }
+
+    static Stream<Arguments> endings() {
+        return Stream.of(
+                Arguments.of(
+                        "a rejected key holds the job instead of spending an attempt",
+                        new ProviderStop("provider_rejected", "model provider: invalid key (HTTP 401)"),
+                        ClassifierError.TRIAGE_PROVIDER_REJECTED),
+                Arguments.of(
+                        "a refused request holds the job instead of spending an attempt",
+                        new ProviderStop("request_refused", "model provider: no such model (HTTP 404)"),
+                        ClassifierError.TRIAGE_REQUEST_REFUSED),
+                Arguments.of(
+                        "a provider that did not answer spends an attempt",
+                        new ProviderStop("provider_unavailable", "model provider: overloaded (HTTP 529)"),
+                        ClassifierError.TRIAGE_PROVIDER_UNAVAILABLE),
+                Arguments.of(
+                        "a launcher that does not answer parks the drain unspent",
+                        new TessaryException(AgentRunError.LAUNCHER_UNAVAILABLE, "connection refused"),
+                        ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE),
+                Arguments.of(
+                        "a launcher that refuses the run holds the job until the deployment changes",
+                        new TessaryException(AgentRunError.LAUNCHER_MISCONFIGURED, "status 401"),
+                        ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED),
+                Arguments.of(
+                        "a run past its wall clock spends an attempt",
+                        new TessaryException(AgentRunError.TIMED_OUT, 1_800_000),
+                        ClassifierError.TRIAGE_RUN_INCOMPLETE),
+                Arguments.of(
+                        "a session that closed early spends an attempt",
+                        new TessaryException(AgentRunError.RUN_FAILED, "the session closed"),
+                        ClassifierError.TRIAGE_RUN_INCOMPLETE),
+                Arguments.of(
+                        "an answer that stays unusable after the correction spends an attempt",
+                        new TessaryException(AgentRunError.BAD_OUTPUT, "no JSON object"),
+                        ClassifierError.TRIAGE_RUN_INCOMPLETE),
+                Arguments.of(
+                        "an unexpected failure in the run spends an attempt",
+                        new TessaryException(ClassifierError.TRIAGE_RUN_INCOMPLETE, "f1", "x"),
+                        ClassifierError.TRIAGE_RUN_INCOMPLETE));
+    }
+
+    /**
+     * A full launcher is nothing the run did wrong: the code says busy and asks for a retry in 30 seconds, which the
+     * worker turns into an unspent release that still reads Queued (a busy sandbox shown as a retry).
+     */
+    @Test
+    void aFullLauncherAsksForARetryWithoutSpendingTheAttempt() {
+        when(runner.run(any(), any())).thenThrow(new TessaryException(AgentRunError.CAPACITY, "4 sessions running"));
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> sandbox().run(request()));
+
+        assertEquals(ClassifierError.TRIAGE_SANDBOX_BUSY, e.error());
+        assertEquals(30, assertInstanceOf(Retryable.class, e).retryAfterSeconds());
+    }
+
+    /** An org with no usable credential is the worker's credential-gap hold, so its code passes through untouched. */
+    @Test
+    void aMissingCredentialPassesThroughToTheWorkersHold() {
+        TessaryException missing = new TessaryException(ModelConfigError.MISSING_CREDENTIALS, "grok", "triage");
+        when(runner.run(any(), any())).thenThrow(missing);
+
+        assertSame(missing, assertThrows(TessaryException.class, () -> sandbox().run(request())));
+    }
+
+    /** A failure that is not a Tessary error still spends an attempt with the finding named, never escapes raw. */
+    @Test
+    void aRawFailureSpendsAnAttempt() {
+        when(runner.run(any(), any())).thenThrow(new IllegalStateException("socket closed"));
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> sandbox().run(request()));
+
+        assertEquals(ClassifierError.TRIAGE_RUN_INCOMPLETE, e.error());
+        assertEquals(
+                IllegalStateException.class,
+                e.getCause() == null ? null : e.getCause().getClass());
+    }
+
+    /** The span names no token: the MCP key rides the session start only. */
+    @Test
+    void theSpanCarriesNoToken() {
+        when(runner.run(any(), any())).thenReturn(new AgentSessionRunner.Answer("{}", usage(), 0));
+        ArgumentCaptor<String> values = ArgumentCaptor.forClass(String.class);
+
+        sandbox().run(request());
+
+        verify(span, org.mockito.Mockito.atLeastOnce()).setAttribute(anyString(), values.capture());
+        assertNull(values.getAllValues().stream()
+                .filter(v -> v.contains("tsy_a_secret"))
+                .findFirst()
+                .orElse(null));
+    }
+
+    private static AgentSpanTelemetry.AgentUsage usage() {
+        return new AgentSpanTelemetry.AgentUsage(1200, 80, 1000, 200, new BigDecimal("0.0123"));
     }
 }

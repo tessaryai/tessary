@@ -17,8 +17,16 @@ public class ProjectPurgeRepository {
      * Everything else is left to the {@code ON DELETE CASCADE} of the final project delete. {@code job} is safe to
      * empty: the purge job's own row has a NULL {@code project_id}.
      */
-    public static final List<String> TABLES =
-            List.of("span_payload", "tool_call", "retrieved_doc", "span", "trace", "media_object", "job");
+    public static final List<String> TABLES = List.of(
+            "span_payload",
+            "tool_call",
+            "retrieved_doc",
+            "span",
+            "trace",
+            "media_object",
+            "agent_run_step",
+            "agent_run",
+            "job");
 
     private final JdbcClient jdbc;
 
@@ -30,6 +38,9 @@ public class ProjectPurgeRepository {
     public int deleteBatch(String table, String projectId, int limit) {
         if ("trace".equals(table)) {
             return deleteTraceLeafBatch(projectId, limit);
+        }
+        if ("agent_run_step".equals(table)) {
+            return deleteAgentRunStepBatch(projectId, limit);
         }
         return jdbc.sql("DELETE FROM " + table + " WHERE ctid IN (" + "SELECT ctid FROM " + table
                         + " WHERE project_id = :pid LIMIT :n)")
@@ -54,6 +65,19 @@ public class ProjectPurgeRepository {
                             SELECT 1 FROM trace c
                              WHERE c.project_id = t.project_id AND c.parent_trace_id = t.id
                         )
+                      LIMIT :n
+                 )
+                """).param("pid", projectId).param("n", limit).update();
+    }
+
+    /** {@code agent_run_step} carries no {@code project_id}; its run does. */
+    private int deleteAgentRunStepBatch(String projectId, int limit) {
+        return jdbc.sql("""
+                DELETE FROM agent_run_step
+                 WHERE ctid IN (
+                     SELECT s.ctid
+                       FROM agent_run_step s JOIN agent_run r ON r.id = s.run_id
+                      WHERE r.project_id = :pid
                       LIMIT :n
                  )
                 """).param("pid", projectId).param("n", limit).update();

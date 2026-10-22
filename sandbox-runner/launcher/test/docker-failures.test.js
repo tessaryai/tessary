@@ -118,7 +118,7 @@ async function withLauncher(shape, env, fn) {
     });
     const post = (body) => new Promise((resolve, reject) => {
       const req = http.request(
-        { host: '127.0.0.1', port, path: '/triage', method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer testkey' } },
+        { host: '127.0.0.1', port, path: '/runs', method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer testkey' } },
         (res) => {
           const chunks = [];
           res.on('data', (c) => chunks.push(c));
@@ -157,9 +157,9 @@ test('a container that exits non-zero answers script_exit with its spend, and it
         kind: 'script_exit',
         timeout: false,
         error_class: 'Error',
-        detail: 'triage exited 3 (output withheld; see launcher logs)',
+        detail: 'run exited 3 (output withheld; see launcher logs)',
         exit_code: 3,
-        script: 'triage',
+        script: 'run',
         timeout_ms: 10000,
         // A failed run's cost reaches the backend with its tokens, or it books the spend as unpriced.
         usage: { input_tokens: 90, cache_read_input_tokens: 4, cost_usd: 0.04 },
@@ -170,6 +170,30 @@ test('a container that exits non-zero answers script_exit with its spend, and it
       assert.doesNotMatch(stderr(), /ghs_secret/);
     },
   );
+});
+
+test('a lane that names a provider failure answers that kind with a fixed detail and the provider status', async () => {
+  // Bug caught: a rejected key read as script_exit, so the backend retried a run that could never succeed.
+  const envelope = JSON.stringify({ is_error: true, error: 'model provider: invalid x-api-key', usage: { input_tokens: 0 }, kind: 'provider_rejected', provider_status: 401 });
+  await withLauncher({ exitCode: 1, logs: [[1, envelope]] }, {}, async ({ post }) => {
+    const { status, body } = await post({});
+
+    assert.equal(status, 502);
+    assert.equal(body.kind, 'provider_rejected');
+    assert.equal(body.timeout, false);
+    assert.equal(body.detail, 'the model provider rejected the credential (HTTP 401)');
+    assert.equal(body.exit_code, 1);
+  });
+});
+
+test('a lane cannot name a kind outside the provider failures, nor put text in the provider status', async () => {
+  const envelope = JSON.stringify({ is_error: true, error: 'x', kind: 'timeout', provider_status: 'invalid x-api-key sk-ant-123' });
+  await withLauncher({ exitCode: 1, logs: [[1, envelope]] }, {}, async ({ post }) => {
+    const { body } = await post({});
+
+    assert.equal(body.kind, 'script_exit');
+    assert.doesNotMatch(JSON.stringify(body), /sk-ant-123/);
+  });
 });
 
 test('a truncated failure envelope books no spend and still reports the exit', async () => {
@@ -201,7 +225,7 @@ test('a container flooding stdout past the cap is killed rather than buffered', 
     const { status, body } = await post({});
 
     assert.equal(status, 502);
-    assert.equal(body.detail, 'triage stdout exceeded 16777216 bytes');
+    assert.equal(body.detail, 'run stdout exceeded 16777216 bytes');
     assert.ok(calls.includes('POST /containers/c1/kill'), 'a runaway agent must not keep running');
   });
 });
@@ -212,7 +236,7 @@ test('stdout that is not JSON is bad_output, and none of it reaches the response
 
     assert.equal(status, 502);
     assert.equal(body.kind, 'bad_output');
-    assert.equal(body.detail, 'triage returned unparseable output (25 bytes)');
+    assert.equal(body.detail, 'run returned unparseable output (25 bytes)');
     assert.doesNotMatch(JSON.stringify(body), /answer is yes/);
   });
 });
@@ -238,7 +262,7 @@ test('a work dir that cannot be created fails the run before any container exist
 
     assert.equal(status, 502);
     assert.equal(body.kind, 'orchestration');
-    assert.equal(body.script, 'triage', 'the failure still names the run it belongs to');
+    assert.equal(body.script, 'run', 'the failure still names the run it belongs to');
     assert.equal(body.timeout_ms, 10000);
     assert.ok(!calls.includes('POST /containers/create'));
   });

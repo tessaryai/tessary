@@ -110,6 +110,13 @@ function mockSdk({ messagesById }) {
   return { createCalls, serverConfigs, promptBodies };
 }
 
+/** An assistant turn that carries the error opencode records when the provider refuses the call. */
+function providerErrorMessage(error) {
+  const message = assistantMessage({});
+  message.info.error = error;
+  return message;
+}
+
 test('F1: a fresh-session retry does not lose attempt 1\'s usage', async (t) => {
   t.after(() => mock.reset());
   // Session 1: one empty turn with real input spend, cheap enough that the gate allows a retry. Session 2 fails the
@@ -347,7 +354,7 @@ test('systemPrompt: selects the custom triage agent, routes MCP through a loopba
   assert.equal(extDir[path.join(dataHome, 'opencode', 'tool-output', '*')], 'allow');
 });
 
-test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with a bearer header, no agent on the prompt, external_directory a blanket deny', async (t) => {
+test('no systemPrompt (a /runs caller that sends none): default build agent, direct MCP with a bearer header, no agent on the prompt, external_directory a blanket deny', async (t) => {
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs, promptBodies } = mockSdk({
@@ -364,7 +371,7 @@ test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with 
   });
 
   const config = serverConfigs()[0];
-  assert.deepEqual(config.agent, { build: { maxSteps: 8 } }, 'the RCA path still runs under opencode\'s default agent');
+  assert.deepEqual(config.agent, { build: { maxSteps: 8 } }, 'a run with no system prompt runs under opencode\'s default agent');
   assert.deepEqual(config.mcp['tessary-evals'], {
     type: 'remote',
     url: 'https://tessary.example/mcp',
@@ -481,6 +488,105 @@ test('b: the failure envelope lane.js writes is valid JSON with a numeric-only u
   for (const [k, v] of Object.entries(parsed.usage)) {
     assert.equal(typeof v, 'number', `usage.${k} must be numeric — server.js's HARD RULE forwards this verbatim`);
   }
+});
+
+test('a provider that rejects the key fails the run at once as provider_rejected, with no second session', async (t) => {
+  // Bug caught: the 401 opencode recorded was read as an empty completion, retried in a fresh session, and reported
+  // as "no usable reply", so the backend retried a key that could never work.
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { createCalls } = mockSdk({
+    messagesById: () => [
+      providerErrorMessage({
+        name: 'APIError',
+        data: { message: 'invalid x-api-key', statusCode: 401, isRetryable: false },
+      }),
+    ],
+  });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    (err) => {
+      assert.equal(err.providerKind, 'provider_rejected');
+      assert.equal(err.providerStatus, 401);
+      assert.match(err.message, /invalid x-api-key/);
+      assert.equal(err.turns.length, 1);
+      return true;
+    },
+  );
+  assert.equal(createCalls.length, 1, 'a key the provider rejected is not tried again in a fresh session');
+});
+
+test('a request the provider refuses for another reason fails as request_refused', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  mockSdk({
+    messagesById: () => [
+      providerErrorMessage({
+        name: 'APIError',
+        data: { message: 'model not found', statusCode: 404, isRetryable: false },
+      }),
+    ],
+  });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    (err) => err.providerKind === 'request_refused' && err.providerStatus === 404,
+  );
+});
+
+test('a provider opencode stopped retrying fails as provider_unavailable at once, with no second session', async (t) => {
+  // Bug caught: after opencode spent a minute retrying an unreachable provider, a fresh session spent another.
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { createCalls } = mockSdk({
+    messagesById: () => [
+      providerErrorMessage({
+        name: 'APIError',
+        data: { message: 'Cannot connect to API: Unable to connect.', isRetryable: true },
+      }),
+    ],
+  });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    (err) => {
+      assert.equal(err.providerKind, 'provider_unavailable');
+      assert.equal(err.providerStatus, undefined);
+      assert.match(err.message, /Cannot connect to API/);
+      return true;
+    },
+  );
+  assert.equal(createCalls.length, 1);
+});
+
+test('a session the run itself aborted is not reported as a provider failure', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  mockSdk({ messagesById: () => [providerErrorMessage({ name: 'MessageAbortedError', data: { message: 'aborted' } })] });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    (err) => err.providerKind === undefined,
+  );
+});
+
+test('the failure envelope names the provider failure, and nothing for any other failure', () => {
+  const { failureEnvelope } = require('../agent-stream');
+  const turns = [{ usage: { input_tokens: 5, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }];
+  const rejected = JSON.parse(failureEnvelope(Object.assign(new Error('invalid x-api-key'), {
+    turns,
+    providerKind: 'provider_rejected',
+    providerStatus: 401,
+  })));
+  assert.equal(rejected.kind, 'provider_rejected');
+  assert.equal(rejected.provider_status, 401);
+  assert.equal(rejected.usage.input_tokens, 5);
+
+  const other = JSON.parse(failureEnvelope(Object.assign(new Error('opencode produced no result'), { turns: [] })));
+  assert.equal(other.kind, undefined);
+  assert.equal(other.provider_status, undefined);
+  assert.equal(other.is_error, true);
 });
 
 test('describeError: a non-Error cause is serialised, scrubbed, and never "[object Object]"', () => {

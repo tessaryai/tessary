@@ -21,7 +21,8 @@ const MODE = process.env.FAKE_E2B_MODE || 'ok';
 const LOG = process.env.FAKE_E2B_LOG;
 const record = (entry) => fs.appendFileSync(LOG, JSON.stringify(entry) + '\n');
 
-const FAILURE_ENVELOPE = JSON.stringify({ is_error: true, error: 'agent gave up', usage: { input_tokens: 120, output_tokens: 7 } });
+const FAILURE_ENVELOPE = process.env.FAKE_E2B_FAILURE_STDOUT
+  || JSON.stringify({ is_error: true, error: 'agent gave up', usage: { input_tokens: 120, output_tokens: 7 } });
 
 function named(name, message, fields = {}) {
   return Object.assign(new Error(message), { name }, fields);

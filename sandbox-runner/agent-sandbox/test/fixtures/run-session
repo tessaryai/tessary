@@ -36,6 +36,7 @@ async function startSession({ input = {}, script = { replies: [] }, env = {}, se
   const scriptPath = path.join(scriptDir, 'script.json');
   fs.writeFileSync(scriptPath, JSON.stringify(script));
   fs.writeFileSync(path.join(workDir, 'session.json'), typeof input === 'string' ? input : JSON.stringify({
+    lane: 'agent_run',
     system_prompt: 'You are the session agent.',
     files: {},
     model: 'anthropic/claude-sonnet-5',

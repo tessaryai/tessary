@@ -23,23 +23,20 @@ public record RcaProperties(
 
         @DefaultValue Agentic agentic) {
 
-    /** RCA's only analysis path, so {@link #launcherUrl} is effectively required. */
+    /**
+     * No launcher or model here: RCA runs on the session launcher every agent lane shares ({@code tessary.agentrun.*},
+     * falling back to {@code tessary.observer.agentic.*}) and on the observer's model.
+     */
     public record Agentic(
 
             /** Only "e2b" ships today. */
             @DefaultValue("e2b") String sandbox,
 
-            @DefaultValue("") String launcherUrl,
-
-            @DefaultValue("") String launcherApiKey,
-
-            // No `model` here on purpose: RCA rides the observer's launcher and model (TESSARY_OBSERVER_AGENTIC_MODEL).
-
             /** Keep below {@code tessary.rca.lease-seconds} or the job is reclaimed mid-run. */
             @DefaultValue("900000") long timeoutMs,
 
-            // Sent as `max_turns`, which forces a text-only reply at the cap rather than a hard kill that discards a
-            // partial verdict.
+            // Two turns go to the answer, so the session's tool cap is two below this; at the cap the agent answers in
+            // text rather than being killed with a partial verdict.
             @DefaultValue("40") int maxTurns,
 
             /**

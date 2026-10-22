@@ -278,8 +278,8 @@
   /* --- Chart palettes (charts only) ---
    * The one place a hue carries data instead of status. Metrics charts draw up to six ranked series
    * plus an "other" fold; a series line, bar, legend dot or hover marker reads --color-series-N, and
-   * nothing outside an SVG chart or its legend may. Three palettes; the user picks one in Settings >
-   * Organization > Appearance (localStorage tessary.prefs.chartPalette) and ChartPaletteProvider
+   * nothing outside an SVG chart or its legend may. Three palettes; the user picks one from the three dots in
+   * the Metrics header (localStorage tessary.prefs.chartPalette) and ChartPaletteProvider
    * stamps it on <html> as data-chart-palette. Every value clears 3:1 on --color-surface (#1B1B1B),
    * the card background a chart sits on; the ratios are in frontend/DESIGN_SYSTEM.md, Charts. */
   /* The Tessary v2 design system's chart-series-1..6 ramp. */

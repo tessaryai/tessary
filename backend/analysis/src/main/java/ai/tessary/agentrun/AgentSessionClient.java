@@ -6,6 +6,7 @@ import ai.tessary.usage.LlmUsageAccountant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Long-lived agent sessions on the launcher ({@code sandbox-runner/README.md}). The credential is claimed per reply,
@@ -41,9 +42,10 @@ public interface AgentSessionClient {
     Stream<SessionEvent> events(String sessionId, long afterSeq);
 
     /**
-     * @param files relative path to content, written under the sandbox's {@code dossier/} @param mcpServers their
-     * tokens go to the launcher only @param idleTimeoutMs the launcher closes the session after this long with no
-     * message; no default @param maxToolCallsPerMessage the agent's step cap per reply
+     * @param files relative path to content, written under the sandbox's {@code dossier/} @param mcpServers their tokens go to the launcher only
+     * @param idleTimeoutMs the launcher closes the session after this long with no message; no default @param
+     * maxToolCallsPerMessage the agent's step cap per reply @param repo the repository the sandbox clones before it is
+     * ready, RCA only
      */
     record Start(
             String projectId,
@@ -53,7 +55,41 @@ public interface AgentSessionClient {
             List<McpServer> mcpServers,
             long idleTimeoutMs,
             int maxToolCallsPerMessage,
-            LlmUsageAccountant.Subject subject) {}
+            LlmUsageAccountant.Subject subject,
+            @Nullable Clone repo) {
+
+        public Start(
+                String projectId,
+                ModelLane lane,
+                String systemPrompt,
+                Map<String, String> files,
+                List<McpServer> mcpServers,
+                long idleTimeoutMs,
+                int maxToolCallsPerMessage,
+                LlmUsageAccountant.Subject subject) {
+            this(
+                    projectId,
+                    lane,
+                    systemPrompt,
+                    files,
+                    mcpServers,
+                    idleTimeoutMs,
+                    maxToolCallsPerMessage,
+                    subject,
+                    null);
+        }
+    }
+
+    /**
+     * @param url embeds a short-lived token: never logged, never in {@code toString} @param onsetAt when the movement
+     * began, so the sandbox can name the commit live then
+     */
+    record Clone(String url, String headSha, @Nullable String onsetAt) {
+        @Override
+        public String toString() {
+            return "Clone[headSha=" + headSha + ", onsetAt=" + onsetAt + "]";
+        }
+    }
 
     /** @param token a project key the caller owns and revokes; never logged, never in {@code toString} */
     record McpServer(String name, String url, String token) {

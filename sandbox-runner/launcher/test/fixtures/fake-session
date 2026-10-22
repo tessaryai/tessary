@@ -14,7 +14,8 @@ const { finished } = require('node:stream');
 /**
  * shape (all optional):
  *   startingPolls  /healthz answers 503 starting this many times before 200 ready (default 1)
- *   startFails     /healthz is always 503 failed, and the log holds the script's start error
+ *   startFails     /healthz is always 503 failed, and the log holds the script's start error (this
+ *                  string as its detail, or a fixed one for `true`)
  *   hold           the first message emits one text delta and waits for release() or /abort
  *   cutEventsAfter the first /events response is destroyed after this many lines
  *   splitMultibyte a line that holds a multi-byte character is written in two writes 30 ms apart,
@@ -105,7 +106,7 @@ async function startFakeSession({ port, secret, shape = {} }) {
   }
 
   if (shape.startFails) {
-    emit('error', { kind: 'start', detail: 'boom tsy_a_leaked' });
+    emit('error', { kind: 'start', detail: typeof shape.startFails === 'string' ? shape.startFails : 'boom tsy_a_leaked' });
     emit('closed', { reason: 'failed' });
     logEnded = true;
   }

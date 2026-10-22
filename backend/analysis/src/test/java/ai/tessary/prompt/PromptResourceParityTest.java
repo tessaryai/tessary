@@ -30,6 +30,7 @@ class PromptResourceParityTest {
     private static Map<String, Supplier<String>> pinned() {
         Map<String, Supplier<String>> m = new LinkedHashMap<>();
         constant(m, ai.tessary.classifier.finding.BehaviorTriageEngine.class, "SYSTEM_PROMPT");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "SYSTEM_PROMPT");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "PROMPT");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "REPO_PRESENT");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "REPO_ABSENT");
@@ -37,6 +38,10 @@ class PromptResourceParityTest {
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "METHOD_LINE");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "TOOLS");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "JSON_SCHEMA");
+        constant(m, ai.tessary.agentrun.AgentSessionRunner.class, "SCHEMA_INSTRUCTION");
+        constant(m, ai.tessary.agentrun.AgentSessionRunner.class, "CORRECTION_NO_TOOL_BUDGET");
+        constant(m, ai.tessary.agentrun.AgentSessionRunner.class, "CORRECTION_MISSING_KEYS");
+        constant(m, ai.tessary.agentrun.AgentSessionRunner.class, "CORRECTION_UNPARSEABLE");
         for (String method : List.of(
                 "tool_error", "metric_drift", "secret_leak", "malformed_output", "frustration", "groundedness")) {
             m.put("rca.methods." + method, () -> PromptCraft.text("rca", "methods/" + method + ".md"));

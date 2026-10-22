@@ -15,24 +15,21 @@ as the Docker backend's agent image.
   OpenCode's config. Every `tools/call` result is saved whole to `checks/mcp/NNN-<tool>.json` (one
   counter across all upstreams), and a large one comes back to the agent as a summary. Used by
   `agent-stream.js` on the system-prompt path, and by `session.js` for the session's named servers.
-- `lane.js` — the three one-shot lanes, run as `node lane.js <rca|triage|run> <input.json>`. Each
-  materializes the caller's dossier under `dossier/` and runs the agent wired to the platform's MCP
-  surface, emitting the schema-constrained answer (or prose, for `run` with no `json_schema`). (Node
-  builtins only.)
-  - `rca` — the finding-anchored root cause. The clone is optional and read-only; with one, the
-    prompt's `{onset_commit}` becomes the newest commit before `onset_at`, or `unknown`. It may never
-    edit.
-  - `triage` — the Layer-2 ruling. It never clones: no repository says whether a claim about
-    production traffic is true. It may edit anywhere under the work dir; `checks/` is where its own
-    scripts go.
-  - `run` — the generic run behind the backend's `AgentRunService` (the `AGENT_RUN` lane), under
-    the caller's own system prompt. The clone is optional and read-only (`edit` denied under
-    `repo/`); everywhere else under the work dir is writable.
+- `lane.js` — the one-shot `run` lane behind the launcher's `/runs`, run as
+  `node lane.js run <input.json>`: the generic run behind the backend's `AgentRunService` (the
+  `AGENT_RUN` lane), under the caller's own system prompt. It materializes the caller's dossier
+  under `dossier/`, clones the repo when asked (read-only: `edit` denied under `repo/`; everywhere
+  else under the work dir is writable), and runs the agent wired to the platform's MCP surface,
+  emitting the schema-constrained answer, or prose with no `json_schema`. (Node builtins only.)
+  Triage and RCA run as `session.js` lanes instead.
 - `session.js` — one long-lived agent session: reads and deletes `session.json`, starts the relay
   with the session's named MCP servers and one `opencode serve`, and serves `POST /message`,
   `POST /abort`, `GET /events` and `GET /healthz` to the launcher behind a per-session secret. It
   maps OpenCode's event stream to `text`, `tool_start`, `tool_end`, `message_end`, `error` and
-  `closed` events. The contract is in [`sandbox-runner/README.md`](../README.md#agent-sessions-sessionjs).
+  `closed` events. `session.json` names its lane: `agent_run`; `triage`, which never clones, may
+  edit, and gets `checks/` for its scripts; or `rca`, which is read-only, may clone the repo at a
+  commit, and puts the commit live at the onset into each message's `{onset_commit}`. The contract
+  is in [`sandbox-runner/README.md`](../README.md#agent-sessions-sessionjs).
   The launcher runs it with `/usr/local/bin/node-sealed`, a copy of `node` both recipes make. In
   the Docker image the copy is execute-only: a process started from a binary its user cannot read
   is not dumpable, so the agent, which runs as the same user, cannot read the relay's MCP tokens out

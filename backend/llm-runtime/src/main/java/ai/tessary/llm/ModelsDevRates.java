@@ -110,11 +110,6 @@ public class ModelsDevRates {
         return Optional.ofNullable(bundled.get(modelsDevId));
     }
 
-    /** Leaves the field off when there are no rates, which the launcher reads as "declare the model with no rates". */
-    public void putModelCost(ObjectNode launcherBody, @Nullable String modelsDevId) {
-        cost(modelsDevId).ifPresent(c -> launcherBody.set("model_cost", c.toOpencodeCost(mapper)));
-    }
-
     private @Nullable Rates current() {
         Rates held = live;
         Instant now = clock.instant();
