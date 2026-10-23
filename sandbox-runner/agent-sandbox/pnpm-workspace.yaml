@@ -5,8 +5,3 @@
 #   esbuild  postinstall fetches the platform binary (pulled in via tsx, used by `pnpm run build`)
 allowBuilds:
   esbuild: true
-# 1.18.30 is younger than pnpm's release-age gate. Excluded rather than pinned lower: it is the
-# version this was exercised against, and it must match the `opencode` CLI in template.ts. Names
-# one exact version, so it lapses on the next bump.
-minimumReleaseAgeExclude:
-  - '@opencode-ai/sdk@1.18.30'
