@@ -74,7 +74,7 @@ RUN cp app/target/app-*-exec.jar app.jar \
 # io.pyroscope:agent dependency in backend/shared/pom.xml: the labels API is shared
 # static state between the javaagent and the app, so a skew makes the tessary_* pool
 # and tenant labels silently vanish with no error.
-ARG PYROSCOPE_AGENT_VERSION=2.8.0
+ARG PYROSCOPE_AGENT_VERSION=2.9.2
 RUN curl -fsSL -o /pyroscope.jar \
       "https://github.com/grafana/pyroscope-java/releases/download/v${PYROSCOPE_AGENT_VERSION}/pyroscope.jar"
 

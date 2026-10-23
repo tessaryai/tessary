@@ -14,7 +14,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.1</version>
+        <version>4.1.2</version>
         <relativePath/>
     </parent>
 
@@ -52,10 +52,11 @@
         <findsecbugs.version>1.14.0</findsecbugs.version>
         <awssdk.version>2.56.0</awssdk.version>
         <grpc.version>1.85.0</grpc.version>
-        <!-- CVE-2026-65182 / CVE-2026-65905 / CVE-2026-68525: spring-boot-starter-parent:4.1.1's
-             BOM pins tomcat-embed-core to 11.0.24. Override ahead of Boot's own BOM until a
-             4.1.2+ parent is released; remove this once that BOM catches up to >=11.0.25. -->
-        <tomcat.version>11.0.25</tomcat.version>
+        <!-- CVE-2026-110879 (GHSA-m8xf-2cr7-77ph): spring-boot-starter-parent:4.1.2's BOM pins
+             Jackson to 2.21.7 and 3.1.7. Override ahead of Boot's own BOM; remove both once that
+             BOM catches up to >=2.21.8 and >=3.1.8. -->
+        <jackson-2-bom.version>2.21.8</jackson-2-bom.version>
+        <jackson-bom.version>3.1.8</jackson-bom.version>
         <!-- PDF text extraction for the document/PDF modality: pure-Java,
              Apache-2.0, no native binaries and no network egress — safe for the open bucket.
              Verified latest stable 3.x on Maven Central 2026-09-02. NOT covered by CI (
@@ -143,6 +144,13 @@
                 <groupId>org.jspecify</groupId>
                 <artifactId>jspecify</artifactId>
                 <version>1.0.1</version>
+            </dependency>
+            <!-- CVE-2026-106451: kafka-clients 4.2.2 (Boot 4.1.2's kafka) declares lz4-java 1.11.2,
+                 and the Boot BOM does not manage it. Remove once kafka-clients declares >=1.11.4. -->
+            <dependency>
+                <groupId>at.yawk.lz4</groupId>
+                <artifactId>lz4-java</artifactId>
+                <version>1.11.4</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

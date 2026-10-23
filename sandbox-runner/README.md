@@ -151,7 +151,7 @@ error), each cut to 2000 characters; `bytes` is the size of the whole output bef
 
 `reason` is `limit` when the script cut the reply at its tool cap, else `aborted` when an abort was
 asked during the reply, else `limit` when the reply used `steps` model steps or more, else `done`.
-OpenCode 1.18.30 does not enforce `steps`: on the step that reaches it, it tells the model that
+OpenCode 1.18.35 does not enforce `steps`: on the step that reaches it, it tells the model that
 tools are disabled and to answer in text, but it still offers the tools. So the script counts the
 reply's tool calls itself, and when a call starts that takes the count past
 `max_tool_calls_per_message`, it aborts the reply in OpenCode; that call ends with `tool_end`
@@ -170,7 +170,7 @@ SIGTERM or SIGINT stops OpenCode (awaited), the relay and the HTTP server, and e
 ### How a reply ends
 
 The script prompts with `prompt_async` and reads OpenCode's own event stream (`GET /event`,
-which sends `server.heartbeat` about every 10 s). Three facts of the 1.18.30 binary shape the rules:
+which sends `server.heartbeat` about every 10 s). Three facts of the 1.18.35 binary shape the rules:
 
 - After a reply ends, OpenCode sends the reply's user message again, and after an abort or a
   provider error it sends a second idle pair. So a reply counts an idle only after it has seen its

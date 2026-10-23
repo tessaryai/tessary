@@ -17,7 +17,7 @@ RUN apk upgrade --no-cache \
 # size only: npm installs every platform variant on musl. Prune by the inode backing bin/opencode.exe,
 # since npm's pick differs per arch, and abort if stat fails rather than delete the live one.
 RUN set -e; \
-    npm install -g opencode-ai@1.18.30; \
+    npm install -g opencode-ai@1.18.35; \
     D=/usr/local/lib/node_modules/opencode-ai; \
     INO="$(stat -c %i "$D/bin/opencode.exe")"; \
     [ -n "$INO" ] || { echo "could not stat opencode.exe" >&2; exit 1; }; \
@@ -42,7 +42,7 @@ USER node
 WORKDIR /home/user
 
 # npm, not pnpm, as in template.ts; keep this line byte-identical to its install.
-RUN npm install @opencode-ai/sdk@1.18.30 undici@^6.28.0 \
+RUN npm install @opencode-ai/sdk@1.18.35 undici@^6.29.1 \
     && npm cache clean --force
 
 # agent-stream.js and mcp-relay.js must be baked beside the scripts that require them.

@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@opencode-ai/sdk':
-        specifier: 1.18.30
-        version: 1.18.30
+        specifier: 1.18.35
+        version: 1.18.35
       e2b:
         specifier: ^2.56.0
         version: 2.56.0
@@ -205,8 +205,8 @@ packages:
     resolution: {integrity: sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w==}
     engines: {node: '>=18.0.0'}
 
-  '@opencode-ai/sdk@1.18.30':
-    resolution: {integrity: sha512-uviJ+PZLc/D1szt33WGzzt/rqJ+IaNmRGBb+UcOXrcQANl8XXKJrp4CNQQ2UAnUJ3Ek+VqcamIwjtKHUW/OjOQ==}
+  '@opencode-ai/sdk@1.18.35':
+    resolution: {integrity: sha512-cp3IFKwnqgeUbflrrwz/WmG/dALVyM2k0LA1aqCvWe58Tu4utNTNw+BwZzQEML1HxDaLrIB+Fc4Ztb8S16Ijcw==}
 
   balanced-match@4.0.4:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
@@ -421,7 +421,7 @@ snapshots:
     dependencies:
       minipass: 7.1.3
 
-  '@opencode-ai/sdk@1.18.30':
+  '@opencode-ai/sdk@1.18.35':
     dependencies:
       cross-spawn: 7.0.6
 
