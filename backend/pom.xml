@@ -50,8 +50,8 @@
         <spotbugs-maven-plugin.version>4.10.5.0</spotbugs-maven-plugin.version>
         <spotbugs.version>4.10.5</spotbugs.version>
         <findsecbugs.version>1.14.0</findsecbugs.version>
-        <awssdk.version>2.56.0</awssdk.version>
-        <grpc.version>1.85.0</grpc.version>
+        <awssdk.version>2.57.0</awssdk.version>
+        <grpc.version>1.85.1</grpc.version>
         <!-- CVE-2026-110879 (GHSA-m8xf-2cr7-77ph): spring-boot-starter-parent:4.1.2's BOM pins
              Jackson to 2.21.7 and 3.1.7. Override ahead of Boot's own BOM; remove both once that
              BOM catches up to >=2.21.8 and >=3.1.8. -->
