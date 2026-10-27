@@ -8,7 +8,7 @@
  * once: opencode resolves a new model id against models.opencode.ai, and every egress run failed
  * with a 500 while own-key runs, which have no network rules, worked.
  *
- * It starts this directory's real server.js and sends it an /rca request, the same path production
+ * It starts this directory's real server.js and sends it a /runs request, the same path production
  * takes. The models are read from the backend's ModelCatalog, so a new Tessary AI model is probed
  * without an edit here.
  *
@@ -91,7 +91,7 @@ async function main() {
     const port = await launcher.port;
     for (const model of platformModels()) {
       const started = Date.now();
-      const { status, body } = await post(port, apiKey, '/rca', {
+      const { status, body } = await post(port, apiKey, '/runs', {
         prompt: 'Reply with the single word ok.',
         model,
         mcp: MCP,
