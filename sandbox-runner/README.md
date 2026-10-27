@@ -390,7 +390,7 @@ two mistakes — a missing `bash` (this SDK hardcodes `cmd: "/bin/bash"`) and a 
 It runs on the dedup path too: "the recipe did not change" says nothing about whether the published
 build still boots.
 
-The boot checks apply no network rules, so the job then runs `launcher/probe-egress.js`: one `/rca`
+The boot checks apply no network rules, so the job then runs `launcher/probe-egress.js`: one `/runs`
 through the real launcher for each Tessary AI model in `ModelCatalog.java`, under the egress posture,
 with the key from the team's `tessary-ai-anthropic` E2B secret. The unit tests fake E2B and opencode,
 so a host opencode needs at run time and the allowlist leaves out fails only there. To run it by hand:
