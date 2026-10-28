@@ -9,7 +9,10 @@ import ai.tessary.classifier.frustration.FrustrationRateRepository.CauseRef;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.ConversationContext;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.FlaggedTurn;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.WitnessPage;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -73,6 +76,23 @@ public class FrustrationDetailService {
         int next = offset + ids.size();
         return new FrustratedSessionPage(
                 rows, witnesses.total(), next < witnesses.total() ? Integer.toString(next) : null);
+    }
+
+    /**
+     * The last messages before each flagged turn, as the detector judged it, keyed by witness trace id and session id.
+     * Empty for any finding other than {@code frustration_rate}.
+     */
+    public Map<String, List<EarlierMessage>> priorMessages(
+            FindingRow finding, Collection<String> traceIds, Collection<String> sessionIds) {
+        if (!FindingRow.Cause.FRUSTRATION_RATE.equals(finding.causeKind())) return Map.of();
+        Map<String, List<EarlierMessage>> out = new HashMap<>();
+        rates.earlierMessages(finding.projectId(), finding.subjectId(), finding.nativeCauseKey(), traceIds, sessionIds)
+                .forEach((key, messages) -> out.put(
+                        key,
+                        List.copyOf(messages.subList(
+                                Math.max(0, messages.size() - FrustrationTurnBuilder.PRIOR_MESSAGES),
+                                messages.size()))));
+        return out;
     }
 
     /** The next row's offset; anything unreadable starts over. */

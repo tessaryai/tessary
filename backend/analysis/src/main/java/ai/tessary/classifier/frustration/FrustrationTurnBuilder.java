@@ -16,7 +16,7 @@ import java.util.Optional;
  */
 public final class FrustrationTurnBuilder {
 
-    private static final int PRIOR_MESSAGES = 4;
+    static final int PRIOR_MESSAGES = 4;
 
     /** In chars (a token is about four). */
     public record Caps(int currentUser, int earlierUser, int latestAssistant, int olderAssistant, int budget) {

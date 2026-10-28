@@ -4,8 +4,13 @@ package ai.tessary.classifier.finding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
+import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
+import ai.tessary.classifier.frustration.JevFrustrationQuestion;
+import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.RateClassifierFixture;
@@ -134,6 +139,85 @@ record FindingEvidenceExportIntegrationTest(
         assertEquals(true, exported.get("ok"));
         assertEquals(Map.of("region", "eu"), exported.get("nested"));
         assertEquals("z".repeat(4_000) + EvidenceExportText.CUT_MARK, exported.get("prompt"));
+    }
+
+    /**
+     * A frustration witness is a session row and a trace row; both carry the last four messages the detector judged
+     * the flagged turn against, roles kept, and the member row carries none. Catches the session row (no trace, no
+     * span, no payload) reading as a bare id, so the agent cannot see the exchange that led to the flag.
+     */
+    @Test
+    @DisplayName("a frustration witness row carries the messages before the flagged turn")
+    void export_sessionRowCarriesThePriorTurns() {
+        String pid = rates.project("finding-export-frustration", Capability.FRUSTRATION);
+        ClassifierRow signal = rates.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION);
+        String callSite = "cs-support";
+        String conv = "conv-export";
+        String trace = "trace-export-flagged";
+        Instant onset = Instant.parse("2026-10-01T10:00:00Z");
+        String findingId = Objects.requireNonNull(findings.recordRecomputedRate(
+                        Ids.ulid(),
+                        pid,
+                        signal.classifierKey(),
+                        CauseKey.frustration(signal.id(), callSite),
+                        FindingRow.Cause.FRUSTRATION_RATE,
+                        callSite,
+                        FindingRow.SubjectKind.CLASSIFIER,
+                        signal.id(),
+                        signal.name(),
+                        null,
+                        1,
+                        callSite,
+                        onset.toString(),
+                        "{}",
+                        onset.plusSeconds(3_600).toString(),
+                        onset.minusSeconds(3_600).toString(),
+                        onset.plusSeconds(7_200).toString()))
+                .findingId();
+        rates.frustrationAssessment(
+                pid,
+                signal,
+                trace,
+                conv,
+                callSite,
+                onset.plusSeconds(60),
+                true,
+                JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD),
+                "{\"state\":{\"current_user_message\":\"still broken\",\"earlier_messages\":["
+                        + "{\"role\":\"user\",\"content\":\"a\"},{\"role\":\"assistant\",\"content\":\"b\"},"
+                        + "{\"role\":\"user\",\"content\":\"c\"},{\"role\":\"assistant\",\"content\":\"d\"},"
+                        + "{\"role\":\"user\",\"content\":\"e\"}]},\"questions\":[]}");
+        String now = Instant.now().toString();
+        evidence.record(
+                pid,
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(FindingEvidenceRepository.Ref.session(conv)),
+                now);
+        evidence.record(
+                pid,
+                findingId,
+                FindingEvidenceRow.Role.WITNESS,
+                List.of(FindingEvidenceRepository.Ref.session(conv), FindingEvidenceRepository.Ref.trace(trace)),
+                now);
+
+        BehaviorDtos.EvidenceExportPage page = behaviorDrift.exportEvidence(pid, findingId, null, 4_000, null);
+
+        List<EarlierMessage> expected = List.of(
+                new EarlierMessage("assistant", "b"),
+                new EarlierMessage("user", "c"),
+                new EarlierMessage("assistant", "d"),
+                new EarlierMessage("user", "e"));
+        assertEquals(3, page.rows().size());
+        for (BehaviorDtos.EvidenceExportRow row : page.rows()) {
+            String label = row.measured().role() + ":" + row.measured().sessionId() + ":"
+                    + row.measured().traceId();
+            if (FindingEvidenceRow.Role.WITNESS.equals(row.measured().role())) {
+                assertEquals(expected, row.priorMessages(), label);
+            } else {
+                assertNull(row.priorMessages(), label);
+            }
+        }
     }
 
     private String project(String slug) {

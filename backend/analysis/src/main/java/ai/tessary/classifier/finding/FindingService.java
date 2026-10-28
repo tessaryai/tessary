@@ -17,11 +17,13 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.frustration.FrustrationEvidence;
 import ai.tessary.classifier.frustration.FrustrationRateRepository;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,6 +41,11 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class FindingService {
+
+    public static final int EXPORT_MAX_ROWS = 2000;
+
+    /** Characters of text per export page, about 6 MB; the row that crosses it still rides the page. */
+    public static final long EXPORT_TEXT_BUDGET = 6L * 1024 * 1024;
 
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;
@@ -145,6 +152,58 @@ public class FindingService {
                 page.nextCursor(),
                 evidence.countsByRole(projectId, findingId),
                 recorded);
+    }
+
+    /**
+     * Same guard, counts and cursor as {@link #findingEvidenceSpans}, with each row's payload text and attributes, and
+     * on a frustration finding's witness rows the messages the detector judged the flagged turn against.
+     */
+    public BehaviorDtos.EvidenceExportPage exportEvidence(
+            String projectId, String findingId, @Nullable String role, int textChars, @Nullable String cursor) {
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        Map<String, Long> recorded = new LinkedHashMap<>();
+        for (String r : FindingEvidenceRow.Role.ALL) recorded.put(r, finding.evidenceCount(r));
+        boolean secretLeak = BuiltInDetector.Kind.SECRET_LEAK.equals(finding.classifierKey());
+        boolean malformedOutput = BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(finding.classifierKey());
+        FindingEvidenceRepository.ExportPage page = evidence.exportPage(
+                projectId,
+                findingId,
+                role,
+                new FindingEvidenceRepository.ExportLimits(textChars, EXPORT_MAX_ROWS, EXPORT_TEXT_BUDGET),
+                cursor,
+                secretLeak,
+                malformedOutput);
+        List<String> witnessTraces = new ArrayList<>();
+        List<String> witnessSessions = new ArrayList<>();
+        for (FindingEvidenceRepository.ExportRow row : page.rows()) {
+            if (!FindingEvidenceRow.Role.WITNESS.equals(row.measured().role())) continue;
+            if (row.measured().traceId() != null)
+                witnessTraces.add(row.measured().traceId());
+            else if (row.measured().sessionId() != null)
+                witnessSessions.add(row.measured().sessionId());
+        }
+        Map<String, List<EarlierMessage>> prior = frustrations.priorMessages(finding, witnessTraces, witnessSessions);
+        List<BehaviorDtos.EvidenceExportRow> rows = page.rows().stream()
+                .map(row -> {
+                    String key = FindingEvidenceRow.Role.WITNESS.equals(
+                                    row.measured().role())
+                            ? priorKey(row.measured())
+                            : null;
+                    return new BehaviorDtos.EvidenceExportRow(
+                            BehaviorDtos.EvidenceSpanView.of(row.measured()),
+                            row.input(),
+                            row.output(),
+                            row.attributes(),
+                            key == null ? null : prior.get(key));
+                })
+                .toList();
+        return new BehaviorDtos.EvidenceExportPage(
+                rows, page.nextCursor(), evidence.countsByRole(projectId, findingId), recorded, textChars);
+    }
+
+    /** A trace witness is looked up by its trace, a session witness (no trace) by its session. */
+    private static @Nullable String priorKey(FindingEvidenceRepository.SpanRef row) {
+        return row.traceId() != null ? row.traceId() : row.sessionId();
     }
 
     /**

@@ -3,17 +3,25 @@ package ai.tessary.classifier.frustration;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -133,6 +141,11 @@ public class FrustrationRateRepository {
             @Nullable String startedAt,
             boolean cleared,
             @Nullable String message) {}
+
+    private static final ObjectMapper MAPPER =
+            new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+    private static final TypeReference<List<EarlierMessage>> EARLIER = new TypeReference<>() {};
 
     private final JdbcClient jdbc;
     private final ClassifierDetectionWriteRepository detections;
@@ -306,6 +319,61 @@ public class FrustrationRateRepository {
                 .list()
                 .forEach(t -> out.put(t.traceId(), t));
         return out;
+    }
+
+    /**
+     * The {@code earlier_messages} each turn was judged against, read from the stored scorer request, keyed by trace id
+     * and, for a conversation, by its newest frustrated turn. The newest assessment decides; if retention cleared its
+     * request, the key has no entry.
+     */
+    public Map<String, List<EarlierMessage>> earlierMessages(
+            String projectId,
+            String classifierId,
+            String callSiteId,
+            Collection<String> traceIds,
+            Collection<String> conversationIds) {
+        Map<String, List<EarlierMessage>> out = new HashMap<>();
+        if (traceIds.isEmpty() && conversationIds.isEmpty()) return out;
+        Set<String> traces = Set.copyOf(traceIds);
+        Set<String> conversations = Set.copyOf(conversationIds);
+        List<String> match = new ArrayList<>(2);
+        if (!traces.isEmpty()) match.add("a.trace_id IN (:traces)");
+        if (!conversations.isEmpty()) match.add("(a.conversation_id IN (:conversations) AND a.frustrated)");
+        var spec = jdbc.sql("SELECT a.trace_id, a.conversation_id, a.frustrated,"
+                        + " (a.request -> 'state' -> 'earlier_messages')::text AS earlier"
+                        + " FROM frustration_assessment a"
+                        + " WHERE a.project_id = :pid AND a.classifier_id = :cid"
+                        + " AND COALESCE(a.call_site_id, '') = :callSite"
+                        + " AND (" + String.join(" OR ", match) + ")"
+                        + " ORDER BY a.created_at DESC, a.id DESC")
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("callSite", callSiteId);
+        if (!traces.isEmpty()) spec = spec.param("traces", traces);
+        if (!conversations.isEmpty()) spec = spec.param("conversations", conversations);
+        Set<String> decided = new HashSet<>();
+        spec.query(rs -> {
+            List<EarlierMessage> messages = parseEarlier(rs.getString("earlier"));
+            String trace = rs.getString("trace_id");
+            if (traces.contains(trace) && decided.add("t:" + trace) && messages != null) out.put(trace, messages);
+            String conversation = rs.getString("conversation_id");
+            if (rs.getBoolean("frustrated")
+                    && conversations.contains(conversation)
+                    && decided.add("c:" + conversation)
+                    && messages != null) {
+                out.put(conversation, messages);
+            }
+        });
+        return out;
+    }
+
+    private static @Nullable List<EarlierMessage> parseEarlier(@Nullable String json) {
+        if (json == null) return null;
+        try {
+            return MAPPER.readValue(json, EARLIER);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 
     /** @param sessionId null when the flagged trace carries no session */
