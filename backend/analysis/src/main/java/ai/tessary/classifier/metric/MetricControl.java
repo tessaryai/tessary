@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.metric;
 
+import ai.tessary.classifier.finding.EvidenceSample;
+import ai.tessary.classifier.metric.MetricEvidenceRefs.Timed;
 import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -38,12 +40,22 @@ public final class MetricControl {
     /** Three half-lives; past this a day is worth under an eighth. */
     static final int RETAIN_DAYS = 21;
 
-    /** {@code day} is the key exclusion decides on. A day without a sketch is never held. */
+    /**
+     * Rows kept per day slot, for the rolling arm's baseline sample. A product constant like {@link #HALF_LIFE_DAYS}:
+     * {@link #RETAIN_DAYS} of them bound a bucket's ring.
+     */
+    static final int DAY_ROWS = 100;
+
+    /**
+     * {@code day} is the key exclusion decides on. A day without a sketch is never held. {@code refsJson} is a sample of
+     * the rows folded into the day, in fold order; null on a day folded before rows were kept.
+     */
     public record Day(
             String day,
             String sketchJson,
             @Nullable String workloadJson,
-            @Nullable String tokensJson) {}
+            @Nullable String tokensJson,
+            @Nullable String refsJson) {}
 
     private final List<Day> days;
 
@@ -70,10 +82,16 @@ public final class MetricControl {
     /**
      * Returns a new instance, since one control is threaded through a page that may close several windows. The fold is
      * exact; weighting happens at read time in {@link #resolve}. Retention anchors on {@code max(day, days held)}, so
-     * folding an older day can never evict a newer one.
+     * folding an older day can never evict a newer one. {@code rows} are the closed window's rows; a day keeps up to
+     * {@link #DAY_ROWS} of them, each window's share in proportion to the samples it put into the day's sketch.
      */
     public MetricControl fold(
-            Grid grid, String day, MetricSketch measure, MetricWorkload workload, MetricTokens tokens) {
+            Grid grid,
+            String day,
+            MetricSketch measure,
+            MetricWorkload workload,
+            MetricTokens tokens,
+            List<Timed> rows) {
         Map<String, Day> byDay = new LinkedHashMap<>();
         for (Day d : days) {
             byDay.put(d.day(), d);
@@ -83,10 +101,14 @@ public final class MetricControl {
         MetricSketch mergedMeasure = measure.copy();
         MetricWorkload mergedWorkload = workload.copy();
         MetricTokens mergedTokens = tokens.copy();
+        List<Timed> keptRows = List.of();
         if (existing != null) {
             // A dead-grid slot is discarded, as MetricWorkload.fromJson does; merging it would throw on every close.
             MetricSketch prior = readSketch(existing.sketchJson(), grid);
-            if (prior != null) mergedMeasure.merge(prior);
+            if (prior != null) {
+                mergedMeasure.merge(prior);
+                keptRows = existingShare(existing, prior.count(), measure.count());
+            }
             MetricWorkload priorWorkload = readWorkload(existing.workloadJson(), grid);
             if (priorWorkload != null) mergedWorkload.merge(priorWorkload);
             MetricTokens priorTokens = readTokens(existing.tokensJson(), grid);
@@ -98,7 +120,8 @@ public final class MetricControl {
                         day,
                         mergedMeasure.toJson(),
                         mergedWorkload.isEmpty() ? null : mergedWorkload.toJson(),
-                        mergedTokens.isEmpty() ? null : mergedTokens.toJson()));
+                        mergedTokens.isEmpty() ? null : mergedTokens.toJson(),
+                        rowsJson(keptRows, rows)));
 
         // Never wall-clock now: a backfilled old day leaves the anchor alone.
         String anchor = day;
@@ -116,6 +139,19 @@ public final class MetricControl {
         return new MetricControl(List.copyOf(out));
     }
 
+    /** Shares follow the day sketch's counts, so the last window cannot take most of a day it added little to. */
+    private static List<Timed> existingShare(Day existing, long priorCount, long newCount) {
+        if (priorCount + newCount <= 0) return List.of();
+        int share = (int) Math.round((double) DAY_ROWS * priorCount / (priorCount + newCount));
+        return EvidenceSample.spread(MetricEvidenceRefs.fromJson(existing.refsJson()), share);
+    }
+
+    private static @Nullable String rowsJson(List<Timed> kept, List<Timed> added) {
+        List<Timed> out = new ArrayList<>(kept);
+        out.addAll(EvidenceSample.spread(added, DAY_ROWS - kept.size()));
+        return MetricEvidenceRefs.toJson(out);
+    }
+
     /**
      * Ages are measured back from {@code eventDay}, never wall clock, and days after it are skipped, so a replay never
      * compares against traffic that had not happened yet. {@code excludedDays} is applied on every pass rather than at
@@ -125,9 +161,8 @@ public final class MetricControl {
         Weighted measure = new Weighted(grid);
         MetricWorkload workload = new MetricWorkload(MetricWorkload.grid(grid.bins()));
         MetricTokens tokens = new MetricTokens(MetricTokens.grid(grid.bins()));
-        int used = 0;
         int excluded = 0;
-        String oldest = null;
+        List<Day> used = new ArrayList<>();
         for (Day d : days) {
             if (excludedDays.contains(d.day())) {
                 excluded++;
@@ -142,22 +177,31 @@ public final class MetricControl {
             if (dayWorkload != null) workload.merge(dayWorkload);
             MetricTokens dayTokens = readTokens(d.tokensJson(), grid);
             if (dayTokens != null) tokens.merge(dayTokens);
-            if (oldest == null) oldest = d.day();
-            used++;
+            used.add(d);
         }
-        if (used == 0 || measure.count() == 0) return null;
+        if (used.isEmpty() || measure.count() == 0) return null;
         return new Resolved(
                 measure,
                 workload.isEmpty() ? null : workload,
                 tokens.isEmpty() ? null : tokens,
-                used,
+                used.size(),
                 excluded,
-                oldest);
+                used.get(0).day(),
+                List.copyOf(used));
+    }
+
+    /** The rows the days kept, in day order. Decoded here rather than in {@link #resolve}, which most reads call. */
+    public static List<Timed> rows(List<Day> days) {
+        List<Timed> out = new ArrayList<>();
+        for (Day d : days) {
+            out.addAll(MetricEvidenceRefs.fromJson(d.refsJson()));
+        }
+        return List.copyOf(out);
     }
 
     /**
      * {@code daysUsed} tells "went quiet" from "excluded everything"; {@code daysExcluded} explains why a long
-     * regression keeps firing.
+     * regression keeps firing. {@code days} are the days that passed every skip, oldest first.
      */
     public record Resolved(
             MetricReading measure,
@@ -165,7 +209,8 @@ public final class MetricControl {
             @Nullable MetricTokens tokens,
             int daysUsed,
             int daysExcluded,
-            @Nullable String oldestDay) {}
+            @Nullable String oldestDay,
+            List<Day> days) {}
 
     /**
      * 0 outside retention or after {@code eventDay}. A day exactly {@link #RETAIN_DAYS} old still counts, and the same
@@ -216,6 +261,7 @@ public final class MetricControl {
             node.putRawValue("m", new RawValue(d.sketchJson()));
             if (d.workloadJson() != null) node.putRawValue("w", new RawValue(d.workloadJson()));
             if (d.tokensJson() != null) node.putRawValue("t", new RawValue(d.tokensJson()));
+            if (d.refsJson() != null) node.putRawValue("r", new RawValue(d.refsJson()));
         }
         return root.toString();
     }
@@ -234,11 +280,13 @@ public final class MetricControl {
                 if (day.isEmpty() || measure == null || measure.isNull()) continue;
                 JsonNode workload = node.get("w");
                 JsonNode tokens = node.get("t");
+                JsonNode refs = node.get("r");
                 out.add(new Day(
                         day,
                         measure.toString(),
                         workload == null || workload.isNull() ? null : workload.toString(),
-                        tokens == null || tokens.isNull() ? null : tokens.toString()));
+                        tokens == null || tokens.isNull() ? null : tokens.toString(),
+                        refs == null || refs.isNull() ? null : refs.toString()));
             }
             out.sort((a, b) -> a.day().compareTo(b.day()));
             return new MetricControl(List.copyOf(out));

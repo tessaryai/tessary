@@ -138,7 +138,10 @@ public final class MetricFindingEvidence {
             @Nullable String windowKind,
             /** Not "since this version"; see {@code MetricFindingEvidence.Explained}. */
             @Nullable String sinceVersionId,
-            /** Null on the pinned arm, whose reference is enumerated as {@code baseline} evidence rows. */
+            /**
+             * Null on the pinned arm, whose reference window is enumerated as {@code baseline} rows. The rolling arm's
+             * rows are a sample, declared under {@code control.baseline} in the payload.
+             */
             @Nullable Control control,
             List<Explains> explains,
             /** Null on a blob written before the mean existed. */
@@ -161,6 +164,21 @@ public final class MetricFindingEvidence {
 
         /** The window's rows carried no values, so {@code at} is the window open. */
         public static final String METHOD_UNAVAILABLE = "unavailable";
+    }
+
+    /**
+     * The rolling arm's {@code baseline} rows: {@code rows} drawn by {@link #RULE} from the {@code of} rows its
+     * {@code days} kept. Written once, when the finding opens.
+     */
+    public record BaselineSample(
+            int rows,
+            int of,
+            int days,
+            @Nullable String oldestDay,
+            @Nullable String newestDay) {
+
+        /** {@code EvidenceSample.spread}, rank-even over the days' rows in fold order. */
+        public static final String RULE = "spread";
     }
 
     public record Control(
@@ -321,6 +339,7 @@ public final class MetricFindingEvidence {
             String windowKind,
             List<Explained> explains,
             @Nullable Resolved control,
+            @Nullable BaselineSample baseline,
             Grid grid,
             ChangePoint changepoint,
             @Nullable String referenceFrom) {
@@ -376,8 +395,8 @@ public final class MetricFindingEvidence {
             }
         }
 
-        // The rolling arm has no rows behind its reference, so its composition is reported instead. Neither `baseline`
-        // refs nor `control` means a lost write.
+        // The rolling arm reports its composition and declares its `baseline` sample. `of: 0` on a ring that held no
+        // rows is a fact, not a lost write; neither `baseline` refs nor `control` is one.
         if (control != null) {
             ObjectNode ring = root.putObject("control");
             ring.put("kind", "rolling");
@@ -387,6 +406,15 @@ public final class MetricFindingEvidence {
             ring.put("oldest_day", control.oldestDay());
             ring.put("half_life_days", MetricControl.HALF_LIFE_DAYS);
             ring.put("retain_days", MetricControl.RETAIN_DAYS);
+            if (baseline != null) {
+                ObjectNode sample = ring.putObject("baseline");
+                sample.put("rule", BaselineSample.RULE);
+                sample.put("rows", baseline.rows());
+                sample.put("of", baseline.of());
+                sample.put("days", baseline.days());
+                sample.put("oldest_day", baseline.oldestDay());
+                sample.put("newest_day", baseline.newestDay());
+            }
         }
 
         root.put("since_version_id", sinceVersionId);

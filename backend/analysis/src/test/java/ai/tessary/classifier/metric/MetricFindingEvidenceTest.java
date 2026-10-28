@@ -4,10 +4,12 @@ package ai.tessary.classifier.metric;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.metric.MetricDriftDetector.Decision;
 import ai.tessary.classifier.metric.MetricDriftDetector.Direction;
 import ai.tessary.classifier.metric.MetricDriftDetector.Reference;
+import ai.tessary.classifier.metric.MetricFindingEvidence.BaselineSample;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ChangePoint;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Explains;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Pair;
@@ -115,6 +117,7 @@ class MetricFindingEvidenceTest {
                 "count",
                 List.of(),
                 null,
+                null,
                 grid,
                 new ChangePoint("2026-06-01T00:00:04Z", ChangePoint.METHOD_CUSUM, 4, 4),
                 "2026-05-25T00:00:00Z");
@@ -176,5 +179,73 @@ class MetricFindingEvidenceTest {
     void anUnreadableOrKeylessBlobIsUnavailableToBothReaders(@Nullable String blob) {
         assertNull(MetricFindingEvidence.read(blob));
         assertNull(MetricFindingEvidence.detail(blob));
+    }
+
+    /**
+     * The rolling arm writes a sample as its {@code baseline} rows, which the role contract allows only with the rule
+     * declared beside it. The bug is a sample written without its rule, so a reader cannot audit the selection.
+     */
+    @Test
+    void theRollingArmDeclaresItsBaselineSample() throws Exception {
+        Grid grid = Grid.duration();
+        MetricHistogram window = new MetricHistogram(grid);
+        for (int i = 0; i < 50; i++) window.add(Math.log(2000));
+        MetricControl.Resolved control = MetricControl.empty()
+                .fold(
+                        grid,
+                        "2026-06-21",
+                        window,
+                        new MetricWorkload(MetricWorkload.grid(grid.bins())),
+                        new MetricTokens(MetricTokens.grid(grid.bins())),
+                        List.of())
+                .resolve(grid, "2026-06-22", java.util.Set.of());
+        assertNotNull(control);
+        Decision fired =
+                new Decision(true, "turn_duration", Reference.PREVIOUS, 0.4, 1.5, Direction.UP, 50, 50, 0.139, null);
+
+        JsonNode declared = MetricHistogram.JSON
+                .readTree(rollingArm(
+                        grid, window, fired, control, new BaselineSample(200, 1050, 21, "2026-06-01", "2026-06-21")))
+                .path("control")
+                .path("baseline");
+        assertEquals("spread", declared.path("rule").asText());
+        assertEquals(200, declared.path("rows").asInt());
+        assertEquals(1050, declared.path("of").asInt());
+        assertEquals(21, declared.path("days").asInt());
+        assertEquals("2026-06-01", declared.path("oldest_day").asText());
+        assertEquals("2026-06-21", declared.path("newest_day").asText());
+
+        JsonNode undeclared = MetricHistogram.JSON.readTree(rollingArm(grid, window, fired, control, null));
+        assertTrue(undeclared.path("control").isObject(), "the ring's composition is still reported");
+        assertTrue(undeclared.path("control").path("baseline").isMissingNode(), "no sample, no declaration");
+    }
+
+    private static String rollingArm(
+            Grid grid,
+            MetricHistogram window,
+            Decision fired,
+            MetricControl.Resolved control,
+            @Nullable BaselineSample baseline) {
+        return MetricFindingEvidence.toJson(
+                "turn_duration",
+                "call_site",
+                "cs-1",
+                fired,
+                control.measure(),
+                window,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-22T00:00:00Z",
+                "2026-06-22T00:00:49Z",
+                "count",
+                List.of(),
+                control,
+                baseline,
+                grid,
+                new ChangePoint("2026-06-22T00:00:00Z", ChangePoint.METHOD_CUSUM, 0, 0),
+                "2026-06-21T00:00:00Z");
     }
 }

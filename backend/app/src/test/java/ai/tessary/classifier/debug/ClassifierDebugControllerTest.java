@@ -109,7 +109,8 @@ record ClassifierDebugControllerTest(
                         "2025-12-31",
                         window(50),
                         new MetricWorkload(MetricWorkload.grid(GRID.bins())),
-                        new MetricTokens(MetricTokens.grid(GRID.bins())));
+                        new MetricTokens(MetricTokens.grid(GRID.bins())),
+                        List.of());
         baselines.closeWindow(watched, control.toJson(), now);
         baselines.updateCurrentSketch(watched, window(10).toJson(), null, null, null, now);
         baselines.advanceWindow(watched, 10, now, T0, T0, now, "trace-last");

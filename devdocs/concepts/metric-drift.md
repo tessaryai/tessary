@@ -268,6 +268,11 @@ window closed — the ring stays an exact record and the late verdict is retroac
 itself — `finding.onset_at`/`last_seen_at` for a metric-drift cause — is now also EVENT time, so it
 lines up with the ring's own day keys.
 
+Each day also keeps up to 100 of the rows folded into it, sampled rank-even and shared between that
+day's windows in proportion to their sample counts. When a finding opens against the control, it
+writes a spread sample of up to 200 of the used days' rows as `baseline`, once, and declares the
+sample under `control.baseline` in its payload.
+
 The wire word stays `previous`. It is the last segment of every `cause_key` ever written, so renaming
 it would split one bucket's history into two causes and reopen everything already resolved.
 

@@ -75,7 +75,8 @@ public class FindingRepository {
      * Record a closed window's shift. {@code sampleDelta} is traffic observed, not traces labelled. The payload
      * refreshes every window because absorb absorbs the current level. {@code onsetAt} is the event time of the
      * window's change point and {@code eventAt} that of its last row; {@code quietBefore} is the recovery horizon, past
-     * which a new spell's onset moves so {@code CaseLedger.isNewSpell} can reopen its case.
+     * which a new spell's onset moves so {@code CaseLedger.isNewSpell} can reopen its case. The baseline declaration
+     * describes rows written once, so it is kept across refreshes.
      */
     public Recorded recordShift(
             String id,
@@ -105,7 +106,10 @@ public class FindingRepository {
                 updated_at = EXCLUDED.updated_at,
                 -- The conflict target only ever matches an unruled row (see the class javadoc), so the
                 -- payload here is always safe to re-point: nothing has read and ruled on this claim yet.
-                payload = EXCLUDED.payload,
+                payload = CASE
+                    WHEN finding.payload #> '{control,baseline}' IS NOT NULL
+                    THEN jsonb_set(EXCLUDED.payload, '{control,baseline}', finding.payload #> '{control,baseline}')
+                    ELSE EXCLUDED.payload END,
                 -- The onset moves only across an observed recovery, never within a spell. Both sides are
                 -- now EVENT time.
                 onset_at = CASE

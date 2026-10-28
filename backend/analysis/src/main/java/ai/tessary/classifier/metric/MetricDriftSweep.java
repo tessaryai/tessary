@@ -4,6 +4,7 @@ package ai.tessary.classifier.metric;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
+import ai.tessary.classifier.finding.EvidenceSample;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -61,6 +62,9 @@ public class MetricDriftSweep implements ClassifierSweep {
      * a thick bucket closes about one window per pass.
      */
     static final int PAGE_SIZE = 500;
+
+    /** Rows the rolling arm's {@code baseline} sample holds at most. */
+    static final int BASELINE_SAMPLE = 200;
 
     /**
      * Named rather than derived: {@code classifier_key} is what every shared reader routes on and must match the
@@ -242,8 +246,8 @@ public class MetricDriftSweep implements ClassifierSweep {
 
     /**
      * A finding one closed window earned, held until the whole page has been folded at both grains.
-     * {@code baselineRefs} is the pinned window's rows, and empty for the rolling-control arm, which has no set of rows
-     * behind it.
+     * {@code baselineRefs} is the pinned window's rows, or on the rolling-control arm a spread sample of the rows its
+     * days kept, declared by {@code baselineSample}.
      */
     private record Pending(
             Measured spec,
@@ -260,7 +264,8 @@ public class MetricDriftSweep implements ClassifierSweep {
             Map<String, Long> callSites,
             List<Timed> memberRefs,
             List<Timed> baselineRefs,
-            @Nullable Resolved control) {}
+            @Nullable Resolved control,
+            MetricFindingEvidence.@Nullable BaselineSample baselineSample) {}
 
     /**
      * How many leading heads may be folded now: up to the first trace whose root span has not arrived and is younger
@@ -552,7 +557,12 @@ public class MetricDriftSweep implements ClassifierSweep {
                     Map.copyOf(callSites),
                     List.copyOf(windowRefs));
             control = control.fold(
-                    grid, eventDay, closedWindow.measure(), closedWindow.workload(), closedWindow.tokens());
+                    grid,
+                    eventDay,
+                    closedWindow.measure(),
+                    closedWindow.workload(),
+                    closedWindow.tokens(),
+                    List.copyOf(windowRefs));
             baselines.closeWindow(row.id(), control.toJson(), now);
             pinned = compared.pinned();
             if (compared.pending() != null) pending.add(compared.pending());
@@ -643,8 +653,12 @@ public class MetricDriftSweep implements ClassifierSweep {
                     callSites,
                     windowRefs,
                     pinned.refs(),
+                    null,
                     null);
         } else if (againstPrevious.fired() && control != null) {
+            List<Timed> candidates = MetricControl.rows(control.days());
+            List<Timed> sample = EvidenceSample.spread(candidates, BASELINE_SAMPLE);
+            List<MetricControl.Day> days = control.days();
             pending = new Pending(
                     spec,
                     bucket,
@@ -659,10 +673,14 @@ public class MetricDriftSweep implements ClassifierSweep {
                     last,
                     callSites,
                     windowRefs,
-                    // The rolling control has no window of rows behind it, so this arm's baseline starts empty and
-                    // gains only the rows just before the change point.
-                    List.of(),
-                    control);
+                    sample,
+                    control,
+                    new MetricFindingEvidence.BaselineSample(
+                            sample.size(),
+                            candidates.size(),
+                            days.size(),
+                            days.get(0).day(),
+                            days.get(days.size() - 1).day()));
         }
 
         boolean unusable =
@@ -896,6 +914,7 @@ public class MetricDriftSweep implements ClassifierSweep {
                 closedWindow.measure().count() >= config.windowTargetCount() ? "count" : "elapsed",
                 explains,
                 pending.control(),
+                pending.baselineSample(),
                 spec.grid(),
                 onset.changePoint(),
                 referenceFrom(pending));
@@ -927,11 +946,16 @@ public class MetricDriftSweep implements ClassifierSweep {
                 FindingEvidenceRow.Role.MEMBER,
                 MetricEvidenceRefs.refs(pending.memberRefs()),
                 at.toString());
-        // One list, one replace: the healthy rows just before the step are comparison rows, never citable.
+        // One list, one replace: the healthy rows just before the step are comparison rows, never citable. The rolling
+        // arm writes once: a later ring has folded the shifted days, so a redraw would sample the shift into its own
+        // baseline.
         List<FindingEvidenceRepository.Ref> baseline = new ArrayList<>(MetricEvidenceRefs.refs(pending.baselineRefs()));
         baseline.addAll(onset.beforeRows());
-        evidenceRefs.replace(
-                projectId, recorded.findingId(), FindingEvidenceRow.Role.BASELINE, baseline, at.toString());
+        MetricFindingEvidence.BaselineSample sample = pending.baselineSample();
+        if (pending.control() == null || recorded.created()) {
+            evidenceRefs.replace(
+                    projectId, recorded.findingId(), FindingEvidenceRow.Role.BASELINE, baseline, at.toString());
+        }
         evidenceRefs.replace(
                 projectId, recorded.findingId(), FindingEvidenceRow.Role.CHANGEPOINT, onset.fromRows(), at.toString());
         StructuredLog.info(log, Markers.OPS, "metric.finding.recorded")
@@ -942,6 +966,8 @@ public class MetricDriftSweep implements ClassifierSweep {
                 .field("created", recorded.created())
                 .field("samples", recorded.sampleCount())
                 .field("explains", explains.size())
+                .field("baselineRows", pending.baselineRefs().size())
+                .field("baselineOf", sample == null ? null : sample.of())
                 .log();
         return recorded;
     }

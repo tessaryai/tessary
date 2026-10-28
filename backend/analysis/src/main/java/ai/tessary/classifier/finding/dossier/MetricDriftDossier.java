@@ -85,14 +85,29 @@ final class MetricDriftDossier {
         }
         if (root.hasNonNull("control")) {
             JsonNode c = root.path("control");
-            sb.append("\nReference composition (rolling arm — no per-instance baseline rows exist for"
-                            + " this arm, only this ring): ")
+            sb.append("\nReference composition (rolling arm): ")
                     .append(c.path("days_used").asInt(0))
                     .append(" day(s) used, ")
                     .append(c.path("days_excluded_as_confirmed").asInt(0))
                     .append(" excluded as already-confirmed, oldest day ")
                     .append(c.path("oldest_day").asText("?"))
-                    .append(".\n");
+                    .append(". ");
+            JsonNode sample = c.path("baseline");
+            if (sample.isObject()) {
+                sb.append("`baseline` rows are a spread sample: ")
+                        .append(sample.path("rows").asInt(0))
+                        .append(" of ")
+                        .append(sample.path("of").asInt(0))
+                        .append(" rows from ")
+                        .append(sample.path("days").asInt(0))
+                        .append(" day(s) of this ring (")
+                        .append(sample.path("oldest_day").asText("?"))
+                        .append(" to ")
+                        .append(sample.path("newest_day").asText("?"))
+                        .append(").\n");
+            } else {
+                sb.append("No `baseline` sample: this ring was folded before its days kept rows.\n");
+            }
         }
 
         JsonNode explains = root.path("explains");
