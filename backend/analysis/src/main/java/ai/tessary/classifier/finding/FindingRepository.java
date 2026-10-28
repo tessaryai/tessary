@@ -69,14 +69,25 @@ public class FindingRepository {
             String findingId,
             boolean created,
             long sampleCount,
-            @Nullable String escalatedAt) {}
+            @Nullable String escalatedAt,
+            /**
+             * The write set the finding's onset: on create, or on a {@link #recordShift} across a recovery. Evidence
+             * tied to the onset is written only then.
+             */
+            boolean onsetSet) {
+
+        public Recorded(String findingId, boolean created, long sampleCount, @Nullable String escalatedAt) {
+            this(findingId, created, sampleCount, escalatedAt, created);
+        }
+    }
 
     /**
      * Record a closed window's shift. {@code sampleDelta} is traffic observed, not traces labelled. The payload
      * refreshes every window because absorb absorbs the current level. {@code onsetAt} is the event time of the
      * window's change point and {@code eventAt} that of its last row; {@code quietBefore} is the recovery horizon, past
      * which a new spell's onset moves so {@code CaseLedger.isNewSpell} can reopen its case. The baseline declaration
-     * describes rows written once, so it is kept across refreshes.
+     * describes rows written once, so it is kept across refreshes. The change point is kept while the onset is, so the
+     * two always agree.
      */
     public Recorded recordShift(
             String id,
@@ -93,7 +104,13 @@ public class FindingRepository {
             String quietBefore,
             String now) {
         String payload = mergeVocabulary(evidenceJson, nativeVocabulary("distribution_shift", "__global__", causeKey));
-        Recorded outcome = jdbc.sql("""
+        // The new payload with the old baseline declaration, which describes rows written once.
+        String keptBaseline = """
+            CASE WHEN finding.payload #> '{control,baseline}' IS NOT NULL
+                 THEN jsonb_set(EXCLUDED.payload, '{control,baseline}', finding.payload #> '{control,baseline}')
+                 ELSE EXCLUDED.payload END""";
+        record Shift(Recorded recorded, boolean onsetSet) {}
+        Shift outcome = jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  call_site_id, status, onset_at, last_seen_at, sample_count, payload,
                                  since_version_id, created_at, updated_at)
@@ -106,17 +123,18 @@ public class FindingRepository {
                 updated_at = EXCLUDED.updated_at,
                 -- The conflict target only ever matches an unruled row (see the class javadoc), so the
                 -- payload here is always safe to re-point: nothing has read and ruled on this claim yet.
+                -- The change point moves with the onset, so within a spell the old one is kept.
                 payload = CASE
-                    WHEN finding.payload #> '{control,baseline}' IS NOT NULL
-                    THEN jsonb_set(EXCLUDED.payload, '{control,baseline}', finding.payload #> '{control,baseline}')
-                    ELSE EXCLUDED.payload END,
+                    WHEN finding.last_seen_at < :quietBefore THEN %1$s
+                    WHEN finding.payload -> 'changepoint' IS NULL THEN (%1$s) - 'changepoint'
+                    ELSE jsonb_set(%1$s, '{changepoint}', finding.payload -> 'changepoint') END,
                 -- The onset moves only across an observed recovery, never within a spell. Both sides are
                 -- now EVENT time.
                 onset_at = CASE
                     WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
                     ELSE finding.onset_at END
-            RETURNING id, sample_count, escalated_at
-            """)
+            RETURNING id, sample_count, escalated_at, onset_at = :onsetAt AS onset_set
+            """.formatted(keptBaseline))
                 .param("id", id)
                 .param("pid", projectId)
                 .param("classifier", classifierKey)
@@ -131,9 +149,15 @@ public class FindingRepository {
                 .param("eventAt", eventAt)
                 .param("quietBefore", quietBefore)
                 .param("now", now)
-                .query((rs, n) -> recorded(rs))
+                .query((rs, n) -> new Shift(recorded(rs), rs.getBoolean("onset_set")))
                 .single();
-        return created(id, outcome);
+        Recorded made = created(id, outcome.recorded());
+        return new Recorded(
+                made.findingId(),
+                made.created(),
+                made.sampleCount(),
+                made.escalatedAt(),
+                made.created() || outcome.onsetSet());
     }
 
     /**

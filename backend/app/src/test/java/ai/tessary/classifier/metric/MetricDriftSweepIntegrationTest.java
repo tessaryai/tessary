@@ -296,6 +296,83 @@ record MetricDriftSweepIntegrationTest(
         assertEquals(2, control.path("baseline").path("days").asInt(), "the declaration describes the rows written");
     }
 
+    /**
+     * A rolling-reference finding opened before its baseline rows were written holds no {@code baseline} rows and no
+     * declaration. The next window that bumps it writes both, and they agree. The bug is a finding whose payload
+     * declares a sample no row backs, and which never gains a comparison side.
+     */
+    @Test
+    @DisplayName("a rolling-reference finding with no baseline rows gets them on the next window")
+    void aRollingFindingWithNoBaselineGetsOneOnTheNextWindow() {
+        String pid = project("metric-sweep-rolling-baseline-late");
+        ClassifierRow signal = signal(pid);
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+        Instant judgedJuly = earlyJuly.plus(7, ChronoUnit.DAYS);
+        rollingFixture(pid, signal, lateJune, earlyJuly, judgedJuly);
+        String findingId = rollingFinding(pid).id();
+        jdbc.sql("DELETE FROM finding_evidence WHERE finding_id = :fid AND role = :role")
+                .param("fid", findingId)
+                .param("role", FindingEvidenceRow.Role.BASELINE)
+                .update();
+        jdbc.sql("UPDATE finding SET payload = payload #- '{control,baseline}' WHERE id = :fid")
+                .param("fid", findingId)
+                .update();
+
+        seedTurnsAt(pid, judgedJuly.plus(7, ChronoUnit.DAYS), 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).fired());
+
+        FindingRow finding = rollingFinding(pid);
+        assertEquals(findingId, finding.id(), "the same cause was bumped, not opened again");
+        int declared =
+                evidence(finding).path("control").path("baseline").path("rows").asInt();
+        assertTrue(declared > 0, "the bump declares the sample it draws");
+        assertEquals(
+                declared,
+                evidenceTraceIds(finding, FindingEvidenceRow.Role.BASELINE).size());
+    }
+
+    /**
+     * Two shifted windows an hour apart are one spell, so the finding keeps the first window's onset. The second window
+     * leaves the change point where the onset is: its {@code changepoint} rows and {@code payload.changepoint} stay
+     * the first window's. The bug is a change point that moves to the latest window while the onset stays put, so
+     * checks.md reports a change point that disagrees with the onset.
+     */
+    @Test
+    @DisplayName("a window that bumps a finding within its spell leaves its change point at the onset")
+    void aBumpWithinTheSpellLeavesTheChangePoint() {
+        String pid = project("metric-sweep-change-point-kept");
+        ClassifierRow signal = signal(pid);
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+        Instant anHourOn = earlyJuly.plus(1, ChronoUnit.HOURS);
+
+        seedTurnsAt(pid, lateJune, 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed(), "the bootstrap pin");
+        seedTurnsAt(pid, earlyJuly, 50, 8_000, null);
+        assertTrue(sweep.sweepMetrics(claim(pid, signal), signal).fired() >= 1, "the first window fires");
+        seedTurnsAt(pid, anHourOn, 50, 8_000, null);
+        assertTrue(sweep.sweepMetrics(claim(pid, signal), signal).fired() >= 1, "the second window bumps it");
+
+        FindingRow finding = findings.listByProject(pid, null, null, null, false, 100).stream()
+                .filter(f -> f.nativeCauseKey().endsWith(":pinned"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no finding fired on the pinned arm"));
+        assertEquals(earlyJuly, Instant.parse(finding.onsetAt()), "one spell keeps its first onset");
+        assertEquals(
+                earlyJuly,
+                Instant.parse(evidence(finding).path("changepoint").path("at").asText()),
+                "the change point stays at the onset");
+        assertEquals(
+                Set.copyOf(traceIdsFrom(pid, earlyJuly, 10)),
+                evidenceTraceIds(finding, FindingEvidenceRow.Role.CHANGEPOINT),
+                "the first window's rows from the change point on");
+        assertEquals(
+                Set.copyOf(traceIdsFrom(pid, anHourOn, 50)),
+                evidenceTraceIds(finding, FindingEvidenceRow.Role.MEMBER),
+                "members still move to the window that just fired");
+    }
+
     @Test
     @DisplayName("a confirmed regression's own event day is excluded from the control it would otherwise pollute")
     void aConfirmedRegressionExcludesItsOwnDayFromTheControl() {

@@ -947,17 +947,29 @@ public class MetricDriftSweep implements ClassifierSweep {
                 MetricEvidenceRefs.refs(pending.memberRefs()),
                 at.toString());
         // One list, one replace: the healthy rows just before the step are comparison rows, never citable. The rolling
-        // arm writes once: a later ring has folded the shifted days, so a redraw would sample the shift into its own
-        // baseline.
+        // arm writes once, when the finding has none yet: a later ring has folded the shifted days, so a redraw would
+        // sample the shift into its own baseline.
         List<FindingEvidenceRepository.Ref> baseline = new ArrayList<>(MetricEvidenceRefs.refs(pending.baselineRefs()));
         baseline.addAll(onset.beforeRows());
         MetricFindingEvidence.BaselineSample sample = pending.baselineSample();
-        if (pending.control() == null || recorded.created()) {
+        if (pending.control() == null
+                || recorded.created()
+                || evidenceRefs
+                                .countsByRole(projectId, recorded.findingId())
+                                .getOrDefault(FindingEvidenceRow.Role.BASELINE, 0L)
+                        == 0) {
             evidenceRefs.replace(
                     projectId, recorded.findingId(), FindingEvidenceRow.Role.BASELINE, baseline, at.toString());
         }
-        evidenceRefs.replace(
-                projectId, recorded.findingId(), FindingEvidenceRow.Role.CHANGEPOINT, onset.fromRows(), at.toString());
+        // The change point moves with the onset: within a spell `recordShift` keeps both, so the rows stay too.
+        if (recorded.onsetSet()) {
+            evidenceRefs.replace(
+                    projectId,
+                    recorded.findingId(),
+                    FindingEvidenceRow.Role.CHANGEPOINT,
+                    onset.fromRows(),
+                    at.toString());
+        }
         StructuredLog.info(log, Markers.OPS, "metric.finding.recorded")
                 .field("project", projectId)
                 .field("baseline", pending.row().id())
