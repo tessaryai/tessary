@@ -217,6 +217,85 @@ record MetricDriftSweepIntegrationTest(
         assertEquals("2026-06-24", control.oldestDay());
     }
 
+    /**
+     * The backfill replay's three windows: June 24 at 2s pins, July 1 at 8s fires on the pinned arm, and July 8 at 2s
+     * fires only against the rolling control of June 24 and July 1. Each of those days kept all 50 of its rows (under
+     * the 100 a day keeps), and 100 candidates are under the 200-row sample, so the baseline is exactly those 100 rows.
+     * The July 8 window is shifted throughout, so its change point is its first row and no rows before it join the
+     * baseline. The bug is a rolling-reference finding with no comparison side.
+     */
+    @Test
+    @DisplayName("a rolling-reference finding writes baseline rows drawn from the days its control used")
+    void rollingReferenceFindingWritesBaselineFromItsDays() {
+        String pid = project("metric-sweep-rolling-baseline");
+        ClassifierRow signal = signal(pid);
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+        Instant judgedJuly = earlyJuly.plus(7, ChronoUnit.DAYS);
+        rollingFixture(pid, signal, lateJune, earlyJuly, judgedJuly);
+
+        FindingRow finding = rollingFinding(pid);
+        assertEquals(100, finding.evidenceCount(FindingEvidenceRow.Role.BASELINE));
+        Set<String> expected = new java.util.HashSet<>(traceIdsFrom(pid, lateJune, 50));
+        expected.addAll(traceIdsFrom(pid, earlyJuly, 50));
+        Set<String> baseline = evidenceTraceIds(finding, FindingEvidenceRow.Role.BASELINE);
+        assertEquals(expected, baseline, "every row the two reference days kept, and nothing else");
+        assertTrue(
+                java.util.Collections.disjoint(baseline, traceIdsFrom(pid, judgedJuly, 50)),
+                "no row of the judged window is its own baseline");
+
+        JsonNode declared = evidence(finding).path("control").path("baseline");
+        assertEquals("spread", declared.path("rule").asText());
+        assertEquals(100, declared.path("rows").asInt());
+        assertEquals(100, declared.path("of").asInt());
+        assertEquals(2, declared.path("days").asInt());
+        assertEquals("2026-06-24", declared.path("oldest_day").asText());
+        assertEquals("2026-07-01", declared.path("newest_day").asText());
+    }
+
+    /**
+     * A fourth window, July 15 at 2s. The control now weighs June 24 at 0.125, July 1 at 0.25 and July 8 at 0.5, so the
+     * 8s day is 12.5 of 43.75 units of mass and the window sits about 0.286 x ln 4 = 0.40 below it against a 0.139
+     * floor; the pinned arm sees 2s against 2s and stays quiet. The same rolling finding is bumped. Its baseline stays
+     * the 100 rows drawn when it opened, though the ring now also holds July 8, and its declaration stays with them while
+     * the ring's own composition moves to three days. The bugs are a per-fire redraw that samples the regression into
+     * its own baseline, and a refresh that rewrites the declaration over rows it never wrote.
+     */
+    @Test
+    @DisplayName("a later window that bumps a rolling-reference finding neither redraws nor grows its baseline")
+    void secondPassDoesNotGrowTheBaseline() {
+        String pid = project("metric-sweep-rolling-baseline-bump");
+        ClassifierRow signal = signal(pid);
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+        Instant judgedJuly = earlyJuly.plus(7, ChronoUnit.DAYS);
+        Instant midJuly = judgedJuly.plus(7, ChronoUnit.DAYS);
+        rollingFixture(pid, signal, lateJune, earlyJuly, judgedJuly);
+        Set<String> firstBaseline = evidenceTraceIds(rollingFinding(pid), FindingEvidenceRow.Role.BASELINE);
+
+        seedTurnsAt(pid, midJuly, 50, 2_000, null);
+        MetricDriftSweep.MetricSweepOutcome bump = sweep.sweepMetrics(claim(pid, signal), signal);
+        assertEquals(1, bump.windowsClosed());
+        assertEquals(1, bump.fired(), "still faster than a control that holds the 8s day");
+
+        List<FindingRow> rolling = findings.listByProject(pid, null, null, null, false, 100).stream()
+                .filter(f -> f.nativeCauseKey().endsWith(":previous"))
+                .toList();
+        assertEquals(1, rolling.size(), "the same cause was bumped, not opened again");
+        FindingRow finding = rolling.get(0);
+        assertEquals(
+                Set.copyOf(traceIdsFrom(pid, midJuly, 50)),
+                evidenceTraceIds(finding, FindingEvidenceRow.Role.MEMBER),
+                "members move to the window that just fired");
+        assertEquals(100, finding.evidenceCount(FindingEvidenceRow.Role.BASELINE));
+        assertEquals(firstBaseline, evidenceTraceIds(finding, FindingEvidenceRow.Role.BASELINE));
+
+        JsonNode control = evidence(finding).path("control");
+        assertEquals(3, control.path("days_used").asInt(), "the ring itself now holds the July 8 day");
+        assertEquals(100, control.path("baseline").path("rows").asInt());
+        assertEquals(2, control.path("baseline").path("days").asInt(), "the declaration describes the rows written");
+    }
+
     @Test
     @DisplayName("a confirmed regression's own event day is excluded from the control it would otherwise pollute")
     void aConfirmedRegressionExcludesItsOwnDayFromTheControl() {
@@ -848,6 +927,48 @@ record MetricDriftSweepIntegrationTest(
                         Math.toIntExact(usage.cacheWriteTokens()))
                 .map(priced -> priced.total().toPlainString())
                 .orElse(null);
+    }
+
+    /** The backfill replay's three windows, up to the rolling arm firing on the third. */
+    private void rollingFixture(
+            String projectId, ClassifierRow signal, Instant lateJune, Instant earlyJuly, Instant judgedJuly) {
+        seedTurnsAt(projectId, lateJune, 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(projectId, signal), signal).windowsClosed(), "the bootstrap pin");
+        seedTurnsAt(projectId, earlyJuly, 50, 8_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(projectId, signal), signal).fired(), "fires on the pinned arm");
+        seedTurnsAt(projectId, judgedJuly, 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(projectId, signal), signal).fired(), "fires on the rolling arm");
+    }
+
+    private FindingRow rollingFinding(String projectId) {
+        return findings.listByProject(projectId, null, null, null, false, 100).stream()
+                .filter(f -> f.nativeCauseKey().endsWith(":previous"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no finding fired on the rolling-control arm"));
+    }
+
+    /** The {@code count} traces seeded one second apart from {@code start}. */
+    private List<String> traceIdsFrom(String projectId, Instant start, int count) {
+        return jdbc.sql("""
+            SELECT id FROM trace
+            WHERE project_id = :pid AND started_at >= CAST(:from AS timestamptz)
+              AND started_at < CAST(:to AS timestamptz)
+            """)
+                .param("pid", projectId)
+                .param("from", start.toString())
+                .param("to", start.plusSeconds(count).toString())
+                .query(String.class)
+                .list();
+    }
+
+    private Set<String> evidenceTraceIds(FindingRow finding, String role) {
+        return Set.copyOf(jdbc.sql("""
+            SELECT trace_id FROM finding_evidence WHERE finding_id = :fid AND role = :role
+            """)
+                .param("fid", finding.id())
+                .param("role", role)
+                .query(String.class)
+                .list());
     }
 
     /** A finding's evidence blob as JSON. Read as JSON because Postgres re-serializes a jsonb value. */
