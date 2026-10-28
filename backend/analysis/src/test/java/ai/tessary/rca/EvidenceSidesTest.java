@@ -137,4 +137,13 @@ class EvidenceSidesTest {
 
         assertEquals(List.of(Role.WITNESS, Role.MEMBER, Role.BASELINE), sides.readOrder());
     }
+
+    /** Only the roles the finding recorded are present. The bug is a role with no rows reported as present. */
+    @Test
+    void theRolesPresentAreTheRolesRecorded() {
+        EvidenceSides sides = EvidenceSides.of(ClaimShape.RATE_RISE, SpanRefs.recorded(TOOL_ERROR_ROWS));
+
+        assertEquals(Set.of(Role.WITNESS, Role.MEMBER), sides.rolesPresent());
+        assertEquals(3, sides.recordedRows());
+    }
 }
