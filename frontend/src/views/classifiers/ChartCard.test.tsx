@@ -102,7 +102,7 @@ describe("ChartCard", () => {
   it("labels the dashed baseline of a rate card", () => {
     renderCard(card({}));
     expect(screen.getByText("Baseline 4.2%")).toBeTruthy();
-    expect(screen.getByText("% of conversations flagged")).toBeTruthy();
+    expect(screen.getByText("% of sessions flagged")).toBeTruthy();
     expect(screen.getByText("UTC")).toBeTruthy();
   });
 
@@ -227,11 +227,11 @@ describe("ChartCard", () => {
     const chart = screen.getByRole("group", { name: /Frustration, last 28 days, 28 points/ });
     fireEvent.focus(chart);
     expect(screen.getByRole("tooltip").textContent).toContain("Oct 8, 00:00-14:00 UTC, still filling");
-    expect(screen.getByRole("tooltip").textContent).toContain("8 of 100 conversations");
+    expect(screen.getByRole("tooltip").textContent).toContain("8 of 100 sessions");
 
     fireEvent.keyDown(chart, { key: "ArrowLeft" });
     expect(screen.getByRole("tooltip").textContent).toContain("Oct 7, 00:00-24:00 UTC");
-    expect(screen.getByRole("tooltip").textContent).toContain("4 of 100 conversations");
+    expect(screen.getByRole("tooltip").textContent).toContain("4 of 100 sessions");
 
     fireEvent.keyDown(chart, { key: "Home" });
     expect(screen.getByRole("tooltip").textContent).toContain("Sep 11, 00:00-24:00 UTC");
@@ -306,7 +306,7 @@ describe("ChartCard", () => {
 
     const live = within(screen.getByRole("region", { name: "Frustration" })).getByRole("status");
     expect(live.textContent).toContain("Oct 7, 00:00-24:00 UTC");
-    expect(live.textContent).toContain("4 of 100 conversations");
+    expect(live.textContent).toContain("4 of 100 sessions");
     expect(screen.getByRole("group", { name: /Frustration/, description: /Oct 7/ })).toBe(chart);
   });
 });

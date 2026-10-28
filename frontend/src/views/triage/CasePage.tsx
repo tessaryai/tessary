@@ -25,6 +25,7 @@ import { LeakPins, LeakTimeline } from "../classifiers/secretStory";
 import { HowOutputsBroke, MalformedRate } from "../classifiers/malformedStory";
 import {
   FRUSTRATION_LIST_COPY,
+  FRUSTRATION_SHARE,
   FrustrationRate,
   frustrationLoader,
   frustrationRows,
@@ -507,7 +508,7 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
   // A frustration case draws the finding page's own figure, whose first note already states the basis.
   if (detail.frustration) {
     return (
-      <Block label="What changed" note="Share of sessions with a user frustrated with the agent">
+      <Block label="What changed" note={FRUSTRATION_SHARE}>
         <FrustrationRate detail={detail.frustration} />
       </Block>
     );

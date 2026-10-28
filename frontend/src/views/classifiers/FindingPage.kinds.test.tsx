@@ -571,16 +571,16 @@ describe("a frustration finding", () => {
     );
     renderPage();
 
-    expect(await screen.findByText("6.40% of sessions are frustrated")).toBeTruthy();
+    expect(await screen.findByText("6.40% of session-hours are frustrated")).toBeTruthy();
     expect(
       screen.getByText(
-        `58 of 906 sessions since ${sinceWords("2026-09-23T09:12:00Z")} had a user frustrated with the agent. This rate opened the case.`,
+        `58 of 906 session-hours since ${sinceWords("2026-09-23T09:12:00Z")} had a user frustrated with the agent. This rate opened the case.`,
       ),
     ).toBeTruthy();
     expect(screen.getByText("2.10% is normal for this call site")).toBeTruthy();
     expect(
       screen.getByText(
-        "Learned from its first 1,000 sessions. The current rate is 4.3 percentage points higher. A message counts as frustrated when its score is above 0.50.",
+        "Learned from its first 1,000 session-hours. The current rate is 4.3 percentage points higher. A message counts as frustrated when its score is above 0.50.",
       ),
     ).toBeTruthy();
     expect(screen.getByRole("img", { name: "Frustrated sessions: 2.10% before, 6.40% after" })).toBeTruthy();

@@ -715,7 +715,11 @@ describe("a frustration case", () => {
     expect(screen.getByText("Why users got frustrated")).toBeTruthy();
     expect(screen.getByText("agent/prompt.md @ c0ffee1")).toBeTruthy();
     expect(screen.getByText("Always retry.")).toBeTruthy();
-    expect(screen.getByText("Share of sessions with a user frustrated with the agent")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Share of sessions with a user frustrated with the agent, each session counted once in each hour it was active",
+      ),
+    ).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^Show \d+ sessions?$/ }).map((b) => b.textContent)).toEqual([
       "Show 1 session",
     ]);

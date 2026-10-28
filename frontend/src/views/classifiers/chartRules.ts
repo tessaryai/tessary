@@ -157,7 +157,7 @@ function deltaOf(card: ChartCard): { text: string; tone: DeltaTone } | null {
 }
 
 const RATE_WORDS: Record<string, { verb: string; noun: string; title: string }> = {
-  frustration: { verb: "flagged", noun: "conversations", title: "% of conversations flagged" },
+  frustration: { verb: "flagged", noun: "sessions", title: "% of sessions flagged" },
   groundedness: { verb: "unsupported", noun: "answers", title: "% of answers unsupported" },
   malformed_output: { verb: "failed the schema", noun: "outputs", title: "% of outputs that fail the schema" },
   tool_error: { verb: "failed", noun: "calls", title: "% of calls failed" },

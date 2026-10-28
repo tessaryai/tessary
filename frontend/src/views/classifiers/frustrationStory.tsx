@@ -30,7 +30,7 @@ export function FrustrationHeader({
       title={finding.title}
       subtitle={
         closed
-          ? "This finding is closed. This call site is learning its normal rate again from its next sessions."
+          ? "This finding is closed. This call site is learning its normal rate again from its next session-hours."
           : "Frustration findings skip triage. Tessary opened a case as soon as the rate rose above this call site's normal."
       }
       actions={<RulingWithCase finding={finding} basePath={basePath} />}
@@ -88,11 +88,11 @@ export function FrustrationRate({ detail }: { detail: FrustrationDetail }) {
     <RateFigure
       rate={detail.rate}
       label="Frustrated sessions"
-      unit="sessions"
+      unit="session-hours"
       flagged="are frustrated"
       flaggedLine="had a user frustrated with the agent. This rate opened the case."
       referenceLabel="is normal for this call site"
-      referenceDetail={`Learned from its first ${detail.rate.nRef.toLocaleString()} sessions.`}
+      referenceDetail={`Learned from its first ${detail.rate.nRef.toLocaleString()} session-hours.`}
       thresholdLine={`A message counts as frustrated when its score is above ${detail.jevThreshold.toFixed(2)}.`}
     />
   );
@@ -128,6 +128,10 @@ export function frustrationLoader(api: ProjectApi, findingId: string): FlaggedLo
     return { rows: page.rows.map(frustrationRow), nextCursor: page.nextCursor, total: page.total };
   };
 }
+
+/** What the rate measures, said once for the finding and the case page. */
+export const FRUSTRATION_SHARE =
+  "Share of sessions with a user frustrated with the agent, each session counted once in each hour it was active";
 
 export const FRUSTRATION_LIST_COPY: {
   listLabel: string;
