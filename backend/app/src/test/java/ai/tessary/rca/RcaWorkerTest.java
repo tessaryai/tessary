@@ -170,7 +170,9 @@ record RcaWorkerTest(
         // so nothing pre-chooses a sample.
         Map<String, String> dossier = capturedDossier();
         String folder = "findings/1-" + job.findingId() + "/";
-        assertEquals(Set.of(folder + "finding.md", folder + "evidence.md", "method.md", "tools.md"), dossier.keySet());
+        assertEquals(
+                Set.of(folder + "finding.md", folder + "checks.md", folder + "evidence.md", "method.md", "tools.md"),
+                dossier.keySet());
         assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.SECRET_LEAK), dossier.get("method.md"));
         assertEquals(AgenticRcaEngine.TOOLS, dossier.get("tools.md"));
         String findingDoc = dossier.get(folder + "finding.md");

@@ -11,9 +11,12 @@ import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler;
 import ai.tessary.classifier.finding.dossier.EvidenceContext;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.open.obs.Markers;
+import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -21,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -86,7 +90,7 @@ public class RcaAnalysisService {
                         subject.stream().map(FindingClaim::id).toList(),
                         subject.get(0).onsetAt(),
                         subject.get(subject.size() - 1).lastSeenAt()),
-                dossierFiles(report, subject),
+                dossierFiles(report, subject, sides),
                 ev);
         complete(
                 job,
@@ -168,12 +172,14 @@ public class RcaAnalysisService {
      * Files rather than one prompt, so numbers stay verbatim. The layout is the contract {@link AgenticRcaEngine}'s
      * prompt describes; change them together.
      */
-    private Map<String, String> dossierFiles(RcaReportRow report, List<FindingClaim> subject) {
+    private Map<String, String> dossierFiles(
+            RcaReportRow report, List<FindingClaim> subject, Map<String, EvidenceSides> sides) {
         Map<String, String> files = new LinkedHashMap<>();
         for (int i = 0; i < subject.size(); i++) {
             FindingClaim finding = subject.get(i);
             String folder = findingFolder(i, finding);
             files.put(folder + "finding.md", findingDoc(report, finding));
+            files.put(folder + CHECKS_FILE, checks(finding, Objects.requireNonNull(sides.get(finding.id()))));
             // An adapter's file first, then a per-shape assembler, else fenced JSON.
             String payload = ownersEvidence(finding)
                     .map(ClassifierDossierAssembler::budget)
@@ -197,6 +203,43 @@ public class RcaAnalysisService {
         return files;
     }
 
+    /**
+     * Pages role by role, flagged roles first: unfiltered, the repository pages in role-string order, which would cut
+     * the witnesses first on a large finding.
+     */
+    private String checks(FindingClaim finding, EvidenceSides sides) {
+        Instant start = Instant.now();
+        List<FindingEvidenceRepository.SpanRef> rows = new ArrayList<>();
+        for (String role : sides.readOrder()) {
+            String cursor = null;
+            do {
+                int room = EvidenceChecks.ROW_CEILING - rows.size();
+                if (room <= 0) break;
+                FindingEvidenceRepository.SpanPage page = evidence.spanPage(
+                        finding.projectId(), finding.id(), role, Math.min(CHECKS_PAGE, room), cursor, false, false);
+                rows.addAll(page.rows());
+                cursor = page.nextCursor();
+            } while (cursor != null);
+        }
+        String text = EvidenceChecks.render(
+                sides.shape(),
+                EvidenceChecks.Metric.of(finding.payloadText("measure")),
+                rows,
+                sides,
+                sides.recordedRows());
+        StructuredLog.info(log, Markers.OPS, "rca.checks.built")
+                .message(
+                        "checks for finding %s read %d of %d rows into %d characters",
+                        finding.id(), rows.size(), sides.recordedRows(), text.length())
+                .field("finding", finding.id())
+                .field("rows", rows.size())
+                .field("recordedRows", sides.recordedRows())
+                .field("chars", text.length())
+                .durationMs(start)
+                .log();
+        return text;
+    }
+
     private Optional<String> ownersEvidence(FindingClaim finding) {
         if (adapters.ownerOf(finding).isEmpty()) return Optional.empty();
         ClassifierDossierAssembler.EvidenceCounts counts = evidenceCounts(finding);
@@ -216,6 +259,8 @@ public class RcaAnalysisService {
     }
 
     static final String EVIDENCE_FILE = "evidence.md";
+    static final String CHECKS_FILE = "checks.md";
+    private static final int CHECKS_PAGE = 2_000;
 
     static String findingFolder(int index, FindingClaim finding) {
         return "findings/" + (index + 1) + "-" + finding.id() + "/";
