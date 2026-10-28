@@ -90,7 +90,7 @@ record RcaWorkerTest(
         String healthyA = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(3)));
         String healthyB = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(4)));
 
-        String findingId = seedFinding(pid, List.of(baselineTrace), List.of(failingTrace));
+        String findingId = seedFinding(pid, List.of(baselineTrace), List.of(failingTrace), FindingRow.Cause.RATE_SHIFT);
         String now = Instant.now().toString();
         for (String traceId : List.of(failingTrace, healthyA, healthyB)) {
             evidence.record(
@@ -115,7 +115,10 @@ record RcaWorkerTest(
         assertEquals(1, ev.flaggedCount(), "the flagged side counted the whole population instead of the failures");
         assertEquals("traces", ev.grain());
         assertTrue(ev.baselinePresent());
-        assertEquals(Set.of(failingTrace, baselineTrace), ev.citableTraceIds(), "a healthy member is not citable");
+        assertEquals(
+                Set.of(failingTrace, baselineTrace, healthyA, healthyB),
+                ev.citableTraceIds(),
+                "unflagged members are the comparison side and may be cited");
     }
 
     @Test
@@ -167,7 +170,9 @@ record RcaWorkerTest(
         // so nothing pre-chooses a sample.
         Map<String, String> dossier = capturedDossier();
         String folder = "findings/1-" + job.findingId() + "/";
-        assertEquals(Set.of(folder + "finding.md", folder + "evidence.md", "method.md", "tools.md"), dossier.keySet());
+        assertEquals(
+                Set.of(folder + "finding.md", folder + "checks.md", folder + "evidence.md", "method.md", "tools.md"),
+                dossier.keySet());
         assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.SECRET_LEAK), dossier.get("method.md"));
         assertEquals(AgenticRcaEngine.TOOLS, dossier.get("tools.md"));
         String findingDoc = dossier.get(folder + "finding.md");
@@ -331,7 +336,7 @@ record RcaWorkerTest(
         String turnA = seedTrace(pid, sessionA, SPLIT.plus(Duration.ofHours(2)));
         String turnB = seedTrace(pid, sessionB, SPLIT.plus(Duration.ofHours(3)));
         String calm = seedSession(pid);
-        String findingId = seedFinding(pid, List.of(), List.of());
+        String findingId = seedFinding(pid, List.of(), List.of(), FindingRow.Cause.FRUSTRATION_RATE);
         String now = Instant.now().toString();
         evidence.record(
                 pid,
@@ -386,7 +391,7 @@ record RcaWorkerTest(
         assertEquals("sessions", ev.grain());
         assertFalse(ev.baselinePresent());
         assertTrue(ev.citableSessionIds().containsAll(Set.of(sessionA, sessionB)), ev.toString());
-        assertFalse(ev.citableSessionIds().contains(calm), "a calm session is not citable");
+        assertTrue(ev.citableSessionIds().contains(calm), "a calm session is the comparison side");
         assertTrue(ev.citableTraceIds().containsAll(Set.of(turnA, turnB)), ev.toString());
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
@@ -410,7 +415,7 @@ record RcaWorkerTest(
         String flaggedA = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
         String flaggedB = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(3)));
         String clean = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(4)));
-        String findingId = seedFinding(pid, List.of(), List.of());
+        String findingId = seedFinding(pid, List.of(), List.of(), FindingRow.Cause.GROUNDEDNESS_RATE);
         String now = Instant.now().toString();
         evidence.record(
                 pid,
@@ -460,7 +465,10 @@ record RcaWorkerTest(
         assertEquals(2, ev.flaggedCount(), "the flagged traces, not the clean member");
         assertEquals("traces", ev.grain());
         assertFalse(ev.baselinePresent());
-        assertEquals(Set.of(flaggedA, flaggedB), ev.citableTraceIds(), "a clean member is not citable");
+        assertEquals(
+                Set.of(flaggedA, flaggedB, clean),
+                ev.citableTraceIds(),
+                "unflagged members are the comparison side and may be cited");
         assertFalse(capturedDossier().containsKey("detections.md"), "flagged sentences are read over MCP");
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
@@ -600,11 +608,13 @@ record RcaWorkerTest(
         return ev.getValue();
     }
 
-    /** An armed-window finding, which rules by the verb alone. */
-    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
-
     /** One open finding citing {@code baseline} and {@code flagged} traces as its two sides. */
     private String seedFinding(String pid, List<String> baseline, List<String> flagged) {
+        return seedFinding(pid, baseline, flagged, FindingRow.Cause.ARMED_WINDOW);
+    }
+
+    /** The cause kind decides the claim's shape, and so which rows are its comparison side. */
+    private String seedFinding(String pid, List<String> baseline, List<String> flagged, String causeKind) {
         String now = Instant.now().toString();
         String cause = "cause-" + Ids.ulid();
         String findingId = Objects.requireNonNull(findings.recordArmedWindow(
@@ -615,7 +625,7 @@ record RcaWorkerTest(
                         cause,
                         1,
                         "cs_extract",
-                        ARMED_PAYLOAD,
+                        "{\"cause_kind\":\"" + causeKind + "\"}",
                         now,
                         now,
                         now,
