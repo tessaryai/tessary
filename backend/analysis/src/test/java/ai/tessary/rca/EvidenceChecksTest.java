@@ -11,14 +11,20 @@ import ai.tessary.rca.EvidenceChecks.Metric;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class EvidenceChecksTest {
 
+    /** The row fields after {@code errorType} and before {@code payloadAvailable}, none set by the fixtures below. */
+    private static final String UNSET_TAIL = "callSiteId, models, projectVersionId, userId, latencyMs, totalTokens,"
+            + " inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens, traceIndex,"
+            + " sessionTraces, inputBytes, outputBytes.";
+
     private static final String NOT_RECORDED_TODAY =
-            "Not recorded on these rows: name, kind, status, level, callSiteId, models, latencyMs, totalTokens.";
+            "Not recorded on these rows: name, kind, status, level, " + UNSET_TAIL;
 
     /**
      * A field no row carries says so once. The bug is a missing field rendered as {@code (none)} at 100% on both sides,
@@ -34,7 +40,8 @@ class EvidenceChecksTest {
 
         String text = render(ClaimShape.RATE_RISE, Metric.LATENCY_MS, rows);
 
-        assertEquals("""
+        assertEquals(
+                """
                 ## Flagged against comparison
 
                 ### errorType
@@ -43,7 +50,8 @@ class EvidenceChecksTest {
                 | refused | 0 (0.0%) | 2 (100.0%) | -100.0 pp |
                 | timeout | 2 (100.0%) | 0 (0.0%) | +100.0 pp |
 
-                Not recorded on these rows: name, kind, status, level, callSiteId, models, latencyMs, totalTokens.""", section(text, "## Flagged against comparison"));
+                """ + NOT_RECORDED_TODAY + "\nNo difference between the sides: payloadAvailable.",
+                section(text, "## Flagged against comparison"));
         assertFalse(text.contains("### level"), text);
     }
 
@@ -69,7 +77,8 @@ class EvidenceChecksTest {
 
         String text = render(ClaimShape.RATE_RISE, Metric.LATENCY_MS, rows);
 
-        assertEquals("""
+        assertEquals(
+                """
                 ## Flagged against comparison
 
                 ### errorType
@@ -78,8 +87,9 @@ class EvidenceChecksTest {
                 | (none) | 0 (0.0%) | 6 (100.0%) | -100.0 pp |
                 | timeout | 4 (100.0%) | 0 (0.0%) | +100.0 pp |
 
-                Not recorded on these rows: name, kind, level, callSiteId, models, latencyMs, totalTokens.
-                No difference between the sides: status.""", section(text, "## Flagged against comparison"));
+                """ + "Not recorded on these rows: name, kind, level, " + UNSET_TAIL
+                        + "\nNo difference between the sides: status, payloadAvailable.",
+                section(text, "## Flagged against comparison"));
     }
 
     /**
@@ -209,6 +219,11 @@ class EvidenceChecksTest {
                 |---|---|
                 | schema | 3 (100.0%) |
 
+                ### payloadAvailable
+                | value | flagged |
+                |---|---|
+                | false | 3 (100.0%) |
+
                 """ + NOT_RECORDED_TODAY, section(text, "## Flagged rows alone"));
         assertEquals(
                 "No comparison side.",
@@ -321,6 +336,95 @@ class EvidenceChecksTest {
                 "Flagged rows: `exemplar` (0), `member` (3), `changepoint` (0). Comparison rows: none. No comparison"
                         + " side: a presence event has nothing it is compared against.",
                 lineStarting(text, "Flagged rows"));
+    }
+
+    /**
+     * A step that arrives with a deploy has every flagged row on the new version and every comparison row on the old.
+     * The bug is a version the rows carry and the checks leave out, so a deploy cause has no computed field.
+     */
+    @Test
+    void aStepPresentOnlyInOneVersionShowsAsADifference() {
+        List<SpanRef> rows = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            rows.add(SpanRefs.row(Role.BASELINE)
+                    .trace("b" + i)
+                    .startedAt(hour(0))
+                    .projectVersionId("v1")
+                    .latencyMs(100)
+                    .build());
+            rows.add(SpanRefs.row(Role.MEMBER)
+                    .trace("m" + i)
+                    .startedAt(hour(1))
+                    .projectVersionId("v2")
+                    .latencyMs(1_000)
+                    .build());
+        }
+
+        String text = render(ClaimShape.DISTRIBUTION_SHIFT, Metric.LATENCY_MS, rows);
+
+        assertTrue(text.contains("""
+                ### projectVersionId
+                | value | flagged | comparison | difference |
+                |---|---|---|---|
+                | v1 | 0 (0.0%) | 4 (100.0%) | -100.0 pp |
+                | v2 | 4 (100.0%) | 0 (0.0%) | +100.0 pp |"""), text);
+    }
+
+    /**
+     * An instance switch shows in the short attribute list, one table per key, after the row fields. The bug is an
+     * attribute the rows carry and the checks never compare.
+     */
+    @Test
+    void anAttributeKeyThatDiffersHasItsOwnTable() {
+        List<SpanRef> rows = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            rows.add(SpanRefs.row(Role.WITNESS)
+                    .trace("w" + i)
+                    .attributes(Map.of("service.instance.id", "i-2", "service.name", "api"))
+                    .build());
+            rows.add(SpanRefs.row(Role.MEMBER)
+                    .trace("m" + i)
+                    .attributes(Map.of("service.instance.id", "i-1", "service.name", "api"))
+                    .build());
+        }
+
+        String text = section(render(ClaimShape.RATE_RISE, Metric.LATENCY_MS, rows), "## Flagged against comparison");
+
+        assertTrue(text.contains("""
+                ### attributes.service.instance.id
+                | value | flagged | comparison | difference |
+                |---|---|---|---|
+                | i-1 | 0 (0.0%) | 2 (100.0%) | -100.0 pp |
+                | i-2 | 2 (100.0%) | 0 (0.0%) | +100.0 pp |"""), text);
+        assertTrue(lineStarting(text, "No difference").endsWith("payloadAvailable, attributes.service.name."), text);
+    }
+
+    /**
+     * A token shift's series is the token bucket the detector moved. The bug is a token measure that reads no value,
+     * so its series is empty.
+     */
+    @Test
+    void aTokenShiftReadsItsBucket() {
+        List<SpanRef> rows = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            rows.add(SpanRefs.row(Role.BASELINE)
+                    .trace("b" + i)
+                    .startedAt(hour(0))
+                    .inputTokens(1_000)
+                    .build());
+            rows.add(SpanRefs.row(Role.MEMBER)
+                    .trace("m" + i)
+                    .startedAt(hour(1))
+                    .inputTokens(3_000)
+                    .build());
+        }
+
+        String text = render(ClaimShape.DISTRIBUTION_SHIFT, Metric.INPUT_TOKENS, rows);
+
+        assertEquals(
+                "Before: mean 1,000 tokens over 2 rows. After: mean 3,000 tokens over 2 rows.",
+                lineStarting(text, "Before"));
+        assertFalse(text.contains("### inputTokens"), "the series measure is not also a field table: " + text);
     }
 
     private static String render(ClaimShape shape, Metric metric, List<SpanRef> rows) {

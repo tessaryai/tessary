@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRepository.SpanRef;
 import ai.tessary.classifier.finding.FindingEvidenceRow.Role;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
@@ -50,17 +51,21 @@ final class EvidenceChecks {
 
     /** The measure a shift moved; the other shapes ignore it. */
     enum Metric {
-        LATENCY_MS(" ms"),
-        TOTAL_COST(" USD"),
-        INPUT_TOKENS(" tokens"),
-        OUTPUT_TOKENS(" tokens"),
-        CACHE_READ_TOKENS(" tokens"),
-        CACHE_WRITE_TOKENS(" tokens");
+        LATENCY_MS(" ms", "latencyMs"),
+        TOTAL_COST(" USD", "totalCost"),
+        INPUT_TOKENS(" tokens", "inputTokens"),
+        OUTPUT_TOKENS(" tokens", "outputTokens"),
+        CACHE_READ_TOKENS(" tokens", "cacheReadTokens"),
+        CACHE_WRITE_TOKENS(" tokens", "cacheWriteTokens");
 
         private final String unit;
 
-        Metric(String unit) {
+        /** The row field the measure reads; a shift leaves it out of the field tables, since it is the series. */
+        private final String field;
+
+        Metric(String unit, String field) {
             this.unit = unit;
+            this.field = field;
         }
 
         static Metric of(@Nullable String measure) {
@@ -75,17 +80,20 @@ final class EvidenceChecks {
             };
         }
 
-        /** The token buckets are not on the evidence row yet, so a token shift reads as having no values. */
         @Nullable
         Double value(SpanRef row) {
             return switch (this) {
-                case LATENCY_MS -> {
-                    Long ms = row.latencyMs();
-                    yield ms == null ? null : ms.doubleValue();
-                }
                 case TOTAL_COST -> row.totalCost();
-                case INPUT_TOKENS, OUTPUT_TOKENS, CACHE_READ_TOKENS, CACHE_WRITE_TOKENS -> null;
+                case LATENCY_MS -> asDouble(row.latencyMs());
+                case INPUT_TOKENS -> asDouble(row.inputTokens());
+                case OUTPUT_TOKENS -> asDouble(row.outputTokens());
+                case CACHE_READ_TOKENS -> asDouble(row.cacheReadTokens());
+                case CACHE_WRITE_TOKENS -> asDouble(row.cacheWriteTokens());
             };
+        }
+
+        private static @Nullable Double asDouble(@Nullable Long value) {
+            return value == null ? null : value.doubleValue();
         }
 
         String format(double value) {
@@ -98,10 +106,10 @@ final class EvidenceChecks {
     private record Field(String name, Function<SpanRef, @Nullable String> value) {}
 
     /**
-     * Every field a row carries that two sides can differ on, in table order. Ids, ranks, times and previews are left
-     * out; a shift leaves out its own measure, which is the series.
+     * Every field a row carries that two sides can differ on, in table order, then one per attribute key the rows
+     * carry. Ids, ranks, times and previews are left out; a shift leaves out its own measure, which is the series.
      */
-    private static List<Field> fields(ClaimShape shape, Metric metric) {
+    private static List<Field> fields(ClaimShape shape, Metric metric, List<SpanRef> rows) {
         boolean shift = shape == ClaimShape.DISTRIBUTION_SHIFT;
         List<Field> fields = new ArrayList<>(List.of(
                 new Field("name", SpanRef::name),
@@ -110,16 +118,50 @@ final class EvidenceChecks {
                 new Field("level", SpanRef::level),
                 new Field("errorType", SpanRef::errorType),
                 new Field("callSiteId", SpanRef::callSiteId),
-                new Field("models", row -> row.models().isEmpty() ? null : String.join(",", row.models()))));
-        if (!(shift && metric == Metric.LATENCY_MS)) fields.add(banded("latencyMs", SpanRef::latencyMs));
-        fields.add(banded("totalTokens", SpanRef::totalTokens));
+                new Field("models", row -> row.models().isEmpty() ? null : String.join(",", row.models())),
+                new Field("projectVersionId", SpanRef::projectVersionId),
+                new Field("userId", SpanRef::userId)));
+        List<Field> banded = List.of(
+                banded("latencyMs", SpanRef::latencyMs),
+                banded("totalTokens", SpanRef::totalTokens),
+                banded("inputTokens", SpanRef::inputTokens),
+                banded("outputTokens", SpanRef::outputTokens),
+                banded("cacheReadTokens", SpanRef::cacheReadTokens),
+                banded("cacheWriteTokens", SpanRef::cacheWriteTokens),
+                banded("reasoningTokens", SpanRef::reasoningTokens));
+        for (Field field : banded) {
+            if (!(shift && field.name().equals(metric.field))) fields.add(field);
+        }
         if (shift && metric != Metric.TOTAL_COST) {
             fields.add(new Field("totalCostCents", row -> {
                 Double cost = row.totalCost();
                 return cost == null ? null : band(Math.round(cost * 100));
             }));
         }
+        fields.add(banded("traceIndex", row -> widen(row.traceIndex())));
+        fields.add(banded("sessionTraces", row -> widen(row.sessionTraces())));
+        fields.add(banded("inputBytes", SpanRef::inputBytes));
+        fields.add(banded("outputBytes", SpanRef::outputBytes));
+        fields.add(new Field("payloadAvailable", row -> Boolean.toString(row.payloadAvailable())));
+        for (String key : attributeKeys(rows)) {
+            fields.add(new Field("attributes." + key, row -> row.attributes().get(key)));
+        }
         return fields;
+    }
+
+    private static @Nullable Long widen(@Nullable Integer value) {
+        return value == null ? null : value.longValue();
+    }
+
+    /** The keys any row carries, in the repository's short-list order; a key outside it sorts after. */
+    private static List<String> attributeKeys(List<SpanRef> rows) {
+        Set<String> keys = new HashSet<>();
+        for (SpanRef row : rows) keys.addAll(row.attributes().keySet());
+        List<String> order = FindingEvidenceRepository.SHORT_ATTRIBUTE_KEYS;
+        return keys.stream()
+                .sorted(Comparator.comparingInt((String k) -> order.contains(k) ? order.indexOf(k) : order.size())
+                        .thenComparing(Comparator.naturalOrder()))
+                .toList();
     }
 
     private static Field banded(String name, Function<SpanRef, @Nullable Long> value) {
@@ -140,7 +182,7 @@ final class EvidenceChecks {
     static String render(ClaimShape shape, Metric metric, List<SpanRef> rows, EvidenceSides sides, int recordedRows) {
         EvidenceSides.Split split = sides.split(rows);
         List<Dist> dists = new ArrayList<>();
-        for (Field field : fields(shape, metric)) dists.add(Dist.of(field, split));
+        for (Field field : fields(shape, metric, rows)) dists.add(Dist.of(field, split));
         List<String> sections = new ArrayList<>();
         sections.add(header(shape, rows, sides, split, recordedRows));
         sections.add(series(shape, metric, rows, sides, split));
