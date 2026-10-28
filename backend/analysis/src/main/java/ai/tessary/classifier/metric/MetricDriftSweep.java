@@ -901,6 +901,7 @@ public class MetricDriftSweep implements ClassifierSweep {
                 closedWindow.measure().count() >= config.windowTargetCount() ? "count" : "elapsed",
                 explains,
                 pending.control(),
+                null,
                 spec.grid(),
                 onset.changePoint(),
                 referenceFrom(pending));
