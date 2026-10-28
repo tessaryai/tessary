@@ -12,7 +12,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -38,6 +40,12 @@ public class FindingEvidenceRepository {
 
     /** Enough to recognise the call and its error. Cut with SQL {@code left()} so the bytes never leave Postgres. */
     private static final int PREVIEW_CHARS = 200;
+
+    /** Rows read per query by {@link #exportPage}; not a page size. */
+    private static final int EXPORT_CHUNK = 200;
+
+    /** Charged per exported row on top of its text, for the measured fields that ride with it. */
+    private static final int EXPORT_ROW_OVERHEAD = 512;
 
     private static final char CURSOR_SEP = '\u001f';
 
@@ -270,7 +278,37 @@ public class FindingEvidenceRepository {
             @Nullable String cursor,
             boolean secretLeak,
             boolean malformedOutput) {
-        Key key = decodeCursor(cursor);
+        record Seeded(SpanRef ref, String evidenceId) {}
+        List<Seeded> rows = evidenceRows(
+                projectId,
+                findingId,
+                role,
+                limit + 1,
+                decodeCursor(cursor),
+                secretLeak,
+                malformedOutput,
+                List.of(),
+                (rs, n) -> new Seeded(mapSpan(rs), rs.getString("evidence_id")));
+        List<SpanRef> refs = rows.stream().map(Seeded::ref).toList();
+        if (refs.size() <= limit) return new SpanPage(refs, null);
+        // Seeded from THIS page's last row; the over-fetched row starts the next page.
+        Seeded last = rows.get(limit - 1);
+        return new SpanPage(
+                List.copyOf(refs.subList(0, limit)),
+                encodeCursor(last.ref().role(), last.ref().rank(), last.evidenceId()));
+    }
+
+    /** {@link #spanPage}'s one SELECT, with {@code extraColumns} appended for a reader that needs more of the payload. */
+    private <T> List<T> evidenceRows(
+            String projectId,
+            String findingId,
+            @Nullable String role,
+            int fetch,
+            @Nullable Key key,
+            boolean secretLeak,
+            boolean malformedOutput,
+            List<String> extraColumns,
+            RowMapper<T> mapper) {
         StringBuilder sql = new StringBuilder("SELECT e.id AS evidence_id, e.role, e.rank, e.session_id,"
                 + " e.trace_id, e.span_id,"
                 + " s.name, s.kind, s.status, s.level, s.error_type, s.started_at, s.latency_ms,"
@@ -290,6 +328,7 @@ public class FindingEvidenceRepository {
                         ? " , CASE WHEN md.evidence ->> 'reason' = 'not_json' THEN 'not JSON'"
                                 + "        ELSE md.evidence -> 'violations' -> 0 ->> 'message' END AS violation"
                         : " , NULL::text AS violation")
+                + extraColumns.stream().map(c -> ", " + c).collect(Collectors.joining())
                 + " FROM finding_evidence e"
                 + " LEFT JOIN LATERAL ("
                 + "   SELECT sp.* FROM span sp"
@@ -333,21 +372,95 @@ public class FindingEvidenceRepository {
         var spec = jdbc.sql(sql.toString())
                 .param("pid", projectId)
                 .param("fid", findingId)
-                .param("n", limit + 1);
+                .param("n", fetch);
         if (role != null) spec = spec.param("role", role);
         if (key != null) {
             spec = spec.param("cRole", key.role()).param("cRank", key.rank()).param("cId", key.id());
         }
-        record Seeded(SpanRef ref, String evidenceId) {}
-        List<Seeded> rows = spec.query((rs, n) -> new Seeded(mapSpan(rs), rs.getString("evidence_id")))
-                .list();
-        List<SpanRef> refs = rows.stream().map(Seeded::ref).toList();
-        if (refs.size() <= limit) return new SpanPage(refs, null);
-        // Seeded from THIS page's last row; the over-fetched row starts the next page.
-        Seeded last = rows.get(limit - 1);
-        return new SpanPage(
-                List.copyOf(refs.subList(0, limit)),
-                encodeCursor(last.ref().role(), last.ref().rank(), last.evidenceId()));
+        return spec.query(mapper).list();
+    }
+
+    public record ExportRow(
+            SpanRef measured,
+            @Nullable String input,
+            @Nullable String output,
+            @Nullable Map<String, Object> attributes) {}
+
+    public record ExportPage(List<ExportRow> rows, @Nullable String nextCursor) {}
+
+    public record ExportLimits(int textChars, int maxRows, long textBudget) {}
+
+    /**
+     * {@link #spanPage}'s rows and cursor, plus the payload text cut in SQL at {@code textChars +}
+     * {@link EvidenceExportText#MARGIN} and masked before the final cut. Read in chunks; a page closes on the row that
+     * reaches {@code maxRows} or the text budget, so it always holds at least one row, and the cursor is seeded from
+     * that row so the next page starts on the first row not included.
+     */
+    public ExportPage exportPage(
+            String projectId,
+            String findingId,
+            @Nullable String role,
+            ExportLimits limits,
+            @Nullable String cursor,
+            boolean secretLeak,
+            boolean malformedOutput) {
+        int cut = limits.textChars() + EvidenceExportText.MARGIN;
+        List<String> text = List.of(
+                "left(pl.input, " + cut + ") AS input_text",
+                "left(pl.output, " + cut + ") AS output_text",
+                "pl.attributes::text AS attributes_json");
+        record Raw(
+                SpanRef ref,
+                String evidenceId,
+                @Nullable String input,
+                @Nullable String output,
+                @Nullable String attributes) {}
+        Key key = decodeCursor(cursor);
+        List<ExportRow> rows = new ArrayList<>();
+        long spent = 0;
+        while (true) {
+            List<Raw> chunk = evidenceRows(
+                    projectId,
+                    findingId,
+                    role,
+                    EXPORT_CHUNK + 1,
+                    key,
+                    secretLeak,
+                    malformedOutput,
+                    text,
+                    (rs, n) -> new Raw(
+                            mapSpan(rs),
+                            rs.getString("evidence_id"),
+                            rs.getString("input_text"),
+                            rs.getString("output_text"),
+                            rs.getString("attributes_json")));
+            int usable = Math.min(chunk.size(), EXPORT_CHUNK);
+            for (int i = 0; i < usable; i++) {
+                Raw raw = chunk.get(i);
+                ExportRow row = new ExportRow(
+                        raw.ref(),
+                        EvidenceExportText.maskThenCut(raw.input(), limits.textChars()),
+                        EvidenceExportText.maskThenCut(raw.output(), limits.textChars()),
+                        EvidenceExportText.attributes(raw.attributes(), limits.textChars()));
+                rows.add(row);
+                spent += EvidenceExportText.chars(row.input())
+                        + EvidenceExportText.chars(row.output())
+                        + EvidenceExportText.chars(row.attributes())
+                        + EXPORT_ROW_OVERHEAD;
+                if (rows.size() >= limits.maxRows() || spent >= limits.textBudget()) {
+                    boolean more = i + 1 < chunk.size();
+                    return new ExportPage(
+                            rows,
+                            more ? encodeCursor(raw.ref().role(), raw.ref().rank(), raw.evidenceId()) : null);
+                }
+            }
+            if (chunk.size() <= EXPORT_CHUNK) return new ExportPage(rows, null);
+            Raw last = chunk.get(EXPORT_CHUNK - 1);
+            key = new Key(
+                    last.ref().role(),
+                    last.ref().rank() == null ? RANK_TAIL : last.ref().rank(),
+                    last.evidenceId());
+        }
     }
 
     /** Counted now, so at or below {@code finding.evidence_counts} once refs age out. */

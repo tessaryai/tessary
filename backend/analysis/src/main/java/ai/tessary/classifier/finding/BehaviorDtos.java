@@ -5,6 +5,7 @@ import ai.tessary.agentrun.AgentRunRepository.RunSummary;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.TriageJobState;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
@@ -115,6 +116,24 @@ public final class BehaviorDtos {
             @Nullable String nextCursor,
             Map<String, Long> counts,
             Map<String, Long> recordedCounts) {}
+
+    /**
+     * One evidence row with its payload text, masked and cut to the page's {@code textChars}. {@code priorMessages} is
+     * set only on a frustration finding's witness rows, and is null there once the assessment's request aged out.
+     */
+    public record EvidenceExportRow(
+            EvidenceSpanView measured,
+            @Nullable String input,
+            @Nullable String output,
+            @Nullable Map<String, Object> attributes,
+            @Nullable List<EarlierMessage> priorMessages) {}
+
+    public record EvidenceExportPage(
+            List<EvidenceExportRow> rows,
+            @Nullable String nextCursor,
+            Map<String, Long> counts,
+            Map<String, Long> recordedCounts,
+            int textChars) {}
 
     /**
      * At most one of the cause-kind blocks is set; none for behaviour drift or an unreadable blob, and the finding
