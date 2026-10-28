@@ -129,6 +129,19 @@ class BehaviorTriagePromptTest {
     }
 
     /**
+     * The claim is judged inside its window against its reference. The bug is a real rise ruled {@code negative}
+     * because the traffic changed.
+     */
+    @Test
+    void theSystemPromptJudgesTheClaimInsideItsWindow() {
+        String prompt = BehaviorTriageEngine.SYSTEM_PROMPT;
+
+        assertFalse(prompt.contains("points to `negative`"), "a traffic change is not a negative");
+        assertTrue(prompt.contains("never by itself a `negative`"), prompt);
+        assertTrue(prompt.contains("support the claim against its reference"), prompt);
+    }
+
+    /**
      * A groundedness rate finding ships {@code detections.md}: each flagged answer since onset with its score,
      * offsets, and strongest sentence.
      */

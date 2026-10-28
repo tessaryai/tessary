@@ -72,41 +72,38 @@ public final class ClassifierMethodCard {
 
             - `:pinned`: a fixed reference, set automatically to the first window with enough rows, or
               moved later by a person with Legitimate, absorb. Its rows are here as `baseline` unless a
-              person moved it.
+              person moved it, with the rows just before the change point.
             - `:previous`: a rolling control: one slot per UTC day over 21 days, each an exact merge of
               every window that closed in it, weighted by a seven-day half-life, with days a confirmed
-              regression ran through excluded. The name is legacy; it has not meant "the previous window"
-              since that design was retired for normalising away step changes.
+              regression ran through excluded. A sample spread over those days is here as `baseline`,
+              with the rows just before the change point. The name is legacy.
 
             **The claim's numbers** are in `get_finding` under `metric`: `ratio` and `w1Log` against
-            `floor`, `direction`, `nRef` and `nCur`, `quantiles` (p50 and p95, then and now), `workload`
-            (input tokens, user message length and prior turns per turn, then and now), `tokens` on a cost
-            finding, `bucketKind` and `bucketKey`, the window, and on the `:previous` arm `control` (days
-            used, days excluded as confirmed, oldest day, half-life). `explains` lists sibling shifts this
-            one accounts for. The quantiles come from a log histogram with 5% bins, so quantiles you take
-            from the rows will not match them to the digit.
+            `floor`, `direction`, `nRef` and `nCur`, `mean` and `quantiles` (then and now) with the signed
+            `shift`, `workload` (input tokens, user message length and prior turns per turn, then and now),
+            `tokens` on a cost finding, `bucketKind` and `bucketKey`, the window, and on the `:previous` arm
+            `control` (days used, days excluded as confirmed, oldest day, half-life). `explains` lists
+            sibling shifts this one accounts for. The quantiles come from a log histogram with 5% bins, so
+            quantiles you take from the rows will not match them to the digit.
 
             **Evidence**
             - `member`: every sample folded into the closed window, in fold order. Span grain for a
               tool-grain measure, whole-run rows for a turn-grain one. Written once, when the finding
               opened; a persisting regression re-fires on later windows and those are not appended.
-            - `baseline`: the pinned window's rows, on the `:pinned` arm only.
+            - `baseline`: the reference side. The pinned window's rows, or a sample spread over the
+              rolling control's days, plus the rows just before the change point.
+            - `changepoint`: the first rows from the change point on. The onset is the change point.
 
             A tool bucket spans every call site that calls the tool, and each row carries its own
-            `callSiteId`. On the `:previous` arm the reference period's traffic is not in the evidence but
-            is still in the store: `list_spans` and `list_traces` with a `range` on the reference period's
-            own dates reach it, within retention.
+            `callSiteId`.
 
             **Absent roles**
-            - No `baseline` on a `:previous` finding is correct: a weighted ring of daily histograms has no
-              rows behind it, and `metric.control` describes what it was. A `:pinned` finding with no
-              `baseline` means a person moved the reference with Legitimate, absorb: that reference is a
-              day's merged histogram with no rows behind it, so read its shape from `metric` and reach its
-              period with `list_traces` or `list_spans`.
+            - A `baseline` holding only the rows before the change point means a person moved the
+              reference with Legitimate, absorb: that reference is a day's merged histogram with no rows
+              behind it, so read its shape from `metric`.
             - No `witness`: every sample in the window is a member of the shifted population, and nothing
               marks one as the failure.
             - No `exemplar`: nothing here is a designated way in, and every member is equally one.
-            - No `changepoint`: this detector does not write that role.
 
             ### Cause: `distribution_shift`
 
@@ -115,10 +112,9 @@ public final class ClassifierMethodCard {
             member is a member of the shifted population, not an anomaly in it, and the bar is the
             reference, not any absolute limit.
 
-            The claim holds when the same kind of work moved. The `workload` pairs describe what users
-            asked for, then and now, beside the measure that moved; the rows carry the models, tokens,
-            call sites and timing behind it. Flat inputs with a moved measure is the agent running
-            differently. Inputs that moved with the measure is the traffic changing.
+            The claim holds when the window's rows are the population the detector measured. The `workload`
+            pairs and the rows' fields show what moved with it; a change in the traffic is a fact to state,
+            never by itself a `negative`.
             """;
 
     private static final String SECRET_LEAK = """
@@ -188,8 +184,7 @@ public final class ClassifierMethodCard {
 
             The share of one call site's outputs failing its declared schema has risen above its fitted
             rate. Some failures are normal. The claim holds when the witnesses really fail the declared
-            schema and the failures come from how the agent produces its output, not from what it was
-            asked.
+            schema. What the agent was asked is never by itself a `negative`.
             """;
 
     private static final String FRUSTRATION = """
@@ -232,8 +227,8 @@ public final class ClassifierMethodCard {
 
             The share of one call site's sessions in which the user was frustrated with the agent has
             risen above the rate it learned. Some frustration is normal. The claim holds when the witness
-            sessions show the user reacting to something the agent did, and that behaviour is
-            what changed, not who the users are or what they asked.
+            sessions show the user reacting to the agent. Who the users are or what they asked is never by
+            itself a `negative`.
             """;
 
     private static final String GROUNDEDNESS = """
@@ -278,8 +273,7 @@ public final class ClassifierMethodCard {
             The share of one call site's traces with a flagged answer has risen above the rate it learned.
             Some flags are normal: at sentence level about two in three flagged sentences are really
             unsupported. The claim holds when the witness answers really state things their retrieved
-            documents do not support, and that is what changed, not which documents were retrieved or what
-            users asked.
+            documents do not support. What was retrieved or what users asked is never by itself a `negative`.
             """;
 
     /** Cards for the classifiers that write findings through a detector of their own. */
