@@ -175,7 +175,8 @@ record CaseServiceTest(
                 null,
                 null,
                 "## Why\nThe provider rotated the default.",
-                true);
+                true,
+                null);
         // The wire status is the job's: the report column alone would leave an exhaustion-swept job reading as
         // claimed.
         rcaJobs.markDone(jobId);

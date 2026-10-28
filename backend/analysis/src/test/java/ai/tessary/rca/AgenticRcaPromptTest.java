@@ -305,12 +305,31 @@ class AgenticRcaPromptTest {
                 List.of("change", "standing"),
                 texts(cause.path("properties").path("change").path("enum")));
         assertEquals(
-                List.of("code", "prompt", "tool", "model", "traffic", "upstream", "data", "other"),
+                List.of(
+                        "code",
+                        "prompt",
+                        "tool",
+                        "model",
+                        "deploy",
+                        "config",
+                        "infra",
+                        "traffic",
+                        "upstream",
+                        "data",
+                        "other"),
                 texts(cause.path("properties").path("type").path("enum")));
         assertEquals(4, props.path("causes").path("maxItems").asInt());
         assertEquals(
-                List.of("summary", "verdict", "causes", "ruled_out", "detailed_report"),
+                List.of("summary", "verdict", "causes", "ruled_out", "coverage", "detailed_report"),
                 texts(schema.path("required")));
+        assertEquals(List.of("read", "how_chosen"), texts(props.path("coverage").path("required")));
+        assertEquals(
+                List.of("role", "count"),
+                texts(props.path("coverage")
+                        .path("properties")
+                        .path("read")
+                        .path("items")
+                        .path("required")));
         assertEquals(
                 List.of(
                         "title",
@@ -360,6 +379,7 @@ class AgenticRcaPromptTest {
                 null,
                 null,
                 RcaReportRow.Engine.AGENTIC,
+                null,
                 null,
                 "2026-05-08T01:00:00Z",
                 null);

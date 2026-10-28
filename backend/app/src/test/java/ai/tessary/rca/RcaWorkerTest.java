@@ -141,8 +141,11 @@ record RcaWorkerTest(
                 new RcaDtos.Attribution(null, "agent/system.md", "abc123", "Refuse when unsure."),
                 List.of(failingTrace),
                 List.of(),
+                1,
                 1);
         RuledOutCheck ruledOut = RuledOutCheck.ruledOut(1, "The serving model did not change.");
+        RcaDtos.Coverage coverage = new RcaDtos.Coverage(
+                List.of(new RcaDtos.RoleCount("exemplar", 1), new RcaDtos.RoleCount("baseline", 1)), "all of them");
         when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
@@ -150,7 +153,8 @@ record RcaWorkerTest(
                         List.of(cause),
                         List.of(ruledOut),
                         "## Investigation",
-                        true));
+                        true,
+                        coverage));
 
         RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(passingTrace), List.of(failingTrace)));
         worker.run(job);
@@ -164,7 +168,8 @@ record RcaWorkerTest(
         assertEquals(Map.of("ruled_out_1", ruledOut), storedChecks(report));
 
         RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
-        assertEquals(List.of(cause), view.causes(), "change and type survive the round trip");
+        assertEquals(List.of(cause), view.causes(), "change, type and affected_of survive the round trip");
+        assertEquals(coverage, view.coverage(), "the run's coverage is stored");
 
         // The dossier is the claim, the numbers, the method and the tools only: the agent pages evidence over MCP,
         // so nothing pre-chooses a sample.
@@ -373,6 +378,7 @@ record RcaWorkerTest(
                 new RcaDtos.Attribution(null, "agent/system.md", "abc123", "Answer briefly."),
                 List.of(turnA),
                 List.of(sessionA, sessionB),
+                2,
                 2);
         when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
@@ -381,7 +387,8 @@ record RcaWorkerTest(
                         List.of(cause),
                         List.of(RuledOutCheck.ruledOut(1, "Frustration is not concentrated on one model.")),
                         "## Investigation",
-                        true));
+                        true,
+                        null));
 
         RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
         worker.run(job);
@@ -448,6 +455,7 @@ record RcaWorkerTest(
                 new RcaDtos.Attribution(null, "rag/retrieve.py", "abc123", "top_k=1"),
                 List.of(flaggedA, flaggedB),
                 List.of(),
+                2,
                 2);
         when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
@@ -456,7 +464,8 @@ record RcaWorkerTest(
                         List.of(cause),
                         List.of(RuledOutCheck.ruledOut(1, "Flagged answers are not concentrated on one model.")),
                         "## Investigation",
-                        true));
+                        true,
+                        null));
 
         RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
         worker.run(job);
@@ -580,7 +589,7 @@ record RcaWorkerTest(
     private void stubEngine() {
         when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
-                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "summary", List.of(), List.of(), "## report", true));
+                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "summary", List.of(), List.of(), "## report", true, null));
     }
 
     private static Map<String, RuledOutCheck> storedChecks(RcaReportRow report) {

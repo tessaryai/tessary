@@ -78,7 +78,7 @@ public class RcaAnalysisService {
                             ClaimShape.of(finding.causeKind()),
                             evidence.listByFinding(finding.projectId(), finding.id())));
         }
-        AgenticRcaEngine.Evidence ev = evidence(sides.values());
+        AgenticRcaEngine.Evidence ev = evidence(sides.values(), subject);
         if (ev.citableTraceIds().isEmpty() && ev.citableSessionIds().isEmpty()) {
             throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, job.findingId());
         }
@@ -99,7 +99,8 @@ public class RcaAnalysisService {
                 result.ruledOut(),
                 result.causes(),
                 result.detailedReport(),
-                result.repoAvailable());
+                result.repoAvailable(),
+                result.coverage());
     }
 
     /** The case is locked when RCA is pressed, so this set is the one the person saw. */
@@ -117,26 +118,37 @@ public class RcaAnalysisService {
      * A cause may cite a flagged row or a comparison row; the two sides are {@link EvidenceSides}, the rule checks.md
      * reads too. Session grain when any finding flags whole sessions.
      */
-    private static AgenticRcaEngine.Evidence evidence(Collection<EvidenceSides> all) {
-        Set<String> traces = new LinkedHashSet<>();
-        Set<String> sessions = new LinkedHashSet<>();
+    private static AgenticRcaEngine.Evidence evidence(Collection<EvidenceSides> all, List<FindingClaim> subject) {
         Set<String> flaggedTraces = new LinkedHashSet<>();
+        Set<String> flaggedSessions = new LinkedHashSet<>();
         Set<String> flaggedSessionRefs = new LinkedHashSet<>();
+        Set<String> comparisonTraces = new LinkedHashSet<>();
+        Set<String> comparisonSessions = new LinkedHashSet<>();
         boolean baselinePresent = false;
         for (EvidenceSides sides : all) {
-            traces.addAll(sides.flaggedTraces());
-            traces.addAll(sides.comparisonTraces());
-            sessions.addAll(sides.flaggedSessions());
-            sessions.addAll(sides.comparisonSessions());
             flaggedTraces.addAll(sides.flaggedTraces());
+            flaggedSessions.addAll(sides.flaggedSessions());
             flaggedSessionRefs.addAll(sides.flaggedSessionRefs());
+            comparisonTraces.addAll(sides.comparisonTraces());
+            comparisonSessions.addAll(sides.comparisonSessions());
             baselinePresent |= sides.baselinePresent();
+        }
+        // One finding's flagged row may be another's comparison row; it counts as flagged.
+        comparisonTraces.removeAll(flaggedTraces);
+        comparisonSessions.removeAll(flaggedSessions);
+        Map<String, Long> recorded = new LinkedHashMap<>();
+        for (String role : FindingEvidenceRow.Role.ALL) {
+            recorded.put(
+                    role, subject.stream().mapToLong(f -> f.evidenceCount(role)).sum());
         }
         boolean sessionGrain = !flaggedSessionRefs.isEmpty();
         return new AgenticRcaEngine.Evidence(
-                traces,
-                sessions,
+                flaggedTraces,
+                flaggedSessions,
+                comparisonTraces,
+                comparisonSessions,
                 baselinePresent,
+                Map.copyOf(recorded),
                 sessionGrain ? flaggedSessionRefs.size() : flaggedTraces.size(),
                 sessionGrain ? EvidenceSides.SESSIONS : EvidenceSides.TRACES);
     }
@@ -148,7 +160,8 @@ public class RcaAnalysisService {
             List<RuledOutCheck> ruledOut,
             List<Cause> causes,
             @Nullable String detailedReport,
-            boolean repoAvailable) {
+            boolean repoAvailable,
+            RcaDtos.@Nullable Coverage coverage) {
         reports.complete(
                 job.id(),
                 "done",
@@ -157,7 +170,8 @@ public class RcaAnalysisService {
                 writeJson(ruledOut),
                 causes.isEmpty() ? null : writeJson(causes),
                 detailedReport,
-                repoAvailable);
+                repoAvailable,
+                coverage == null ? null : writeJson(coverage));
         log.info(
                 "rca done project={} subject={}:{} metric={} verdict={} causes={}",
                 job.projectId(),

@@ -69,6 +69,7 @@ class RcaAnalysisServiceTest {
             null,
             RcaReportRow.Engine.AGENTIC,
             null,
+            null,
             "2026-10-02T00:00:00Z",
             null);
 
@@ -128,7 +129,7 @@ class RcaAnalysisServiceTest {
         stubPage(FindingEvidenceRow.Role.WITNESS, WITNESS_SPAN);
         when(agenticEngine.run(eq(JOB), eq(REPORT), any(), any(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
-                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "nothing found", List.of(), List.of(), null, false));
+                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "nothing found", List.of(), List.of(), null, false, null));
     }
 
     /**

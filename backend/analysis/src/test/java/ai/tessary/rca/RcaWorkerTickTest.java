@@ -115,6 +115,7 @@ class RcaWorkerTickTest {
                         isNull(),
                         isNull(),
                         isNull(),
+                        isNull(),
                         isNull());
 
         worker.run(JOB);
@@ -241,6 +242,7 @@ class RcaWorkerTickTest {
                         eq(RcaJobRow.FAILED),
                         isNull(),
                         eq("agent returned junk"),
+                        isNull(),
                         isNull(),
                         isNull(),
                         isNull(),
