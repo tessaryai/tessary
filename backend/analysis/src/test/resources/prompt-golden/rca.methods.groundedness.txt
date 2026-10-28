@@ -14,8 +14,8 @@ site it had an answer scored on, and it fails while one of those answers holds a
 Numbers are in each finding's `evidence.md`. `witness` trace rows are every trace with a flagged answer since the onset. `witness` span rows are each flagged answer;
 on `get_finding_evidence` each carries `flaggedSentences`, the sentences the model marked, with
 their scores. The question, the answer and the retrieved documents are in the span body, from
-`get_span`. `member` trace rows are every trace scored on the call site since the onset. There
-are no `baseline` rows: the normal rate is a number, not a set of rows.
+`get_span`. `member` trace rows are every trace scored on the call site since the onset; the
+unflagged ones are the comparison side, and there are no `baseline` rows.
 
 ## Measurement quirks
 About one flagged sentence in three is supported after all. A flag says the model saw no support
