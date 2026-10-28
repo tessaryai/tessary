@@ -240,6 +240,18 @@ public class FindingEvidenceRepository {
                 .list();
     }
 
+    /** One role's rows in rank order, which is the order they were written in. */
+    public List<FindingEvidenceRow> listByRole(String projectId, String findingId, String role) {
+        return jdbc.sql("SELECT " + COLS + " FROM finding_evidence"
+                        + " WHERE project_id = :pid AND finding_id = :fid AND role = :role"
+                        + " ORDER BY " + ORDER)
+                .param("pid", projectId)
+                .param("fid", findingId)
+                .param("role", role)
+                .query((rs, n) -> map(rs))
+                .list();
+    }
+
     public record Head(List<FindingEvidenceRow> rows, boolean more) {}
 
     /**

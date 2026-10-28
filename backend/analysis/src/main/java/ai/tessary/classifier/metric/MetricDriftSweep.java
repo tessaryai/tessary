@@ -33,6 +33,7 @@ import ai.tessary.classifier.worker.SweepOutcome;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
@@ -946,21 +947,8 @@ public class MetricDriftSweep implements ClassifierSweep {
                 FindingEvidenceRow.Role.MEMBER,
                 MetricEvidenceRefs.refs(pending.memberRefs()),
                 at.toString());
-        // One list, one replace: the healthy rows just before the step are comparison rows, never citable. The rolling
-        // arm writes once, when the finding has none yet: a later ring has folded the shifted days, so a redraw would
-        // sample the shift into its own baseline.
-        List<FindingEvidenceRepository.Ref> baseline = new ArrayList<>(MetricEvidenceRefs.refs(pending.baselineRefs()));
-        baseline.addAll(onset.beforeRows());
+        writeBaseline(projectId, pending, recorded, onset, at.toString());
         MetricFindingEvidence.BaselineSample sample = pending.baselineSample();
-        if (pending.control() == null
-                || recorded.created()
-                || evidenceRefs
-                                .countsByRole(projectId, recorded.findingId())
-                                .getOrDefault(FindingEvidenceRow.Role.BASELINE, 0L)
-                        == 0) {
-            evidenceRefs.replace(
-                    projectId, recorded.findingId(), FindingEvidenceRow.Role.BASELINE, baseline, at.toString());
-        }
         // The change point moves with the onset: within a spell `recordShift` keeps both, so the rows stay too.
         if (recorded.onsetSet()) {
             evidenceRefs.replace(
@@ -982,6 +970,45 @@ public class MetricDriftSweep implements ClassifierSweep {
                 .field("baselineOf", sample == null ? null : sample.of())
                 .log();
         return recorded;
+    }
+
+    /**
+     * The {@code baseline} rows: the reference's rows, then the healthy rows just before the onset's step, in one list
+     * so the step's rows are comparison rows, never citable. The rows before the step move only with the onset, like
+     * the change point; within a spell a later window's rows before its own step are shifted rows. The rolling arm
+     * draws its sample once, when the finding has none: a later ring has folded the shifted days, so a redraw would
+     * sample the shift into its own baseline. A new spell keeps that sample and swaps only the rows before the step.
+     */
+    private void writeBaseline(String projectId, Pending pending, Recorded recorded, Onset onset, String now) {
+        String findingId = recorded.findingId();
+        boolean stored =
+                evidenceRefs.countsByRole(projectId, findingId).getOrDefault(FindingEvidenceRow.Role.BASELINE, 0L) > 0;
+        if (stored && !recorded.onsetSet()) return;
+        List<FindingEvidenceRepository.Ref> baseline = new ArrayList<>(
+                stored && pending.control() != null
+                        ? storedSample(projectId, findingId)
+                        : MetricEvidenceRefs.refs(pending.baselineRefs()));
+        if (recorded.onsetSet()) baseline.addAll(onset.beforeRows());
+        // Empty is a no-op, so a moved pin with no rows behind it keeps what was stored.
+        evidenceRefs.replace(projectId, findingId, FindingEvidenceRow.Role.BASELINE, baseline, now);
+    }
+
+    /**
+     * The rolling sample a finding already holds: its first {@code control.baseline.rows} {@code baseline} rows, since
+     * the sample is written ahead of the rows before the step and {@code recordShift} keeps that declaration.
+     */
+    private List<FindingEvidenceRepository.Ref> storedSample(String projectId, String findingId) {
+        List<FindingEvidenceRow> rows = evidenceRefs.listByRole(projectId, findingId, FindingEvidenceRow.Role.BASELINE);
+        int declared = findings.findById(projectId, findingId)
+                .map(f -> f.payload().path("control").path("baseline").path("rows"))
+                .filter(JsonNode::isInt)
+                .map(JsonNode::asInt)
+                .orElse(rows.size());
+        List<FindingEvidenceRepository.Ref> sample = new ArrayList<>();
+        for (FindingEvidenceRow row : rows.subList(0, Math.min(declared, rows.size()))) {
+            sample.add(new FindingEvidenceRepository.Ref(row.sessionId(), row.traceId(), row.spanId()));
+        }
+        return sample;
     }
 
     private static Timed refOf(Sample sample, Grid grid) {

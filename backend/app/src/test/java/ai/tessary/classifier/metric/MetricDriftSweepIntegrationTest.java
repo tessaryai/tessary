@@ -373,6 +373,84 @@ record MetricDriftSweepIntegrationTest(
                 "members still move to the window that just fired");
     }
 
+    /**
+     * Two shifted windows an hour apart, each with healthy rows before its step: one spell. The second window keeps the
+     * first window's onset, so its {@code baseline} keeps the first window's ten rows before the step. The bugs are a
+     * baseline that takes the second window's rows before its own step, which are members of the window that fired, and
+     * one that loses the rows before the onset's step.
+     */
+    @Test
+    @DisplayName("a window that bumps a finding within its spell keeps the rows before the onset's step")
+    void aBumpWithinTheSpellKeepsTheRowsBeforeTheOnsetsStep() {
+        String pid = project("metric-sweep-before-rows-kept");
+        ClassifierRow signal = signal(pid);
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+        Instant anHourOn = earlyJuly.plus(1, ChronoUnit.HOURS);
+
+        seedTurnsAt(pid, lateJune, 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed(), "the bootstrap pin");
+        seedTurnsAt(pid, earlyJuly, 20, 2_000, null);
+        seedTurnsAt(pid, earlyJuly.plusSeconds(20), 30, 8_000, null);
+        assertTrue(sweep.sweepMetrics(claim(pid, signal), signal).fired() >= 1, "the first window fires");
+        seedTurnsAt(pid, anHourOn, 5, 2_000, null);
+        seedTurnsAt(pid, anHourOn.plusSeconds(5), 45, 8_000, null);
+        assertTrue(sweep.sweepMetrics(claim(pid, signal), signal).fired() >= 1, "the second window bumps it");
+
+        FindingRow finding = findings.listByProject(pid, null, null, null, false, 100).stream()
+                .filter(f -> f.nativeCauseKey().endsWith(":pinned"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no finding fired on the pinned arm"));
+        assertEquals(earlyJuly.plusSeconds(20), Instant.parse(finding.onsetAt()), "one spell keeps its first onset");
+        Set<String> expected = new java.util.HashSet<>(traceIdsFrom(pid, lateJune, 50));
+        expected.addAll(traceIdsFrom(pid, earlyJuly.plusSeconds(10), 10));
+        Set<String> baseline = evidenceTraceIds(finding, FindingEvidenceRow.Role.BASELINE);
+        assertEquals(expected, baseline, "the pinned window and the onset window's ten rows before its step");
+        assertTrue(
+                java.util.Collections.disjoint(baseline, traceIdsFrom(pid, anHourOn, 50)),
+                "no row of the window that just fired is a comparison row");
+        assertEquals(
+                10, evidence(finding).path("changepoint").path("rows_before").asInt());
+    }
+
+    /**
+     * The rolling finding of {@link #rollingFixture} recovers, and a week later a window of four 8s rows then 2s rows
+     * fires on the rolling arm alone: four 8s rows are too few to move it from the 2s pin. The new spell's change point
+     * is its first 2s row, so the four 8s rows are its rows before the step. The baseline keeps the 100 rows drawn when
+     * the finding opened and gains those four. The bug is a new spell whose rows before the step are left out of the
+     * baseline while {@code payload.changepoint} counts them.
+     */
+    @Test
+    @DisplayName("a rolling-reference finding that opens a new spell adds that spell's rows before its step")
+    void aNewRollingSpellAddsItsRowsBeforeTheStep() {
+        String pid = project("metric-sweep-rolling-new-spell");
+        ClassifierRow signal = signal(pid);
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+        Instant judgedJuly = earlyJuly.plus(7, ChronoUnit.DAYS);
+        Instant midJuly = judgedJuly.plus(7, ChronoUnit.DAYS);
+        rollingFixture(pid, signal, lateJune, earlyJuly, judgedJuly);
+        Set<String> firstBaseline = evidenceTraceIds(rollingFinding(pid), FindingEvidenceRow.Role.BASELINE);
+
+        seedTurnsAt(pid, midJuly, 4, 8_000, null);
+        seedTurnsAt(pid, midJuly.plusSeconds(4), 46, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).fired(), "fires on the rolling arm alone");
+
+        FindingRow finding = rollingFinding(pid);
+        assertEquals(midJuly.plusSeconds(4), Instant.parse(finding.onsetAt()), "the new spell's onset is its step");
+        assertEquals(
+                4, evidence(finding).path("changepoint").path("rows_before").asInt());
+        Set<String> expected = new java.util.HashSet<>(firstBaseline);
+        expected.addAll(traceIdsFrom(pid, midJuly, 4));
+        assertEquals(
+                expected,
+                evidenceTraceIds(finding, FindingEvidenceRow.Role.BASELINE),
+                "the sample drawn at open and the new spell's four rows before its step");
+        assertEquals(
+                100,
+                evidence(finding).path("control").path("baseline").path("rows").asInt());
+    }
+
     @Test
     @DisplayName("a confirmed regression's own event day is excluded from the control it would otherwise pollute")
     void aConfirmedRegressionExcludesItsOwnDayFromTheControl() {
