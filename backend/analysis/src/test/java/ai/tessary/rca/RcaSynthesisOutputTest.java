@@ -11,10 +11,14 @@ import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaDtos.Attribution;
 import ai.tessary.rca.RcaDtos.Cause;
+import ai.tessary.rca.RcaDtos.Coverage;
+import ai.tessary.rca.RcaDtos.RoleCount;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -28,28 +32,51 @@ class RcaSynthesisOutputTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** Every trace and session id in the finding's evidence: what a cause may cite. */
+    /** The finding's flagged rows, one comparison trace, and the counts finding.md showed the agent. */
     private static final Set<String> TRACES = Set.of("tr-1", "tr-2", "tr-3");
 
     private static final Set<String> SESSIONS = Set.of("s-1", "s-2", "s-3");
 
+    private static final AgenticRcaEngine.Evidence EVIDENCE = new AgenticRcaEngine.Evidence(
+            TRACES, SESSIONS, Set.of("tb-1"), Set.of(), true, Map.of("witness", 3L, "baseline", 1L), 3, "traces");
+
+    /** A frustration-like subject: two flagged sessions, whose turns are the flagged traces. */
+    private static final AgenticRcaEngine.Evidence SESSION_GRAIN = new AgenticRcaEngine.Evidence(
+            TRACES, Set.of("s-1", "s-2"), Set.of(), Set.of(), false, Map.of("witness", 2L), 2, "sessions");
+
     private static RcaSynthesisOutput.Parsed parse(String reply) {
-        return RcaSynthesisOutput.parse(MAPPER, reply, TRACES, SESSIONS, true, "proj");
+        return RcaSynthesisOutput.parse(MAPPER, reply, EVIDENCE, true, "proj");
     }
 
     private static RcaSynthesisOutput.Parsed parseWithoutRepo(String reply) {
-        return RcaSynthesisOutput.parse(MAPPER, reply, TRACES, SESSIONS, false, "proj");
+        return RcaSynthesisOutput.parse(MAPPER, reply, EVIDENCE, false, "proj");
     }
 
     private static String cause(String title, String confidence, int affected, String traces, String sessions) {
+        return cause(title, confidence, (Integer) affected, traces, sessions);
+    }
+
+    private static String cause(
+            String title, String confidence, @Nullable Integer affected, String traces, String sessions) {
         return "{\"title\":\"" + title + "\",\"change\":\"standing\",\"type\":\"prompt\",\"confidence\":\""
                 + confidence + "\",\"what_happens\":\"w\",\"how_it_caused_this\":\"h\",\"next_step\":\"n\","
-                + "\"affected_count\":" + affected + ",\"evidence_trace_ids\":[" + traces + "],"
+                + (affected == null ? "" : "\"affected_count\":" + affected + ",")
+                + "\"evidence_trace_ids\":[" + traces + "],"
                 + "\"evidence_session_ids\":[" + sessions + "],"
                 + "\"attribution\":{\"path\":\"agent/prompt.md\",\"commit\":\"abc123\",\"excerpt\":\"Answer briefly.\"}}";
     }
 
     private static String reply(String verdict, String... causes) {
+        return replyWithCoverage(
+                verdict, "{\"read\":[{\"role\":\"witness\",\"count\":3}],\"how_chosen\":\"all\"}", causes);
+    }
+
+    private static String replyWithCoverage(String verdict, String coverage, String... causes) {
+        return "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"detailed_report\":\"## r\",\"ruled_out\":[],"
+                + "\"coverage\":" + coverage + ",\"causes\":[" + String.join(",", causes) + "]}";
+    }
+
+    private static String replyWithoutCoverage(String verdict, String... causes) {
         return "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"detailed_report\":\"## r\",\"ruled_out\":[],"
                 + "\"causes\":[" + String.join(",", causes) + "]}";
     }
@@ -79,7 +106,8 @@ class RcaSynthesisOutputTest {
                         new Attribution(null, "agent/prompt.md", "abc123", "Answer briefly."),
                         List.of("tr-1"),
                         List.of("s-1", "s-2"),
-                        2)),
+                        2,
+                        3)),
                 out.causes());
     }
 
@@ -292,8 +320,150 @@ class RcaSynthesisOutputTest {
                         null,
                         List.of(),
                         List.of("s-1"),
-                        1)),
+                        1,
+                        3)),
                 out.causes());
         assertEquals(List.of(), out.ruledOut());
+    }
+
+    /**
+     * Citing only comparison rows proves nothing about the flagged ones. The bugs are such a cause surviving, and a
+     * comparison id counted toward {@code affected_count}; the comparison receipt itself stays on a kept cause.
+     */
+    @Test
+    void aCauseCitingOnlyComparisonRowsIsDropped() {
+        RcaSynthesisOutput.Parsed out = parse(reply(
+                "causes_identified",
+                cause("A", "high", null, "\"tb-1\"", ""),
+                cause("B", "medium", null, "\"tr-1\",\"tb-1\"", "")));
+
+        assertEquals(List.of("B"), titles(out));
+        Cause b = out.causes().get(0);
+        assertEquals(List.of("tr-1", "tb-1"), b.evidenceTraceIds());
+        assertEquals(1, b.affectedCount());
+        assertEquals(List.of(), out.platformNotes());
+
+        RcaSynthesisOutput.Parsed none = parse(reply("causes_identified", cause("A", "high", null, "\"tb-1\"", "")));
+        assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, none.verdict());
+        assertTrue(none.verdictNote().contains("a flagged trace or session"), none.verdictNote());
+    }
+
+    /**
+     * A count is stored between the flagged rows a cause cites and the flagged total, and a corrected claim is said
+     * where the engineer reads. The bugs are a count above the total stored as claimed, and a correction left silent.
+     */
+    @Test
+    void affectedCountIsClampedToCitedAndTotal() {
+        RcaSynthesisOutput.Parsed out = parse(reply(
+                "causes_identified",
+                cause("A", "high", 1, "\"tr-1\",\"tr-2\"", ""),
+                cause("B", "high", 900, "\"tr-1\"", ""),
+                cause("C", "medium", null, "\"tr-1\"", "")));
+
+        Map<String, Cause> byTitle =
+                out.causes().stream().collect(java.util.stream.Collectors.toMap(Cause::title, c -> c));
+        assertEquals(2, byTitle.get("A").affectedCount());
+        assertEquals(3, byTitle.get("B").affectedCount());
+        assertEquals(1, byTitle.get("C").affectedCount());
+        out.causes().forEach(c -> assertEquals(3, c.affectedOf(), c.title()));
+        assertEquals(2, out.platformNotes().size(), String.valueOf(out.platformNotes()));
+        assertTrue(
+                out.platformNotes().stream()
+                        .anyMatch(n -> n.contains("\"A\"") && n.contains("claimed 1 ") && n.contains("recorded as 2")),
+                String.valueOf(out.platformNotes()));
+        assertTrue(
+                out.platformNotes().stream()
+                        .anyMatch(
+                                n -> n.contains("\"B\"") && n.contains("claimed 900 ") && n.contains("recorded as 3")),
+                String.valueOf(out.platformNotes()));
+        assertTrue(out.platformNotes().stream().noneMatch(n -> n.contains("\"C\"")));
+    }
+
+    /** Causes may overlap. The bug is a dedupe across causes dropping or zeroing the second one to cite a row. */
+    @Test
+    void aRowMayCountUnderTwoCauses() {
+        RcaSynthesisOutput.Parsed out = parse(reply(
+                "causes_identified", cause("A", "high", 1, "\"tr-1\"", ""), cause("B", "high", 1, "\"tr-1\"", "")));
+
+        assertEquals(List.of("A", "B"), titles(out));
+        out.causes().forEach(c -> assertEquals(1, c.affectedCount(), c.title()));
+        assertEquals(List.of(), out.platformNotes());
+    }
+
+    /** The bug is a deploy, config or infrastructure cause stored as {@code other}. */
+    @ParameterizedTest
+    @ValueSource(strings = {"deploy", "config", "infra"})
+    void deployConfigInfraAreKeptNotOther(String type) {
+        String typed =
+                cause("Typed", "high", 1, "\"tr-1\"", "").replace("\"type\":\"prompt\"", "\"type\":\"" + type + "\"");
+
+        assertEquals(
+                type, parse(reply("causes_identified", typed)).causes().get(0).type());
+    }
+
+    /**
+     * What the analysis says it read is held to what was recorded. The bugs are an over-count stored as read and an
+     * unknown role reaching the page.
+     */
+    @Test
+    void coverageCountsAreClamped() {
+        RcaSynthesisOutput.Parsed out = parse(replyWithCoverage(
+                "causes_identified",
+                "{\"read\":[{\"role\":\"witness\",\"count\":70},{\"role\":\"baseline\",\"count\":1},"
+                        + "{\"role\":\"changepoint\",\"count\":-2},{\"role\":\"bogus\",\"count\":5}],"
+                        + "\"how_chosen\":\"every witness row, baseline paged whole\"}",
+                cause("A", "high", 1, "\"tr-1\"", "")));
+
+        assertEquals(
+                new Coverage(
+                        List.of(
+                                new RoleCount("witness", 3),
+                                new RoleCount("baseline", 1),
+                                new RoleCount("changepoint", 0)),
+                        "every witness row, baseline paged whole"),
+                out.coverage());
+    }
+
+    /** The bug is a reply that ignores the schema's coverage block sinking a finished run. */
+    @Test
+    void aMissingCoverageBlockReadsAsNone() {
+        RcaSynthesisOutput.Parsed out =
+                parse(replyWithoutCoverage("causes_identified", cause("A", "high", 1, "\"tr-1\"", "")));
+
+        assertNull(out.coverage());
+        assertEquals(List.of("A"), titles(out));
+    }
+
+    /**
+     * In session grain a flagged row is a session, and the cited traces are its turns. The bug is counting cited
+     * turns as flagged rows, which lifts the floor above the flagged total.
+     */
+    @Test
+    void theLowerBoundCountsRowsOfTheGrain() {
+        RcaSynthesisOutput.Parsed low = RcaSynthesisOutput.parse(
+                MAPPER,
+                reply("causes_identified", cause("A", "high", 1, "\"tr-1\",\"tr-2\",\"tr-3\"", "\"s-1\"")),
+                SESSION_GRAIN,
+                true,
+                "proj");
+        assertEquals(1, low.causes().get(0).affectedCount());
+        assertEquals(List.of(), low.platformNotes());
+
+        RcaSynthesisOutput.Parsed high = RcaSynthesisOutput.parse(
+                MAPPER,
+                reply("causes_identified", cause("A", "high", 5, "\"tr-1\",\"tr-2\",\"tr-3\"", "\"s-1\"")),
+                SESSION_GRAIN,
+                true,
+                "proj");
+        assertEquals(2, high.causes().get(0).affectedCount());
+        assertEquals(1, high.platformNotes().size());
+
+        RcaSynthesisOutput.Parsed turnsOnly = RcaSynthesisOutput.parse(
+                MAPPER,
+                reply("causes_identified", cause("A", "high", null, "\"tr-1\"", "")),
+                SESSION_GRAIN,
+                true,
+                "proj");
+        assertEquals(1, turnsOnly.causes().get(0).affectedCount());
     }
 }

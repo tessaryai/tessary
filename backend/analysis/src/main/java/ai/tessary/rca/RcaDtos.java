@@ -35,9 +35,17 @@ public final class RcaDtos {
         }
     }
 
+    /** What the analysis says it read, each role's count held to what the detector recorded. */
+    public record Coverage(
+            List<RoleCount> read,
+            @JsonProperty("how_chosen") @Nullable String howChosen) {}
+
+    public record RoleCount(String role, int count) {}
+
     /**
      * Current-format when it carries {@code change}; older causes lack {@code change} and {@code type} and may be
-     * {@code low}. @param howItCausedThis null on reports written before the field existed
+     * {@code low}. @param howItCausedThis null on reports written before the field existed @param affectedOf the
+     * flagged total {@code affectedCount} is out of; null on causes stored before it was
      */
     public record Cause(
             String title,
@@ -50,7 +58,8 @@ public final class RcaDtos {
             @Nullable Attribution attribution,
             @JsonProperty("evidence_trace_ids") List<String> evidenceTraceIds,
             @JsonProperty("evidence_session_ids") List<String> evidenceSessionIds,
-            @JsonProperty("affected_count") int affectedCount) {
+            @JsonProperty("affected_count") int affectedCount,
+            @JsonProperty("affected_of") @Nullable Integer affectedOf) {
 
         public static final String HIGH = "high";
         public static final String MEDIUM = "medium";
@@ -76,6 +85,7 @@ public final class RcaDtos {
             @Nullable List<String> evidence_trace_ids,
             @Nullable List<String> evidence_session_ids,
             @Nullable Integer affected_count,
+            @Nullable Integer affected_of,
             @Nullable String rationale,
             @Nullable String what_the_agent_did,
             @Nullable String fix_suggestion,
@@ -98,7 +108,8 @@ public final class RcaDtos {
                     attribution,
                     evidence_trace_ids == null ? List.of() : evidence_trace_ids,
                     evidence_session_ids == null ? List.of() : evidence_session_ids,
-                    count == null ? 0 : count);
+                    count == null ? 0 : count,
+                    affected_of);
         }
 
         private static @Nullable String firstPresent(@Nullable String... values) {
@@ -228,6 +239,8 @@ public final class RcaDtos {
             String engine,
             /** Null on reports written before the column existed: unknown, not "no repository". */
             @JsonProperty("repo_available") @Nullable Boolean repoAvailable,
+            /** Null on reports written before the column existed, and on a run that returned none. */
+            @Nullable Coverage coverage,
             @JsonProperty("created_at") String createdAt,
             @JsonProperty("completed_at") @Nullable String completedAt,
             /** Where the analysis stands; null only on a view built without its job. */
@@ -262,9 +275,19 @@ public final class RcaDtos {
                     r.detailedReport(),
                     r.engine(),
                     r.repoAvailable(),
+                    readCoverage(mapper, r.coverage()),
                     r.createdAt(),
                     r.completedAt(),
                     run);
+        }
+
+        private static @Nullable Coverage readCoverage(ObjectMapper mapper, @Nullable String json) {
+            if (json == null || json.isBlank()) return null;
+            try {
+                return mapper.readValue(json, Coverage.class);
+            } catch (Exception e) {
+                return null;
+            }
         }
 
         private static <T> List<T> readList(ObjectMapper mapper, @Nullable String json, TypeReference<List<T>> type) {

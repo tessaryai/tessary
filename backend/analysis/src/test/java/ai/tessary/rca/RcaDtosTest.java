@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.tessary.rca.RcaDtos.Attribution;
 import ai.tessary.rca.RcaDtos.Cause;
+import ai.tessary.rca.RcaDtos.Coverage;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaDtos.RcaRunView;
+import ai.tessary.rca.RcaDtos.RoleCount;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.rca.RcaReportRepository.RunState;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,7 +65,8 @@ class RcaDtosTest {
                 MAPPER);
 
         assertEquals(
-                List.of(new Cause("New model", "high", null, null, "r", null, null, null, List.of("t1"), List.of(), 0)),
+                List.of(new Cause(
+                        "New model", "high", null, null, "r", null, null, null, List.of("t1"), List.of(), 0, null)),
                 view.causes());
     }
 
@@ -99,7 +102,8 @@ class RcaDtosTest {
                         new Attribution("prompt", "agent/prompt.md", null, null),
                         List.of("tr-1", "tr-2"),
                         List.of("s-1"),
-                        4)),
+                        4,
+                        null)),
                 view.causes());
     }
 
@@ -140,7 +144,8 @@ class RcaDtosTest {
                         new Attribution("model", "cfg.yaml", "abc", null),
                         List.of("t1"),
                         List.of(),
-                        3)),
+                        3,
+                        null)),
                 view.causes());
         assertEquals(
                 List.of(
@@ -340,6 +345,16 @@ class RcaDtosTest {
             @Nullable String ruledOut,
             @Nullable String hypotheses,
             @Nullable String causes) {
+        return row(reportKind, summary, ruledOut, hypotheses, causes, null);
+    }
+
+    private static RcaReportRow row(
+            String reportKind,
+            @Nullable String summary,
+            @Nullable String ruledOut,
+            @Nullable String hypotheses,
+            @Nullable String causes,
+            @Nullable String coverage) {
         return new RcaReportRow(
                 "rpt-1",
                 "job-1",
@@ -364,7 +379,43 @@ class RcaDtosTest {
                 "## r",
                 RcaReportRow.Engine.AGENTIC,
                 true,
+                coverage,
                 "2026-05-08T01:00:00Z",
                 "2026-05-08T01:05:00Z");
+    }
+
+    /** Catches {@code affected_of} dropped on the read back, or invented on a cause stored before it existed. */
+    @Test
+    void aCurrentCauseReadsItsAffectedOfAndAnOlderOneReadsNone() {
+        RcaReportView view = RcaReportView.of(
+                row(
+                        RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES,
+                        "s",
+                        "[]",
+                        null,
+                        "[{\"title\":\"Now\",\"confidence\":\"high\",\"affected_count\":3,\"affected_of\":58},"
+                                + "{\"title\":\"Before\",\"confidence\":\"high\",\"affected_count\":2}]"),
+                MAPPER);
+
+        assertEquals(58, view.causes().get(0).affectedOf());
+        assertNull(view.causes().get(1).affectedOf());
+    }
+
+    /** Catches the coverage column read but not surfaced, or an older report's null read as an empty block. */
+    @Test
+    void aReportReadsItsCoverageAndAnOlderOneReadsNone() {
+        RcaReportView view = RcaReportView.of(
+                row(
+                        RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES,
+                        "s",
+                        "[]",
+                        null,
+                        "[]",
+                        "{\"read\":[{\"role\":\"witness\",\"count\":12}],\"how_chosen\":\"all\"}"),
+                MAPPER);
+
+        assertEquals(new Coverage(List.of(new RoleCount("witness", 12)), "all"), view.coverage());
+        assertNull(RcaReportView.of(row(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES, "s", "[]", null, "[]"), MAPPER)
+                .coverage());
     }
 }

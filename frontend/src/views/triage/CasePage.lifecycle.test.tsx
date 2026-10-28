@@ -58,18 +58,19 @@ const ANSWER_REPORT: RcaReport = {
       evidence_trace_ids: ["trace-0123456789"],
       evidence_session_ids: [],
       affected_count: 12,
+      affected_of: null,
     },
     {
       title: "Customers started pasting whole order histories", confidence: "high", change: null, type: null,
       what_changed: "Inputs grew to include order histories.", how_it_caused_this: "Longer inputs take longer to read.",
       next_step: "Expected traffic. Nothing to fix.", attribution: null, evidence_trace_ids: [],
-      evidence_session_ids: [], affected_count: 4,
+      evidence_session_ids: [], affected_count: 4, affected_of: null,
     },
     {
       title: "Traffic moved to longer inputs", confidence: "low", change: null, type: null,
       what_changed: "Inputs grew.", how_it_caused_this: "Maybe slower.",
       next_step: "Compare input lengths on both sides.", attribution: null, evidence_trace_ids: [],
-      evidence_session_ids: [], affected_count: 0,
+      evidence_session_ids: [], affected_count: 0, affected_of: null,
     },
   ],
   ruled_out: [

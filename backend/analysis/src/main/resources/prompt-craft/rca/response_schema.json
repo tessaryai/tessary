@@ -27,7 +27,7 @@
           },
           "type": {
             "type": "string",
-            "enum": ["code", "prompt", "tool", "model", "traffic", "upstream", "data", "other"]
+            "enum": ["code", "prompt", "tool", "model", "deploy", "config", "infra", "traffic", "upstream", "data", "other"]
           },
           "confidence": {
             "type": "string",
@@ -89,10 +89,32 @@
       "items": {"type": "string"},
       "description": "Each candidate the evidence disproved, as one plain sentence with the reason. A candidate you could not check is not ruled out: it goes under '## Not checked' in detailed_report."
     },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "read": {
+          "type": "array",
+          "description": "Rows you opened, per role.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {"type": "string"},
+              "count": {"type": "integer"}
+            },
+            "required": ["role", "count"]
+          }
+        },
+        "how_chosen": {
+          "type": "string",
+          "description": "How you chose which rows to read, in one sentence."
+        }
+      },
+      "required": ["read", "how_chosen"]
+    },
     "detailed_report": {
       "type": "string",
       "description": "The investigation as markdown. Ends with '## Evidence audit' (a table of each claim to its trace id, session id, commit or query) and '## What would settle it'. Before them, '## Not checked' lists every candidate you could not check or did not reach."
     }
   },
-  "required": ["summary", "verdict", "causes", "ruled_out", "detailed_report"]
+  "required": ["summary", "verdict", "causes", "ruled_out", "coverage", "detailed_report"]
 }

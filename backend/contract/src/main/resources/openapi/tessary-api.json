@@ -3472,6 +3472,13 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "affected_of" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "attribution" : {
             "anyOf" : [
               {
@@ -3533,6 +3540,7 @@
         },
         "required" : [
           "affected_count",
+          "affected_of",
           "attribution",
           "change",
           "confidence",
@@ -4530,6 +4538,27 @@
         },
         "required" : [
           "count"
+        ],
+        "type" : "object"
+      },
+      "Coverage" : {
+        "properties" : {
+          "how_chosen" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "read" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RoleCount"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "how_chosen",
+          "read"
         ],
         "type" : "object"
       },
@@ -8271,6 +8300,16 @@
               "null"
             ]
           },
+          "coverage" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/Coverage"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "created_at" : {
             "type" : "string"
           },
@@ -8367,6 +8406,7 @@
           "call_site_id",
           "causes",
           "completed_at",
+          "coverage",
           "created_at",
           "current_value",
           "delta",
@@ -8668,6 +8708,22 @@
         "required" : [
           "text",
           "title"
+        ],
+        "type" : "object"
+      },
+      "RoleCount" : {
+        "properties" : {
+          "count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "role" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "count",
+          "role"
         ],
         "type" : "object"
       },

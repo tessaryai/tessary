@@ -129,9 +129,17 @@ class AgenticRcaEngineTest {
         };
     }
 
-    /** Evidence with flagged traces and no baseline side. */
-    private static AgenticRcaEngine.Evidence traces(String... citable) {
-        return new AgenticRcaEngine.Evidence(Set.of(citable), Set.of(), false, citable.length, "traces");
+    /** Evidence with flagged traces and no comparison side. */
+    private static AgenticRcaEngine.Evidence traces(String... flagged) {
+        return new AgenticRcaEngine.Evidence(
+                Set.of(flagged),
+                Set.of(),
+                Set.of(),
+                Set.of(),
+                false,
+                Map.of("witness", (long) flagged.length),
+                flagged.length,
+                "traces");
     }
 
     /**
@@ -154,8 +162,15 @@ class AgenticRcaEngineTest {
                 + "\"detailed_report\":\"## d\",\"ruled_out\":[],\"causes\":[]}");
         RcaReportRow report = report(kind);
         Map<String, String> dossier = Map.of("finding.md", "# f", AgenticRcaEngine.METHOD_FILE, "# m");
-        AgenticRcaEngine.Evidence evidence =
-                new AgenticRcaEngine.Evidence(Set.of("tr-1", "tb-1"), Set.of("s-1", "s-2"), true, 2, "sessions");
+        AgenticRcaEngine.Evidence evidence = new AgenticRcaEngine.Evidence(
+                Set.of("tr-1"),
+                Set.of("s-1", "s-2"),
+                Set.of("tb-1"),
+                Set.of(),
+                true,
+                Map.of("witness", 2L, "baseline", 1L),
+                2,
+                "sessions");
 
         AgenticRcaEngine.Result result = engine(props, sandbox).run(job(), report, subject(report), dossier, evidence);
 
@@ -185,7 +200,7 @@ class AgenticRcaEngineTest {
                 sandbox.requests);
         assertEquals(
                 new AgenticRcaEngine.Result(
-                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "s", List.of(), List.of(), "## d", false),
+                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "s", List.of(), List.of(), "## d", false, null),
                 result);
     }
 
@@ -202,7 +217,9 @@ class AgenticRcaEngineTest {
     })
     void theStepWordsNameTheClassifiersFlaggedRowsAndTheirTotal(String classifierKey, @Nullable String noun) {
         StepWords.Context words = AgenticRcaEngine.stepWords(
-                classifierKey, new AgenticRcaEngine.Evidence(Set.of("t1"), Set.of(), false, 58, "traces"));
+                classifierKey,
+                new AgenticRcaEngine.Evidence(
+                        Set.of("t1"), Set.of(), Set.of(), Set.of(), false, Map.of("witness", 58L), 58, "traces"));
 
         assertEquals(noun == null ? Map.of() : Map.of("witness", noun), words.roleNouns());
         assertEquals(Map.of("witness", 58L), words.roleTotals());
@@ -261,11 +278,39 @@ class AgenticRcaEngineTest {
                                 new RcaDtos.Attribution(null, null, null, "top_k=1"),
                                 List.of("tr-1"),
                                 List.of(),
+                                2,
                                 2)),
                         List.of(RcaDtos.RuledOutCheck.ruledOut(1, "The model did not change.")),
                         "## r",
-                        false),
+                        false,
+                        null),
                 result);
+    }
+
+    /**
+     * Catches a corrected count that is only logged: the note must lead the report after any verdict note, and the
+     * run's coverage must reach the result to be stored.
+     */
+    @Test
+    void theClampNotesFollowTheVerdictNoteAndLeadTheReport() {
+        RcaProperties props = Props.of(RcaProperties.class, "agentic.mcp-base-url", "https://tessary.test");
+        when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
+        RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"s\",\"verdict\":\"causes_identified\","
+                + "\"detailed_report\":\"## r\",\"ruled_out\":[],"
+                + "\"coverage\":{\"read\":[{\"role\":\"witness\",\"count\":2}],\"how_chosen\":\"all of them\"},"
+                + "\"causes\":[{\"title\":\"t\",\"change\":\"change\",\"type\":\"code\",\"confidence\":\"high\","
+                + "\"affected_count\":50,\"evidence_trace_ids\":[\"tr-1\"]}]}");
+        RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
+
+        AgenticRcaEngine.Result result =
+                engine(props, sandbox).run(job(), report, subject(report), Map.of(), traces("tr-1", "tr-2"));
+
+        assertTrue(
+                result.detailedReport().startsWith("> **Count corrected by the platform.**"), result.detailedReport());
+        assertTrue(result.detailedReport().endsWith("\n\n## r"), result.detailedReport());
+        assertEquals(2, result.causes().get(0).affectedCount());
+        assertEquals(
+                new RcaDtos.Coverage(List.of(new RcaDtos.RoleCount("witness", 2)), "all of them"), result.coverage());
     }
 
     /**
@@ -444,6 +489,7 @@ class AgenticRcaEngineTest {
                 g.detailedReport(),
                 g.engine(),
                 g.repoAvailable(),
+                g.coverage(),
                 g.createdAt(),
                 g.completedAt());
     }
@@ -472,6 +518,7 @@ class AgenticRcaEngineTest {
                 null,
                 null,
                 RcaReportRow.Engine.AGENTIC,
+                null,
                 null,
                 "2026-05-08T01:00:00Z",
                 null);

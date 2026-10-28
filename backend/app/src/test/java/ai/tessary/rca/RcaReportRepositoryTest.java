@@ -15,12 +15,15 @@ import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.rca.RcaDtos.Coverage;
 import ai.tessary.rca.RcaDtos.RcaReportView;
+import ai.tessary.rca.RcaDtos.RoleCount;
 import ai.tessary.rca.RcaReportRepository.RunState;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.TenantFixture;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -85,6 +88,35 @@ record RcaReportRepositoryTest(
                 .orElseThrow()
                 .id();
         return new Seeded(pid, caseId, findingId);
+    }
+
+    /**
+     * The completion write against the real column: a coverage block written and not read back, or read from a column
+     * the write never set, and a run that returned none reading as anything but null.
+     */
+    @Test
+    void complete_roundTripsCoverage() {
+        Seeded s = caseIn("rca-coverage");
+        RcaReportView shell = cases.runRca(s.projectId(), s.caseId(), "user-1");
+        String coverage = "{\"read\":[{\"role\":\"witness\",\"count\":12},{\"role\":\"baseline\",\"count\":40}],"
+                + "\"how_chosen\":\"every witness row\"}";
+
+        reports.complete(shell.jobId(), "done", "causes_identified", "s", "[]", "[]", "## r", true, coverage);
+
+        RcaReportRow row = reports.findByJobId(s.projectId(), shell.jobId()).orElseThrow();
+        RcaReportView view = RcaReportView.of(row, new ObjectMapper());
+        assertEquals(
+                new Coverage(List.of(new RoleCount("witness", 12), new RoleCount("baseline", 40)), "every witness row"),
+                view.coverage());
+        assertEquals("causes_identified", row.verdict());
+        assertEquals("s", row.summary());
+        assertEquals("## r", row.detailedReport());
+        assertEquals(Boolean.TRUE, row.repoAvailable());
+
+        reports.complete(shell.jobId(), "done", "no_cause_found", "s", "[]", null, "## r", true, null);
+
+        assertNull(
+                reports.findByJobId(s.projectId(), shell.jobId()).orElseThrow().coverage());
     }
 
     /**

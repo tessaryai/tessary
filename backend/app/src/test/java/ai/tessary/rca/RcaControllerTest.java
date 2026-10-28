@@ -217,7 +217,8 @@ record RcaControllerTest(
                 "[{\"title\":\"A canary model\",\"confidence\":\"high\",\"change\":\"change\",\"type\":\"model\","
                         + "\"evidence_trace_ids\":[]}]",
                 "## r",
-                true);
+                true,
+                null);
         jobs.markDone(report.jobId());
 
         assertEquals(
