@@ -704,8 +704,7 @@ public class McpToolRegistry {
                         + " and marked '…[cut]', every payload attribute, and on a frustration finding's witness"
                         + " rows priorMessages, the messages before the flagged turn. Credentials are masked. A page"
                         + " stops at " + FindingService.EXPORT_MAX_ROWS + " rows or about 6 MB of text; page with"
-                        + " nextCursor, the same cursor get_finding_evidence uses. Save each page to a file and"
-                        + " compute over it.",
+                        + " nextCursor, the same cursor get_finding_evidence uses.",
                 schema(
                         Map.ofEntries(
                                 Map.entry(

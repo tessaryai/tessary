@@ -58,12 +58,12 @@
           "evidence_trace_ids": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Trace ids from this finding's evidence that show the cause."
+            "description": "Flagged trace ids from this finding's evidence that show the cause."
           },
           "evidence_session_ids": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Session ids from this finding's evidence that show the cause, when it flags sessions."
+            "description": "Flagged session ids from this finding's evidence that show the cause, when it flags sessions."
           },
           "affected_count": {
             "type": "integer",

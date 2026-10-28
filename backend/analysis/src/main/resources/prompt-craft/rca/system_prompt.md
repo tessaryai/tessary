@@ -43,8 +43,8 @@ cause. When none reaches `medium`, the verdict is `no_cause_found`, with what yo
 
 ## Report
 
-Cite only trace and session ids from these findings' evidence that you read; any other id is
-discarded. Write every prose field but `detailed_report` for a reader with no context: plain
+Cite only flagged trace and session ids from these findings' evidence that you read; any other
+id is discarded. Write every prose field but `detailed_report` for a reader with no context: plain
 words, no ids, queries or statistics.
 
 Keep reading until you are certain of the causes, or that none can be found. Report what you
