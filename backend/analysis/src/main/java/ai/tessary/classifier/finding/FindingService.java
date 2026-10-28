@@ -17,6 +17,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.frustration.FrustrationEvidence;
 import ai.tessary.classifier.frustration.FrustrationRateRepository;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder;
 import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
@@ -28,6 +29,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
@@ -156,7 +158,8 @@ public class FindingService {
 
     /**
      * Same guard, counts and cursor as {@link #findingEvidenceSpans}, with each row's payload text and attributes, and
-     * on a frustration finding's witness rows the messages the detector judged the flagged turn against.
+     * on a frustration finding's witness rows the messages the detector judged the flagged turn against. Every string is
+     * masked and cut to {@code textChars}.
      */
     public BehaviorDtos.EvidenceExportPage exportEvidence(
             String projectId, String findingId, @Nullable String role, int textChars, @Nullable String cursor) {
@@ -165,11 +168,16 @@ public class FindingService {
         for (String r : FindingEvidenceRow.Role.ALL) recorded.put(r, finding.evidenceCount(r));
         boolean secretLeak = BuiltInDetector.Kind.SECRET_LEAK.equals(finding.classifierKey());
         boolean malformedOutput = BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(finding.classifierKey());
+        // A frustration witness row gets its prior messages after the page closes, so each is charged their ceiling.
+        long witnessCharge = FindingRow.Cause.FRUSTRATION_RATE.equals(finding.causeKind())
+                ? (long) FrustrationTurnBuilder.PRIOR_MESSAGES * textChars
+                : 0;
         FindingEvidenceRepository.ExportPage page = evidence.exportPage(
                 projectId,
                 findingId,
                 role,
-                new FindingEvidenceRepository.ExportLimits(textChars, EXPORT_MAX_ROWS, EXPORT_TEXT_BUDGET),
+                new FindingEvidenceRepository.ExportLimits(
+                        textChars, EXPORT_MAX_ROWS, EXPORT_TEXT_BUDGET, witnessCharge),
                 cursor,
                 secretLeak,
                 malformedOutput);
@@ -182,7 +190,17 @@ public class FindingService {
             else if (row.measured().sessionId() != null)
                 witnessSessions.add(row.measured().sessionId());
         }
-        Map<String, List<EarlierMessage>> prior = frustrations.priorMessages(finding, witnessTraces, witnessSessions);
+        // Masked and cut like every other exported string: a user may have pasted a credential into an earlier turn.
+        Map<String, List<EarlierMessage>> prior = new LinkedHashMap<>();
+        frustrations
+                .priorMessages(finding, witnessTraces, witnessSessions)
+                .forEach((key, messages) -> prior.put(
+                        key,
+                        messages.stream()
+                                .map(m -> new EarlierMessage(
+                                        m.role(),
+                                        Objects.requireNonNull(EvidenceExportText.maskThenCut(m.content(), textChars))))
+                                .toList()));
         List<BehaviorDtos.EvidenceExportRow> rows = page.rows().stream()
                 .map(row -> {
                     String key = FindingEvidenceRow.Role.WITNESS.equals(

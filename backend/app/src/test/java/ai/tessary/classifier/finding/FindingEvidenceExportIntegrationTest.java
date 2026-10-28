@@ -150,6 +150,88 @@ record FindingEvidenceExportIntegrationTest(
     @DisplayName("a frustration witness row carries the messages before the flagged turn")
     void export_sessionRowCarriesThePriorTurns() {
         String pid = rates.project("finding-export-frustration", Capability.FRUSTRATION);
+        String findingId = frustrationFinding(
+                pid,
+                "{\"role\":\"user\",\"content\":\"a\"},{\"role\":\"assistant\",\"content\":\"b\"},"
+                        + "{\"role\":\"user\",\"content\":\"c\"},{\"role\":\"assistant\",\"content\":\"d\"},"
+                        + "{\"role\":\"user\",\"content\":\"e\"}");
+
+        BehaviorDtos.EvidenceExportPage page = behaviorDrift.exportEvidence(pid, findingId, null, 4_000, null);
+
+        List<EarlierMessage> expected = List.of(
+                new EarlierMessage("assistant", "b"),
+                new EarlierMessage("user", "c"),
+                new EarlierMessage("assistant", "d"),
+                new EarlierMessage("user", "e"));
+        assertEquals(3, page.rows().size());
+        for (BehaviorDtos.EvidenceExportRow row : page.rows()) {
+            String label = row.measured().role() + ":" + row.measured().sessionId() + ":"
+                    + row.measured().traceId();
+            if (FindingEvidenceRow.Role.WITNESS.equals(row.measured().role())) {
+                assertEquals(expected, row.priorMessages(), label);
+            } else {
+                assertNull(row.priorMessages(), label);
+            }
+        }
+    }
+
+    /**
+     * A user pasted a key into a turn before the flagged one. Catches the prior messages exported as stored, which
+     * puts the raw key in a file the export says is masked, and uncut, which overruns the page's text budget.
+     */
+    @Test
+    @DisplayName("a credential in a message before the flagged turn is masked and the message cut")
+    void export_masksCredentialInPriorMessages() {
+        String pid = rates.project("finding-export-frustration-mask", Capability.FRUSTRATION);
+        String findingId = frustrationFinding(
+                pid,
+                "{\"role\":\"user\",\"content\":\"a\"},{\"role\":\"assistant\",\"content\":\"b\"},"
+                        + "{\"role\":\"user\",\"content\":\"my key is " + AWS + " " + "y".repeat(500) + "\"},"
+                        + "{\"role\":\"assistant\",\"content\":\"d\"},{\"role\":\"user\",\"content\":\"e\"}");
+
+        BehaviorDtos.EvidenceExportPage page = behaviorDrift.exportEvidence(pid, findingId, null, 200, null);
+
+        String pasted = "my key is " + AWS_MASKED + " " + "y".repeat(500);
+        EarlierMessage expected = new EarlierMessage("user", pasted.substring(0, 200) + EvidenceExportText.CUT_MARK);
+        int witnesses = 0;
+        for (BehaviorDtos.EvidenceExportRow row : page.rows()) {
+            if (!FindingEvidenceRow.Role.WITNESS.equals(row.measured().role())) continue;
+            witnesses++;
+            List<EarlierMessage> prior = Objects.requireNonNull(row.priorMessages());
+            assertEquals(expected, prior.get(1));
+            assertFalse(prior.toString().contains("AKIAQYLPMN"), "the raw key reached the export");
+        }
+        assertEquals(2, witnesses);
+    }
+
+    /**
+     * Prior messages are attached after the repository closes its page, so each witness row is charged their ceiling
+     * up front. The member row costs its overhead and the first witness row reaches the budget, so the page closes
+     * there and resumes on the second. Catches a page the messages push past its stated bound.
+     */
+    @Test
+    @DisplayName("a witness row is charged its prior messages against the page budget")
+    void export_chargesPriorMessagesToThePage() {
+        String pid = rates.project("finding-export-frustration-charge", Capability.FRUSTRATION);
+        String findingId = frustrationFinding(pid, "{\"role\":\"user\",\"content\":\"a\"}");
+
+        FindingEvidenceRepository.ExportPage page = evidence.exportPage(
+                pid,
+                findingId,
+                null,
+                new FindingEvidenceRepository.ExportLimits(4_000, 2_000, 16_000, 16_000),
+                null,
+                false,
+                false);
+
+        assertEquals(
+                List.of(FindingEvidenceRow.Role.MEMBER, FindingEvidenceRow.Role.WITNESS),
+                page.rows().stream().map(r -> r.measured().role()).toList());
+        assertNotNull(page.nextCursor(), "the second witness row is on the next page");
+    }
+
+    /** A frustration finding on one conversation: a member session, and a witness session and turn. */
+    private String frustrationFinding(String pid, String earlierMessages) {
         ClassifierRow signal = rates.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION);
         String callSite = "cs-support";
         String conv = "conv-export";
@@ -183,10 +265,8 @@ record FindingEvidenceExportIntegrationTest(
                 onset.plusSeconds(60),
                 true,
                 JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD),
-                "{\"state\":{\"current_user_message\":\"still broken\",\"earlier_messages\":["
-                        + "{\"role\":\"user\",\"content\":\"a\"},{\"role\":\"assistant\",\"content\":\"b\"},"
-                        + "{\"role\":\"user\",\"content\":\"c\"},{\"role\":\"assistant\",\"content\":\"d\"},"
-                        + "{\"role\":\"user\",\"content\":\"e\"}]},\"questions\":[]}");
+                "{\"state\":{\"current_user_message\":\"still broken\",\"earlier_messages\":[" + earlierMessages
+                        + "]},\"questions\":[]}");
         String now = Instant.now().toString();
         evidence.record(
                 pid,
@@ -200,24 +280,7 @@ record FindingEvidenceExportIntegrationTest(
                 FindingEvidenceRow.Role.WITNESS,
                 List.of(FindingEvidenceRepository.Ref.session(conv), FindingEvidenceRepository.Ref.trace(trace)),
                 now);
-
-        BehaviorDtos.EvidenceExportPage page = behaviorDrift.exportEvidence(pid, findingId, null, 4_000, null);
-
-        List<EarlierMessage> expected = List.of(
-                new EarlierMessage("assistant", "b"),
-                new EarlierMessage("user", "c"),
-                new EarlierMessage("assistant", "d"),
-                new EarlierMessage("user", "e"));
-        assertEquals(3, page.rows().size());
-        for (BehaviorDtos.EvidenceExportRow row : page.rows()) {
-            String label = row.measured().role() + ":" + row.measured().sessionId() + ":"
-                    + row.measured().traceId();
-            if (FindingEvidenceRow.Role.WITNESS.equals(row.measured().role())) {
-                assertEquals(expected, row.priorMessages(), label);
-            } else {
-                assertNull(row.priorMessages(), label);
-            }
-        }
+        return findingId;
     }
 
     private String project(String slug) {

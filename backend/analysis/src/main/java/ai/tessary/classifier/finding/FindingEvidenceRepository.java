@@ -473,7 +473,16 @@ public class FindingEvidenceRepository {
 
     public record ExportPage(List<ExportRow> rows, @Nullable String nextCursor) {}
 
-    public record ExportLimits(int textChars, int maxRows, long textBudget) {}
+    /**
+     * @param witnessCharge charged to the budget per {@code witness} row for text the caller attaches after the page
+     *     closes, so the page still keeps to its bound
+     */
+    public record ExportLimits(int textChars, int maxRows, long textBudget, long witnessCharge) {
+
+        public ExportLimits(int textChars, int maxRows, long textBudget) {
+            this(textChars, maxRows, textBudget, 0);
+        }
+    }
 
     /**
      * {@link #spanPage}'s rows and cursor, plus the payload text cut in SQL at {@code textChars +}
@@ -531,7 +540,8 @@ public class FindingEvidenceRepository {
                 spent += EvidenceExportText.chars(row.input())
                         + EvidenceExportText.chars(row.output())
                         + EvidenceExportText.chars(row.attributes())
-                        + EXPORT_ROW_OVERHEAD;
+                        + EXPORT_ROW_OVERHEAD
+                        + (FindingEvidenceRow.Role.WITNESS.equals(raw.ref().role()) ? limits.witnessCharge() : 0);
                 if (rows.size() >= limits.maxRows() || spent >= limits.textBudget()) {
                     boolean more = i + 1 < chunk.size();
                     return new ExportPage(
