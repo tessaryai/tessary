@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -110,7 +111,7 @@ public class FindingRepository {
                  THEN jsonb_set(EXCLUDED.payload, '{control,baseline}', finding.payload #> '{control,baseline}')
                  ELSE EXCLUDED.payload END""";
         record Shift(Recorded recorded, boolean onsetSet) {}
-        Shift outcome = jdbc.sql("""
+        Shift outcome = jdbc.sql(String.format(Locale.ROOT, """
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  call_site_id, status, onset_at, last_seen_at, sample_count, payload,
                                  since_version_id, created_at, updated_at)
@@ -134,7 +135,7 @@ public class FindingRepository {
                     WHEN finding.last_seen_at < :quietBefore THEN EXCLUDED.onset_at
                     ELSE finding.onset_at END
             RETURNING id, sample_count, escalated_at, onset_at = :onsetAt AS onset_set
-            """.formatted(keptBaseline))
+            """, keptBaseline))
                 .param("id", id)
                 .param("pid", projectId)
                 .param("classifier", classifierKey)
