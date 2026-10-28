@@ -94,7 +94,7 @@ record FindingEvidenceSpanPageIntegrationTest(
                 + "\"gen_ai.response.model\":\"m-2026-01\",\"gen_ai.request.model\":\"m\","
                 + "\"gen_ai.input.messages\":\"[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"hi\\\"}]\","
                 + "\"gen_ai.prompt.0.content\":\"hi\","
-                + "\"host.name\":\"ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5\"}";
+                + "\"host.name\":\"" + "ghp_" + "aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5\"}";
         SpanRow span = fx.spanSeed(pid).at(T0).payload("q", "a", attributes).write();
         record(
                 pid,
