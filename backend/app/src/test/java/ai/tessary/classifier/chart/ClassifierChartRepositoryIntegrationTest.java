@@ -531,7 +531,10 @@ record ClassifierChartRepositoryIntegrationTest(
                 quiet(service().charts(pid, null, "tool:search", 7)));
     }
 
-    /** A card still learning counts the trials its call site has seen toward the minimum. */
+    /**
+     * A card still learning counts the trials its call site has seen toward the minimum, in the hours that have
+     * settled on its own clock: the newest hour, which has not, is left out.
+     */
     @Test
     void learningCards_countTheirCallSitesTrials() {
         String pid = project("chart-learning", Capability.GROUNDEDNESS, Capability.MALFORMED_OUTPUT);
@@ -542,14 +545,23 @@ record ClassifierChartRepositoryIntegrationTest(
         Instant at = Instant.parse("2026-10-06T10:00:00Z");
         fixture.groundednessAnswer(pid, groundedness, "t-1", "s-1", "cs-a", at, false, "{}");
         fixture.groundednessAnswer(pid, groundedness, "t-2", "s-2", "cs-a", at, false, "{}");
+        // Seven hours on, the 10:00 hour has settled under groundedness's six-hour delay.
+        Instant later = at.plus(Duration.ofHours(7));
+        fixture.groundednessAnswer(pid, groundedness, "t-3", "s-3", "cs-a", later, false, "{}");
         fx.ingestedAt(output(pid, "cs-a", at), at);
+        // Two hours on, it has settled under malformed output's one-hour delay.
+        Instant next = at.plus(Duration.ofHours(2));
+        fx.ingestedAt(output(pid, "cs-a", next), next);
         assertEquals(0, learned(service().charts(pid, "cs-a", null, 7), BuiltInDetector.Kind.MALFORMED_OUTPUT));
         sweptTo(pid, malformed, "2026-10-08T00:00:00Z");
 
         ChartsView view = service().charts(pid, "cs-a", null, 7);
 
-        assertEquals(2, learned(view, BuiltInDetector.Kind.GROUNDEDNESS), "two traces scored");
-        assertEquals(1, learned(view, BuiltInDetector.Kind.MALFORMED_OUTPUT), "one output checked since the sweep");
+        assertEquals(2, learned(view, BuiltInDetector.Kind.GROUNDEDNESS), "two traces scored in a settled hour");
+        assertEquals(
+                1,
+                learned(view, BuiltInDetector.Kind.MALFORMED_OUTPUT),
+                "one output checked since the sweep, in a settled hour");
     }
 
     private static long learned(ChartsView view, String key) {
