@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
@@ -465,6 +466,133 @@ class EvidenceChecksTest {
                 "Before: mean 1,000 tokens over 2 rows. After: mean 3,000 tokens over 2 rows.",
                 lineStarting(text, "Before"));
         assertFalse(text.contains("### inputTokens"), "the series measure is not also a field table: " + text);
+    }
+
+    /**
+     * Each measure a shift can name reads its own field, and cost keeps its cents. The bug is a measure that falls back
+     * to latency, or a cost rounded to whole dollars.
+     */
+    @Test
+    void eachMeasureReadsItsOwnField() {
+        record Case(String measure, BiFunction<SpanRefs.Builder, Integer, SpanRefs.Builder> set, String before) {}
+        List<Case> cases = List.of(
+                new Case(
+                        "cost",
+                        (b, v) -> b.totalCost(v / 100.0),
+                        "Before: mean 0.0100 USD over 2 rows. After: mean 0.0300 USD over 2 rows."),
+                new Case(
+                        "tok_input",
+                        (b, v) -> b.inputTokens(v),
+                        "Before: mean 1 tokens over 2 rows. After: mean 3 tokens over 2 rows."),
+                new Case(
+                        "tok_output",
+                        (b, v) -> b.outputTokens(v),
+                        "Before: mean 1 tokens over 2 rows. After: mean 3 tokens over 2 rows."),
+                new Case(
+                        "tok_cache_read",
+                        (b, v) -> b.cacheReadTokens(v),
+                        "Before: mean 1 tokens over 2 rows. After: mean 3 tokens over 2 rows."),
+                new Case(
+                        "tok_cache_write",
+                        (b, v) -> b.cacheWriteTokens(v),
+                        "Before: mean 1 tokens over 2 rows. After: mean 3 tokens over 2 rows."),
+                new Case(
+                        "turn_duration",
+                        (b, v) -> b.latencyMs(v),
+                        "Before: mean 1 ms over 2 rows. After: mean 3 ms over 2 rows."));
+        for (Case c : cases) {
+            List<SpanRef> rows = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                rows.add(c.set()
+                        .apply(SpanRefs.row(Role.BASELINE).trace("b" + i).startedAt(hour(0)), 1)
+                        .build());
+                rows.add(c.set()
+                        .apply(SpanRefs.row(Role.MEMBER).trace("m" + i).startedAt(hour(1)), 3)
+                        .build());
+            }
+
+            String text = render(ClaimShape.DISTRIBUTION_SHIFT, Metric.of(c.measure()), rows);
+
+            assertEquals(c.before(), lineStarting(text, "Before"), c.measure());
+        }
+    }
+
+    /**
+     * When the row ceiling cuts into the flagged side, the file says so. The bug is a file that claims a whole flagged
+     * side it did not read.
+     */
+    @Test
+    void theCeilingSaysWhenTheFlaggedSideWasCut() {
+        List<SpanRef> recorded = new ArrayList<>();
+        for (int i = 0; i < 20_100; i++) {
+            recorded.add(SpanRefs.row(Role.WITNESS).trace("w" + i).build());
+        }
+        recorded.add(SpanRefs.row(Role.MEMBER).trace("m0").build());
+        List<SpanRef> read = recorded.subList(0, 20_000);
+        EvidenceSides sides = EvidenceSides.of(ClaimShape.RATE_RISE, SpanRefs.recorded(recorded));
+
+        String text = EvidenceChecks.render(ClaimShape.RATE_RISE, Metric.LATENCY_MS, read, sides, 20_101);
+
+        assertEquals(
+                "Row ceiling: 20,000 of 20,101 recorded rows read; the flagged side itself was cut. The tables below are"
+                        + " over the rows read.",
+                lineStarting(text, "Row ceiling"));
+    }
+
+    /** A series longer than two days is bucketed by day. The bug is a table of hundreds of hourly rows. */
+    @Test
+    void aSeriesLongerThanTwoDaysIsBucketedByDay() {
+        List<SpanRef> rows = List.of(
+                SpanRefs.row(Role.MEMBER).trace("t1").startedAt(hour(0)).build(),
+                SpanRefs.row(Role.MEMBER)
+                        .trace("t2")
+                        .startedAt("2026-10-04T05:00:00Z")
+                        .build());
+
+        String text = render(ClaimShape.PRESENCE_EVENT, Metric.LATENCY_MS, rows);
+
+        assertEquals("Daily buckets, 2026-10-01 to 2026-10-04 (4 buckets).", lineStarting(text, "Daily"));
+    }
+
+    /**
+     * A detector change point at the first bucket leaves nothing before it, and each shape says so. The bug is a mean or
+     * share over no rows.
+     */
+    @Test
+    void aChangePointAtTheFirstBucketHasNoRowsBefore() {
+        List<SpanRef> shift = List.of(
+                SpanRefs.row(Role.CHANGEPOINT)
+                        .trace("cp")
+                        .startedAt(hour(0))
+                        .latencyMs(1_000)
+                        .build(),
+                SpanRefs.row(Role.MEMBER)
+                        .trace("m1")
+                        .startedAt(hour(1))
+                        .latencyMs(1_000)
+                        .build());
+        List<SpanRef> rise = List.of(
+                SpanRefs.row(Role.CHANGEPOINT).trace("cp").startedAt(hour(0)).build(),
+                SpanRefs.row(Role.MEMBER).trace("m1").startedAt(hour(1)).build(),
+                SpanRefs.row(Role.BASELINE).trace("b1").startedAt(hour(1)).build());
+
+        String shiftText = render(ClaimShape.DISTRIBUTION_SHIFT, Metric.LATENCY_MS, shift);
+        String riseText = render(ClaimShape.RATE_RISE, Metric.LATENCY_MS, rise);
+
+        assertEquals("Before: no rows. After: mean 1,000 ms over 2 rows.", lineStarting(shiftText, "Before"));
+        assertEquals("Before: no rows. After: share 66.7% over 3 rows.", lineStarting(riseText, "Before"));
+    }
+
+    /** A row whose time does not parse is left out of the series and counted. The bug is the whole render failing. */
+    @Test
+    void aRowWithAnUnreadableTimeIsLeftOutOfTheSeries() {
+        List<SpanRef> rows = List.of(
+                SpanRefs.row(Role.MEMBER).trace("t1").startedAt(hour(0)).build(),
+                SpanRefs.row(Role.MEMBER).trace("t2").startedAt("yesterday").build());
+
+        String text = render(ClaimShape.PRESENCE_EVENT, Metric.LATENCY_MS, rows);
+
+        assertEquals("1 row has no startedAt and is not in the series.", lineStarting(text, "1 row"));
     }
 
     private static String render(ClaimShape shape, Metric metric, List<SpanRef> rows) {

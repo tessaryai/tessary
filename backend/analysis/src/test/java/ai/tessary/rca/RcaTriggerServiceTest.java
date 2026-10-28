@@ -287,6 +287,27 @@ class RcaTriggerServiceTest {
         }
     }
 
+    /**
+     * A reference start that does not parse is ignored, so the window starts as if none were recorded. The bug is a
+     * bad payload value refusing the analysis.
+     */
+    @Test
+    void anUnreadableReferenceStartFallsBackToTheDefaultWindow() {
+        String badReference = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"cost\","
+                + "\"bucket\":{\"key\":\"cs-1\"},\"mean\":[1.0,1.3],\"reference_from\":\"last week\"}";
+        when(findings.findClaim("proj", "fnd_g"))
+                .thenReturn(Optional.of(driftClaim("fnd_g", "2026-06-02T00:00:00Z", badReference)));
+        jobIs("job_d");
+
+        trigger.trigger("proj", "fnd_g", "user_1", null);
+
+        driftReported(
+                "fnd_g",
+                Instant.parse("2026-05-31T12:00:00Z"),
+                Instant.parse("2026-06-01T12:00:00Z"),
+                Instant.parse("2026-06-02T00:00:00Z"));
+    }
+
     private void driftReported(String findingId, Instant from, Instant split, Instant to) {
         verify(reports)
                 .insertPendingIfAbsent(

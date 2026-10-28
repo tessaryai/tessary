@@ -19,6 +19,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -107,6 +108,38 @@ record FindingEvidenceExportIntegrationTest(
 
         assertEquals(List.of(2, 2, 2, 1), sizes);
         assertEquals(seeded, read);
+    }
+
+    /**
+     * The repository reads 200 rows per query, so a page larger than that is read in more than one query. Catches the
+     * next query starting on the wrong row, which drops or repeats rows at the join.
+     */
+    @Test
+    @DisplayName("a page longer than one read keeps every row once and in order")
+    void export_pageLongerThanOneReadKeepsEveryRow() {
+        String pid = project("finding-export-chunks");
+        String findingId = firing(pid, "gram-export-chunks");
+        List<String> seeded = new ArrayList<>();
+        List<FindingEvidenceRepository.Ref> refs = new ArrayList<>();
+        for (int i = 0; i < 205; i++) {
+            String trace = String.format(Locale.ROOT, "trace-chunk-%03d", i);
+            seeded.add(trace);
+            refs.add(FindingEvidenceRepository.Ref.trace(trace));
+        }
+        member(pid, findingId, refs);
+
+        FindingEvidenceRepository.ExportPage page = evidence.exportPage(
+                pid,
+                findingId,
+                null,
+                new FindingEvidenceRepository.ExportLimits(4_000, 2_000, SIX_MIB),
+                null,
+                false,
+                false);
+
+        assertEquals(
+                seeded, page.rows().stream().map(r -> r.measured().traceId()).toList());
+        assertNull(page.nextCursor());
     }
 
     /** Catches a short allow-list leaking into the export, or a long value dropped instead of cut. */
@@ -230,8 +263,31 @@ record FindingEvidenceExportIntegrationTest(
         assertNotNull(page.nextCursor(), "the second witness row is on the next page");
     }
 
+    /**
+     * A stored request whose earlier messages are not a list. Catches one malformed request failing the whole export
+     * instead of leaving its rows without prior messages.
+     */
+    @Test
+    @DisplayName("a stored request whose earlier messages do not parse exports its rows without them")
+    void export_unreadablePriorMessagesExportNone() {
+        String pid = rates.project("finding-export-frustration-unreadable", Capability.FRUSTRATION);
+        String findingId = frustrationFindingRaw(pid, "\"not a list\"");
+
+        BehaviorDtos.EvidenceExportPage page = behaviorDrift.exportEvidence(pid, findingId, null, 4_000, null);
+
+        assertEquals(3, page.rows().size());
+        for (BehaviorDtos.EvidenceExportRow row : page.rows()) {
+            assertNull(row.priorMessages(), row.measured().role());
+        }
+    }
+
     /** A frustration finding on one conversation: a member session, and a witness session and turn. */
     private String frustrationFinding(String pid, String earlierMessages) {
+        return frustrationFindingRaw(pid, "[" + earlierMessages + "]");
+    }
+
+    /** As {@link #frustrationFinding}, with the stored {@code earlier_messages} value given whole. */
+    private String frustrationFindingRaw(String pid, String earlierMessages) {
         ClassifierRow signal = rates.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION);
         String callSite = "cs-support";
         String conv = "conv-export";
@@ -265,8 +321,8 @@ record FindingEvidenceExportIntegrationTest(
                 onset.plusSeconds(60),
                 true,
                 JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD),
-                "{\"state\":{\"current_user_message\":\"still broken\",\"earlier_messages\":[" + earlierMessages
-                        + "]},\"questions\":[]}");
+                "{\"state\":{\"current_user_message\":\"still broken\",\"earlier_messages\":" + earlierMessages
+                        + "},\"questions\":[]}");
         String now = Instant.now().toString();
         evidence.record(
                 pid,

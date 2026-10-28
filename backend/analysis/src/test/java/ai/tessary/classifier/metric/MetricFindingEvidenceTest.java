@@ -141,6 +141,47 @@ class MetricFindingEvidenceTest {
         assertEquals(new PlainShift(3.54, 3.66, 4.0), detail.shift());
     }
 
+    /**
+     * A reference reading with no rows has no then, so each shift is null rather than measured from zero. The bug is a
+     * shift equal to the whole current value.
+     */
+    @Test
+    void anEmptyReferenceWritesANullShift() throws Exception {
+        Grid grid = new Grid(1.0, 2.0, 4);
+        MetricHistogram ref = new MetricHistogram(grid);
+        MetricHistogram cur = new MetricHistogram(grid);
+        for (int i = 0; i < 4; i++) cur.add(Math.log(5));
+        Decision fired =
+                new Decision(true, "turn_duration", Reference.PINNED, 0.98, 2.67, Direction.UP, 0, 4, 0.19, null);
+
+        String json = MetricFindingEvidence.toJson(
+                "turn_duration",
+                "call_site",
+                "cs-1",
+                fired,
+                ref,
+                cur,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-01T00:00:00Z",
+                "2026-06-01T00:00:07Z",
+                "count",
+                List.of(),
+                null,
+                null,
+                grid,
+                new ChangePoint("2026-06-01T00:00:04Z", ChangePoint.METHOD_CUSUM, 4, 4),
+                null);
+
+        JsonNode shift = MetricHistogram.JSON.readTree(json).path("shift");
+        assertTrue(shift.path("mean").isNull(), json);
+        assertTrue(shift.path("p50").isNull(), json);
+        assertTrue(shift.path("p95").isNull(), json);
+    }
+
     /** The headline a case is built from: the direction read as written, and the p50 pair split into its sides. */
     @Test
     void read_takesTheHeadlineNumbersAndTheMedianPair() {

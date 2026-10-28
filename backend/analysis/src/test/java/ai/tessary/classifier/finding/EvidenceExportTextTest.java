@@ -4,6 +4,7 @@ package ai.tessary.classifier.finding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
 import java.util.Map;
@@ -54,5 +55,19 @@ class EvidenceExportTextTest {
 
         assertNotNull(out);
         assertEquals("z".repeat(4_000) + EvidenceExportText.CUT_MARK, out.get("prompt"));
+    }
+
+    /** Catches unparseable attributes dropped silently, or passed through unmasked. */
+    @Test
+    void attributes_keepsUnparseableJsonWholeUnderRawMasked() {
+        Map<String, Object> out = EvidenceExportText.attributes("{\"k\": " + AWS, 4_000);
+
+        assertEquals(Map.of("_raw", "{\"k\": " + AWS_MASKED), out);
+    }
+
+    /** Catches a map that cannot be serialised counted as zero characters against the page budget. */
+    @Test
+    void chars_refusesAMapItCannotSerialise() {
+        assertThrows(IllegalStateException.class, () -> EvidenceExportText.chars(Map.of("x", new Object())));
     }
 }

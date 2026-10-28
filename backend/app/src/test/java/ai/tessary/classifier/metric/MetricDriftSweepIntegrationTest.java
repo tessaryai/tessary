@@ -487,6 +487,44 @@ record MetricDriftSweepIntegrationTest(
         assertEquals(3_600, payload.path("shift").path("mean").asDouble(), 3_600 * 0.03, "a signed rise in ms");
     }
 
+    /**
+     * An open window whose stored refs were written before refs carried values cannot be split, so its onset is the
+     * window open and the change point says it was not located. The bug is a fired window that throws or invents a
+     * split.
+     */
+    @Test
+    @DisplayName("a window whose refs carry no values falls back to the window open")
+    void aWindowWithUnvaluedRefsFallsBackToItsOpen() {
+        String pid = project("metric-sweep-change-point-unavailable");
+        ClassifierRow signal = signal(pid);
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+
+        seedTurnsAt(pid, lateJune, 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed(), "the bootstrap pin");
+        seedTurnsAt(pid, earlyJuly, 40, 8_000, null);
+        assertEquals(0, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed(), "the window is still open");
+        jdbc.sql("""
+            UPDATE metric_baseline
+            SET current_refs_json = (SELECT jsonb_agg(r - 'v') FROM jsonb_array_elements(
+                                         CAST(current_refs_json AS jsonb)) r)::text
+            WHERE project_id = :pid AND current_refs_json IS NOT NULL
+            """).param("pid", pid).update();
+        seedTurnsAt(pid, earlyJuly.plusSeconds(40), 10, 8_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).fired());
+
+        FindingRow finding = findings.listByProject(pid, null, null, null, false, 100).stream()
+                .filter(f -> f.nativeCauseKey().endsWith(":pinned"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no finding fired on the pinned arm"));
+        assertEquals(earlyJuly, Instant.parse(finding.onsetAt()), "the onset is the window open");
+        JsonNode changepoint = evidence(finding).path("changepoint");
+        assertEquals("unavailable", changepoint.path("method").asText());
+        assertEquals(earlyJuly, Instant.parse(changepoint.path("at").asText()));
+        assertEquals(0, changepoint.path("rows_before").asInt());
+        assertEquals(0, finding.evidenceCount(FindingEvidenceRow.Role.CHANGEPOINT), "no rows from an unknown split");
+    }
+
     @Test
     @DisplayName("a window filled across two pages enumerates both, not just the page its close landed in")
     void windowRefsSurviveThePageBoundary() {

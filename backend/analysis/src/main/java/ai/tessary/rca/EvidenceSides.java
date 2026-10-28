@@ -155,10 +155,6 @@ public record EvidenceSides(
         return Role.ALL.stream().filter(role -> sideOf(role) == side).toList();
     }
 
-    public Set<String> rolesPresent() {
-        return roleCounts.keySet();
-    }
-
     public int recordedRows() {
         return roleCounts.values().stream().mapToInt(Integer::intValue).sum();
     }

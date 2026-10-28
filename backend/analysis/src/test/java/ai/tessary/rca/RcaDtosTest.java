@@ -418,4 +418,13 @@ class RcaDtosTest {
         assertNull(RcaReportView.of(row(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES, "s", "[]", null, "[]"), MAPPER)
                 .coverage());
     }
+
+    /** A coverage column that does not parse reads as none. The bug is one bad column failing the whole report read. */
+    @Test
+    void anUnreadableCoverageReadsAsNone() {
+        RcaReportView view = RcaReportView.of(
+                row(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES, "s", "[]", null, "[]", "{\"read\":"), MAPPER);
+
+        assertNull(view.coverage());
+    }
 }
