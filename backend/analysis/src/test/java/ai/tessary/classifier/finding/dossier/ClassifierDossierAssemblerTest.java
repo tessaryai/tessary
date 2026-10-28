@@ -68,7 +68,7 @@ class ClassifierDossierAssemblerTest {
     }
 
     @Test
-    void frustrationShapeStatesTheRateInConversationsAndPairsSessionWithTraceWitnesses() throws Exception {
+    void frustrationShapeStatesTheRateInSessionHoursAndListsTurnWitnesses() throws Exception {
         String payload = """
                 {"call_site_id":"support-chat","direction":"up","baseline_conversations":200,
                  "baseline_frustrated":10,"baseline_rate":0.052,"current_rate":0.25,
@@ -83,9 +83,9 @@ class ClassifierDossierAssemblerTest {
                 .thenReturn(headOf(
                         List.of(
                                 new FindingEvidenceRow(
-                                        "e1", PROJECT_ID, FINDING_ID, "conv-1", null, null, "witness", 0, "t0"),
+                                        "e1", PROJECT_ID, FINDING_ID, "conv-1", "trace-1", null, "witness", 0, "t0"),
                                 new FindingEvidenceRow(
-                                        "e2", PROJECT_ID, FINDING_ID, null, "trace-1", null, "witness", 1, "t0")),
+                                        "e2", PROJECT_ID, FINDING_ID, "conv-2", "trace-2", null, "witness", 1, "t0")),
                         false));
 
         String dossier = ClassifierDossierAssembler.assemble(
@@ -94,10 +94,12 @@ class ClassifierDossierAssemblerTest {
 
         assertTrue(dossier.startsWith("# Frustration evidence"));
         assertTrue(dossier.contains("5.20% learned → 25.00% since onset"));
-        assertTrue(dossier.contains("since onset: 600 conversations, 150 frustrated"));
+        assertTrue(dossier.contains("learned from 200 session-hours, 10 frustrated"), dossier);
+        assertTrue(dossier.contains("since onset: 600 session-hours, 150 frustrated"), dossier);
+        assertTrue(dossier.contains("is also a `member`"), dossier);
         assertTrue(dossier.contains("There is no baseline side"));
-        assertTrue(dossier.contains("- `witness` session=`conv-1` trace=`-`"));
-        assertTrue(dossier.contains("- `witness` trace=`trace-1`"));
+        assertTrue(dossier.contains("- `witness` session=`conv-1` trace=`trace-1`"));
+        assertTrue(dossier.contains("- `witness` session=`conv-2` trace=`trace-2`"));
     }
 
     @Test

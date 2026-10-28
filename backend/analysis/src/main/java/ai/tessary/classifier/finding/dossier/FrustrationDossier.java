@@ -4,10 +4,7 @@ package ai.tessary.classifier.finding.dossier;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
-/**
- * The {@code frustration_rate} shape. Explains the two witness grains, since a session row beside a trace row is unlike
- * other shapes.
- */
+/** The {@code frustration_rate} shape. Explains the trial and why each witness is also a member. */
 final class FrustrationDossier {
 
     /** Dispatched on from the payload. */
@@ -34,12 +31,12 @@ final class FrustrationDossier {
                 root.path("threshold").asDouble(0)));
         sb.append(String.format(
                 Locale.ROOT,
-                "- learned from %d sessions, %d frustrated%n",
+                "- learned from %d session-hours, %d frustrated%n",
                 root.path("baseline_conversations").asLong(0),
                 root.path("baseline_frustrated").asLong(0)));
         sb.append(String.format(
                 Locale.ROOT,
-                "- since onset: %d conversations, %d frustrated%n",
+                "- since onset: %d session-hours, %d frustrated%n",
                 root.path("conversations_since_onset").asLong(0),
                 root.path("frustrated_since_onset").asLong(0)));
         if (root.hasNonNull("onset_at")) {
@@ -53,10 +50,11 @@ final class FrustrationDossier {
         }
 
         sb.append("\n## How to read the evidence\n\n");
-        sb.append("A session is one conversation on this finding's call site. It is one trial, and a failure while"
-                + " it holds an uncleared frustration flag. Each `witness` session row is a frustrated session; the"
-                + " `witness` trace row after it is the user turn that fired inside it. There is no baseline side:"
-                + " the learned rate is a count on this finding, not an enumeration.\n");
+        sb.append("The trial is a session in one UTC hour on this finding's call site; it fails when a turn in that"
+                + " hour was flagged and the flag stands. Each evidence row is a turn standing for one session-hour"
+                + " and names its session: a `witness` row is the first flagged turn of a frustrated session-hour"
+                + " and is also a `member`; a `member` row with no witness is the last scored turn of a calm one."
+                + " There is no baseline side: the learned rate is a count on this finding, not an enumeration.\n");
         return sb.toString();
     }
 }

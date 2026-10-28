@@ -2,19 +2,19 @@
 
 ## What it measures
 The share of one call site's sessions in which the user became frustrated with the agent,
-against the rate the call site learned as its own normal. A session is one conversation on one
-call site and one trial; it fails while it holds an uncleared flag. A hosted decision model
-scores each eligible user turn. A turn is eligible only when the four messages before it are
+against the rate the call site learned as its own normal. A trial is a session in one UTC hour
+it has a scored turn; it fails when a turn in that hour was flagged and the flag stands. A
+hosted decision model scores each eligible user turn: one whose four messages before it are
 user, assistant, user, assistant, each with text, so a session's first two user turns are never
 scored. A turn is flagged when its unhappy-with-assistant score passes the threshold.
 Frustration aimed at something outside the chat never flags. A session stops being scored at
-its first flag.
+its first flag, so it has no later trials until the flag is cleared.
 
 ## Reading the evidence
-Numbers are in each finding's `evidence.md`. `witness` session rows are every frustrated session
-since the onset. `witness` trace rows are the flagged turn in each; exported, they carry the four
-messages before it. `member` session rows are every session scored on the call site since the
-onset; the unflagged ones are the comparison side, and there are no `baseline` rows.
+Numbers are in each finding's `evidence.md`. Each row is a turn, naming its session, for one
+session-hour since the onset; all are `member` rows. A calm session-hour's is its last scored
+turn, the comparison side. A frustrated one's is its first flagged turn, also a `witness`;
+exported, it carries the four messages before it. There are no `baseline` rows.
 
 ## Measurement quirks
 The flagged turn marks where the user reacted, not the turn that prompted the reaction. The

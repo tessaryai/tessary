@@ -212,7 +212,7 @@ class AgenticRcaEngineTest {
     @ParameterizedTest
     @CsvSource({
         BuiltInDetector.Kind.GROUNDEDNESS + ", flagged answers",
-        BuiltInDetector.Kind.FRUSTRATION + ", flagged sessions",
+        BuiltInDetector.Kind.FRUSTRATION + ", flagged turns",
         BuiltInDetector.Kind.TOOL_ERROR + ","
     })
     void theStepWordsNameTheClassifiersFlaggedRowsAndTheirTotal(String classifierKey, @Nullable String noun) {

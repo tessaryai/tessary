@@ -29,6 +29,22 @@ class EvidenceSidesTest {
         assertEquals(Set.of("t1"), sides.flaggedTraces());
         assertEquals(Set.of("t2"), sides.comparisonTraces());
         assertEquals(1, sides.flaggedCount());
+
+        // Frustration's turn rows, each naming its session: A calm at 09:40, A flagged at 10:20, D calm at 10:50.
+        List<SpanRef> turns = List.of(
+                SpanRefs.row(Role.MEMBER).trace("a-0940").session("A").build(),
+                SpanRefs.row(Role.WITNESS).trace("a-1020").session("A").build(),
+                SpanRefs.row(Role.MEMBER).trace("a-1020").session("A").build(),
+                SpanRefs.row(Role.MEMBER).trace("d-1050").session("D").build());
+        EvidenceSides frustration = EvidenceSides.of(ClaimShape.RATE_RISE, SpanRefs.recorded(turns));
+        assertEquals(EvidenceSides.TRACES, frustration.grain(), "a turn naming its session is a trace row");
+        assertEquals(Set.of("a-1020"), frustration.flaggedTraces());
+        assertEquals(
+                Set.of("a-0940", "d-1050"),
+                frustration.comparisonTraces(),
+                "a calm hour of a session flagged in another hour is a comparison turn");
+        assertEquals(Set.of("D"), frustration.comparisonSessions());
+        assertEquals(1, frustration.flaggedCount());
     }
 
     /**
@@ -84,8 +100,9 @@ class EvidenceSidesTest {
     }
 
     /**
-     * Frustration flags a conversation with a session row and a trace row for its flagged turn, and its members are
-     * sessions; groundedness flags an answer with a trace row and a span row, and its members are traces. The bug is
+     * A classifier that writes session rows flags a conversation with a session row and a trace row for its flagged
+     * turn, and its members are sessions, as frustration findings closed before turn rows still hold; groundedness
+     * flags an answer with a trace row and a span row, and its members are traces. The bug is
      * both rows counted on the flagged side, so it holds two rows per unit against one on the comparison side.
      */
     @Test

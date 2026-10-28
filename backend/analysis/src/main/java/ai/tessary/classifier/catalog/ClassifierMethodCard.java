@@ -188,34 +188,35 @@ public final class ClassifierMethodCard {
             """;
 
     private static final String FRUSTRATION = """
-            ## frustration: a Bernoulli CUSUM over one call site's frustrated sessions
+            ## frustration: a Bernoulli CUSUM over one call site's frustrated session-hours
 
             **Measures** the fraction of one call site's sessions in which the user became
             frustrated with the agent. Each eligible user turn is one question to a hosted decision model:
             a turn is eligible only when the four messages before it are user, assistant, user, assistant,
             each with text, so a session's first two user turns are never scored. A turn is flagged
             when its `unhappy_with_assistant` score exceeds the threshold; frustration aimed at something
-            outside the chat never flags. A session stops being scored at its first flag.
+            outside the chat never flags.
 
             **Compares against** the rate that call site learned as its own normal over its first
-            sessions, and may keep learning for a while after judging starts; either way it is a fitted
-            number and not a stretch of traffic. A call site that was frustrating
+            session-hours, and may keep learning for a while after judging starts; either way it is a
+            fitted number and not a stretch of traffic. A call site that was frustrating
             from the start learned that as normal and is flagged only for getting worse. A resolve
             restarts the accumulator and re-learns the rate from the traffic after it.
 
-            A session is one conversation on one call site. It is one trial, and a failure while it
-            holds an uncleared flag.
+            The trial is a session in one UTC hour: a session counts once in each hour it has a scored
+            turn, and fails when a turn in that hour was flagged and the flag stands. A flagged session is
+            not scored again until its flag is cleared, so it has no later trials.
 
             **The claim's numbers** are in `get_finding` under `frustration`: `rate` (`refRate` and
-            `curRate` as fractions of sessions, `nRef`, `nCur`, `failuresCur`, `statistic` against
+            `curRate` as fractions of session-hours, `nRef`, `nCur`, `failuresCur`, `statistic` against
             `threshold`, `effectSize`, `direction`, `onsetAt`, and no pattern breakdown),
             `baselineFrustrated`, `jevThreshold`, `arlTarget`, `minDecisionInterval` and `scorerVersion`.
 
             **Evidence**
-            - `member` session rows: every session scored on the call site since onset, the rate's
-              denominator.
-            - `witness` session rows: every frustrated session since onset, the numerator. Read these.
-            - `witness` trace rows: the user turn that was flagged inside each of those sessions.
+            - `member` trace rows: one turn per session-hour scored on the call site since onset, the
+              rate's denominator. Each names its session.
+            - `witness` trace rows: the first flagged turn of each frustrated session-hour, the numerator;
+              each is also a member. Read these.
 
             **Absent roles**
             - No `baseline`: the reference is a learned rate, not a window of rows, so there is no before
@@ -227,7 +228,7 @@ public final class ClassifierMethodCard {
 
             The share of one call site's sessions in which the user was frustrated with the agent has
             risen above the rate it learned. Some frustration is normal. The claim holds when the witness
-            sessions show the user reacting to the agent. Who the users are or what they asked is never by
+            turns show the user reacting to the agent. Who the users are or what they asked is never by
             itself a `negative`.
             """;
 

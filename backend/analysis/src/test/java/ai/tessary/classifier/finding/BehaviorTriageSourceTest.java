@@ -168,7 +168,7 @@ class BehaviorTriageSourceTest {
         assertEquals(
                 switch (classifierKey) {
                     case BuiltInDetector.Kind.GROUNDEDNESS -> Map.of("witness", "flagged answers");
-                    case BuiltInDetector.Kind.FRUSTRATION -> Map.of("witness", "flagged sessions");
+                    case BuiltInDetector.Kind.FRUSTRATION -> Map.of("witness", "flagged turns");
                     default -> Map.of();
                 },
                 words.roleNouns());

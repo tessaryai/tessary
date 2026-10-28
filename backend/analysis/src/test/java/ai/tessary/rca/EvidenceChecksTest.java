@@ -233,7 +233,8 @@ class EvidenceChecksTest {
     }
 
     /**
-     * Frustration-shaped evidence: every conversation is a {@code member} session, and each flagged one is also a
+     * Session-grain evidence, as frustration findings closed before turn rows hold: every conversation is a
+     * {@code member} session, and each flagged one is also a
      * {@code witness} twice, as its session and as its flagged turn. One of four sessions is flagged in the first hour
      * and three of four in the second. The bug is the turn counted beside its session, which doubles the flagged side
      * and every share read off it.

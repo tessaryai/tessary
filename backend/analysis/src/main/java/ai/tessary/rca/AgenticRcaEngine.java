@@ -242,8 +242,7 @@ public class AgenticRcaEngine {
                 switch (classifierKey) {
                     case BuiltInDetector.Kind.GROUNDEDNESS ->
                         Map.of(FindingEvidenceRow.Role.WITNESS, "flagged answers");
-                    case BuiltInDetector.Kind.FRUSTRATION ->
-                        Map.of(FindingEvidenceRow.Role.WITNESS, "flagged sessions");
+                    case BuiltInDetector.Kind.FRUSTRATION -> Map.of(FindingEvidenceRow.Role.WITNESS, "flagged turns");
                     default -> Map.of();
                 };
         return new StepWords.Context(nouns, Map.of(FindingEvidenceRow.Role.WITNESS, (long) evidence.flaggedCount()));

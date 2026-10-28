@@ -351,11 +351,12 @@ record RcaWorkerTest(
     }
 
     /**
-     * A frustration finding: the frustrated sessions are what was flagged, counted in sessions, and causes persist on a
-     * frustration_causes report.
+     * A frustration finding: the flagged turns are what was flagged, one per frustrated session-hour, and each names
+     * its session, so a cause may cite the sessions; causes persist on a frustration_causes report. A turn row without
+     * its session leaves the flagged sessions empty, and the cause's session citations are refused.
      */
     @Test
-    void aFrustrationReportCountsSessionsAndPersistsItsCauses() {
+    void aFrustrationReportCountsFlaggedTurnsAndPersistsItsCauses() {
         var fix = TenantFixture.bootstrap(tenants, "rca-frustration");
         String pid = fix.project().id();
         String sessionA = seedSession(pid);
@@ -363,31 +364,18 @@ record RcaWorkerTest(
         String turnA = seedTrace(pid, sessionA, SPLIT.plus(Duration.ofHours(2)));
         String turnB = seedTrace(pid, sessionB, SPLIT.plus(Duration.ofHours(3)));
         String calm = seedSession(pid);
+        String calmTurn = seedTrace(pid, calm, SPLIT.plus(Duration.ofHours(4)));
         String findingId = seedFinding(pid, List.of(), List.of(), FindingRow.Cause.FRUSTRATION_RATE);
         String now = Instant.now().toString();
+        FindingEvidenceRepository.Ref flaggedA = FindingEvidenceRepository.Ref.turn(sessionA, turnA);
+        FindingEvidenceRepository.Ref flaggedB = FindingEvidenceRepository.Ref.turn(sessionB, turnB);
         evidence.record(
                 pid,
                 findingId,
                 FindingEvidenceRow.Role.MEMBER,
-                List.of(
-                        FindingEvidenceRepository.Ref.session(sessionA),
-                        FindingEvidenceRepository.Ref.session(calm),
-                        FindingEvidenceRepository.Ref.session(sessionB)),
+                List.of(flaggedA, FindingEvidenceRepository.Ref.turn(calm, calmTurn), flaggedB),
                 now);
-        evidence.record(
-                pid,
-                findingId,
-                FindingEvidenceRow.Role.WITNESS,
-                List.of(
-                        FindingEvidenceRepository.Ref.session(sessionA),
-                        FindingEvidenceRepository.Ref.session(sessionB)),
-                now);
-        evidence.record(
-                pid,
-                findingId,
-                FindingEvidenceRow.Role.WITNESS,
-                List.of(FindingEvidenceRepository.Ref.trace(turnA), FindingEvidenceRepository.Ref.trace(turnB)),
-                now);
+        evidence.record(pid, findingId, FindingEvidenceRow.Role.WITNESS, List.of(flaggedA, flaggedB), now);
 
         RcaDtos.Cause cause = new RcaDtos.Cause(
                 "Ignores the attached file",
@@ -416,11 +404,12 @@ record RcaWorkerTest(
         worker.run(job);
 
         AgenticRcaEngine.Evidence ev = capturedEvidence();
-        assertEquals(2, ev.flaggedCount(), "the frustrated sessions, not the calm one");
-        assertEquals("sessions", ev.grain());
+        assertEquals(2, ev.flaggedCount(), "the flagged turns, not the calm one");
+        assertEquals("traces", ev.grain());
         assertFalse(ev.baselinePresent());
         assertTrue(ev.flaggedSessionIds().containsAll(Set.of(sessionA, sessionB)), ev.toString());
         assertTrue(ev.comparisonSessionIds().contains(calm), "a calm session is the comparison side");
+        assertTrue(ev.comparisonTraceIds().contains(calmTurn), "and its turn");
         assertTrue(ev.flaggedTraceIds().containsAll(Set.of(turnA, turnB)), ev.toString());
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
