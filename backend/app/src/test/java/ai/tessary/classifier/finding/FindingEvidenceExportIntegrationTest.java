@@ -1,0 +1,180 @@
+// SPDX-License-Identifier: Apache-2.0
+package ai.tessary.classifier.finding;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.tenant.Ids;
+import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.RateClassifierFixture;
+import ai.tessary.testsupport.SubstrateV2Fixtures;
+import ai.tessary.testsupport.TenantFixture;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+/**
+ * The bulk evidence export against the real schema: text cut in SQL with a margin and masked before the final cut,
+ * pages closed by a text budget without losing a row across the cursor, and every payload attribute carried.
+ */
+@SpringBootTest
+record FindingEvidenceExportIntegrationTest(
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        FindingService behaviorDrift,
+        SubstrateV2Fixtures fx,
+        RateClassifierFixture rates,
+        TenantService tenants) {
+
+    private static final String AWS = "AKIA" + "QYLPMN5HHHFPZAM2";
+    private static final String AWS_MASKED = "AKIA…ZAM2";
+    private static final long SIX_MIB = 6L * 1024 * 1024;
+
+    /** Catches a SQL cut at exactly {@code text_chars}: the mask then sees half a key and {@code AKIAQYLPMN} leaks. */
+    @Test
+    @DisplayName("a credential that straddles the cut is masked before the export cuts it")
+    void export_masksCredentialStraddlingTheCut() {
+        String pid = project("finding-export-mask");
+        String findingId = firing(pid, "gram-export-mask");
+        String filler = "x".repeat(3_989);
+        String input = filler + " " + AWS + " " + "y".repeat(100);
+        member(pid, findingId, List.of(span(pid, "trace-mask", input, null)));
+
+        FindingEvidenceRepository.ExportPage page = evidence.exportPage(
+                pid,
+                findingId,
+                null,
+                new FindingEvidenceRepository.ExportLimits(4_000, 2_000, SIX_MIB),
+                null,
+                false,
+                false);
+
+        assertEquals(1, page.rows().size());
+        String exported = page.rows().get(0).input();
+        assertEquals(filler + " " + AWS_MASKED + " " + EvidenceExportText.CUT_MARK, exported);
+        assertFalse(String.valueOf(exported).contains("AKIAQYLPMN"), "the raw key reached the export");
+    }
+
+    /**
+     * A row costs 1,000 + 512 = 1,512 against a 2,500 budget: one row is under it, the second reaches it and closes
+     * the page, so 7 rows page as 2, 2, 2, 1. Catches a budget stop that seeds the cursor from a row it dropped
+     * (skipped forever) or counts the over-fetched row (read twice).
+     */
+    @Test
+    @DisplayName("a page closed by the text budget resumes on the next row, losing and repeating none")
+    void export_byteBudgetPage_noRowLostAcrossCursor() {
+        String pid = project("finding-export-budget");
+        String findingId = firing(pid, "gram-export-budget");
+        List<String> seeded = new ArrayList<>();
+        List<FindingEvidenceRepository.Ref> refs = new ArrayList<>();
+        for (int i = 0; i < 7; i++) {
+            String trace = "trace-budget-" + i;
+            seeded.add(trace);
+            refs.add(span(pid, trace, "a".repeat(1_000), null));
+        }
+        member(pid, findingId, refs);
+
+        List<Integer> sizes = new ArrayList<>();
+        List<String> read = new ArrayList<>();
+        String cursor = null;
+        do {
+            FindingEvidenceRepository.ExportPage page = evidence.exportPage(
+                    pid,
+                    findingId,
+                    null,
+                    new FindingEvidenceRepository.ExportLimits(4_000, 2_000, 2_500),
+                    cursor,
+                    false,
+                    false);
+            sizes.add(page.rows().size());
+            page.rows().forEach(r -> read.add(r.measured().traceId()));
+            cursor = page.nextCursor();
+        } while (cursor != null && sizes.size() < 10);
+
+        assertEquals(List.of(2, 2, 2, 1), sizes);
+        assertEquals(seeded, read);
+    }
+
+    /** Catches a short allow-list leaking into the export, or a long value dropped instead of cut. */
+    @Test
+    @DisplayName("the export carries every payload attribute and marks a long value it cut")
+    void export_carriesEveryAttributeAndMarksLongValues() {
+        String pid = project("finding-export-attributes");
+        String findingId = firing(pid, "gram-export-attributes");
+        String attributes = "{\"deploy\":\"v1\",\"host\":\"h-1\",\"n\":3,\"ok\":true,"
+                + "\"nested\":{\"region\":\"eu\"},\"prompt\":\"" + "z".repeat(5_000) + "\"}";
+        member(pid, findingId, List.of(span(pid, "trace-attributes", "in", attributes)));
+
+        FindingEvidenceRepository.ExportPage page = evidence.exportPage(
+                pid,
+                findingId,
+                null,
+                new FindingEvidenceRepository.ExportLimits(4_000, 2_000, SIX_MIB),
+                null,
+                false,
+                false);
+
+        assertEquals(1, page.rows().size());
+        Map<String, Object> exported = page.rows().get(0).attributes();
+        assertNotNull(exported);
+        // jsonb keeps no key order, so the keys are compared as a set.
+        assertEquals(Set.of("deploy", "host", "n", "ok", "nested", "prompt"), exported.keySet());
+        assertEquals("v1", exported.get("deploy"));
+        assertEquals("h-1", exported.get("host"));
+        assertEquals(3, exported.get("n"));
+        assertEquals(true, exported.get("ok"));
+        assertEquals(Map.of("region", "eu"), exported.get("nested"));
+        assertEquals("z".repeat(4_000) + EvidenceExportText.CUT_MARK, exported.get("prompt"));
+    }
+
+    private String project(String slug) {
+        return TenantFixture.bootstrap(tenants, slug).project().id();
+    }
+
+    private FindingEvidenceRepository.Ref span(
+            String pid, String traceId, @Nullable String input, @Nullable String attributes) {
+        SubstrateV2Fixtures.SpanRef ref = fx.spanSeed(pid)
+                .traceId(traceId)
+                .kind("llm")
+                .at(Instant.now())
+                .payload(input, null, attributes)
+                .writeRef();
+        return FindingEvidenceRepository.Ref.span(ref.traceId(), ref.spanId());
+    }
+
+    private void member(String pid, String findingId, List<FindingEvidenceRepository.Ref> refs) {
+        evidence.record(
+                pid,
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                refs,
+                Instant.now().toString());
+    }
+
+    private String firing(String pid, String gram) {
+        String now = Instant.now().toString();
+        return Objects.requireNonNull(findings.recordArmedWindow(
+                        Ids.ulid(),
+                        pid,
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-" + gram,
+                        gram,
+                        1,
+                        "cs-a",
+                        "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}",
+                        now,
+                        now,
+                        now,
+                        now))
+                .findingId();
+    }
+}
