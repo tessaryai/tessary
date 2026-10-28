@@ -58,6 +58,7 @@ class AgenticRcaPromptTest {
      */
     private static final List<String> EXPECTED_TOOLS = List.of(
             "get_finding_evidence",
+            "export_finding_evidence",
             "get_trace",
             "get_span",
             "list_traces",
@@ -175,6 +176,9 @@ class AgenticRcaPromptTest {
         assertTrue(
                 AgenticRcaEngine.SYSTEM_PROMPT.contains("`dossier/findings/<n>-<id>/evidence.md`"),
                 "evidence.md is a first read");
+        assertTrue(
+                AgenticRcaEngine.SYSTEM_PROMPT.contains("`dossier/findings/<n>-<id>/checks.md`"),
+                "checks.md is a first read");
     }
 
     /** Nothing fills a placeholder in the fixed part, so the agent would read a literal one on every run. */
@@ -242,16 +246,35 @@ class AgenticRcaPromptTest {
         assertEquals(method, prompt.contains("dossier/method.md"), "no line points at a file that is not there");
     }
 
-    /** {@code member} rows are not a comparison side; only the finding's own {@code baseline} rows are. */
+    /**
+     * The comparison side is the finding's own {@code baseline} rows, else its unflagged {@code member} rows. The bug
+     * is a cause called on a value as common in healthy rows as in flagged ones, because the agent was told it had
+     * nothing to compare against.
+     */
     @ParameterizedTest(name = "repo={0} baseline={1} method={2}")
     @MethodSource("runs")
-    void theBaselineSnippetAppearsOnlyWithBaselineRows(boolean repo, boolean baseline, boolean method) {
+    void theComparisonSideIsBaselineElseUnflaggedMembers(boolean repo, boolean baseline, boolean method) {
         String prompt = prompt(repo, baseline, method);
 
         assertEquals(baseline, prompt.contains("are the traffic before the onset"));
+        assertFalse(AgenticRcaEngine.SYSTEM_PROMPT.contains("`member` rows are not"), "members are a comparison side");
         assertTrue(
-                AgenticRcaEngine.SYSTEM_PROMPT.contains("`member` rows are not\na comparison side"),
-                "said whether or not there is one");
+                AgenticRcaEngine.SYSTEM_PROMPT.contains("the unflagged\n`member` rows where there is no `baseline`"),
+                "said whether or not there is a baseline");
+    }
+
+    /** The bug is an agent reading a field the row does not carry: the row's field is {@code models}. */
+    @Test
+    void theToolsFileSpellsTheRowFieldsAsTheSurfaceDoes() {
+        assertFalse(AgenticRcaEngine.TOOLS.contains("`model`"), "the row carries no model field");
+        assertTrue(AgenticRcaEngine.TOOLS.contains("`models`"), AgenticRcaEngine.TOOLS);
+    }
+
+    /** The bug is an agent stopping at a fraction of its budget with the right next step still on its own list. */
+    @Test
+    void theSystemPromptStopsOnCertaintyNotOnTheClock() {
+        assertFalse(AgenticRcaEngine.SYSTEM_PROMPT.contains("When the time budget runs short"));
+        assertTrue(AgenticRcaEngine.SYSTEM_PROMPT.contains("Keep reading until you are certain"));
     }
 
     /** No repo is a lower ceiling, not a refusal: the agent is told the code side is unread and to attribute nothing. */

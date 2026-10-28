@@ -12,15 +12,14 @@ its first flag.
 
 ## Reading the evidence
 Numbers are in each finding's `evidence.md`. `witness` session rows are every frustrated session
-since the onset. `witness` trace rows are the user turn that was flagged inside each of those sessions. `member` session rows are
-every session scored on the call site since the onset. There are no `baseline` rows: the normal
-rate is a number, not a set of rows.
+since the onset. `witness` trace rows are the flagged turn in each; exported, they carry the four
+messages before it. `member` session rows are every session scored on the call site since the
+onset; the unflagged ones are the comparison side, and there are no `baseline` rows.
 
 ## Measurement quirks
 The flagged turn marks where the user reacted, not the turn that prompted the reaction. The
 learned rate absorbs a call site that was frustrating from the start; the finding is about a
-rise. The rate may still be learning when judging starts. A resolve restarts the accumulator and
-re-learns the rate from the traffic after it.
+rise. A resolve restarts the accumulator and re-learns the rate from the traffic after it.
 
 ## In the repo
 The call site's prompt and configuration sit in its call-site file in the bundle. The code
