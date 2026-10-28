@@ -196,7 +196,7 @@ describe("RcaReport", () => {
     expect(screen.getByText("2 flagged answers")).toBeTruthy();
   });
 
-  // Bug: what the analysis read shown nowhere, or a line shown on an older report that recorded none.
+  // Bug: what the analysis read shown nowhere.
   it("shows what the analysis read under the verdict", async () => {
     report = {
       ...CURRENT_GROUNDEDNESS_REPORT,
@@ -214,6 +214,7 @@ describe("RcaReport", () => {
     ).toBeTruthy();
   });
 
+  // Bug: a coverage line shown on an older report that recorded none.
   it("shows no coverage line on a report that recorded none", async () => {
     report = { ...CURRENT_GROUNDEDNESS_REPORT, coverage: null };
     renderReport();
