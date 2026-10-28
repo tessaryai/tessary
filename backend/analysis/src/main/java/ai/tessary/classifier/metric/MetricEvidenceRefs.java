@@ -29,6 +29,14 @@ final class MetricEvidenceRefs {
             return new Timed(ref, null, null);
         }
 
+        /**
+         * Clamped to the grid as {@link MetricHistogram} clamps it, so the change point and the reference mean are in
+         * the same units. A zero reading is -Infinity, which no CUSUM term or JSON number survives.
+         */
+        static Timed measured(Ref ref, String at, double logValue, MetricHistogram.Grid grid) {
+            return new Timed(ref, at, Math.clamp(logValue, grid.logLo(), grid.logHi()));
+        }
+
         boolean valued() {
             return at != null && value != null;
         }

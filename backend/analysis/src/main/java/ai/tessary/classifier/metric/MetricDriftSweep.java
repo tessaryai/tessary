@@ -531,7 +531,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             }
             current.add(sample);
             callSites.merge(sample.callSiteId(), 1L, Long::sum);
-            windowRefs.add(refOf(sample));
+            windowRefs.add(refOf(sample, grid));
             count++;
             if (!shouldClose(count, openedAt, sample.eventAt(), config)) continue;
 
@@ -972,12 +972,12 @@ public class MetricDriftSweep implements ClassifierSweep {
         return recorded;
     }
 
-    private static Timed refOf(Sample sample) {
+    private static Timed refOf(Sample sample, Grid grid) {
         String spanId = sample.spanId();
         FindingEvidenceRepository.Ref ref = spanId == null
                 ? FindingEvidenceRepository.Ref.trace(sample.traceId())
                 : FindingEvidenceRepository.Ref.span(sample.traceId(), spanId);
-        return new Timed(ref, sample.eventAt(), sample.logValue());
+        return Timed.measured(ref, sample.eventAt(), sample.logValue(), grid);
     }
 
     /**

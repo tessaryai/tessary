@@ -50,6 +50,28 @@ class MetricChangePointTest {
         assertEquals(new Located(4, second(4)), MetricChangePoint.locate(window, LN_2000, Direction.UP));
     }
 
+    /**
+     * A zero reading is ln 0 = -Infinity; clamped to the grid's floor (ln 1 ms = 0) it is one low row. Diffs against
+     * ln 2000 are 0, -7.6, 0, 0, +1.386, +1.386, so the latest minimiser is k = 4, the first 8000 row. The bugs are
+     * an unclamped row that pins every later CUSUM term at -Infinity, which moves the onset to the last row, and a
+     * stored -Infinity that reads back as no value, which leaves the window with no located change point.
+     */
+    @Test
+    void aZeroRowLocatesTheStepInMemoryAndAfterTheBlob() {
+        MetricHistogram.Grid grid = MetricHistogram.Grid.duration();
+        double[] values = {LN_2000, Math.log(0), LN_2000, LN_2000, LN_8000, LN_8000};
+        List<Timed> window = new ArrayList<>();
+        for (int i = 0; i < values.length; i++) {
+            window.add(Timed.measured(Ref.trace("t-" + i), second(i), values[i], grid));
+        }
+
+        assertEquals(new Located(4, second(4)), MetricChangePoint.locate(window, LN_2000, Direction.UP));
+        assertEquals(
+                new Located(4, second(4)),
+                MetricChangePoint.locate(
+                        MetricEvidenceRefs.fromJson(MetricEvidenceRefs.toJson(window)), LN_2000, Direction.UP));
+    }
+
     /** Every row already shifted: the change point is the window's first row, not its close. */
     @Test
     void reportsWindowOpenWhenTheWholeWindowIsShifted() {
