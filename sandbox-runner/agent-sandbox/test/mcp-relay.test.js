@@ -62,8 +62,10 @@ test('a small tools/call result comes back inline in full, with its saved path a
   assert.deepEqual(JSON.parse(body.result.content[0].text), expected);
   assert.deepEqual(body.result.structuredContent, expected);
 
-  const saved = JSON.parse(fs.readFileSync(path.join(workDir, expected.file), 'utf8'));
-  assert.deepEqual(saved, { rows: [{ id: 1 }], nextCursor: null }, 'the full result is saved verbatim, with no file field added');
+  const savedText = fs.readFileSync(path.join(workDir, expected.file), 'utf8');
+  assert.deepEqual(JSON.parse(savedText), { rows: [{ id: 1 }], nextCursor: null }, 'the full result is saved verbatim, with no file field added');
+  // Catches the small-result branch losing its readable form when large results go compact.
+  assert.ok(savedText.includes('\n'), 'a small result is still saved pretty-printed');
 });
 
 test('a large tools/call result is saved to a file and replaced with a summary (nextCursor)', async (t) => {
@@ -95,6 +97,43 @@ test('a large tools/call result is saved to a file and replaced with a summary (
 
   const saved = JSON.parse(fs.readFileSync(path.join(workDir, summary.file), 'utf8'));
   assert.deepEqual(saved, payload, 'the full, unsummarized result is saved verbatim');
+});
+
+// Catches three 5,000-char previews blowing the inline budget the summary exists to respect, and a
+// multi-megabyte page pretty-printed into a file twice the size the agent then parses.
+test('a large result is saved compact, and its preview rows hold no long string', async (t) => {
+  const rows = Array.from({ length: 500 }, (_, i) => ({
+    traceId: `t${i}`,
+    input: 'q'.repeat(5000),
+    attributes: { deploy: 'v1', prompt: 'p'.repeat(5000) },
+  }));
+  const payload = { rows, nextCursor: 'c-2' };
+  const upstream = await startStubUpstream((reqBody, req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(jsonRpcToolResult(reqBody.id, payload)));
+  });
+  t.after(() => upstream.close());
+  const workDir = tempWorkDir();
+  const relay = await relayFor(upstream.url, 'test-token', workDir);
+  t.after(() => relay.close());
+
+  const { body } = await callTool(relay.url, 4, 'export_finding_evidence');
+  const summary = JSON.parse(body.result.content[0].text);
+  assert.equal(summary.cursor, 'c-2');
+  assert.equal(summary.first_rows.length, 3);
+  const strings = [];
+  const collect = (v) => {
+    if (typeof v === 'string') strings.push(v);
+    else if (v && typeof v === 'object') Object.values(v).forEach(collect);
+  };
+  collect(summary.first_rows);
+  for (const s of strings) assert.ok(s.length <= 201, `a preview string is ${s.length} characters`);
+  assert.equal(summary.first_rows[0].input, `${'q'.repeat(200)}…`);
+  assert.equal(summary.first_rows[0].attributes.prompt, `${'p'.repeat(200)}…`);
+  assert.equal(summary.first_rows[0].attributes.deploy, 'v1', 'a short string is kept as it is');
+
+  const savedText = fs.readFileSync(path.join(workDir, summary.file), 'utf8');
+  assert.equal(savedText, JSON.stringify(payload), 'a large result is saved compact');
+  assert.equal(JSON.parse(savedText).rows[0].input.length, 5000, 'the saved file keeps the whole text');
 });
 
 test('a large tools/call result reads next_cursor as well as nextCursor', async (t) => {
