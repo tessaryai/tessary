@@ -48,7 +48,7 @@ Anything weaker is not a cause. It goes on the ruled-out list with its reason. S
 
 The agent compares the flagged rows with the comparison rows the finding itself recorded: the `baseline` rows of a duration or cost drift finding, or the unflagged `member` rows of a tool error, frustration, or groundedness finding. A malformed output or secret leak finding has no comparison side. The agent never fetches normal traffic to build a comparison of its own. A feature as common on the comparison side as among the flagged rows is not a cause.
 
-The agent keeps reading until it is certain of the causes, or certain that none can be found, and the report states what it read. Each run also has a time budget, stated in its instructions. When the budget runs short, the agent returns the causes it has at the confidence they earned and says in the written investigation what it did not check.
+The agent keeps reading until it is certain of the causes, or certain that none can be found, and the report states what it read. Each run also has a time budget, stated in its instructions, and the written investigation says what the agent did not check.
 
 ## Where the run happens
 
