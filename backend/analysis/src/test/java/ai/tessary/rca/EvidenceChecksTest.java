@@ -156,6 +156,83 @@ class EvidenceChecksTest {
     }
 
     /**
+     * The flagged share wobbles by one row an hour and never steps. The bug is a change point named anyway, because the
+     * best single split of any series is somewhere.
+     */
+    @Test
+    void aFlatShareSeriesHasNoChangePoint() {
+        int[] flaggedPerHour = {7, 8, 7, 8, 7, 7, 8, 7};
+        List<SpanRef> rows = new ArrayList<>();
+        for (int hour = 0; hour < flaggedPerHour.length; hour++) {
+            for (int i = 0; i < 20; i++) {
+                rows.add(SpanRefs.row(i < flaggedPerHour[hour] ? Role.WITNESS : Role.MEMBER)
+                        .trace("t" + hour + "-" + i)
+                        .startedAt(hour(hour))
+                        .build());
+            }
+        }
+
+        String text = render(ClaimShape.RATE_RISE, Metric.LATENCY_MS, rows);
+
+        assertEquals(
+                "No change point: the flagged share is flat (35.0% before the best split, 37.1% after).",
+                lineStarting(text, "No change point"));
+        assertFalse(text.contains("Change point:"), text);
+        assertFalse(text.contains("\nBefore:"), text);
+    }
+
+    /**
+     * A sharp step with only four rows after it is too few to name. The bug is a change point read off a handful of
+     * rows at the window's close.
+     */
+    @Test
+    void aStepOverTooFewRowsAfterHasNoChangePoint() {
+        List<SpanRef> rows = new ArrayList<>();
+        for (int hour = 0; hour < 4; hour++) {
+            int size = hour < 3 ? 20 : 4;
+            int flagged = hour < 3 ? 2 : 4;
+            for (int i = 0; i < size; i++) {
+                rows.add(SpanRefs.row(i < flagged ? Role.WITNESS : Role.MEMBER)
+                        .trace("t" + hour + "-" + i)
+                        .startedAt(hour(hour))
+                        .build());
+            }
+        }
+
+        String text = render(ClaimShape.RATE_RISE, Metric.LATENCY_MS, rows);
+
+        assertEquals(
+                "No change point: the flagged share is flat (10.0% before the best split, 100.0% after).",
+                lineStarting(text, "No change point"));
+    }
+
+    /**
+     * A shift's mean that wobbles around one level has no change point either. The bug is the mean's best split named
+     * as a shift.
+     */
+    @Test
+    void aFlatShiftSeriesHasNoChangePoint() {
+        int[][] latencies = {{100, 110}, {105, 95}, {100, 110}, {95, 105}, {100, 100}, {110, 100}};
+        List<SpanRef> rows = new ArrayList<>();
+        for (int hour = 0; hour < latencies.length; hour++) {
+            for (int i = 0; i < latencies[hour].length; i++) {
+                rows.add(SpanRefs.row(hour < 2 ? Role.BASELINE : Role.MEMBER)
+                        .trace("t" + hour + "-" + i)
+                        .startedAt(hour(hour))
+                        .latencyMs(latencies[hour][i])
+                        .build());
+            }
+        }
+
+        String text = render(ClaimShape.DISTRIBUTION_SHIFT, Metric.LATENCY_MS, rows);
+
+        assertEquals(
+                "No change point: the mean is flat (105 ms before the best split, 102 ms after).",
+                lineStarting(text, "No change point"));
+        assertFalse(text.contains("Change point:"), text);
+    }
+
+    /**
      * Frustration-shaped evidence: every conversation is a {@code member} session, and each flagged one is also a
      * {@code witness} twice, as its session and as its flagged turn. One of four sessions is flagged in the first hour
      * and three of four in the second. The bug is the turn counted beside its session, which doubles the flagged side
@@ -191,7 +268,9 @@ class EvidenceChecksTest {
         assertEquals(
                 "Flagged rows: `witness` (4). Comparison rows: unflagged `member` (4), `baseline` (0).",
                 lineStarting(text, "Flagged rows"));
-        assertEquals("Before: share 25.0% over 4 rows. After: share 75.0% over 4 rows.", lineStarting(text, "Before"));
+        assertEquals(
+                "No change point: the flagged share is flat (25.0% before the best split, 75.0% after).",
+                lineStarting(text, "No change point"));
         assertFalse(text.contains("### name"), "a turn's fields are not compared against sessions: " + text);
     }
 
@@ -324,7 +403,7 @@ class EvidenceChecksTest {
         assertTrue(note.find(), text.substring(text.length() - 200));
         assertEquals(String.format(Locale.ROOT, "%,d", note.start()), note.group(1));
         assertTrue(Integer.parseInt(note.group(2).replace(",", "")) > EvidenceChecks.CHAR_CEILING, note.group(2));
-        int changePoint = text.indexOf("Change point:");
+        int changePoint = text.indexOf("No change point:");
         assertTrue(changePoint > 0 && text.indexOf("## Flagged against comparison") > changePoint, "series cut");
     }
 
@@ -447,7 +526,7 @@ class EvidenceChecksTest {
     @Test
     void aTokenShiftReadsItsBucket() {
         List<SpanRef> rows = new ArrayList<>();
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 5; i++) {
             rows.add(SpanRefs.row(Role.BASELINE)
                     .trace("b" + i)
                     .startedAt(hour(0))
@@ -463,7 +542,7 @@ class EvidenceChecksTest {
         String text = render(ClaimShape.DISTRIBUTION_SHIFT, Metric.INPUT_TOKENS, rows);
 
         assertEquals(
-                "Before: mean 1,000 tokens over 2 rows. After: mean 3,000 tokens over 2 rows.",
+                "Before: mean 1,000 tokens over 5 rows. After: mean 3,000 tokens over 5 rows.",
                 lineStarting(text, "Before"));
         assertFalse(text.contains("### inputTokens"), "the series measure is not also a field table: " + text);
     }
@@ -479,30 +558,30 @@ class EvidenceChecksTest {
                 new Case(
                         "cost",
                         (b, v) -> b.totalCost(v / 100.0),
-                        "Before: mean 0.0100 USD over 2 rows. After: mean 0.0300 USD over 2 rows."),
+                        "Before: mean 0.0100 USD over 5 rows. After: mean 0.0300 USD over 5 rows."),
                 new Case(
                         "tok_input",
                         (b, v) -> b.inputTokens(v),
-                        "Before: mean 1 tokens over 2 rows. After: mean 3 tokens over 2 rows."),
+                        "Before: mean 1 tokens over 5 rows. After: mean 3 tokens over 5 rows."),
                 new Case(
                         "tok_output",
                         (b, v) -> b.outputTokens(v),
-                        "Before: mean 1 tokens over 2 rows. After: mean 3 tokens over 2 rows."),
+                        "Before: mean 1 tokens over 5 rows. After: mean 3 tokens over 5 rows."),
                 new Case(
                         "tok_cache_read",
                         (b, v) -> b.cacheReadTokens(v),
-                        "Before: mean 1 tokens over 2 rows. After: mean 3 tokens over 2 rows."),
+                        "Before: mean 1 tokens over 5 rows. After: mean 3 tokens over 5 rows."),
                 new Case(
                         "tok_cache_write",
                         (b, v) -> b.cacheWriteTokens(v),
-                        "Before: mean 1 tokens over 2 rows. After: mean 3 tokens over 2 rows."),
+                        "Before: mean 1 tokens over 5 rows. After: mean 3 tokens over 5 rows."),
                 new Case(
                         "turn_duration",
                         (b, v) -> b.latencyMs(v),
-                        "Before: mean 1 ms over 2 rows. After: mean 3 ms over 2 rows."));
+                        "Before: mean 1 ms over 5 rows. After: mean 3 ms over 5 rows."));
         for (Case c : cases) {
             List<SpanRef> rows = new ArrayList<>();
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < 5; i++) {
                 rows.add(c.set()
                         .apply(SpanRefs.row(Role.BASELINE).trace("b" + i).startedAt(hour(0)), 1)
                         .build());

@@ -39,6 +39,11 @@ final class EvidenceChecks {
 
     private static final int TOP_VALUES = 8;
     private static final int MAX_HOURLY_BUCKETS = 48;
+
+    /** How far apart the two sides of a computed split must be, in standard errors, to name it a change point. */
+    private static final double MIN_Z = 3;
+
+    private static final int MIN_ROWS_AFTER = 5;
     private static final String NONE = "(none)";
     private static final String NO_VALUE = "—";
 
@@ -378,6 +383,11 @@ final class EvidenceChecks {
         } else if (points.size() >= 2) {
             changeBucket = bestSplit(points);
             changeLine = "Change point: %s, computed as the best single split of the series.";
+            String flat = flat(shape, metric, comparisonSide, changeBucket, buckets, flagged, comparison, values);
+            if (flat != null) {
+                blocks.add(flat);
+                return section("## Series", blocks);
+            }
         } else {
             blocks.add("Change point: not computed (fewer than two buckets).");
             return section("## Series", blocks);
@@ -408,6 +418,63 @@ final class EvidenceChecks {
             }
         }
         return points.get(best).bucket();
+    }
+
+    /**
+     * The line that replaces a computed change point the series does not support, or null when it does. A share is
+     * tested with a pooled two-proportion z, a shift's mean with a two-sample z over the rows' own spread; either needs
+     * |z| of at least {@value #MIN_Z} and {@value #MIN_ROWS_AFTER} rows after the split. A count series has no
+     * comparison to test against and keeps its split.
+     */
+    private static @Nullable String flat(
+            ClaimShape shape,
+            Metric metric,
+            boolean comparisonSide,
+            int changeBucket,
+            int buckets,
+            int[] flagged,
+            int[] comparison,
+            List<List<Double>> values) {
+        if (shape == ClaimShape.DISTRIBUTION_SHIFT) {
+            List<Double> before = new ArrayList<>();
+            List<Double> after = new ArrayList<>();
+            for (int b = 0; b < buckets; b++) (b < changeBucket ? before : after).addAll(values.get(b));
+            double m1 = mean(before);
+            double m2 = mean(after);
+            double se = Math.sqrt(variance(before, m1) / before.size() + variance(after, m2) / after.size());
+            boolean steps = se == 0 ? m1 != m2 : Math.abs(m2 - m1) / se >= MIN_Z;
+            if (steps && after.size() >= MIN_ROWS_AFTER) return null;
+            return String.format(
+                    Locale.ROOT,
+                    "No change point: the mean is flat (%s%s before the best split, %s%s after).",
+                    metric.format(m1),
+                    metric.unit,
+                    metric.format(m2),
+                    metric.unit);
+        }
+        if (shape != ClaimShape.RATE_RISE || !comparisonSide) return null;
+        int f1 = 0;
+        int n1 = 0;
+        int f2 = 0;
+        int n2 = 0;
+        for (int b = 0; b < buckets; b++) {
+            if (b < changeBucket) {
+                f1 += flagged[b];
+                n1 += flagged[b] + comparison[b];
+            } else {
+                f2 += flagged[b];
+                n2 += flagged[b] + comparison[b];
+            }
+        }
+        double pooled = (double) (f1 + f2) / (n1 + n2);
+        double se = Math.sqrt(pooled * (1 - pooled) * (1.0 / n1 + 1.0 / n2));
+        double z = se == 0 ? 0 : ((double) f2 / n2 - (double) f1 / n1) / se;
+        if (Math.abs(z) >= MIN_Z && n2 >= MIN_ROWS_AFTER) return null;
+        return String.format(
+                Locale.ROOT,
+                "No change point: the flagged share is flat (%s before the best split, %s after).",
+                percent(f1, n1),
+                percent(f2, n2));
     }
 
     private static String beforeAfter(
@@ -693,6 +760,13 @@ final class EvidenceChecks {
     private static double mean(List<Double> values) {
         double sum = 0;
         for (double v : values) sum += v;
+        return sum / values.size();
+    }
+
+    /** Over the rows themselves, not a sample estimate, so a one-row side has a spread of zero rather than none. */
+    private static double variance(List<Double> values, double mean) {
+        double sum = 0;
+        for (double v : values) sum += (v - mean) * (v - mean);
         return sum / values.size();
     }
 
