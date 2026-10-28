@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.finding.FindingEvidenceRepository.Ref;
+import ai.tessary.classifier.metric.MetricEvidenceRefs.Timed;
 import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -55,7 +57,7 @@ class MetricControlTest {
     private static MetricControl ringOf(String... days) {
         MetricControl control = MetricControl.empty();
         for (String day : days) {
-            control = control.fold(GRID, day, window(100, 1000), workload(), tokens());
+            control = control.fold(GRID, day, window(100, 1000), workload(), tokens(), List.of());
         }
         return control;
     }
@@ -64,8 +66,8 @@ class MetricControlTest {
     @DisplayName("windows landing on the same day merge exactly, so a day is not a sample of itself")
     void sameDayWindowsMergeExactly() {
         MetricControl control = MetricControl.empty()
-                .fold(GRID, "2026-08-10", window(100, 1000), workload(), tokens())
-                .fold(GRID, "2026-08-10", window(400, 1000), workload(), tokens());
+                .fold(GRID, "2026-08-10", window(100, 1000), workload(), tokens(), List.of())
+                .fold(GRID, "2026-08-10", window(400, 1000), workload(), tokens(), List.of());
 
         assertEquals(1, daysOf(control).size(), "one day is one slot however many windows closed in it");
         MetricControl.Resolved resolved = control.resolve(GRID, EVENT_DAY, Set.of());
@@ -78,8 +80,20 @@ class MetricControlTest {
     void weightHalvesEverySevenDays() {
         // Same population both days, so any difference is the weighting.
         MetricControl control = MetricControl.empty()
-                .fold(GRID, "2026-07-27", window(1000, 1000), workload(), tokens()) // 14 days before EVENT_DAY
-                .fold(GRID, "2026-08-10", window(1000, 1000), workload(), tokens()); // the judged window's day
+                .fold(
+                        GRID,
+                        "2026-07-27",
+                        window(1000, 1000),
+                        workload(),
+                        tokens(),
+                        List.of()) // 14 days before EVENT_DAY
+                .fold(
+                        GRID,
+                        "2026-08-10",
+                        window(1000, 1000),
+                        workload(),
+                        tokens(),
+                        List.of()); // the judged window's day
 
         MetricControl.Resolved resolved = control.resolve(GRID, EVENT_DAY, Set.of());
         assertNotNull(resolved);
@@ -88,8 +102,8 @@ class MetricControlTest {
 
         // Past retention it contributes nothing and leaves the ring.
         MetricControl aged = MetricControl.empty()
-                .fold(GRID, "2026-07-01", window(1000, 1000), workload(), tokens())
-                .fold(GRID, "2026-08-10", window(1000, 1000), workload(), tokens());
+                .fold(GRID, "2026-07-01", window(1000, 1000), workload(), tokens(), List.of())
+                .fold(GRID, "2026-08-10", window(1000, 1000), workload(), tokens(), List.of());
         assertEquals(1, daysOf(aged).size(), "a day past retention is dropped on the next fold");
     }
 
@@ -98,7 +112,7 @@ class MetricControlTest {
     void retentionBoundIsInclusive() {
         // One slot, so only resolve's boundary is on trial.
         MetricControl control =
-                MetricControl.empty().fold(GRID, "2026-07-20", window(1000, 1000), workload(), tokens());
+                MetricControl.empty().fold(GRID, "2026-07-20", window(1000, 1000), workload(), tokens(), List.of());
 
         MetricControl.Resolved atBound = control.resolve(GRID, "2026-08-10", Set.of());
         assertNotNull(atBound, "a day exactly three half-lives old still counts");
@@ -125,9 +139,9 @@ class MetricControlTest {
     @DisplayName("a confirmed regression's days are left out, so it never becomes the bar it is judged against")
     void confirmedDaysAreExcluded() {
         MetricControl control = MetricControl.empty()
-                .fold(GRID, "2026-08-08", window(500, 1000), workload(), tokens())
-                .fold(GRID, "2026-08-09", window(500, 4000), workload(), tokens()) // the regression
-                .fold(GRID, "2026-08-10", window(500, 4000), workload(), tokens()); // still regressed
+                .fold(GRID, "2026-08-08", window(500, 1000), workload(), tokens(), List.of())
+                .fold(GRID, "2026-08-09", window(500, 4000), workload(), tokens(), List.of()) // the regression
+                .fold(GRID, "2026-08-10", window(500, 4000), workload(), tokens(), List.of()); // still regressed
 
         MetricControl.Resolved all = control.resolve(GRID, EVENT_DAY, Set.of());
         assertNotNull(all);
@@ -147,8 +161,8 @@ class MetricControlTest {
     @DisplayName("the ring round-trips, and an unreadable one comes back empty rather than throwing")
     void serializationRoundTripsAndToleratesGarbage() {
         MetricControl control = MetricControl.empty()
-                .fold(GRID, "2026-08-10", window(250, 1500), workload(), tokens())
-                .fold(GRID, "2026-08-09", window(250, 1500), workload(), tokens());
+                .fold(GRID, "2026-08-10", window(250, 1500), workload(), tokens(), List.of())
+                .fold(GRID, "2026-08-09", window(250, 1500), workload(), tokens(), List.of());
 
         MetricControl back = MetricControl.fromJson(control.toJson());
         assertEquals(2, daysOf(back).size());
@@ -184,7 +198,8 @@ class MetricControlTest {
         assertNull(resolved.tokens());
 
         // A fresh window replaces the unreadable day instead of throwing on the merge.
-        MetricControl.Resolved refolded = control.fold(GRID, "2026-08-09", window(50, 1000), workload(), tokens())
+        MetricControl.Resolved refolded = control.fold(
+                        GRID, "2026-08-09", window(50, 1000), workload(), tokens(), List.of())
                 .resolve(GRID, EVENT_DAY, Set.of());
         assertNotNull(refolded);
         assertEquals(2, refolded.daysUsed());
@@ -196,10 +211,115 @@ class MetricControlTest {
     void overflowMassReadsAtTheTopEdge() {
         double pastTheTop = Math.exp(GRID.logHi()) * 2;
         MetricControl.Resolved resolved = MetricControl.empty()
-                .fold(GRID, "2026-08-10", window(10, pastTheTop), workload(), tokens())
+                .fold(GRID, "2026-08-10", window(10, pastTheTop), workload(), tokens(), List.of())
                 .resolve(GRID, EVENT_DAY, Set.of());
 
         assertNotNull(resolved);
         assertEquals(GRID.logHi(), resolved.measure().quantile(0.5));
+    }
+
+    /** {@code n} trace rows named {@code prefix-i}, a second apart from {@code day}'s midnight, all at 1s. */
+    private static List<Timed> rowsOf(String prefix, String day, int n) {
+        List<Timed> out = new ArrayList<>(n);
+        Instant start = Instant.parse(day + "T00:00:00Z");
+        for (int i = 0; i < n; i++) {
+            out.add(new Timed(Ref.trace(prefix + "-" + i), start.plusSeconds(i).toString(), Math.log(1000)));
+        }
+        return out;
+    }
+
+    private static List<String> traceIds(List<Timed> rows) {
+        return rows.stream().map(t -> t.ref().traceId()).toList();
+    }
+
+    private static List<Timed> dayRows(MetricControl control) {
+        MetricControl.Day day = control.newest();
+        assertNotNull(day);
+        return MetricControl.rows(List.of(day));
+    }
+
+    /**
+     * A day keeps 100 rows, shared in proportion to the samples each window put into the day's sketch. A 500-row window
+     * stores every fifth row (a-0, a-5, ... a-495). A 100-row window then earns round(100 x 100 / 600) = 17 slots, and
+     * the first window keeps 83 of its 100 stored rows, stored[floor(i x 100 / 83)], ahead of the second window's
+     * b-floor(i x 100 / 17). The bug is a concatenate-then-sample that gives the last window half the day.
+     */
+    @Test
+    void aDayKeepsEveryWindowsShareOfItsRows() {
+        List<Timed> first = rowsOf("a", "2026-08-10", 500);
+        List<Timed> second = rowsOf("b", "2026-08-10", 100);
+        MetricControl control = MetricControl.empty()
+                .fold(GRID, "2026-08-10", window(500, 1000), workload(), tokens(), first)
+                .fold(GRID, "2026-08-10", window(100, 1000), workload(), tokens(), second);
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 83; i++) expected.add("a-" + 5 * (i * 100 / 83));
+        for (int i = 0; i < 17; i++) expected.add("b-" + i * 100 / 17);
+        List<String> kept = traceIds(dayRows(control));
+        assertEquals(100, kept.size(), "a day slot is bounded");
+        assertEquals("a-490", kept.get(82), "the first window's share spans its whole period");
+        assertEquals("b-94", kept.get(99));
+        assertEquals(expected, kept);
+    }
+
+    /** The bug is rows from a sketch no longer in the reference offered as its baseline. */
+    @Test
+    void aDeadGridDayDropsItsRowsWithItsSketch() {
+        Grid other = new Grid(1.0, 2.0, 4);
+        MetricHistogram otherWindow = new MetricHistogram(other);
+        for (int i = 0; i < 30; i++) otherWindow.add(Math.log(3));
+        MetricControl control = MetricControl.empty()
+                .fold(GRID, "2026-08-10", window(50, 1000), workload(), tokens(), rowsOf("a", "2026-08-10", 50))
+                .fold(
+                        other,
+                        "2026-08-10",
+                        otherWindow,
+                        new MetricWorkload(MetricWorkload.grid(other.bins())),
+                        new MetricTokens(MetricTokens.grid(other.bins())),
+                        rowsOf("b", "2026-08-10", 30));
+
+        assertEquals(traceIds(rowsOf("b", "2026-08-10", 30)), traceIds(dayRows(control)));
+    }
+
+    /** The bug is baseline rows drawn from a confirmed regression's day or from a day after the judged window. */
+    @Test
+    void resolveListsTheRowsOfTheDaysItUsedOnly() {
+        List<Timed> a = rowsOf("a", "2026-08-08", 20);
+        MetricControl control = MetricControl.empty()
+                .fold(GRID, "2026-08-08", window(20, 1000), workload(), tokens(), a)
+                .fold(GRID, "2026-08-09", window(20, 4000), workload(), tokens(), rowsOf("b", "2026-08-09", 20))
+                .fold(GRID, "2026-08-11", window(20, 1000), workload(), tokens(), rowsOf("c", "2026-08-11", 20));
+
+        MetricControl.Resolved resolved = control.resolve(GRID, "2026-08-10", Set.of("2026-08-09"));
+        assertNotNull(resolved);
+        assertEquals(
+                List.of("2026-08-08"),
+                resolved.days().stream().map(MetricControl.Day::day).toList());
+        assertEquals(a, MetricControl.rows(resolved.days()));
+    }
+
+    /** The bug is a ring written before days kept rows failing the sweep, or reading as a lost write. */
+    @Test
+    void anOlderRingWithoutRowsReadsAsNoRows() {
+        String json = "{\"kind\":\"control\",\"days\":[{\"d\":\"2026-08-09\",\"m\":"
+                + window(100, 1000).toJson() + "}]}";
+
+        MetricControl.Resolved resolved = MetricControl.fromJson(json).resolve(GRID, EVENT_DAY, Set.of());
+        assertNotNull(resolved);
+        assertEquals(1, resolved.daysUsed());
+        assertEquals(List.of(), MetricControl.rows(resolved.days()));
+    }
+
+    /** The bug is a ring reload that loses a day's rows, their span ids or their event times. */
+    @Test
+    void rowsRoundTripThroughTheRing() {
+        List<Timed> rows = List.of(
+                new Timed(Ref.span("t-1", "s-1"), "2026-08-10T00:00:01Z", Math.log(1500)),
+                new Timed(Ref.span("t-2", "s-2"), "2026-08-10T00:00:02Z", Math.log(2500)),
+                new Timed(Ref.trace("t-3"), "2026-08-10T00:00:03Z", Math.log(3500)));
+        MetricControl control =
+                MetricControl.empty().fold(GRID, "2026-08-10", window(3, 1500), workload(), tokens(), rows);
+
+        assertEquals(rows, dayRows(MetricControl.fromJson(control.toJson())));
     }
 }

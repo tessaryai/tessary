@@ -552,7 +552,12 @@ public class MetricDriftSweep implements ClassifierSweep {
                     Map.copyOf(callSites),
                     List.copyOf(windowRefs));
             control = control.fold(
-                    grid, eventDay, closedWindow.measure(), closedWindow.workload(), closedWindow.tokens());
+                    grid,
+                    eventDay,
+                    closedWindow.measure(),
+                    closedWindow.workload(),
+                    closedWindow.tokens(),
+                    List.copyOf(windowRefs));
             baselines.closeWindow(row.id(), control.toJson(), now);
             pinned = compared.pinned();
             if (compared.pending() != null) pending.add(compared.pending());
