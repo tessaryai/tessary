@@ -38,6 +38,7 @@ const SHIFT = {
   control: null, direction: "up", explains: [], floor: 0, measure: "cost",
   quantiles: [{ key: "p50", then: 1, now: 2.5 }, { key: "p95", then: 10, now: 40 }],
   ratio: 2.5, reference: "previous", tokens: [], workload: [],
+  mean: { key: "mean", then: 1, now: 1.3 }, shift: { mean: 0.3, p50: 1.5, p95: 30 },
 } as unknown as NonNullable<BehaviorFindingDetail["metric"]>;
 
 beforeEach(() => {
@@ -404,6 +405,16 @@ describe("a shift finding", () => {
 
     fireEvent.click(button("Run triage"));
     await waitFor(() => expect(api.analyzeBehaviorFinding).toHaveBeenCalledWith("fnd-1"));
+  });
+
+  // Bug: the page showed the shift only as a ratio, never as the mean in the measure's own units.
+  it("shows the mean and the signed shift under the pins", async () => {
+    api.getBehaviorFinding.mockResolvedValue(plain({ detector: "cost_drift" }, { metric: SHIFT }));
+    renderPage();
+    await screen.findByRole("heading", { level: 1 });
+
+    expect(screen.getByText("On average a turn is $0.30 more")).toBeTruthy();
+    expect(screen.getByText("Mean $1.00 to $1.30 (+$0.30). p50 +$1.50, p95 +$30.00.")).toBeTruthy();
   });
 
   // Bug: the window named its days only, so a drift that ran from morning to afternoon read as a whole day

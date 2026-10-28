@@ -4,6 +4,7 @@ package ai.tessary.classifier.finding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.tenant.Ids;
@@ -73,6 +74,52 @@ record BehaviorFindingOnsetTest(FindingRepository findings, TenantService tenant
         assertTrue(
                 Instant.parse(firstSeenAt(pid, id)).isAfter(firstOnset),
                 "and it moved FORWARD, which is what isNewSpell tests");
+    }
+
+    /**
+     * A drift window whose step came at noon and whose last row came at midnight. The onset is the change point, not the
+     * window close, and a second window in the same spell keeps it. The bugs are an onset written from the window
+     * close, and the spell rule reading the new window's change point on a running spell.
+     */
+    @Test
+    @DisplayName("a drift window's onset is its change point, and a running spell keeps it")
+    void recordShift_writesOnsetAsTheChangePoint() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "onset-change-point").project().id();
+        Instant changePoint = Instant.parse("2026-06-01T12:00:00Z");
+        Instant closed = Instant.parse("2026-06-02T00:00:00Z");
+
+        String id = shift(pid, changePoint, closed).findingId();
+
+        FindingRow first = findings.findById(pid, id).orElseThrow();
+        assertEquals(changePoint, Instant.parse(first.onsetAt()), "the onset is where the shift began");
+        assertEquals(closed, Instant.parse(first.lastSeenAt()), "the last row seen is the window's close");
+
+        Instant nextClosed = Instant.parse("2026-06-02T06:00:00Z");
+        var second = shift(pid, Instant.parse("2026-06-02T05:00:00Z"), nextClosed);
+
+        assertEquals(id, second.findingId(), "one cause is one row");
+        FindingRow after = findings.findById(pid, id).orElseThrow();
+        assertEquals(changePoint, Instant.parse(after.onsetAt()), "a spell still firing keeps its first change point");
+        assertEquals(nextClosed, Instant.parse(after.lastSeenAt()));
+    }
+
+    /** One drift window: its change point and its close, with the quiet horizon a day before the close. */
+    private FindingRepository.Recorded shift(String projectId, Instant onset, Instant closed) {
+        return findings.recordShift(
+                Ids.ulid(),
+                projectId,
+                BuiltInDetector.Kind.DURATION_DRIFT,
+                "mb-onset",
+                "turn_duration:cs-1:slower:pinned",
+                50,
+                null,
+                "cs-1",
+                "{\"measure\":\"turn_duration\"}",
+                onset.toString(),
+                closed.toString(),
+                closed.minus(java.time.Duration.ofHours(24)).toString(),
+                Instant.now().toString());
     }
 
     /** One recompute pass: in a spell since {@code onset}, observed at {@code at}. */

@@ -5,6 +5,7 @@ import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricControl.Resolved;
 import ai.tessary.classifier.metric.MetricDriftDetector.Decision;
 import ai.tessary.classifier.metric.MetricDriftDetector.Direction;
+import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -139,7 +140,28 @@ public final class MetricFindingEvidence {
             @Nullable String sinceVersionId,
             /** Null on the pinned arm, whose reference is enumerated as {@code baseline} evidence rows. */
             @Nullable Control control,
-            List<Explains> explains) {}
+            List<Explains> explains,
+            /** Null on a blob written before the mean existed. */
+            @Nullable Pair mean,
+            @Nullable PlainShift shift) {}
+
+    /** Now minus then, in the measure's own units; a side with no reading leaves its difference null. */
+    public record PlainShift(
+            @Nullable Double mean,
+            @Nullable Double p50,
+            @Nullable Double p95) {}
+
+    /**
+     * Where inside the window the shift began. {@code index} counts window rows before {@code at}; {@code rowsBefore}
+     * is how many of them were written as {@code baseline}.
+     */
+    public record ChangePoint(String at, String method, int index, int rowsBefore) {
+
+        public static final String METHOD_CUSUM = "cusum";
+
+        /** The window's rows carried no values, so {@code at} is the window open. */
+        public static final String METHOD_UNAVAILABLE = "unavailable";
+    }
 
     public record Control(
             int daysUsed,
@@ -189,7 +211,9 @@ public final class MetricFindingEvidence {
                     text(window.path("kind")),
                     text(root.path("since_version_id")),
                     control(root.path("control")),
-                    explains(root.path("explains")));
+                    explains(root.path("explains")),
+                    mean(root.path("mean")),
+                    plainShift(root.path("shift")));
         } catch (JsonProcessingException e) {
             return null;
         }
@@ -225,6 +249,15 @@ public final class MetricFindingEvidence {
                     e.path("covered").asDouble(0)));
         }
         return List.copyOf(out);
+    }
+
+    private static @Nullable Pair mean(JsonNode pair) {
+        return pair.isArray() && pair.size() == 2 ? new Pair("mean", number(pair.get(0)), number(pair.get(1))) : null;
+    }
+
+    private static @Nullable PlainShift plainShift(JsonNode node) {
+        if (!node.isObject()) return null;
+        return new PlainShift(number(node.path("mean")), number(node.path("p50")), number(node.path("p95")));
     }
 
     private static List<Pair> pairs(JsonNode block) {
@@ -287,7 +320,10 @@ public final class MetricFindingEvidence {
             String windowClosedAt,
             String windowKind,
             List<Explained> explains,
-            @Nullable Resolved control) {
+            @Nullable Resolved control,
+            Grid grid,
+            ChangePoint changepoint,
+            @Nullable String referenceFrom) {
         ObjectNode root = MetricHistogram.JSON.createObjectNode();
         root.put("measure", measure);
         ObjectNode bucket = root.putObject("bucket");
@@ -306,6 +342,14 @@ public final class MetricFindingEvidence {
         ObjectNode quantiles = root.putObject("quantiles");
         putPair(quantiles, "p50", rawQuantile(ref, 0.5), rawQuantile(cur, 0.5));
         putPair(quantiles, "p95", rawQuantile(ref, 0.95), rawQuantile(cur, 0.95));
+        // Both sides off the sketch: the rolling control and older pinned blobs have no rows to average.
+        OptionalDouble meanThen = rawMean(ref, grid);
+        OptionalDouble meanNow = rawMean(cur, grid);
+        putPair(root, "mean", meanThen, meanNow);
+        ObjectNode shift = root.putObject("shift");
+        putDifference(shift, "mean", meanThen, meanNow);
+        putDifference(shift, "p50", rawQuantile(ref, 0.5), rawQuantile(cur, 0.5));
+        putDifference(shift, "p95", rawQuantile(ref, 0.95), rawQuantile(cur, 0.95));
 
         ObjectNode workload = root.putObject("workload");
         putPair(
@@ -350,6 +394,12 @@ public final class MetricFindingEvidence {
         window.put("opened_at", windowOpenedAt);
         window.put("closed_at", windowClosedAt);
         window.put("kind", windowKind);
+        ObjectNode located = root.putObject("changepoint");
+        located.put("at", changepoint.at());
+        located.put("method", changepoint.method());
+        located.put("index", changepoint.index());
+        located.put("rows_before", changepoint.rowsBefore());
+        root.put("reference_from", referenceFrom);
 
         // Absence already says this finding suppressed nothing.
         if (!explains.isEmpty()) {
@@ -389,6 +439,30 @@ public final class MetricFindingEvidence {
         } else {
             pair.addNull();
         }
+    }
+
+    private static void putDifference(ObjectNode into, String field, OptionalDouble then, OptionalDouble now) {
+        if (then.isPresent() && now.isPresent()) {
+            into.put(field, roundReading(now.getAsDouble() - then.getAsDouble()));
+        } else {
+            into.putNull(field);
+        }
+    }
+
+    /**
+     * The count-weighted mean of raw values off the bins, with the same edge treatment as {@code stdDevLog} and
+     * {@code quantile}: underflow at the floor, each bin at its midpoint, overflow at the ceiling.
+     */
+    public static OptionalDouble rawMean(MetricReading sketch, Grid grid) {
+        if (sketch.count() == 0) return OptionalDouble.empty();
+        double[] cdf = sketch.cdf();
+        double sum = cdf[0] * Math.exp(grid.logLo());
+        for (int i = 0; i < grid.bins(); i++) {
+            double mass = cdf[i + 1] - cdf[i];
+            if (mass != 0) sum += mass * Math.exp(grid.logLo() + (i + 0.5) * grid.slotWidthLog());
+        }
+        sum += (cdf[grid.bins() + 1] - cdf[grid.bins()]) * Math.exp(grid.logHi());
+        return OptionalDouble.of(sum);
     }
 
     /**

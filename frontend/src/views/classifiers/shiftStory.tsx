@@ -36,6 +36,12 @@ export function formatMeasure(measure: string, v: number | null | undefined): st
   return `${Math.round(v)}ms`;
 }
 
+/** A difference in the measure's units, always signed: `+1.5s`, `-$0.30`. */
+export function signedMeasure(measure: string, v: number | null | undefined): string {
+  if (v == null) return "–";
+  return `${v < 0 ? "-" : "+"}${formatMeasure(measure, Math.abs(v))}`;
+}
+
 function trimZeros(s: string): string {
   return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
 }
@@ -122,6 +128,25 @@ export function pinsFor(shift: Shift): Pin[] {
       at: "after-p95",
     },
   ];
+}
+
+/** The mean then and now, as a difference in the measure's own units. Null on a finding written before the mean. */
+export function meanLine(shift: Shift): { label: string; detail: string; tone: Tone } | null {
+  const then = shift.mean?.then;
+  const now = shift.mean?.now;
+  if (then == null || now == null) return null;
+  const m = shift.measure;
+  const d = shift.shift?.mean ?? now - then;
+  const unit = m === "cost" ? "turn" : "call";
+  const verb = m === "cost" ? (d < 0 ? "less" : "more") : d < 0 ? "faster" : "slower";
+  return {
+    label: `On average a ${unit} is ${formatMeasure(m, Math.abs(d))} ${verb}`,
+    detail: `Mean ${formatMeasure(m, then)} to ${formatMeasure(m, now)} (${signedMeasure(m, d)}). p50 ${signedMeasure(
+      m,
+      shift.shift?.p50,
+    )}, p95 ${signedMeasure(m, shift.shift?.p95)}.`,
+    tone: d < 0 ? "positive" : "negative",
+  };
 }
 
 /* ------------------------------------------------------------------ chart */
@@ -310,6 +335,17 @@ export function ShiftPins({ shift }: { shift: Shift }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+export function ShiftMean({ shift }: { shift: Shift }) {
+  const line = meanLine(shift);
+  if (!line) return null;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className={cn("text-body font-medium", toneTextClass(line.tone))}>{line.label}</span>
+      <span className="text-muted text-small">{line.detail}</span>
     </div>
   );
 }

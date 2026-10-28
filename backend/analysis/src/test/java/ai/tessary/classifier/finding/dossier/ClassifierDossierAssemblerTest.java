@@ -262,4 +262,37 @@ class ClassifierDossierAssemblerTest {
                         + " suppress any other finding, so there is nothing to concentrate over.\n",
                 MetricDriftDossier.build(MAPPER.readTree(payload)));
     }
+    /**
+     * The agent reads the shift in the measure's units and where it began. The bug is a dossier that states only a
+     * ratio, with no plain-unit mean and no change point.
+     */
+    @Test
+    void theMetricDriftDossierStatesTheMeanTheSignedShiftAndTheChangePoint() throws Exception {
+        String payload = "{\"bucket\":{\"key\":\"summarize\",\"kind\":\"call_site\"},\"reference\":\"pinned\","
+                + "\"direction\":\"up\",\"w1_log\":0.37,\"ratio\":1.45,\"floor\":0.15,\"n_ref\":50,\"n_cur\":50,"
+                + "\"quantiles\":{\"p50\":[2000.0,2840.0],\"p95\":[3000.0,4680.0]},"
+                + "\"mean\":[2000.0,2900.0],\"shift\":{\"mean\":900.0,\"p50\":840.0,\"p95\":-1680.0},"
+                + "\"window\":{\"opened_at\":\"2026-06-01T00:00:00Z\",\"closed_at\":\"2026-06-01T23:00:00Z\"},"
+                + "\"changepoint\":{\"at\":\"2026-06-01T12:00:00Z\",\"method\":\"cusum\",\"index\":20,"
+                + "\"rows_before\":10},\"reference_from\":\"2026-05-25T00:00:00Z\"}";
+
+        assertEquals(
+                "# Metric drift evidence\n\n"
+                        + "- bucket: `summarize` (call_site)\n"
+                        + "- reference: pinned\n"
+                        + "- direction: up\n"
+                        + "- effect: w1_log=0.3700 ratio=1.4500x (floor 0.1500)\n"
+                        + "- population: n_ref=50, n_cur=50\n"
+                        + "- change point: 2026-06-01T12:00:00Z (cusum; 20 rows before it in the window)\n"
+                        + "- reference from: 2026-05-25T00:00:00Z\n"
+                        + "\n## Reference vs. current (the paired before/after aggregate)\n\n"
+                        + "- p50: 2000.0 → 2840.0\n"
+                        + "- p95: 3000.0 → 4680.0\n"
+                        + "- mean: 2000.0 → 2900.0\n"
+                        + "- shift (now minus then): mean +900.0, p50 +840.0, p95 -1680.0\n"
+                        + "\n## Concentration: which sibling buckets this drift explains\n\n"
+                        + "This shift explains no sibling buckets (explains=[] or absent) — it did not"
+                        + " suppress any other finding, so there is nothing to concentrate over.\n",
+                MetricDriftDossier.build(MAPPER.readTree(payload)));
+    }
 }

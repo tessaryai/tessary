@@ -73,9 +73,9 @@ public class FindingRepository {
 
     /**
      * Record a closed window's shift. {@code sampleDelta} is traffic observed, not traces labelled. The payload
-     * refreshes every window because absorb absorbs the current level. {@code eventAt} is the window's event time;
-     * {@code quietBefore} is the recovery horizon, past which a new spell's onset moves so
-     * {@code CaseLedger.isNewSpell} can reopen its case.
+     * refreshes every window because absorb absorbs the current level. {@code onsetAt} is the event time of the
+     * window's change point and {@code eventAt} that of its last row; {@code quietBefore} is the recovery horizon, past
+     * which a new spell's onset moves so {@code CaseLedger.isNewSpell} can reopen its case.
      */
     public Recorded recordShift(
             String id,
@@ -87,6 +87,7 @@ public class FindingRepository {
             @Nullable String sinceVersionId,
             String callSiteId,
             String evidenceJson,
+            String onsetAt,
             String eventAt,
             String quietBefore,
             String now) {
@@ -96,7 +97,7 @@ public class FindingRepository {
                                  call_site_id, status, onset_at, last_seen_at, sample_count, payload,
                                  since_version_id, created_at, updated_at)
             VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :callSiteId,
-                    'open', :eventAt, :eventAt, :delta, CAST(:payload AS jsonb), :versionId, :now, :now)
+                    'open', :onsetAt, :eventAt, :delta, CAST(:payload AS jsonb), :versionId, :now, :now)
             ON CONFLICT (project_id, classifier_key, cause_key)
                 WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
                 sample_count = finding.sample_count + EXCLUDED.sample_count,
@@ -122,6 +123,7 @@ public class FindingRepository {
                 .param("delta", sampleDelta)
                 .param("payload", payload)
                 .param("versionId", sinceVersionId)
+                .param("onsetAt", onsetAt)
                 .param("eventAt", eventAt)
                 .param("quietBefore", quietBefore)
                 .param("now", now)

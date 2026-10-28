@@ -33,6 +33,17 @@ public record FindingClaim(
         return FindingPayload.count(evidenceCountsJson, role);
     }
 
+    /** Null when absent or not text. */
+    public @Nullable String payloadText(String key) {
+        return FindingPayload.text(payloadJson, key);
+    }
+
+    /** As {@link FindingRow#causeKind}: the payload's {@code cause_kind}, else {@link #classifierKey}. */
+    public String causeKind() {
+        String kind = payloadText("cause_kind");
+        return kind == null ? classifierKey : kind;
+    }
+
     /** 0 when absent or not a number. */
     public double payloadNumber(String key) {
         JsonNode node = FindingPayload.tree(payloadJson).path(key);

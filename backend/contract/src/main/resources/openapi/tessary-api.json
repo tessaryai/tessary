@@ -7726,6 +7726,37 @@
         ],
         "type" : "object"
       },
+      "PlainShift" : {
+        "properties" : {
+          "mean" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "p50" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "p95" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "mean",
+          "p50",
+          "p95"
+        ],
+        "type" : "object"
+      },
       "PlatformDescriptor" : {
         "properties" : {
           "auth" : {
@@ -9576,6 +9607,16 @@
             "format" : "double",
             "type" : "number"
           },
+          "mean" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/Pair"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "measure" : {
             "type" : "string"
           },
@@ -9599,6 +9640,16 @@
           },
           "reference" : {
             "type" : "string"
+          },
+          "shift" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/PlainShift"
+              },
+              {
+                "type" : "null"
+              }
+            ]
           },
           "sinceVersionId" : {
             "type" : [
@@ -9648,12 +9699,14 @@
           "direction",
           "explains",
           "floor",
+          "mean",
           "measure",
           "nCur",
           "nRef",
           "quantiles",
           "ratio",
           "reference",
+          "shift",
           "sinceVersionId",
           "tokens",
           "w1Log",

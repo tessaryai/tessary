@@ -20,7 +20,7 @@ import { Button, ErrorNote, Modal, PageHeader, Table, TableSkeleton, TBody, TD, 
 import { rcaRunning, shiftKind, shownAsCause, RCA_VERDICT_LABEL, type CauseKind } from "../rcaLabels";
 import { CauseCard } from "../components/CauseCard";
 import { RateChart, RatePins } from "../classifiers/rateStory";
-import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
+import { ShiftChart, ShiftMean, ShiftPins } from "../classifiers/shiftStory";
 import { LeakPins, LeakTimeline } from "../classifiers/secretStory";
 import { HowOutputsBroke, MalformedRate } from "../classifiers/malformedStory";
 import {
@@ -559,6 +559,7 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
         <>
           <ShiftChart shift={shift} />
           <ShiftPins shift={shift} />
+          <ShiftMean shift={shift} />
         </>
       ) : secretLeak ? (
         <>

@@ -17,6 +17,7 @@ import ai.tessary.classifier.finding.FakeFindingAdapter;
 import ai.tessary.classifier.finding.FindingAdapters;
 import ai.tessary.classifier.finding.FindingClaim;
 import ai.tessary.classifier.finding.FindingRepository;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -153,8 +154,9 @@ class RcaTriggerServiceTest {
 
     /**
      * Catches a finding row with an unreadable timestamp refusing the analysis: the window is a rendering
-     * detail, so each end falls back to a sibling column and then to now. Also pins the metric-movement header
-     * for a finding that asserted no severity and has no subject label: 0 over 0, labelled by the subject id.
+     * detail, so the split and the end fall back to a sibling column and then to now, and the start is 24 hours
+     * before the split. Also pins the metric-movement header for a finding that asserted no severity and has no
+     * subject label: 0 over 0, labelled by the subject id.
      */
     @Test
     void anUnreadableWindowFallsBackToASiblingColumnThenToNow() {
@@ -180,7 +182,7 @@ class RcaTriggerServiceTest {
                         isNull(),
                         eq(BuiltInDetector.Kind.TOOL_ERROR),
                         eq(RcaReportRow.ReportKind.METRIC_MOVEMENT),
-                        eq(onset),
+                        eq(Instant.parse("2026-05-03T00:00:00Z")),
                         eq(onset),
                         eq(onset),
                         eq(0.0),
@@ -188,6 +190,7 @@ class RcaTriggerServiceTest {
                         eq(0.0),
                         eq(RcaReportRow.Engine.AGENTIC));
         ArgumentCaptor<Instant> from = ArgumentCaptor.forClass(Instant.class);
+        ArgumentCaptor<Instant> split = ArgumentCaptor.forClass(Instant.class);
         ArgumentCaptor<Instant> to = ArgumentCaptor.forClass(Instant.class);
         verify(reports)
                 .insertPendingIfAbsent(
@@ -201,15 +204,89 @@ class RcaTriggerServiceTest {
                         anyString(),
                         anyString(),
                         from.capture(),
-                        any(Instant.class),
+                        split.capture(),
                         to.capture(),
                         anyDouble(),
                         anyDouble(),
                         anyDouble(),
                         anyString());
-        for (Instant end : List.of(from.getValue(), to.getValue())) {
+        for (Instant end : List.of(split.getValue(), to.getValue())) {
             assertTrue(!end.isBefore(before) && !end.isAfter(after), end + " is the trigger's now");
         }
+        assertEquals(
+                split.getValue().minus(Duration.ofHours(24)), from.getValue(), "the start is 24h before the split");
+    }
+
+    /**
+     * A drift finding swept late: {@code created_at} is the sweep's wall clock, nine days after the change point. The
+     * bug is a window from {@code created_at}, which starts after its own split, and a drift header of severity over
+     * zero instead of the mean then and now.
+     */
+    @Test
+    void trigger_ordersFromBeforeSplitBeforeTo() {
+        String withReference = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"cost\","
+                + "\"bucket\":{\"key\":\"cs-1\"},\"mean\":[1.0,1.3],\"reference_from\":\"2026-05-25T00:00:00Z\"}";
+        String noReference = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"cost\","
+                + "\"bucket\":{\"key\":\"cs-1\"},\"mean\":[1.0,1.3]}";
+        when(findings.findClaim("proj", "fnd_d"))
+                .thenReturn(Optional.of(driftClaim("fnd_d", "2026-06-02T00:00:00Z", withReference)));
+        when(findings.findClaim("proj", "fnd_e"))
+                .thenReturn(Optional.of(driftClaim("fnd_e", "2026-06-02T00:00:00Z", noReference)));
+        when(findings.findClaim("proj", "fnd_f"))
+                .thenReturn(Optional.of(driftClaim("fnd_f", "2026-06-01T00:00:00Z", noReference)));
+        jobIs("job_d");
+
+        trigger.trigger("proj", "fnd_d", "user_1", null);
+        trigger.trigger("proj", "fnd_e", "user_1", null);
+        trigger.trigger("proj", "fnd_f", "user_1", null);
+
+        Instant split = Instant.parse("2026-06-01T12:00:00Z");
+        driftReported("fnd_d", Instant.parse("2026-05-25T00:00:00Z"), split, Instant.parse("2026-06-02T00:00:00Z"));
+        driftReported("fnd_e", Instant.parse("2026-05-31T12:00:00Z"), split, Instant.parse("2026-06-02T00:00:00Z"));
+        driftReported("fnd_f", Instant.parse("2026-05-31T12:00:00Z"), split, split);
+    }
+
+    private void driftReported(String findingId, Instant from, Instant split, Instant to) {
+        verify(reports)
+                .insertPendingIfAbsent(
+                        eq("proj"),
+                        eq("job_d"),
+                        eq(findingId),
+                        eq("metric_baseline"),
+                        eq("mb_1"),
+                        eq("mb_1"),
+                        eq("cs-1"),
+                        eq(BuiltInDetector.Kind.COST_DRIFT),
+                        eq(RcaReportRow.ReportKind.METRIC_MOVEMENT),
+                        eq(from),
+                        eq(split),
+                        eq(to),
+                        eq(1.3),
+                        eq(1.0),
+                        eq(1.3 - 1.0),
+                        eq(RcaReportRow.Engine.AGENTIC));
+    }
+
+    /** A cost-drift finding whose change point is 2026-06-01T12:00, filed by a sweep that ran on 2026-06-10. */
+    private static FindingClaim driftClaim(String id, String lastSeenAt, String payload) {
+        return new FindingClaim(
+                id,
+                "proj",
+                BuiltInDetector.Kind.COST_DRIFT,
+                "mb_1:cost:cs-1:dearer:pinned",
+                "metric_baseline",
+                "mb_1",
+                null,
+                "cs-1",
+                "2026-06-01T12:00:00Z",
+                lastSeenAt,
+                null,
+                null,
+                0.3,
+                50,
+                payload,
+                null,
+                "2026-06-10T00:00:00Z");
     }
 
     /** A tool-error finding with no severity and no subject label, and the three window columns given. */
