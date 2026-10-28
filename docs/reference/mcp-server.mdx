@@ -100,7 +100,7 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 | `list_cases` | none | `state` (`open` \| `resolved`, default `open`), `detector`, `call_site_id`, `limit`, `cursor` | Paged case rows. Open pages are worst-first by severity then most recently opened; a resolved page is newest-closure-first |
 | `get_case` | `id` | none | The case, its activity trail, `latest_finding_id` and `finding_count`, the classifier's summary numbers, and the root-cause report inline in `rca` once one has finished: its summary, verdict, causes, the checks it ruled out, and the full investigation. The ruling, exemplars, and every trace and span id are redacted on this surface; page the finding's rows with `get_finding_evidence` and `latest_finding_id` |
 
-On a frustration case, `frustration` carries the call site's learned and current rates of frustrated sessions with the session counts behind each, and the scoring settings the finding was filed under.
+On a frustration case, `frustration` carries the call site's learned and current rates of frustrated sessions with the session-hour counts behind each, and the scoring settings the finding was filed under.
 
 On a groundedness case, `groundedness` carries the call site's learned and current rates of flagged answers with the trace counts behind each, the score at which a sentence is flagged (`flagThreshold`), and the rate test's settings the finding was filed under.
 

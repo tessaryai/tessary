@@ -31,7 +31,7 @@ Two notes on the deterministic pair.
 
 `frustration` is in this build and starts switched off on every project. It watches whether users become frustrated with the agent, and it is the one classifier that makes a model call per item it scores: each eligible user message is one call to TypeSafe's Jev decision model on your own OpenRouter or TypeSafe key.
 
-A flagged message is not a finding on its own. Each call site learns its normal rate of frustrated sessions, and a finding and its case open together when that rate rises. [Watch for frustrated users](/classifiers/frustration) covers turning it on, what it sends, and reading the case.
+A flagged message is not a finding on its own. Each call site learns its normal rate of frustrated sessions, counted by the hour, and a finding and its case open together when that rate rises. [Watch for frustrated users](/classifiers/frustration) covers turning it on, what it sends, and reading the case.
 
 ### Groundedness, on a separate model service
 

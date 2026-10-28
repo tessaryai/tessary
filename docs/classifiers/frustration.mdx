@@ -58,6 +58,7 @@ A user message is scored only when the four messages before it are user, assista
 - A message whose previous assistant turn ended on a tool call with no text is not scored.
 - A session here is the messages on one call site that share a session ID. A thread ID never joins two sessions. To read all of one user's messages as one conversation, send the same session ID for all of them. If one conversation reaches two call sites, it is two sessions, and each is scored and counted on its own.
 - Once one message in a session is flagged, the rest of that session is not scored.
+- A session counts once in each hour it has a scored message. A session that runs over two hours is counted in both, and is frustrated only in the hour of its flagged message.
 
 The classifier sweeps new traces continuously, so a message is scored shortly after it arrives.
 
@@ -72,7 +73,7 @@ A message is flagged only when the user is unhappy with the assistant, in their 
 
 One flagged message is not a finding and pages nobody. It is listed on the classifier as a detection.
 
-Each call site learns its own normal rate of frustrated sessions from its first sessions, then watches that rate. When the rate rises above what it learned, Tessary files a finding and opens a case in one step, titled for example "Frustrated sessions increased from 2.1% to 6.8% on support-chat". The finding does not wait for triage: its numbers are the claim, so it is ruled when it is filed.
+Each call site learns its own normal rate of frustrated sessions by the hour from its first 100 session-hours, then watches that rate. When the rate rises above what it learned, Tessary files a finding and opens a case in one step, titled for example "Frustrated sessions increased from 2.1% to 6.8% on support-chat". The finding does not wait for triage: its numbers are the claim, so it is ruled when it is filed.
 
 <Note>
   A call site that frustrates users from its first day learns that rate as its normal, and opens a case only if it gets worse.
@@ -83,7 +84,7 @@ Each call site learns its own normal rate of frustrated sessions from its first 
 Both pages show the same evidence:
 
 - A chart of the call site's rate of frustrated sessions over time, against the rate it learned.
-- The frustrated sessions, newest first, each with its flagged message and score. Every session the rate counted is listed; scroll to the end or select **Load more sessions** for the next page.
+- The frustrated sessions, newest first, one row per hour in which a session was flagged, each with its flagged message and score. Every one the rate counted is listed; scroll to the end or select **Load more sessions** for the next page.
 - The selected session as it happened: the flagged turn and the two turns before it, with tool calls, read from the real traces. The flagged message is outlined and marked **Frustration**, and the pane scrolls to it.
 
 If a session's traces have passed your retention period, the page says the traces may have aged out. The finding's counts still stand.
@@ -118,7 +119,7 @@ The case page cards every cause, high first. Each cause shows:
 
 ## Close the case
 
-Once RCA has produced a report, **Close** appears on the **Why** line. Select it and confirm. The call site learns its normal rate again from the sessions after the close, and the sessions the case cites still count as frustrated.
+Once RCA has produced a report, **Close** appears on the **Why** line. Select it and confirm. The call site learns its normal rate again from the session-hours after the close, and the sessions the case cites still count as frustrated.
 
 Close the case only once the fix is live. Closed earlier, the call site learns the frustrated rate as its normal. A frustration case cannot be absorbed.
 

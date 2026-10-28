@@ -63,9 +63,9 @@ Both close every finding the case still holds open, in the same action. Use **Cl
 
 ### Closing a frustration case
 
-A frustration case skips triage. The classifier rules its own finding positive and opens the case when a call site's rate of frustrated sessions rises above the rate it learned, because the numbers on the finding are the claim.
+A frustration case skips triage. The classifier rules its own finding positive and opens the case when a call site's rate of frustrated sessions, counted by the hour, rises above the rate it learned, because the numbers on the finding are the claim.
 
-Closing one restarts that call site's test: the accumulator goes back to zero, and the call site learns its normal rate again from the sessions after the close. The sessions the case cites still count as frustrated. The rate is re-learned from whatever comes next, so close the case once the fix is live. Closed before it lands, the call site learns the frustrated rate as its normal and is flagged only if it gets worse than that.
+Closing one restarts that call site's test: the accumulator goes back to zero, and the call site learns its normal rate again from the session-hours after the close. The sessions the case cites still count as frustrated. The rate is re-learned from whatever comes next, so close the case once the fix is live. Closed before it lands, the call site learns the frustrated rate as its normal and is flagged only if it gets worse than that.
 
 ### Closing a groundedness case
 
