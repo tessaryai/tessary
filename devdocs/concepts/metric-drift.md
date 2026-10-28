@@ -473,8 +473,9 @@ Fields to fill on `CaseDetection`:
 - `basis` — why this crossed **its own** bar, in this detector's terms. The ranked list mixes
   detectors that share no threshold, so say "distribution shift against the window pinned at the
   last deploy, W₁ 0.34 on logs over 1,180 turns" rather than normalizing to someone else's scale.
-- `onsetAt` — when the spell began. The close time of the first window that showed the shift,
-  not when the sweep noticed.
+- `onsetAt` — when the spell began. The change point inside the first window that showed the
+  shift, a one-sided CUSUM of log values against the reference mean, not the window close and not
+  when the sweep noticed.
 - `severity` — 0..1, for ordering only, never rendered as a number.
 
 ### 8.2 Catalog

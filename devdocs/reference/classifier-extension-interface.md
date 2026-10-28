@@ -55,7 +55,7 @@ decides what an out-of-tree jar can actually contribute — see §8.
 `FindingAdapter`'s consumers are `BehaviorTriageSource` (`analyze` and `listAutoEscalatable` for
 eligibility, `resolve` and `repin` for the absorb hook), `BehaviorTriageEngine.methodCard` and
 `RcaAnalysisService.dossierFiles` (the `method.md` texts, after the built-in card or RCA method for the
-key, and the RCA `evidence.md`, before the shape assemblers). An owned finding is ruled by its adapter whatever its cause kind; a case of owned findings calls
+key, and the RCA `evidence.md`, before the shape assemblers, and `checks.md`, which `dossierFiles` computes for every finding outside the adapter path). An owned finding is ruled by its adapter whatever its cause kind; a case of owned findings calls
 the hook once, on its newest finding.
 
 `absorbed` has two callers with different transactions. On one finding (`FindingService.resolve`) it
