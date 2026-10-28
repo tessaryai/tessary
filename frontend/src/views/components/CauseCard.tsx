@@ -29,6 +29,7 @@ export function CauseCard({
   ];
   const where = repoRead && cause.attribution && cause.attribution.kind !== "unknown" ? cause.attribution : null;
   const n = cause.affected_count;
+  const of = cause.affected_of;
   const sessions = show ? [] : cause.evidence_session_ids;
 
   return (
@@ -38,7 +39,9 @@ export function CauseCard({
         {(current || cause.confidence !== "high") && <Confidence level={cause.confidence} current={current} />}
         {n > 0 && (
           <span className="text-small text-muted whitespace-nowrap">
-            {n.toLocaleString()} {n === 1 ? affected[0] : affected[1]}
+            {of != null
+              ? `${n.toLocaleString()} of ${of.toLocaleString()} ${of === 1 ? affected[0] : affected[1]}`
+              : `${n.toLocaleString()} ${n === 1 ? affected[0] : affected[1]}`}
           </span>
         )}
       </div>
@@ -126,7 +129,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 const WHERE_LABEL: Record<string, string> = {
-  prompt: "Prompt", model: "Model", tool: "Tool", data: "Data", code: "Code", unknown: "Code",
+  prompt: "Prompt", model: "Model", tool: "Tool", data: "Data", code: "Code", unknown: "Code", deploy: "Deploy",
+  config: "Config", infra: "Infrastructure", traffic: "Traffic", upstream: "Upstream",
 };
 
 const whereLabel = (kind: string | null): string => WHERE_LABEL[kind ?? "code"] ?? "Where";

@@ -2607,6 +2607,8 @@ export interface components {
         Cause: {
             /** Format: int32 */
             affected_count: number;
+            /** Format: int32 */
+            affected_of: number | null;
             attribution: components["schemas"]["Attribution"] | null;
             change: string | null;
             confidence: string;
@@ -2845,6 +2847,10 @@ export interface components {
         CountView: {
             /** Format: int64 */
             count: number;
+        };
+        Coverage: {
+            how_chosen: string | null;
+            read: components["schemas"]["RoleCount"][];
         };
         CreateOrgRequest: {
             name: string;
@@ -3709,6 +3715,7 @@ export interface components {
             call_site_id: string | null;
             causes: components["schemas"]["Cause"][];
             completed_at: string | null;
+            coverage: components["schemas"]["Coverage"] | null;
             created_at: string;
             /** Format: double */
             current_value: number;
@@ -3800,6 +3807,11 @@ export interface components {
         RetrievedDocumentView: {
             text: string;
             title: string | null;
+        };
+        RoleCount: {
+            /** Format: int32 */
+            count: number;
+            role: string;
         };
         RuleListView: {
             rules: components["schemas"]["RuleView"][];

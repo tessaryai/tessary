@@ -62,7 +62,7 @@ export const GROUNDEDNESS_REPORT: RcaReport = {
   subject_id: "support-agent", subject_kind: "call_site", subject_label: "support-agent", metric: "groundedness_rate",
   current_value: 0.064, prior_value: 0.021, delta: 0.043, window_from: "2026-09-22T09:12:00Z",
   window_split: "2026-09-23T09:12:00Z", window_to: "2026-09-23T15:00:00Z", created_at: "2026-09-23T14:20:00Z",
-  completed_at: "2026-09-23T14:30:00Z", repo_available: true, ruled_out: [], run: null,
+  completed_at: "2026-09-23T14:30:00Z", repo_available: true, ruled_out: [], run: null, coverage: null,
   causes: [
     {
       title: "The retriever still serves the old pricing and policy pages", confidence: "high", change: null,
@@ -70,7 +70,7 @@ export const GROUNDEDNESS_REPORT: RcaReport = {
       how_it_caused_this: "The replaced pages quote old prices, so the answers go beyond the current documents.",
       next_step: "Remove the old folders from the index sources and rebuild the index.",
       attribution: { kind: "config", path: "support-agent/retrieval/index.yaml", commit: "a41c0de", excerpt: null },
-      evidence_session_ids: [], evidence_trace_ids: ["t-1", "t-2", "t-3"], affected_count: 3,
+      evidence_session_ids: [], evidence_trace_ids: ["t-1", "t-2", "t-3"], affected_count: 3, affected_of: null,
     },
     {
       title: "The system prompt asks for a complete answer every time", confidence: "medium", change: null, type: null,
@@ -80,6 +80,7 @@ export const GROUNDEDNESS_REPORT: RcaReport = {
       evidence_session_ids: [],
       evidence_trace_ids: ["t-4", "t-5"],
       affected_count: 2,
+      affected_of: null,
     },
   ],
 };

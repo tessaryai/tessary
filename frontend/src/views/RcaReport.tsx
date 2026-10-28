@@ -95,6 +95,15 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
   );
 }
 
+/** What the analysis says it read, built as one string so it reads as one sentence. */
+function CoverageLine({ coverage }: { coverage: RcaReportView["coverage"] }) {
+  if (!coverage) return null;
+  const parts = coverage.read.map((r) => `${r.count.toLocaleString()} ${r.role} rows`);
+  const read = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
+  const text = [read && `Read ${read}`, coverage.how_chosen].filter(Boolean).join(" · ");
+  return text ? <p className="text-small text-muted mt-1">{text}</p> : null;
+}
+
 function reportCauseKind(r: RcaReportView): CauseKind {
   if (r.report_kind === "frustration_causes") return "frustration";
   if (r.report_kind === "groundedness_causes") return "groundedness";
@@ -305,6 +314,7 @@ export function RcaReport() {
                   </Badge>
                 </div>
                 {r.summary && <p className="text-small text-fg mt-2">{r.summary}</p>}
+                <CoverageLine coverage={r.coverage} />
               </div>
             </Card>
           )}
