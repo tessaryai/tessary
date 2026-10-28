@@ -97,6 +97,20 @@ class GroundednessConfigTest {
     @ParameterizedTest
     @ValueSource(doubles = {0, -1, Double.NaN, Double.POSITIVE_INFINITY})
     void aNonPositiveOrNonFiniteDialIsItsDefault(double bad) {
-        assertEquals(GroundednessConfig.defaults(), new GroundednessConfig(bad, 0L, bad, bad, bad, 0, 0));
+        assertEquals(GroundednessConfig.defaults(), new GroundednessConfig(bad, 0L, bad, bad, bad, 0, 0, -1));
+    }
+
+    /**
+     * A trace's answers are scored a page at a time, within hours: learning its hour sooner reads the reference low,
+     * and a calm call site alarms.
+     */
+    @Test
+    void engine_carriesTheClassifiersSettleDelay() {
+        assertEquals(6, GroundednessConfig.defaults().engine().referenceSettleHours());
+        assertEquals(
+                12,
+                GroundednessConfig.of(MAPPER, "{\"reference_settle_hours\":12}")
+                        .engine()
+                        .referenceSettleHours());
     }
 }

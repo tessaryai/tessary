@@ -22,7 +22,8 @@ public record GroundednessConfig(
         double shiftMultiple,
         double shiftFloor,
         int minBaselineTraces,
-        int freezeBaselineTraces) {
+        int freezeBaselineTraces,
+        int referenceSettleHours) {
 
     /** The 2% false-alarm point on RAGTruth test, thresholds cross-validated by response. */
     public static final double DEFAULT_THRESHOLD = 0.975;
@@ -49,6 +50,12 @@ public record GroundednessConfig(
      */
     public static final int DEFAULT_FREEZE_BASELINE_TRACES = 1_000;
 
+    /**
+     * The encoder scores a page at a time, so a trace's answers are all scored within hours of the hour it counts
+     * in.
+     */
+    public static final int DEFAULT_REFERENCE_SETTLE_HOURS = 6;
+
     public GroundednessConfig {
         threshold = threshold > 0 && threshold < 1 ? threshold : DEFAULT_THRESHOLD;
         arlTarget = arlTarget <= 0 ? DEFAULT_ARL_TARGET : Math.max(1_000L, Math.min(1_000_000_000L, arlTarget));
@@ -69,6 +76,9 @@ public record GroundednessConfig(
         freezeBaselineTraces = freezeBaselineTraces <= 0
                 ? Math.max(minBaselineTraces, DEFAULT_FREEZE_BASELINE_TRACES)
                 : Math.max(minBaselineTraces, Math.min(1_000_000, freezeBaselineTraces));
+        referenceSettleHours = referenceSettleHours < 0
+                ? DEFAULT_REFERENCE_SETTLE_HOURS
+                : Math.min(ToolErrorConfig.MAX_REFERENCE_SETTLE_HOURS, referenceSettleHours);
     }
 
     public static GroundednessConfig defaults() {
@@ -79,7 +89,8 @@ public record GroundednessConfig(
                 DEFAULT_SHIFT_MULTIPLE,
                 DEFAULT_SHIFT_FLOOR,
                 DEFAULT_MIN_BASELINE_TRACES,
-                DEFAULT_FREEZE_BASELINE_TRACES);
+                DEFAULT_FREEZE_BASELINE_TRACES,
+                DEFAULT_REFERENCE_SETTLE_HOURS);
     }
 
     /**
@@ -99,7 +110,8 @@ public record GroundednessConfig(
                     root.path("shift_multiple").asDouble(DEFAULT_SHIFT_MULTIPLE),
                     root.path("shift_floor").asDouble(DEFAULT_SHIFT_FLOOR),
                     root.path("min_baseline_traces").asInt(DEFAULT_MIN_BASELINE_TRACES),
-                    root.path("freeze_baseline_traces").asInt(DEFAULT_FREEZE_BASELINE_TRACES));
+                    root.path("freeze_baseline_traces").asInt(DEFAULT_FREEZE_BASELINE_TRACES),
+                    root.path("reference_settle_hours").asInt(DEFAULT_REFERENCE_SETTLE_HOURS));
         } catch (JsonProcessingException e) {
             return defaults();
         }
@@ -115,7 +127,8 @@ public record GroundednessConfig(
                 ToolErrorConfig.DEFAULT_DOWN_ARM_MIN_RATE,
                 ToolErrorConfig.DEFAULT_MAX_PATTERNS,
                 minDecisionInterval,
-                freezeBaselineTraces);
+                freezeBaselineTraces,
+                referenceSettleHours);
     }
 
     /** The hash of the model, the input layout and the threshold. */

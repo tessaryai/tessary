@@ -277,6 +277,25 @@ class ChartSeriesTest {
         assertEquals(50, ChartSeries.minBaseline(malformed, MAPPER));
     }
 
+    /** The progress line must wait the classifier's own delay, not tool error's hour, before it counts an hour. */
+    @Test
+    void settleHours_isTheClassifiersOwnDelay() {
+        ClassifierRow frustration =
+                ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION).build();
+        ClassifierRow groundedness =
+                ClassifierRowBuilder.of(BuiltInDetector.Kind.GROUNDEDNESS).build();
+        ClassifierRow malformed =
+                ClassifierRowBuilder.of(BuiltInDetector.Kind.MALFORMED_OUTPUT).build();
+        ClassifierRow slower = ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
+                .config("{\"reference_settle_hours\":12}")
+                .build();
+
+        assertEquals(24, ChartSeries.settleHours(frustration, MAPPER));
+        assertEquals(6, ChartSeries.settleHours(groundedness, MAPPER));
+        assertEquals(1, ChartSeries.settleHours(malformed, MAPPER));
+        assertEquals(12, ChartSeries.settleHours(slower, MAPPER));
+    }
+
     @Test
     void rateBaseline_staysLearningUntilTheReferenceHoldsTheMinimum() {
         assertNull(ChartSeries.rateBaseline(state(120, 6), null, 150), "the detector is silent below its minimum");
