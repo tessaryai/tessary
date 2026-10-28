@@ -62,7 +62,7 @@ public class ToolErrorStateRepository {
                         SELECT {key} AS bucket_key, s_up, s_down, onset_up_at, onset_down_at,
                                calls_since_onset_up, calls_since_onset_down,
                                baseline_calls, baseline_failures, watermark_bucket, state_epoch,
-                               pending_pin_by, pending_pin_at, reset_at
+                               pending_pin_by, pending_pin_at, reset_at, learned_through, learn_before
                           FROM {table}
                          WHERE project_id = :pid
                          ORDER BY {key}
@@ -75,6 +75,9 @@ public class ToolErrorStateRepository {
                         baseline = new ToolErrorRate();
                         baseline.addCounts(baselineCalls, rs.getLong("baseline_failures"));
                     }
+                    String watermark = rs.getString("watermark_bucket");
+                    // Null on a row written before learned_through existed, which learned every hour it judged.
+                    String learnedThrough = rs.getString("learned_through");
                     return new CarriedState(
                             rs.getString("bucket_key"),
                             new State(
@@ -85,18 +88,20 @@ public class ToolErrorStateRepository {
                                     rs.getLong("calls_since_onset_up"),
                                     rs.getLong("calls_since_onset_down")),
                             baseline,
-                            rs.getString("watermark_bucket"),
+                            watermark,
                             rs.getString("state_epoch"),
                             rs.getString("pending_pin_by"),
                             rs.getString("pending_pin_at"),
-                            rs.getString("reset_at"));
+                            rs.getString("reset_at"),
+                            learnedThrough == null ? watermark : learnedThrough,
+                            rs.getString("learn_before"));
                 })
                 .list();
     }
 
     /**
-     * Leaves {@code reset_*} and {@code pending_pin_*} alone: they record human decisions a sweep seconds later must
-     * not erase.
+     * Leaves {@code reset_*}, {@code pending_pin_*} and {@code learn_before} alone: they record human decisions (or the
+     * upgrade's fence) a sweep seconds later must not erase.
      */
     public void save(String projectId, CarriedState carried, String updatedAt) {
         State state = carried.state();
@@ -105,9 +110,10 @@ public class ToolErrorStateRepository {
                         INSERT INTO {table} (
                             project_id, {key}, s_up, s_down, onset_up_at, onset_down_at,
                             calls_since_onset_up, calls_since_onset_down,
-                            baseline_calls, baseline_failures, watermark_bucket, state_epoch, updated_at)
+                            baseline_calls, baseline_failures, watermark_bucket, state_epoch, learned_through,
+                            updated_at)
                         VALUES (:pid, :tool, :sUp, :sDown, :onsetUp, :onsetDown, :callsUp, :callsDown,
-                                :baseCalls, :baseFailures, :watermark, :epoch, :at)
+                                :baseCalls, :baseFailures, :watermark, :epoch, :learnedThrough, :at)
                         ON CONFLICT (project_id, {key}) DO UPDATE SET
                             s_up = EXCLUDED.s_up,
                             s_down = EXCLUDED.s_down,
@@ -119,6 +125,7 @@ public class ToolErrorStateRepository {
                             baseline_failures = EXCLUDED.baseline_failures,
                             watermark_bucket = EXCLUDED.watermark_bucket,
                             state_epoch = EXCLUDED.state_epoch,
+                            learned_through = EXCLUDED.learned_through,
                             updated_at = EXCLUDED.updated_at
                         """))
                 .param("pid", projectId)
@@ -133,6 +140,7 @@ public class ToolErrorStateRepository {
                 .param("baseFailures", baseline == null ? null : baseline.failures())
                 .param("watermark", carried.watermarkBucket())
                 .param("epoch", carried.stateEpoch())
+                .param("learnedThrough", carried.learnedThrough())
                 .param("at", updatedAt)
                 .update();
     }
@@ -191,7 +199,8 @@ public class ToolErrorStateRepository {
 
     /**
      * For a ruling that means "the old normal was wrong". The watermark is cleared too, since a row with no reference
-     * cannot resume. @param note required, as for {@link #reset}
+     * cannot resume, and so is the learning fence: the reset fence now says where learning starts. @param note
+     * required, as for {@link #reset}
      */
     public void resetAndRelearn(String projectId, String key, @Nullable String resetBy, String note, String resetAt) {
         jdbc.sql(sql("""
@@ -200,7 +209,7 @@ public class ToolErrorStateRepository {
                                onset_up_at = NULL, onset_down_at = NULL,
                                calls_since_onset_up = 0, calls_since_onset_down = 0,
                                baseline_calls = NULL, baseline_failures = NULL,
-                               watermark_bucket = NULL,
+                               watermark_bucket = NULL, learned_through = NULL, learn_before = NULL,
                                reset_at = :at, reset_by = :by, reset_note = :note, updated_at = :at
                          WHERE project_id = :pid AND {key} = :key
                         """))
@@ -212,9 +221,28 @@ public class ToolErrorStateRepository {
                 .update();
     }
 
-    /** Relearns {@code stale} under {@code epoch}, stamped so the next pass does not reset it again while it learns. */
+    /**
+     * Relearns {@code stale} under {@code epoch}, stamped so the next pass does not reset it again while it learns. A
+     * row with no reference learned nothing under the old tuning, so it only takes the new epoch: no new fence is cut
+     * and its old fences stay, which lets a row the upgrade cleared re-learn its settled history.
+     */
     public static CarriedState retune(
             ToolErrorStateRepository states, String projectId, CarriedState stale, String epoch, String now) {
+        if (stale.baseline() == null) {
+            CarriedState fresh = new CarriedState(
+                    stale.toolKey(),
+                    State.EMPTY,
+                    null,
+                    null,
+                    epoch,
+                    stale.pendingPinBy(),
+                    stale.pendingPinAt(),
+                    stale.resetAt(),
+                    null,
+                    stale.learnBefore());
+            states.save(projectId, fresh, now);
+            return fresh;
+        }
         states.resetAndRelearn(projectId, stale.toolKey(), null, TUNING_CHANGED, now);
         CarriedState fresh = new CarriedState(
                 stale.toolKey(), State.EMPTY, null, null, epoch, stale.pendingPinBy(), stale.pendingPinAt(), now);

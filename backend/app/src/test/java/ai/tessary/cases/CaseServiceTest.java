@@ -357,6 +357,7 @@ record CaseServiceTest(
                         null,
                         null,
                         null,
+                        null,
                         null),
                 Instant.now().toString());
 

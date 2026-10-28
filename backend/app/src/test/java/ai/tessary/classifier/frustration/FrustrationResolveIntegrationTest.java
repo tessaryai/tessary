@@ -150,11 +150,14 @@ record FrustrationResolveIntegrationTest(
 
     // ---- fixtures
 
-    /** A call site at 5% for 210 conversations, then 40% for 180: one spell, one finding, one case. */
+    /**
+     * A call site at 5% for 210 conversations, then, a day later so those hours have settled, 40% for 180: one spell,
+     * one finding, one case.
+     */
     private CaseRow rise(String pid, ClassifierRow signal) {
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40);
         rates.refresh(pid, signal, Instant.now());
         List<CaseRow> live = cases.listLive(pid);
         assertEquals(1, live.size());

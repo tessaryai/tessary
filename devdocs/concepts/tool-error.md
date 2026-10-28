@@ -320,6 +320,13 @@ that there is nothing to lose, and a halving of it is undetectable at any sane r
 > being measured against a reference walking after it. It is now learned once and stored, which is what
 > this section always meant.
 
+> **Decision (2026-10-28): the reference learns only settled hours.** Every hour is still judged, but an
+> hour joins the reference only once its end plus the classifier's settle delay has passed on the key's
+> own event clock (its newest hour), because late spans and labels for it are still arriving before
+> then. So the reference can lag the watermark, and `learned_through` is stored beside it: learning is
+> gated on it, not on the watermark, and a resumed key learns on a later pass an hour that was unsettled
+> when it judged it.
+
 **Decision (Akhil, 2026-08-08): no cursor and no watermark. The replay is recomputed from source on
 every pass.** Superseded in part (2026-08-14): the recompute is no longer driven by a READ.
 

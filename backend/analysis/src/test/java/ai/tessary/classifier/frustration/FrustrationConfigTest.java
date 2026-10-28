@@ -82,6 +82,20 @@ class FrustrationConfigTest {
     @ParameterizedTest
     @ValueSource(doubles = {0, -1, Double.NaN, Double.POSITIVE_INFINITY})
     void aNonPositiveOrNonFiniteDialIsItsDefault(double bad) {
-        assertEquals(FrustrationConfig.defaults(), new FrustrationConfig(bad, 0L, bad, bad, bad, 0, 0));
+        assertEquals(FrustrationConfig.defaults(), new FrustrationConfig(bad, 0L, bad, bad, bad, 0, 0, -1));
+    }
+
+    /**
+     * A conversation is flagged on a later turn, up to a day after its first: learning its hour sooner reads the
+     * reference low, and a calm call site alarms.
+     */
+    @Test
+    void engine_carriesTheClassifiersSettleDelay() {
+        assertEquals(24, FrustrationConfig.defaults().engine().referenceSettleHours());
+        assertEquals(
+                12,
+                FrustrationConfig.of(MAPPER, "{\"reference_settle_hours\":12}")
+                        .engine()
+                        .referenceSettleHours());
     }
 }

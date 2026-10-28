@@ -92,9 +92,10 @@ record FrustrationRateReplayIntegrationTest(
         String pid = fixture.project("fr-rise", Capability.FRUSTRATION);
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        // Judged from 100 (four hours), and every later hour is added to the reference until 1,000.
+        // Judged from 100 (four hours), and every later settled hour is added to the reference until 1,000. With the
+        // rise ending at hour 36, hours up to 11 have settled: a day after they ended.
         seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations at 5%
-        seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40); // then 180 at 40%
+        seedHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40); // then 180 at 40%
         seedHours(pid, signal, "cs-quiet", start, 0, 2, 10, 0.0); // 20 conversations: still learning
         fixture.frustrationAssessment(pid, signal, "orphan", "conv-orphan", null, start, false, VERSION);
 
@@ -107,7 +108,7 @@ record FrustrationRateReplayIntegrationTest(
         CarriedState chat = state(pid, "cs-chat");
         ToolErrorRate baseline = chat.baseline();
         assertNotNull(baseline);
-        assertEquals(390, baseline.calls(), "still learning: every hour so far is in the reference");
+        assertEquals(210, baseline.calls(), "only the settled hours, not the rise");
         assertEquals(
                 FrustrationConfig.of(new ObjectMapper(), signal.configJson()).stateEpoch(), chat.stateEpoch());
     }
@@ -118,6 +119,8 @@ record FrustrationRateReplayIntegrationTest(
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, signal, "cs-chat", start, 0, 12, 30, 0.05);
+        // A later hour on the call site's own clock, so hours 0-11 have settled and a reference is learned.
+        seedHours(pid, signal, "cs-chat", start, 40, 1, 30, 0.05);
         service.refresh(pid, signal, Instant.now());
         assertNotNull(state(pid, "cs-chat").baseline());
 

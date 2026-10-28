@@ -10,7 +10,8 @@ import org.jspecify.annotations.Nullable;
  * The {@code tool_error} operating point (tool-error.md §4, §9; arithmetic in deviation-math.md, which must change with
  * any default). Per-project, clamped, every default EXPERIMENT(tool-error-tuning), and deliberately separate from
  * metric drift's dials, which measure different quantities. {@code arlTarget} is the only threshold dial;
- * {@code freezeBaselineCalls} is how long the reference keeps learning after judging starts.
+ * {@code freezeBaselineCalls} is how long the reference keeps learning after judging starts;
+ * {@code referenceSettleHours} how long an hour waits, on the key's own event clock, before it may join it.
  */
 public record ToolErrorConfig(
         long arlTarget,
@@ -20,7 +21,8 @@ public record ToolErrorConfig(
         double downArmMinRate,
         int maxPatterns,
         double minDecisionInterval,
-        int freezeBaselineCalls) {
+        int freezeBaselineCalls,
+        int referenceSettleHours) {
 
     /**
      * EXPERIMENT(tool-error-tuning): the one dial that means something to a person; {@code h} is derived per tool by
@@ -65,6 +67,14 @@ public record ToolErrorConfig(
 
     public static final int DEFAULT_MAX_PATTERNS = 8;
 
+    /**
+     * EXPERIMENT(tool-error-tuning): hours after an hour ends, on the key's own event clock, before it may join the
+     * reference; late spans and labels land inside it.
+     */
+    public static final int DEFAULT_REFERENCE_SETTLE_HOURS = 1;
+
+    public static final int MAX_REFERENCE_SETTLE_HOURS = 168;
+
     /** Clamped: the blob is operator-editable, and nonsense could mean permanent silence or an hourly false alarm. */
     public ToolErrorConfig {
         // Far outside the range the fit was measured over at both ends.
@@ -79,6 +89,31 @@ public record ToolErrorConfig(
                 clamp(minDecisionInterval, LOWEST_DECISION_INTERVAL, MAX_DECISION_INTERVAL, MIN_DECISION_INTERVAL);
         // A reference that froze before judging could start would never judge.
         freezeBaselineCalls = clampInt(freezeBaselineCalls, minBaselineCalls, 1_000_000, minBaselineCalls);
+        // Zero is meaningful (learn as soon as the hour has ended), so only a negative value is unset.
+        referenceSettleHours = referenceSettleHours < 0
+                ? DEFAULT_REFERENCE_SETTLE_HOURS
+                : Math.min(MAX_REFERENCE_SETTLE_HOURS, referenceSettleHours);
+    }
+
+    public ToolErrorConfig(
+            long arlTarget,
+            double shiftMultiple,
+            double shiftFloor,
+            int minBaselineCalls,
+            double downArmMinRate,
+            int maxPatterns,
+            double minDecisionInterval,
+            int freezeBaselineCalls) {
+        this(
+                arlTarget,
+                shiftMultiple,
+                shiftFloor,
+                minBaselineCalls,
+                downArmMinRate,
+                maxPatterns,
+                minDecisionInterval,
+                freezeBaselineCalls,
+                DEFAULT_REFERENCE_SETTLE_HOURS);
     }
 
     public ToolErrorConfig(
@@ -156,7 +191,8 @@ public record ToolErrorConfig(
                     root.path("max_patterns").asInt(DEFAULT_MAX_PATTERNS),
                     MIN_DECISION_INTERVAL,
                     // Absent: the reference freezes the moment judging starts.
-                    root.path("freeze_baseline_calls").asInt(0));
+                    root.path("freeze_baseline_calls").asInt(0),
+                    root.path("reference_settle_hours").asInt(DEFAULT_REFERENCE_SETTLE_HOURS));
         } catch (JsonProcessingException e) {
             return defaults();
         }

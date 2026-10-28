@@ -626,7 +626,8 @@ public class ClassifierChartService {
         List<HourlyToolTally> mine =
                 tallies.read().stream().filter(t -> key.equals(t.toolKey())).toList();
         return new LearningView(
-                CarriedState.learned(p.states(row.detector()).get(key), mine), ChartSeries.minBaseline(row, mapper));
+                CarriedState.learned(p.states(row.detector()).get(key), mine, ChartSeries.settleHours(row, mapper)),
+                ChartSeries.minBaseline(row, mapper));
     }
 
     private ChartCard rateCard(

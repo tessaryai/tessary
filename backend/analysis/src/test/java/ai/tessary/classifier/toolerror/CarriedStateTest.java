@@ -14,7 +14,9 @@ class CarriedStateTest {
     private static final List<HourlyToolTally> TALLIES = List.of(
             new HourlyToolTally("2026-10-05T09:00:00Z", "cs-a", 100, 4),
             new HourlyToolTally("2026-10-05T10:00:00Z", "cs-a", 50, 2),
-            new HourlyToolTally("2026-10-05T11:00:00Z", "cs-a", 30, 1));
+            new HourlyToolTally("2026-10-05T11:00:00Z", "cs-a", 30, 1),
+            // The key's own event clock: its newest hour is never learned.
+            new HourlyToolTally("2026-10-05T12:00:00Z", "cs-a", 10, 0));
 
     @Test
     void learningProgress_skipsBucketsFencedOffByReset() {
@@ -22,7 +24,20 @@ class CarriedStateTest {
         CarriedState reset =
                 new CarriedState("cs-a", State.EMPTY, null, null, "epoch", null, null, "2026-10-05T10:30:00.500Z");
 
-        assertEquals(30, CarriedState.learned(reset, TALLIES), "only the hour after the reset");
-        assertEquals(180, CarriedState.learned(null, TALLIES), "a key that never swept learns from every hour");
+        assertEquals(30, CarriedState.learned(reset, TALLIES, 0), "only the hour after the reset");
+        assertEquals(180, CarriedState.learned(null, TALLIES, 0), "a key that never swept learns from every hour");
+    }
+
+    /**
+     * The Tuning row must count only what the detector has learned: an hour that has not settled, or one at or after
+     * an open finding's learning fence, is not in the reference yet.
+     */
+    @Test
+    void learningProgress_countsOnlySettledHoursAndStopsAtTheFence() {
+        assertEquals(150, CarriedState.learned(null, TALLIES, 1), "11:00 settles only at 13:00 on the event clock");
+
+        CarriedState fenced = new CarriedState(
+                "cs-a", State.EMPTY, null, null, "epoch", null, null, null, null, "2026-10-05T10:00:00Z");
+        assertEquals(100, CarriedState.learned(fenced, TALLIES, 0), "only the hour before the fence");
     }
 }

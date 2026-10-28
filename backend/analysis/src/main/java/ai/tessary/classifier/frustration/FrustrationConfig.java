@@ -23,7 +23,8 @@ public record FrustrationConfig(
         double shiftMultiple,
         double shiftFloor,
         int minBaselineConversations,
-        int freezeBaselineConversations) {
+        int freezeBaselineConversations,
+        int referenceSettleHours) {
 
     /**
      * EXPERIMENT(frustration-tuning): tool_error's 250,000 calls at 25-50 spans a conversation, conservative end; one
@@ -55,6 +56,12 @@ public record FrustrationConfig(
      */
     private static final int UNSET_FREEZE = 0;
 
+    /**
+     * EXPERIMENT(frustration-tuning): a session's later turns are scored after its first, so its flag arrives within
+     * a day of the hour it counts in.
+     */
+    public static final int DEFAULT_REFERENCE_SETTLE_HOURS = 24;
+
     public FrustrationConfig {
         threshold = threshold > 0 && threshold < 1 ? threshold : JevFrustrationQuestion.DEFAULT_THRESHOLD;
         arlTarget = arlTarget <= 0 ? DEFAULT_ARL_TARGET : Math.max(1_000L, Math.min(1_000_000_000L, arlTarget));
@@ -75,6 +82,9 @@ public record FrustrationConfig(
         freezeBaselineConversations = freezeBaselineConversations <= 0
                 ? minBaselineConversations
                 : Math.max(minBaselineConversations, Math.min(1_000_000, freezeBaselineConversations));
+        referenceSettleHours = referenceSettleHours < 0
+                ? DEFAULT_REFERENCE_SETTLE_HOURS
+                : Math.min(ToolErrorConfig.MAX_REFERENCE_SETTLE_HOURS, referenceSettleHours);
     }
 
     public static FrustrationConfig defaults() {
@@ -85,7 +95,8 @@ public record FrustrationConfig(
                 DEFAULT_SHIFT_MULTIPLE,
                 DEFAULT_SHIFT_FLOOR,
                 DEFAULT_MIN_BASELINE_CONVERSATIONS,
-                UNSET_FREEZE);
+                UNSET_FREEZE,
+                DEFAULT_REFERENCE_SETTLE_HOURS);
     }
 
     /** Falls back to the default per missing key, and to all defaults for an unparseable blob. */
@@ -100,7 +111,8 @@ public record FrustrationConfig(
                     root.path("shift_multiple").asDouble(DEFAULT_SHIFT_MULTIPLE),
                     root.path("shift_floor").asDouble(DEFAULT_SHIFT_FLOOR),
                     root.path("min_baseline_conversations").asInt(DEFAULT_MIN_BASELINE_CONVERSATIONS),
-                    root.path("freeze_baseline_conversations").asInt(UNSET_FREEZE));
+                    root.path("freeze_baseline_conversations").asInt(UNSET_FREEZE),
+                    root.path("reference_settle_hours").asInt(DEFAULT_REFERENCE_SETTLE_HOURS));
         } catch (JsonProcessingException e) {
             return defaults();
         }
@@ -116,7 +128,8 @@ public record FrustrationConfig(
                 ToolErrorConfig.DEFAULT_DOWN_ARM_MIN_RATE,
                 ToolErrorConfig.DEFAULT_MAX_PATTERNS,
                 minDecisionInterval,
-                freezeBaselineConversations);
+                freezeBaselineConversations,
+                referenceSettleHours);
     }
 
     /** The hash of the question and the threshold every assessment row this config scores carries. */

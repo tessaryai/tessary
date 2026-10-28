@@ -81,12 +81,17 @@ class ToolErrorConfigTest {
         ToolErrorConfig toTwoThousand = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0, 2000);
         ToolErrorConfig judgedFromThree = new ToolErrorConfig(50_000L, 2.0, 0.02, 300, 0.01, 8, 4.0, 1000);
         ToolErrorConfig frozen = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0);
+        ToolErrorConfig settlesLater = new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0, 1000, 24);
 
         assertNotEquals(CarriedState.epochOf(toOneThousand, schema), CarriedState.epochOf(toTwoThousand, schema));
         assertNotEquals(CarriedState.epochOf(toOneThousand, schema), CarriedState.epochOf(judgedFromThree, schema));
         assertNotEquals(CarriedState.epochOf(toOneThousand, schema), CarriedState.epochOf(frozen, schema));
+        assertNotEquals(
+                CarriedState.epochOf(toOneThousand, schema),
+                CarriedState.epochOf(settlesLater, schema),
+                "which hours were learned depends on the settle delay");
 
-        // A reference frozen when judging starts leaves the epoch as it was, so no stored row rebuilds for it.
+        // A reference frozen when judging starts adds no learning span; the settle delay is always named.
         ToolErrorConfig d = ToolErrorConfig.defaults();
         assertEquals(
                 String.join(
@@ -95,8 +100,30 @@ class ToolErrorConfigTest {
                         Long.toString(d.arlTarget()),
                         Double.toString(d.shiftMultiple()),
                         Double.toString(d.shiftFloor()),
-                        Double.toString(d.downArmMinRate())),
+                        Double.toString(d.downArmMinRate()),
+                        "settle=1"),
                 CarriedState.epochOf(d, schema));
+    }
+
+    /**
+     * An operator can lengthen or shorten the wait before an hour joins the reference, and a nonsense value cannot
+     * leave a key learning nothing for ever.
+     */
+    @Test
+    void settleIsParsedDefaultedAndClamped() {
+        assertEquals(
+                48,
+                ToolErrorConfig.of(MAPPER, "{\"reference_settle_hours\":48}").referenceSettleHours());
+        assertEquals(1, ToolErrorConfig.of(MAPPER, "{}").referenceSettleHours(), "an hour by default");
+        assertEquals(
+                0,
+                ToolErrorConfig.of(MAPPER, "{\"reference_settle_hours\":0}").referenceSettleHours(),
+                "zero learns an hour as soon as it has ended");
+        assertEquals(1, new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0, 1000, -1).referenceSettleHours());
+        assertEquals(
+                168,
+                new ToolErrorConfig(50_000L, 2.0, 0.02, 200, 0.01, 8, 4.0, 1000, 10_000).referenceSettleHours(),
+                "at most a week");
     }
 
     /**
