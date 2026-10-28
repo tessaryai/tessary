@@ -121,7 +121,7 @@ drives it over HTTP.
 | `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent gets `steps = max_tool_calls_per_message + 1`, and the script aborts a reply whose tool calls go past it (see `reason` below). |
 | `SESSION_SECRET` | Env var, at least 32 characters (the launcher sends 32 random bytes as hex). The script reads it, then removes it from its env before it spawns `opencode serve`, so no child inherits it; on Docker the script's own start-time environment stays unreadable to the agent only because the script runs from the execute-only `node`, and on E2B the agent can read it. Missing or short: `SESSION_SECRET is required` on stderr, exit 2, nothing listens. |
 | `SESSION_PORT` | Env var, default `9400`. The launcher sets it from `SANDBOX_SESSION_PORT`, default 9400; the tests use free ports. The session server binds `0.0.0.0`; OpenCode and the relay stay on `127.0.0.1`. |
-| Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied. `agent_run` and `triage`: `edit` a blanket allow, outside directories denied except OpenCode's own scratch folders; `triage` also gets `checks/` for the agent's scripts. `rca`: `edit` denied everywhere and every outside directory denied. |
+| Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied. Every lane: outside directories denied except OpenCode's own scratch folders. `agent_run` and `triage`: `edit` a blanket allow. `rca`: `edit` denied everywhere, so the cloned repo stays as checked out. `triage` and `rca` also get `checks/` for the agent's scripts; `rca` writes them through bash. |
 
 ### Routes
 

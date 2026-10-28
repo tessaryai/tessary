@@ -27,8 +27,9 @@ as the Docker backend's agent image.
   `POST /abort`, `GET /events` and `GET /healthz` to the launcher behind a per-session secret. It
   maps OpenCode's event stream to `text`, `tool_start`, `tool_end`, `message_end`, `error` and
   `closed` events. `session.json` names its lane: `agent_run`; `triage`, which never clones, may
-  edit, and gets `checks/` for its scripts; or `rca`, which is read-only, may clone the repo at a
-  commit, and puts the commit live at the onset into each message's `{onset_commit}`. The contract
+  edit, and gets `checks/` for its scripts; or `rca`, which may clone the repo at a commit, denies
+  the edit tool, gets `checks/` for scripts it writes through bash, and puts the commit live at the
+  onset into each message's `{onset_commit}`. The contract
   is in [`sandbox-runner/README.md`](../README.md#agent-sessions-sessionjs).
   The launcher runs it with `/usr/local/bin/node-sealed`, a copy of `node` both recipes make. In
   the Docker image the copy is execute-only: a process started from a binary its user cannot read
@@ -62,7 +63,7 @@ pnpm exec tsx build.ts                            # == pnpm run build
 |---|---|---|
 | *(none)* | build + publish under the `default` tag | by hand |
 | `--release=<semver>` | build **only if the recipe hash changed**, tag `<semver>` + `recipe-<hash>` | `build-agent-template` |
-| `--verify=<semver>` | assert public + namespaced name, then boot it and run five checks | `verify-agent-template` |
+| `--verify=<semver>` | assert public + namespaced name, then boot it and run seven checks | `verify-agent-template` |
 | `--promote=<semver>` | move `latest` and `default` onto that build | `finalize` |
 | `--rollback=<semver>` | remove the `<semver>` tag, keep `recipe-<hash>` | `cleanup` |
 
