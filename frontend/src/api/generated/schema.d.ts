@@ -2915,9 +2915,20 @@ export interface components {
             message?: string | null;
         };
         EvidenceSpanView: {
+            attributes: {
+                [key: string]: string;
+            };
+            /** Format: int64 */
+            cacheReadTokens: number | null;
+            /** Format: int64 */
+            cacheWriteTokens: number | null;
             callSiteId: string | null;
             errorType: string | null;
+            /** Format: int64 */
+            inputBytes: number | null;
             inputPreview: string | null;
+            /** Format: int64 */
+            inputTokens: number | null;
             kind: string | null;
             /** Format: int64 */
             latencyMs: number | null;
@@ -2925,13 +2936,23 @@ export interface components {
             models: string[];
             name: string | null;
             notRolledUp: boolean;
+            /** Format: int64 */
+            outputBytes: number | null;
             outputPreview: string | null;
+            /** Format: int64 */
+            outputTokens: number | null;
             partialCost: boolean;
+            payloadAvailable: boolean;
+            projectVersionId: string | null;
             /** Format: int32 */
             rank: number | null;
+            /** Format: int64 */
+            reasoningTokens: number | null;
             role: string;
             secretKey: string | null;
             sessionId: string | null;
+            /** Format: int32 */
+            sessionTraces: number | null;
             spanId: string | null;
             staleTotals: boolean;
             startedAt: string | null;
@@ -2942,6 +2963,9 @@ export interface components {
             /** Format: int64 */
             totalTokens: number | null;
             traceId: string | null;
+            /** Format: int32 */
+            traceIndex: number | null;
+            userId: string | null;
             violation: string | null;
         };
         EvidencedSignal: {

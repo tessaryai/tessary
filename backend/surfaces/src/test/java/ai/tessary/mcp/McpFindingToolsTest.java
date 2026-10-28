@@ -507,6 +507,19 @@ class McpFindingToolsTest {
                                 true,
                                 true,
                                 "otto-von-bismarck",
+                                "v-12",
+                                "user-3",
+                                4000L,
+                                100L,
+                                10L,
+                                5L,
+                                5L,
+                                4,
+                                9,
+                                812L,
+                                64L,
+                                true,
+                                Map.of("service.instance.id", "i-1"),
                                 "what the span was given",
                                 "what it returned",
                                 null,
@@ -532,6 +545,19 @@ class McpFindingToolsTest {
                                 false,
                                 false,
                                 "otto-von-bismarck",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                false,
+                                Map.of(),
                                 "tool input",
                                 "tool output",
                                 null,
@@ -567,7 +593,17 @@ class McpFindingToolsTest {
         assertTrue(first.get("partialCost").asBoolean(), "a whole-run row can flag unpriced spans");
         assertTrue(first.get("staleTotals").asBoolean(), "a whole-run row can flag an unsettled rollup");
         assertEquals("otto-von-bismarck", first.get("callSiteId").asText());
+        assertEquals(4000, first.get("inputTokens").asLong());
+        assertEquals(5, first.get("reasoningTokens").asLong());
+        assertEquals(4, first.get("traceIndex").asInt());
+        assertEquals(9, first.get("sessionTraces").asInt());
+        assertEquals("user-3", first.get("userId").asText());
+        assertEquals("v-12", first.get("projectVersionId").asText());
+        assertEquals(812, first.get("inputBytes").asLong());
+        assertTrue(first.get("payloadAvailable").asBoolean(), first.toString());
+        assertEquals("i-1", first.get("attributes").get("service.instance.id").asText());
         JsonNode second = body.get("rows").get(1);
+        assertEquals(0, second.get("attributes").size(), "an empty short list is {} on the wire, not absent");
         assertEquals("trace-8", second.get("traceId").asText());
         assertEquals("span-2", second.get("spanId").asText());
         assertEquals(3, second.get("rank").asInt());
@@ -650,6 +686,11 @@ class McpFindingToolsTest {
     }
 
     private static EvidenceSpanView evidenceRow(String role, String traceId, @Nullable String spanId) {
+        return evidenceRow(role, traceId, spanId, Map.of());
+    }
+
+    private static EvidenceSpanView evidenceRow(
+            String role, String traceId, @Nullable String spanId, Map<String, String> attributes) {
         return new EvidenceSpanView(
                 role,
                 0,
@@ -670,6 +711,19 @@ class McpFindingToolsTest {
                 false,
                 false,
                 "rag-answer",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false,
+                attributes,
                 "question",
                 "answer",
                 null,
@@ -734,7 +788,11 @@ class McpFindingToolsTest {
         when(behaviorDrift.exportEvidence(PROJECT_ID, "find-1", null, 4000, null))
                 .thenReturn(exportPage(
                         new EvidenceExportRow(
-                                evidenceRow(FindingEvidenceRow.Role.WITNESS, "trace-1", "span-1"),
+                                evidenceRow(
+                                        FindingEvidenceRow.Role.WITNESS,
+                                        "trace-1",
+                                        "span-1",
+                                        Map.of("service.name", "api")),
                                 "the question",
                                 null,
                                 Map.of("deploy", "v1"),
@@ -746,9 +804,14 @@ class McpFindingToolsTest {
                                 null,
                                 null)));
 
-        JsonNode body = structured(mcp.callTool("export_finding_evidence", "{\"finding_id\":\"find-1\"}"));
+        Map<String, Object> result = mcp.callTool("export_finding_evidence", "{\"finding_id\":\"find-1\"}");
+        JsonNode body = structured(result);
 
         JsonNode witness = body.get("rows").get(0);
+        // The row's own bag replaces the short list; two `attributes` keys on one object would be invalid for most
+        // readers.
+        assertEquals(1, witness.get("attributes").size(), witness.toString());
+        assertEquals(2, occurrences(textOf(result), "\"attributes\""), "one attributes key per row");
         assertEquals("witness", witness.get("role").asText());
         assertEquals("trace-1", witness.get("traceId").asText());
         assertEquals("span-1", witness.get("spanId").asText());
@@ -808,5 +871,19 @@ class McpFindingToolsTest {
         String text = errorText(mcp.callTool("export_finding_evidence", "{\"finding_id\":\"other-tenant\"}"));
 
         assertTrue(text.contains("other-tenant"), text);
+    }
+
+    /** The serialized text block, where a duplicate key would still show; the parsed tree keeps only one. */
+    @SuppressWarnings("unchecked")
+    private static String textOf(Map<String, Object> result) {
+        List<Map<String, Object>> content =
+                (List<Map<String, Object>>) java.util.Objects.requireNonNull(result.get("content"));
+        return String.valueOf(content.get(0).get("text"));
+    }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length())) count++;
+        return count;
     }
 }

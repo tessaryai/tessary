@@ -78,10 +78,17 @@ population its claim rests on at finding-open — one `finding_evidence` ref per
 and this tool pages those rows back out joined to the span each names, so a row says what was measured
 on it rather than only where to find it: `{role, rank, sessionId, traceId, spanId, name, kind, status,
 level, errorType, startedAt, latencyMs, totalTokens, totalCost, models, notRolledUp, partialCost,
-staleTotals, callSiteId}` + `nextCursor`
+staleTotals, callSiteId, projectVersionId, userId, inputTokens, outputTokens, cacheReadTokens,
+cacheWriteTokens, reasoningTokens, traceIndex, sessionTraces, inputBytes, outputBytes,
+payloadAvailable, attributes}` + `nextCursor`
 (camelCase, unlike the snake_case tools around it), plus `count_only=true` for the per-role sizes with
 no rows, which answers in the ref shape under `refs`. The join is read-time, so it holds for evidence
-already recorded. Payload text is not on the page; the caller follows a row with `get_trace` /
+already recorded. `FindingEvidenceRepository.spanPage` computes the extra fields in the same SELECT:
+`startedAt` and `userId` fall back from the span to the trace to the session, so a session row has
+both; the turn position counts top-level traces of the session ordered `(started_at, id)`, stopping at
+`POSITION_CAP` (10,000); `attributes` is `SHORT_ATTRIBUTE_KEYS` filtered in SQL with
+`jsonb_each_text`, so a payload's message arrays never leave Postgres, and each value is masked.
+`FindingEvidenceSpanPageIntegrationTest` pins the null rules. Payload text is not on the page; the caller follows a row with `get_trace` /
 `get_span` / `list_spans`, or reads the whole population through `export_finding_evidence`, which pages
 every row of one finding with its text and every attribute, masked, under a row and byte budget. Rows carrying their own numbers is what lets a lane rank a population of
 hundreds and open the handful it chose, instead of opening a handful and calling that the population. That is what lets triage and RCA

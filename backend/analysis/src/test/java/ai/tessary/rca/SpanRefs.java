@@ -5,6 +5,7 @@ import ai.tessary.classifier.finding.FindingEvidenceRepository.SpanRef;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /** Evidence rows by the fields a test names, since the record's positional constructor is long. */
@@ -50,6 +51,19 @@ final class SpanRefs {
         private @Nullable Double totalCost;
         private List<String> models = List.of();
         private @Nullable String callSiteId;
+        private @Nullable String projectVersionId;
+        private @Nullable String userId;
+        private @Nullable Long inputTokens;
+        private @Nullable Long outputTokens;
+        private @Nullable Long cacheReadTokens;
+        private @Nullable Long cacheWriteTokens;
+        private @Nullable Long reasoningTokens;
+        private @Nullable Integer traceIndex;
+        private @Nullable Integer sessionTraces;
+        private @Nullable Long inputBytes;
+        private @Nullable Long outputBytes;
+        private boolean payloadAvailable;
+        private Map<String, String> attributes = Map.of();
 
         private Builder(String role) {
             this.role = role;
@@ -126,6 +140,71 @@ final class SpanRefs {
             return this;
         }
 
+        Builder projectVersionId(String value) {
+            this.projectVersionId = value;
+            return this;
+        }
+
+        Builder userId(String value) {
+            this.userId = value;
+            return this;
+        }
+
+        Builder inputTokens(long value) {
+            this.inputTokens = value;
+            return this;
+        }
+
+        Builder outputTokens(long value) {
+            this.outputTokens = value;
+            return this;
+        }
+
+        Builder cacheReadTokens(long value) {
+            this.cacheReadTokens = value;
+            return this;
+        }
+
+        Builder cacheWriteTokens(long value) {
+            this.cacheWriteTokens = value;
+            return this;
+        }
+
+        Builder reasoningTokens(long value) {
+            this.reasoningTokens = value;
+            return this;
+        }
+
+        Builder traceIndex(int value) {
+            this.traceIndex = value;
+            return this;
+        }
+
+        Builder sessionTraces(int value) {
+            this.sessionTraces = value;
+            return this;
+        }
+
+        Builder inputBytes(long value) {
+            this.inputBytes = value;
+            return this;
+        }
+
+        Builder outputBytes(long value) {
+            this.outputBytes = value;
+            return this;
+        }
+
+        Builder payloadAvailable(boolean value) {
+            this.payloadAvailable = value;
+            return this;
+        }
+
+        Builder attributes(Map<String, String> value) {
+            this.attributes = value;
+            return this;
+        }
+
         SpanRef build() {
             return new SpanRef(
                     role,
@@ -147,6 +226,19 @@ final class SpanRefs {
                     false,
                     false,
                     callSiteId,
+                    projectVersionId,
+                    userId,
+                    inputTokens,
+                    outputTokens,
+                    cacheReadTokens,
+                    cacheWriteTokens,
+                    reasoningTokens,
+                    traceIndex,
+                    sessionTraces,
+                    inputBytes,
+                    outputBytes,
+                    payloadAvailable,
+                    attributes,
                     null,
                     null,
                     null,

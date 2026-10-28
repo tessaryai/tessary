@@ -4803,6 +4803,26 @@
       },
       "EvidenceSpanView" : {
         "properties" : {
+          "attributes" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "cacheReadTokens" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "cacheWriteTokens" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "callSiteId" : {
             "type" : [
               "string",
@@ -4815,9 +4835,23 @@
               "null"
             ]
           },
+          "inputBytes" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "inputPreview" : {
             "type" : [
               "string",
+              "null"
+            ]
+          },
+          "inputTokens" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
               "null"
             ]
           },
@@ -4855,17 +4889,47 @@
           "notRolledUp" : {
             "type" : "boolean"
           },
+          "outputBytes" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "outputPreview" : {
             "type" : [
               "string",
               "null"
             ]
           },
+          "outputTokens" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "partialCost" : {
             "type" : "boolean"
           },
+          "payloadAvailable" : {
+            "type" : "boolean"
+          },
+          "projectVersionId" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "rank" : {
             "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "reasoningTokens" : {
+            "format" : "int64",
             "type" : [
               "integer",
               "null"
@@ -4883,6 +4947,13 @@
           "sessionId" : {
             "type" : [
               "string",
+              "null"
+            ]
+          },
+          "sessionTraces" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
               "null"
             ]
           },
@@ -4933,6 +5004,19 @@
               "null"
             ]
           },
+          "traceIndex" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "userId" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "violation" : {
             "type" : [
               "string",
@@ -4941,21 +5025,32 @@
           }
         },
         "required" : [
+          "attributes",
+          "cacheReadTokens",
+          "cacheWriteTokens",
           "callSiteId",
           "errorType",
+          "inputBytes",
           "inputPreview",
+          "inputTokens",
           "kind",
           "latencyMs",
           "level",
           "models",
           "name",
           "notRolledUp",
+          "outputBytes",
           "outputPreview",
+          "outputTokens",
           "partialCost",
+          "payloadAvailable",
+          "projectVersionId",
           "rank",
+          "reasoningTokens",
           "role",
           "secretKey",
           "sessionId",
+          "sessionTraces",
           "spanId",
           "staleTotals",
           "startedAt",
@@ -4964,6 +5059,8 @@
           "totalCost",
           "totalTokens",
           "traceId",
+          "traceIndex",
+          "userId",
           "violation"
         ],
         "type" : "object"

@@ -638,13 +638,19 @@ public class McpToolRegistry {
                 "get_finding_evidence",
                 "Page the substrate a finding's claim rests on: one row per unit the detector measured, at the"
                         + " grain it measured (role 'member' is the flagged population ENUMERATED, not a sample;"
-                        + " 'baseline' is the reference window's rows; 'exemplar' / 'witness' / 'changepoint' are"
-                        + " the reading aids). Each row carries what was MEASURED on it, not just a pointer to"
-                        + " it: role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType,"
-                        + " startedAt, latencyMs, totalTokens, totalCost, models, callSiteId. On a whole-run"
-                        + " row (no spanId), totalTokens/totalCost are the trace's rollup and models lists"
+                        + " 'baseline' is the reference side's rows; 'changepoint' is the first rows from where"
+                        + " a shift starts; 'exemplar' / 'witness' are the reading aids). Each row carries what"
+                        + " was MEASURED on it, not just a pointer to it: role, rank, sessionId, traceId,"
+                        + " spanId, name, kind, status, level, errorType, startedAt, latencyMs, totalTokens,"
+                        + " totalCost, models, callSiteId, projectVersionId, userId, inputTokens, outputTokens,"
+                        + " cacheReadTokens, cacheWriteTokens, reasoningTokens, traceIndex, sessionTraces,"
+                        + " inputBytes, outputBytes, payloadAvailable, attributes. On a whole-run"
+                        + " row (no spanId), the tokens and totalCost are the trace's rollup and models lists"
                         + " every model the run called; notRolledUp/partialCost/staleTotals flag a rollup"
-                        + " that has not finished, is missing priced spans, or can still change. So compare,"
+                        + " that has not finished, is missing priced spans, or can still change. traceIndex is"
+                        + " the turn's 1-based position in its session and sessionTraces the session's turn"
+                        + " count, both capped at 10,000; attributes is a short fixed set of deploy, host,"
+                        + " instance and model keys, masked. So compare,"
                         + " rank and pick rows from the page itself, and open only the ones you decided to open — the"
                         + " payloads are NOT here, and get_span (trace id plus span id) is where a body comes"
                         + " from. A groundedness finding's witness span rows also carry flaggedSentences: each"
@@ -654,10 +660,9 @@ public class McpToolRegistry {
                         + " per-role sizes with no rows, so you can decide how much to page before you spend"
                         + " context on it. counts is what SURVIVES and can still be opened; recorded_counts is"
                         + " what the detector wrote at finding-open — counts below recorded means substrate aged"
-                        + " out, never a lost write. ZERO under a role is a real answer: metric drift's"
-                        + " rolling-control arm compares against a fitted model, so it has no baseline rows to"
-                        + " point at; read that as 'no"
-                        + " enumerable reference side', not as missing evidence. Pages in the detector's own"
+                        + " out, never a lost write. ZERO under a role is a real answer: a detector with no"
+                        + " enumerable reference side writes no baseline rows; read that as 'no reference rows',"
+                        + " not as missing evidence. Pages in the detector's own"
                         + " order, stably; rank has gaps and is an order, not an index. There is NO sampling"
                         + " mode — if you want a stride or a random draw, take it yourself and say in your"
                         + " citation that you did and what you took.",
@@ -940,6 +945,24 @@ public class McpToolRegistry {
             boolean partialCost,
             boolean staleTotals,
             @Nullable String callSiteId,
+            @Nullable String projectVersionId,
+            @Nullable String userId,
+            @Nullable Long inputTokens,
+            @Nullable Long outputTokens,
+            @Nullable Long cacheReadTokens,
+            @Nullable Long cacheWriteTokens,
+            @Nullable Long reasoningTokens,
+            @Nullable Integer traceIndex,
+            @Nullable Integer sessionTraces,
+            @Nullable Long inputBytes,
+            @Nullable Long outputBytes,
+            boolean payloadAvailable,
+            /**
+             * The short masked list, {@code {}} when empty, so every page has one key set. Null only inside
+             * {@link ExportRow}, which carries every attribute under the same key.
+             */
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Nullable
+            Map<String, String> attributes,
             /** The leaked key, already masked. Set only on a secret-leak finding's evidence. */
             @Nullable String secretKey,
             @Nullable String storedAs,
@@ -951,6 +974,13 @@ public class McpToolRegistry {
 
         static EvidenceSpan of(
                 BehaviorDtos.EvidenceSpanView v,
+                @Nullable List<GroundednessEvidence.FlaggedSentenceText> flaggedSentences) {
+            return of(v, v.attributes(), flaggedSentences);
+        }
+
+        static EvidenceSpan of(
+                BehaviorDtos.EvidenceSpanView v,
+                @Nullable Map<String, String> attributes,
                 @Nullable List<GroundednessEvidence.FlaggedSentenceText> flaggedSentences) {
             return new EvidenceSpan(
                     v.role(),
@@ -972,6 +1002,19 @@ public class McpToolRegistry {
                     v.partialCost(),
                     v.staleTotals(),
                     v.callSiteId(),
+                    v.projectVersionId(),
+                    v.userId(),
+                    v.inputTokens(),
+                    v.outputTokens(),
+                    v.cacheReadTokens(),
+                    v.cacheWriteTokens(),
+                    v.reasoningTokens(),
+                    v.traceIndex(),
+                    v.sessionTraces(),
+                    v.inputBytes(),
+                    v.outputBytes(),
+                    v.payloadAvailable(),
+                    attributes,
                     v.secretKey(),
                     v.storedAs(),
                     v.violation(),
@@ -997,7 +1040,8 @@ public class McpToolRegistry {
 
         static ExportRow of(BehaviorDtos.EvidenceExportRow row) {
             return new ExportRow(
-                    EvidenceSpan.of(row.measured(), null),
+                    // The unwrapped span leaves its short list out; the row's own `attributes` holds every key.
+                    EvidenceSpan.of(row.measured(), null, null),
                     row.input(),
                     row.output(),
                     row.attributes(),

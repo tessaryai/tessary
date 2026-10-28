@@ -9,6 +9,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,48 @@ public class FindingEvidenceRepository {
 
     /** Enough to recognise the call and its error. Cut with SQL {@code left()} so the bytes never leave Postgres. */
     private static final int PREVIEW_CHARS = 200;
+
+    /** Both turn counts stop here, so a long session costs no more than this many index entries per row. */
+    static final int POSITION_CAP = 10_000;
+
+    /** The same columns on span and trace; a whole-run row reads the trace's rollup, a step its span. */
+    private static final List<String> TOKEN_BUCKETS =
+            List.of("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens");
+
+    /**
+     * A turn is a top-level trace of the session. Each count stops at {@link #POSITION_CAP} through its inner
+     * {@code LIMIT}; {@code ix_trace_session} serves both counts and the {@code (started_at, id)} comparison.
+     */
+    private static final String TURNS = " FROM trace x WHERE x.project_id = e.project_id AND x.session_id = ss.id"
+            + " AND x.parent_trace_id IS NULL AND NOT x.is_deleted";
+
+    private static final String POSITION_JOIN = " LEFT JOIN LATERAL ("
+            + "   SELECT (SELECT count(*) FROM (SELECT 1" + TURNS + " LIMIT " + POSITION_CAP + ") c) AS session_traces,"
+            + "          CASE WHEN t.id IS NOT NULL AND t.parent_trace_id IS NULL THEN"
+            + "            (SELECT count(*) FROM (SELECT 1" + TURNS
+            + "               AND (x.started_at, x.id) <= (t.started_at, t.id) LIMIT " + POSITION_CAP + ") c)"
+            + "          END AS trace_index"
+            + "    WHERE ss.id IS NOT NULL) pos ON true";
+
+    /**
+     * Deploy, host, instance and model identity, small enough to ride every row. No key that carries a prompt or a
+     * completion; {@code gen_ai.request.model} already rides {@code models}.
+     */
+    public static final List<String> SHORT_ATTRIBUTE_KEYS = List.of(
+            "service.name",
+            "service.version",
+            "service.instance.id",
+            "deployment.environment.name",
+            "vcs.ref.head.revision",
+            "host.name",
+            "k8s.pod.name",
+            "k8s.node.name",
+            "container.id",
+            "cloud.region",
+            "cloud.availability_zone",
+            "gen_ai.response.model",
+            "gen_ai.provider.name",
+            "gen_ai.system");
 
     /** Rows read per query by {@link #exportPage}; not a page size. */
     private static final int EXPORT_CHUNK = 200;
@@ -249,6 +292,30 @@ public class FindingEvidenceRepository {
             /** Late spans can still change the totals. */
             boolean staleTotals,
             @Nullable String callSiteId,
+            @Nullable String projectVersionId,
+            @Nullable String userId,
+            /** Like {@link #totalTokens}: the span's own on a single-step row, the trace rollup on a whole-run row. */
+            @Nullable Long inputTokens,
+            @Nullable Long outputTokens,
+            @Nullable Long cacheReadTokens,
+            @Nullable Long cacheWriteTokens,
+            @Nullable Long reasoningTokens,
+            /**
+             * The trace's 1-based turn in its session, capped at {@link FindingEvidenceRepository#POSITION_CAP}; null
+             * on a session row, a trace with no session and a sub-agent trace, which is not a turn.
+             */
+            @Nullable Integer traceIndex,
+            /** The session's turn count, capped likewise, so the cap reads as "at least". */
+            @Nullable Integer sessionTraces,
+            @Nullable Long inputBytes,
+            @Nullable Long outputBytes,
+            /** The payload row exists, even with null text; false once retention purged it. */
+            boolean payloadAvailable,
+            /**
+             * Only the keys of {@link FindingEvidenceRepository#SHORT_ATTRIBUTE_KEYS} the payload carries, masked;
+             * never null.
+             */
+            Map<String, String> attributes,
             /**
              * Truncated in SQL, since one LLM output can be megabytes; masked by
              * {@link ai.tessary.redaction.CredentialMasking#mask}, since a project with redaction off can store a raw
@@ -311,7 +378,8 @@ public class FindingEvidenceRepository {
             RowMapper<T> mapper) {
         StringBuilder sql = new StringBuilder("SELECT e.id AS evidence_id, e.role, e.rank, e.session_id,"
                 + " e.trace_id, e.span_id,"
-                + " s.name, s.kind, s.status, s.level, s.error_type, s.started_at, s.latency_ms,"
+                + " s.name, s.kind, s.status, s.level, s.error_type,"
+                + " COALESCE(s.started_at, t.started_at, ss.started_at) AS started_at, s.latency_ms,"
                 + " CASE WHEN e.span_id IS NULL THEN t.total_tokens ELSE s.total_tokens END AS total_tokens,"
                 + " CASE WHEN e.span_id IS NULL THEN t.total_cost ELSE s.total_cost END AS total_cost,"
                 + " m.models,"
@@ -319,6 +387,16 @@ public class FindingEvidenceRepository {
                 + " (e.span_id IS NULL AND COALESCE(t.unpriced_spans, 0) > 0) AS partial_cost,"
                 + " (e.span_id IS NULL AND COALESCE(t.is_settled, false) = false) AS stale_totals,"
                 + " CASE WHEN e.span_id IS NULL THEN t.call_site_id ELSE s.call_site_id END AS call_site_id,"
+                + TOKEN_BUCKETS.stream()
+                        .map(b -> " CASE WHEN e.span_id IS NULL THEN t." + b + " ELSE s." + b + " END AS " + b + ",")
+                        .collect(Collectors.joining())
+                + " COALESCE(s.project_version_id, t.project_version_id) AS project_version_id,"
+                + " COALESCE(s.user_id, t.user_id, ss.user_id) AS user_id,"
+                + " octet_length(pl.input)::bigint AS input_bytes,"
+                + " octet_length(pl.output)::bigint AS output_bytes,"
+                + " (pl.span_id IS NOT NULL) AS payload_available,"
+                + " pos.session_traces, pos.trace_index,"
+                + " attrs.keys AS attribute_keys, attrs.vals AS attribute_values,"
                 + " left(pl.input, " + PREVIEW_CHARS + ") AS input_preview,"
                 + " left(pl.output, " + PREVIEW_CHARS + ") AS output_preview,"
                 + (secretLeak
@@ -349,6 +427,12 @@ public class FindingEvidenceRepository {
                 + "     FROM span sp2"
                 + "    WHERE sp2.project_id = e.project_id AND sp2.trace_id = e.trace_id AND sp2.is_deleted = false"
                 + "      AND (e.span_id IS NULL OR sp2.id = e.span_id)) m ON true"
+                + " LEFT JOIN session ss ON ss.project_id = e.project_id"
+                + "   AND ss.id = COALESCE(e.session_id, t.session_id) AND NOT ss.is_deleted"
+                + POSITION_JOIN
+                + " LEFT JOIN LATERAL ("
+                + "   SELECT array_agg(a.key ORDER BY a.key) AS keys, array_agg(a.value ORDER BY a.key) AS vals"
+                + "     FROM jsonb_each_text(pl.attributes) a WHERE a.key IN (:attrKeys)) attrs ON true"
                 + (secretLeak
                         ? " LEFT JOIN LATERAL (SELECT sld.evidence FROM secret_leak_detection sld"
                                 + "   WHERE sld.project_id = e.project_id AND sld.subject_trace_id = e.trace_id"
@@ -372,6 +456,7 @@ public class FindingEvidenceRepository {
         var spec = jdbc.sql(sql.toString())
                 .param("pid", projectId)
                 .param("fid", findingId)
+                .param("attrKeys", SHORT_ATTRIBUTE_KEYS)
                 .param("n", fetch);
         if (role != null) spec = spec.param("role", role);
         if (key != null) {
@@ -567,11 +652,50 @@ public class FindingEvidenceRepository {
                 rs.getBoolean("partial_cost"),
                 rs.getBoolean("stale_totals"),
                 rs.getString("call_site_id"),
+                rs.getString("project_version_id"),
+                rs.getString("user_id"),
+                (Long) rs.getObject("input_tokens"),
+                (Long) rs.getObject("output_tokens"),
+                (Long) rs.getObject("cache_read_tokens"),
+                (Long) rs.getObject("cache_write_tokens"),
+                (Long) rs.getObject("reasoning_tokens"),
+                count(rs, "trace_index"),
+                count(rs, "session_traces"),
+                (Long) rs.getObject("input_bytes"),
+                (Long) rs.getObject("output_bytes"),
+                rs.getBoolean("payload_available"),
+                attributes(rs),
                 CredentialMasking.mask(rs.getString("input_preview")),
                 CredentialMasking.mask(rs.getString("output_preview")),
                 rs.getString("secret_key"),
                 rs.getString("stored_as"),
                 rs.getString("violation"));
+    }
+
+    /** {@code count(*)} is a bigint; the cap keeps it inside an int. */
+    private static @Nullable Integer count(ResultSet rs, String column) throws SQLException {
+        Long n = (Long) rs.getObject(column);
+        return n == null ? null : n.intValue();
+    }
+
+    /** The two arrays are aggregated in one key order, so they zip; each value is masked, a JSON null left out. */
+    private static Map<String, String> attributes(ResultSet rs) throws SQLException {
+        Array keysArray = rs.getArray("attribute_keys");
+        Array valuesArray = rs.getArray("attribute_values");
+        try {
+            if (keysArray == null || valuesArray == null) return Map.of();
+            String[] keys = (String[]) keysArray.getArray();
+            String[] values = (String[]) valuesArray.getArray();
+            Map<String, String> out = new LinkedHashMap<>();
+            for (int i = 0; i < keys.length; i++) {
+                String value = CredentialMasking.mask(values[i]);
+                if (value != null) out.put(keys[i], value);
+            }
+            return Collections.unmodifiableMap(out);
+        } finally {
+            if (keysArray != null) keysArray.free();
+            if (valuesArray != null) valuesArray.free();
+        }
     }
 
     private int countFor(String findingId, String role) {
