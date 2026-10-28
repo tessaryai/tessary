@@ -15,6 +15,7 @@ import ai.tessary.classifier.finding.ClassifierDetail;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.classifier.frustration.FrustrationEvidence;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
@@ -48,6 +49,7 @@ import ai.tessary.traces.SessionReadService;
 import ai.tessary.traces.TraceDtos;
 import ai.tessary.traces.TracePageCodec;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -79,6 +81,13 @@ public class McpToolRegistry {
     private static final int EVIDENCE_DEFAULT_LIMIT = 100;
 
     private static final int EVIDENCE_MAX_LIMIT = 1000;
+
+    /** Per text field of an exported row; the page itself is bounded by {@link FindingService#EXPORT_TEXT_BUDGET}. */
+    private static final int EXPORT_DEFAULT_TEXT_CHARS = 4000;
+
+    private static final int EXPORT_MIN_TEXT_CHARS = 200;
+
+    private static final int EXPORT_MAX_TEXT_CHARS = 20_000;
 
     /** The widest window a payload-bearing {@code list_spans} page may cover when it is not pinned to one trace. */
     private static final Duration SPAN_PAYLOAD_SCOPE_WINDOW = Duration.ofHours(24);
@@ -682,6 +691,39 @@ public class McpToolRegistry {
                                                 + " rows."))),
                         List.of("finding_id")),
                 this::getFindingEvidence));
+
+        add(new McpTool(
+                "export_finding_evidence",
+                "Every evidence row of a finding, for a script rather than for reading in context: the fields"
+                        + " get_finding_evidence measures, plus the row's input and output text cut at text_chars"
+                        + " and marked '…[cut]', every payload attribute, and on a frustration finding's witness"
+                        + " rows priorMessages, the messages before the flagged turn. Credentials are masked. A page"
+                        + " stops at " + FindingService.EXPORT_MAX_ROWS + " rows or about 6 MB of text; page with"
+                        + " nextCursor, the same cursor get_finding_evidence uses. Save each page to a file and"
+                        + " compute over it.",
+                schema(
+                        Map.ofEntries(
+                                Map.entry(
+                                        "finding_id",
+                                        strField("Finding id — a list_findings row's id, or a case's"
+                                                + " latest_finding_id.")),
+                                Map.entry(
+                                        "role",
+                                        enumField(
+                                                "Restrict to one evidence role. Omit for the whole set, which"
+                                                        + " pages role by role.",
+                                                FindingEvidenceRow.Role.ALL)),
+                                Map.entry(
+                                        "text_chars",
+                                        intField("Optional. Characters kept of each text value (default "
+                                                + EXPORT_DEFAULT_TEXT_CHARS + ", from " + EXPORT_MIN_TEXT_CHARS
+                                                + " to " + EXPORT_MAX_TEXT_CHARS + ").")),
+                                Map.entry(
+                                        "cursor",
+                                        strField("Optional. The nextCursor from a previous page; an unreadable"
+                                                + " token starts again at the first page."))),
+                        List.of("finding_id")),
+                this::exportFindingEvidence));
     }
 
     private BehaviorFindingsView listFindings(TenantContext ctx, Map<String, Object> args) {
@@ -838,6 +880,32 @@ public class McpToolRegistry {
         }
     }
 
+    private ExportPage exportFindingEvidence(TenantContext ctx, Map<String, Object> args) {
+        String projectId = requireProject(ctx).id();
+        String findingId = requireStr(args, "finding_id");
+        String role = strArg(args, "role");
+        if (role != null && !FindingEvidenceRow.Role.ALL.contains(role)) {
+            throw new McpTool.ToolException("unknown evidence role: " + role
+                    + ". export_finding_evidence filters one of " + FindingEvidenceRow.Role.ALL + ".");
+        }
+        int textChars = Math.max(
+                EXPORT_MIN_TEXT_CHARS,
+                TracePageCodec.clampLimit(
+                        intArg(args, "text_chars"), EXPORT_DEFAULT_TEXT_CHARS, EXPORT_MAX_TEXT_CHARS));
+        try {
+            BehaviorDtos.EvidenceExportPage page =
+                    behaviorDrift.exportEvidence(projectId, findingId, role, textChars, strArg(args, "cursor"));
+            return new ExportPage(
+                    page.rows().stream().map(ExportRow::of).toList(),
+                    page.nextCursor(),
+                    page.counts(),
+                    page.recordedCounts(),
+                    page.textChars());
+        } catch (TessaryException e) {
+            throw toolError(e);
+        }
+    }
+
     // null = not a witness span → the key is omitted
     private static @Nullable List<GroundednessEvidence.FlaggedSentenceText> witnessSentences(
             BehaviorDtos.EvidenceSpanView row, Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> sentences) {
@@ -916,6 +984,33 @@ public class McpToolRegistry {
             @Nullable String nextCursor,
             Map<String, Long> counts,
             Map<String, Long> recordedCounts) {}
+
+    /** Flat on the wire, so a script over the saved page reads one level. */
+    record ExportRow(
+            @JsonUnwrapped EvidenceSpan measured,
+            @Nullable String input,
+            @Nullable String output,
+            @Nullable Map<String, Object> attributes,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Nullable
+            List<EarlierMessage> priorMessages) {
+
+        static ExportRow of(BehaviorDtos.EvidenceExportRow row) {
+            return new ExportRow(
+                    EvidenceSpan.of(row.measured(), null),
+                    row.input(),
+                    row.output(),
+                    row.attributes(),
+                    row.priorMessages());
+        }
+    }
+
+    record ExportPage(
+            List<ExportRow> rows,
+            @Nullable String nextCursor,
+            Map<String, Long> counts,
+            Map<String, Long> recordedCounts,
+            int textChars) {}
 
     private void add(McpTool t) {
         tools.put(t.name(), t);

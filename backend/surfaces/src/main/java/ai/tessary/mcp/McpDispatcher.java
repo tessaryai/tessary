@@ -127,7 +127,8 @@ public class McpDispatcher {
                     + "get_finding_evidence pages the rows a finding actually measured: call it with "
                     + "count_only=true first for the per-role sizes, then page the ids and open them with "
                     + "get_trace / get_span. It never samples for you — if you take a subset, say so and say "
-                    + "what you took. ");
+                    + "what you took. export_finding_evidence returns the same rows with their input, output and "
+                    + "attributes, paged by size; save it, do not read it inline. ");
         }
         if (available.contains("query_count")) {
             sb.append("Use the aggregation-first query tools query_count / query_timeseries / query_facets / "

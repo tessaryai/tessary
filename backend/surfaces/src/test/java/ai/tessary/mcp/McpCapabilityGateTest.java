@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
  * does.
  *
  * <ul>
- *   <li>{@code tools/list} names exactly the open set, 20 tools.</li>
+ *   <li>{@code tools/list} names exactly the open set, 21 tools.</li>
  *   <li>{@code tools/call} on a removed tool reads as <b>unknown</b>, and the handler never runs.</li>
  *   <li>{@code initialize} instructions are built from the same catalogue, so the prose cannot advertise a
  *       tool that is gone.</li>
@@ -79,6 +79,9 @@ class McpCapabilityGateTest {
             // project's own substrate, gated by the detector the finding belongs to rather than by a
             // capability of its own.
             "get_finding_evidence",
+            // Open for the same reason: the same rows, with payload text the same token can already read one span
+            // at a time through get_span.
+            "export_finding_evidence",
             // Ungated because it describes the query schema, not a project's rows: withholding it would only
             // force an org to guess the field names of tools it already holds.
             "describe_dataset",
@@ -103,7 +106,7 @@ class McpCapabilityGateTest {
         Set<String> offered = registryWith().pipeline(Pipeline.empty()).build().listToolNames();
 
         assertEquals(OPEN_TOOLS, offered, "every org should be offered exactly the open set");
-        assertEquals(20, offered.size(), "the surface is 20 tools, all open");
+        assertEquals(21, offered.size(), "the surface is 21 tools, all open");
     }
 
     /**
