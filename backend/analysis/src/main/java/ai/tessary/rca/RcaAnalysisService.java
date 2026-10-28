@@ -15,6 +15,7 @@ import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -65,8 +66,15 @@ public class RcaAnalysisService {
                 .orElseThrow(() -> new IllegalStateException("rca job " + job.id() + " has no report row"));
         List<FindingClaim> subject = subject(job.projectId(), job.findingId());
 
-        AgenticRcaEngine.Evidence ev =
-                evidence(job.projectId(), subject.stream().map(FindingClaim::id).toList());
+        Map<String, EvidenceSides> sides = new LinkedHashMap<>();
+        for (FindingClaim finding : subject) {
+            sides.put(
+                    finding.id(),
+                    EvidenceSides.of(
+                            ClaimShape.of(finding.causeKind()),
+                            evidence.listByFinding(finding.projectId(), finding.id())));
+        }
+        AgenticRcaEngine.Evidence ev = evidence(sides.values());
         if (ev.citableTraceIds().isEmpty() && ev.citableSessionIds().isEmpty()) {
             throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, job.findingId());
         }
@@ -102,55 +110,31 @@ public class RcaAnalysisService {
     }
 
     /**
-     * {@code exemplar} and {@code changepoint} are included so a classifier that writes only those is not read as
-     * flagging nothing.
+     * A cause may cite a flagged row or a comparison row; the two sides are {@link EvidenceSides}, the rule checks.md
+     * reads too. Session grain when any finding flags whole sessions.
      */
-    private static final Set<String> FLAGGED_WHEN_NO_WITNESS = Set.of(
-            FindingEvidenceRow.Role.MEMBER, FindingEvidenceRow.Role.EXEMPLAR, FindingEvidenceRow.Role.CHANGEPOINT);
-
-    /**
-     * A cause may cite a flagged row or a {@code baseline} row, never an unflagged member: it would read as explained
-     * when it is healthy.
-     */
-    private AgenticRcaEngine.Evidence evidence(String projectId, List<String> findingIds) {
-        Set<String> baseline = new LinkedHashSet<>();
-        Set<String> witnessTraces = new LinkedHashSet<>();
-        Set<String> populationTraces = new LinkedHashSet<>();
-        Set<String> witnessSessionRefs = new LinkedHashSet<>();
-        Set<String> populationSessionRefs = new LinkedHashSet<>();
-        Set<String> witnessSessions = new LinkedHashSet<>();
-        Set<String> populationSessions = new LinkedHashSet<>();
-        List<FindingEvidenceRow> rows = new ArrayList<>();
-        for (String findingId : findingIds) rows.addAll(evidence.listByFinding(projectId, findingId));
-        for (FindingEvidenceRow row : rows) {
-            if (FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
-                if (row.traceId() != null) baseline.add(row.traceId());
-                continue;
-            }
-            boolean witness = FindingEvidenceRow.Role.WITNESS.equals(row.role());
-            if (!witness && !FLAGGED_WHEN_NO_WITNESS.contains(row.role())) continue;
-            if (row.traceId() != null) {
-                (witness ? witnessTraces : populationTraces).add(row.traceId());
-            } else if (row.sessionId() != null) {
-                (witness ? witnessSessionRefs : populationSessionRefs).add(row.sessionId());
-            }
-            if (row.sessionId() != null) (witness ? witnessSessions : populationSessions).add(row.sessionId());
+    private static AgenticRcaEngine.Evidence evidence(Collection<EvidenceSides> all) {
+        Set<String> traces = new LinkedHashSet<>();
+        Set<String> sessions = new LinkedHashSet<>();
+        Set<String> flaggedTraces = new LinkedHashSet<>();
+        Set<String> flaggedSessionRefs = new LinkedHashSet<>();
+        boolean baselinePresent = false;
+        for (EvidenceSides sides : all) {
+            traces.addAll(sides.flaggedTraces());
+            traces.addAll(sides.comparisonTraces());
+            sessions.addAll(sides.flaggedSessions());
+            sessions.addAll(sides.comparisonSessions());
+            flaggedTraces.addAll(sides.flaggedTraces());
+            flaggedSessionRefs.addAll(sides.flaggedSessionRefs());
+            baselinePresent |= sides.baselinePresent();
         }
-        boolean anyWitness = !witnessTraces.isEmpty() || !witnessSessionRefs.isEmpty();
-        Set<String> flaggedTraces = anyWitness ? witnessTraces : populationTraces;
-        Set<String> flaggedSessionRefs = anyWitness ? witnessSessionRefs : populationSessionRefs;
-        Set<String> citableSessions = anyWitness ? witnessSessions : populationSessions;
-        // A trace cited on both sides is flagged: it is what the claim is about.
-        baseline.removeAll(flaggedTraces);
-        Set<String> citableTraces = new LinkedHashSet<>(flaggedTraces);
-        citableTraces.addAll(baseline);
         boolean sessionGrain = !flaggedSessionRefs.isEmpty();
         return new AgenticRcaEngine.Evidence(
-                citableTraces,
-                citableSessions,
-                !baseline.isEmpty(),
+                traces,
+                sessions,
+                baselinePresent,
                 sessionGrain ? flaggedSessionRefs.size() : flaggedTraces.size(),
-                sessionGrain ? "sessions" : "traces");
+                sessionGrain ? EvidenceSides.SESSIONS : EvidenceSides.TRACES);
     }
 
     private void complete(
