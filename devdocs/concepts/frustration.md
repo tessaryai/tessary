@@ -124,7 +124,9 @@ frustrated conversation-hour as `witness` and `member`, and the last scored turn
 `finding_evidence_grain_check`), so the `false_alarm` clear, the retention pin and RCA's session
 citations read the session off the turn row; there are no session rows. In the example, hour 10:00
 cites A at 10:20 and C at 10:25 as witnesses and D at 10:50 as a calm member. Neither role is capped,
-and both are written on every pass up to the spell's last hour. The finding and case pages read the
+and both are written on every pass up to the spell's last hour. When a later turn of an hour is scored, or an
+earlier one is flagged, the turn that stands for that conversation-hour moves, and the next pass takes out the
+rows of the turn it replaced, so each conversation-hour keeps one row per role. The finding and case pages read the
 witnesses 50 at a time (`GET /findings/{id}/frustrated-sessions`). RCA on the case reads every witness
 turn and writes a cause report instead of a metric-movement report: causes grouped by what the agent
 did, each citing the turns or sessions that show it.

@@ -145,7 +145,7 @@ public class FrustrationRateService implements ClassifierCatchUp {
 
     /**
      * One rising call site: the same spell refreshes the finding it already filed, a new spell files one, rules
-     * it positive and opens or joins its case. Evidence is topped up either way.
+     * it positive and opens or joins its case. Evidence is kept to one turn per conversation-hour either way.
      */
     private void persist(
             String projectId,
@@ -214,6 +214,20 @@ public class FrustrationRateService implements ClassifierCatchUp {
             }
         }
 
+        // A later turn of an hour, or an earlier flag, moves the turn that stands for that conversation-hour: the
+        // rows of the turn it replaced go, or the hour counts twice and on both sides.
+        Map<String, List<FindingEvidenceRepository.Ref>> superseded = new HashMap<>();
+        for (FrustrationRateRepository.Superseded s :
+                rates.superseded(projectId, signal.id(), config.scorerVersion(), callSite, findingId, since, until)) {
+            superseded
+                    .computeIfAbsent(s.role(), r -> new ArrayList<>())
+                    .add(FindingEvidenceRepository.Ref.turn(s.sessionId(), s.traceId()));
+        }
+        int removed = 0;
+        for (Map.Entry<String, List<FindingEvidenceRepository.Ref>> e : superseded.entrySet()) {
+            removed += evidence.remove(projectId, findingId, e.getKey(), e.getValue());
+        }
+
         // Each row names its session: the clearer, the retention pin and RCA's session citations read it off the
         // trace row.
         List<FindingEvidenceRepository.Ref> members = new ArrayList<>(trials.size());
@@ -223,7 +237,7 @@ public class FrustrationRateService implements ClassifierCatchUp {
             members.add(turn);
             if (t.flagged()) witnesses.add(turn);
         }
-        // Rows already stored are skipped by the ref's unique index, so each pass adds only what is new.
+        // Rows already stored are skipped by the ref's unique index, so each pass adds only the turns that now stand.
         int stored = evidence.record(projectId, findingId, FindingEvidenceRow.Role.MEMBER, members, now)
                 + evidence.record(projectId, findingId, FindingEvidenceRow.Role.WITNESS, witnesses, now);
 
@@ -243,6 +257,7 @@ public class FrustrationRateService implements ClassifierCatchUp {
                 .field("frustratedSinceOnset", d.failuresSinceOnset())
                 .field("criticality", d.criticality())
                 .field("evidenceStored", stored)
+                .field("evidenceRemoved", removed)
                 .log();
     }
 

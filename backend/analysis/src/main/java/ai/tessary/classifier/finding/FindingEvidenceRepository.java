@@ -20,9 +20,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The evidence behind a finding: append-only, uncapped, written in the transaction that opens the finding. The whole
- * population is written, not a sample, so a claim can be audited; retention treats the rows as pinned. {@link #record}
- * bumps {@code finding.evidence_counts} in the same call, and {@code ux_finding_evidence_ref} makes repeats a no-op.
+ * The evidence behind a finding: append-only save {@link #remove} and {@link #replace}, uncapped, written in the
+ * transaction that opens the finding. The whole population is written, not a sample, so a claim can be audited;
+ * retention treats the rows as pinned. {@link #record} bumps {@code finding.evidence_counts} in the same call, and
+ * {@code ux_finding_evidence_ref} makes repeats a no-op.
  */
 @Repository
 public class FindingEvidenceRepository {
@@ -207,9 +208,65 @@ public class FindingEvidenceRepository {
     }
 
     /**
-     * The one exception to append-never-rewrite: callers must first establish that no ruling stands on the finding
-     * ({@code FindingRepository.Recorded#ruled()}). An empty {@code refs} is a no-op, since some references
-     * legitimately have no rows.
+     * Takes out rows whose ref no longer stands for the unit it was written for, as when a later turn replaces the one
+     * that stood for a conversation-hour, and recounts the role from what is left. Not for rows a claim still rests
+     * on.
+     */
+    public int remove(String projectId, String findingId, String role, List<Ref> refs) {
+        int removed = 0;
+        for (int from = 0; from < refs.size(); from += INSERT_CHUNK) {
+            List<Ref> chunk = refs.subList(from, Math.min(from + INSERT_CHUNK, refs.size()));
+            StringBuilder sql = new StringBuilder("DELETE FROM finding_evidence"
+                    + " WHERE project_id = :pid AND finding_id = :fid AND role = :role"
+                    + " AND (COALESCE(session_id, ''), COALESCE(trace_id, ''), COALESCE(span_id, '')) IN (");
+            for (int i = 0; i < chunk.size(); i++) {
+                if (i > 0) sql.append(',');
+                sql.append("(:session")
+                        .append(i)
+                        .append(", :trace")
+                        .append(i)
+                        .append(", :span")
+                        .append(i)
+                        .append(')');
+            }
+            sql.append(')');
+            var spec = jdbc.sql(sql.toString())
+                    .param("pid", projectId)
+                    .param("fid", findingId)
+                    .param("role", role);
+            for (int i = 0; i < chunk.size(); i++) {
+                Ref ref = chunk.get(i);
+                spec = spec.param("session" + i, nonNull(ref.sessionId()))
+                        .param("trace" + i, nonNull(ref.traceId()))
+                        .param("span" + i, nonNull(ref.spanId()));
+            }
+            removed += spec.update();
+        }
+        if (removed == 0) return 0;
+        jdbc.sql("""
+                UPDATE finding
+                   SET evidence_counts = jsonb_set(
+                           COALESCE(evidence_counts, '{}'::jsonb),
+                           ARRAY[CAST(:role AS text)],
+                           to_jsonb((SELECT count(*) FROM finding_evidence
+                                      WHERE project_id = :pid AND finding_id = :fid AND role = :role)))
+                 WHERE project_id = :pid AND id = :fid
+                """)
+                .param("role", role)
+                .param("pid", projectId)
+                .param("fid", findingId)
+                .update();
+        return removed;
+    }
+
+    private static String nonNull(@Nullable String value) {
+        return value == null ? "" : value;
+    }
+
+    /**
+     * Besides {@link #remove}, the one exception to append-never-rewrite: callers must first establish that no ruling
+     * stands on the finding ({@code FindingRepository.Recorded#ruled()}). An empty {@code refs} is a no-op, since
+     * some references legitimately have no rows.
      */
     public int replace(String projectId, String findingId, String role, List<Ref> refs, String now) {
         if (refs.isEmpty()) return 0;

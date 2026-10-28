@@ -69,11 +69,11 @@ public class FrustrationRateRepository {
             """.replace("{flaggedTurn}", FLAGGED_TURN);
 
     /**
-     * Per conversation-hour, its earliest flagged turn when one stands, else its latest turn. Reads neither
-     * {@code request} nor {@code response}.
+     * Every turn in the window, ranked within its conversation-hour: {@code rn = 1} is its earliest flagged turn when
+     * one stands, else its latest turn. Reads neither {@code request} nor {@code response}.
      */
-    static final String TRIALS_SINCE = """
-            WITH turn AS (
+    private static final String RANKED_TURNS = """
+            turn AS (
               SELECT a.conversation_id, a.trace_id, a.turn_started_at,
                      date_trunc('hour', a.turn_started_at, 'UTC') AS bucket,
                      {flaggedTurn} AS flagged
@@ -87,12 +87,25 @@ public class FrustrationRateRepository {
                          ORDER BY t.flagged DESC,
                                   CASE WHEN t.flagged THEN t.turn_started_at END ASC,
                                   t.turn_started_at DESC, t.trace_id DESC) AS rn
-                FROM turn t)
+                FROM turn t)""".replace("{flaggedTurn}", FLAGGED_TURN);
+
+    /** Per conversation-hour, the turn that stands for it. */
+    static final String TRIALS_SINCE = "WITH " + RANKED_TURNS + """
+
             SELECT bucket, conversation_id, trace_id, flagged
               FROM ranked
              WHERE rn = 1
              ORDER BY bucket DESC, flagged DESC, turn_started_at DESC, conversation_id DESC
-            """.replace("{flaggedTurn}", FLAGGED_TURN);
+            """;
+
+    /** A finding's turn rows whose turn no longer stands for its conversation-hour. */
+    static final String SUPERSEDED = "WITH " + RANKED_TURNS + """
+
+            SELECT e.role, e.session_id, e.trace_id
+              FROM finding_evidence e
+              JOIN ranked r ON r.trace_id = e.trace_id AND r.conversation_id = e.session_id
+             WHERE e.project_id = :pid AND e.finding_id = :fid AND e.span_id IS NULL AND r.rn > 1
+            """;
 
     /**
      * With {@code {filter}} set, only one RCA cause's share, read off the stored report so the request carries two
@@ -209,6 +222,35 @@ public class FrustrationRateRepository {
                         rs.getString("conversation_id"),
                         rs.getString("trace_id"),
                         rs.getBoolean("flagged")))
+                .list();
+    }
+
+    /** A stored turn row of {@code findingId} whose turn no longer stands for its conversation-hour. */
+    public record Superseded(String role, String sessionId, String traceId) {}
+
+    /**
+     * Over the same window as {@link #trialsSince}: a later turn of the same hour was scored, or an earlier one was
+     * flagged, since the row was written.
+     */
+    public List<Superseded> superseded(
+            String projectId,
+            String classifierId,
+            String scorerVersion,
+            String callSiteId,
+            String findingId,
+            Instant onset,
+            Instant until) {
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
+        return jdbc.sql(SUPERSEDED.replace("{detections}", table))
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("scorerVersion", scorerVersion)
+                .param("callSite", callSiteId)
+                .param("fid", findingId)
+                .param("onset", Timestamp.from(onset))
+                .param("until", Timestamp.from(until))
+                .query((rs, n) ->
+                        new Superseded(rs.getString("role"), rs.getString("session_id"), rs.getString("trace_id")))
                 .list();
     }
 

@@ -198,6 +198,59 @@ record FrustrationRateIntegrationTest(
         assertEquals(1, cases.listLive(pid).size());
     }
 
+    /**
+     * The turn that stands for a conversation-hour moves when a later turn in that hour is scored. A row left on the
+     * turn it replaced counts that conversation-hour twice, and on both sides when the later turn is flagged.
+     */
+    @Test
+    void aLaterTurnInTheSameHourReplacesTheRowsOfTheTurnBeforeIt() {
+        String pid = fixture.project("fr-two-pass", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, "frustration");
+        Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        risenCallSite(pid, signal, start);
+        Instant hour = start.plus(45, ChronoUnit.HOURS);
+        fixture.frustrationAssessment(
+                pid, signal, "g-1010", "conv-g", "cs-chat", hour.plus(10, ChronoUnit.MINUTES), false, VERSION);
+        fixture.frustrationAssessment(
+                pid, signal, "e-1010", "conv-e", "cs-chat", hour.plus(10, ChronoUnit.MINUTES), false, VERSION);
+        service.refresh(pid, signal, Instant.now());
+
+        Instant later = hour.plus(40, ChronoUnit.MINUTES);
+        fixture.frustrationAssessment(pid, signal, "g-1040", "conv-g", "cs-chat", later, true, VERSION);
+        fixture.frustrationFlag(pid, signal, "g-1040", "conv-g", "cs-chat", later);
+        fixture.frustrationAssessment(pid, signal, "e-1040", "conv-e", "cs-chat", later, false, VERSION);
+        service.refresh(pid, signal, Instant.now());
+
+        List<FindingRow> filed = findings.listByProject(pid, null, null, "frustration", false, 10);
+        assertEquals(1, filed.size(), "the same spell is one finding");
+        FindingRow finding = filed.get(0);
+        List<FindingEvidenceRow> all = evidence.listByFinding(pid, finding.id());
+        assertEquals(
+                List.of("member g-1040", "witness g-1040"),
+                all.stream()
+                        .filter(r -> "conv-g".equals(r.sessionId()))
+                        .map(r -> r.role() + " " + r.traceId())
+                        .sorted()
+                        .toList(),
+                "the flagged turn alone stands for conv-g's hour, on both sides");
+        assertEquals(
+                List.of("member e-1040"),
+                all.stream()
+                        .filter(r -> "conv-e".equals(r.sessionId()))
+                        .map(r -> r.role() + " " + r.traceId())
+                        .toList(),
+                "the latest calm turn alone stands for conv-e's hour");
+        long members = all.stream()
+                .filter(r -> FindingEvidenceRow.Role.MEMBER.equals(r.role()))
+                .count();
+        assertEquals(finding.sampleCount(), members, "one member row per trial");
+        assertEquals(members, finding.evidenceCount(FindingEvidenceRow.Role.MEMBER), "the count follows the rows");
+        assertEquals(
+                all.size() - members,
+                finding.evidenceCount(FindingEvidenceRow.Role.WITNESS),
+                "the witness count follows the rows");
+    }
+
     /** A page past the last session still carries the count, and an unparseable score lists the session unscored. */
     @Test
     void aPagePastTheEndKeepsTheTotalAndAnUnreadableScoreIsUnscored() {
