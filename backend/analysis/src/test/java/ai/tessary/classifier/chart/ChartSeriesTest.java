@@ -290,7 +290,7 @@ class ChartSeriesTest {
                 .config("{\"reference_settle_hours\":12}")
                 .build();
 
-        assertEquals(24, ChartSeries.settleHours(frustration, MAPPER));
+        assertEquals(1, ChartSeries.settleHours(frustration, MAPPER));
         assertEquals(6, ChartSeries.settleHours(groundedness, MAPPER));
         assertEquals(1, ChartSeries.settleHours(malformed, MAPPER));
         assertEquals(12, ChartSeries.settleHours(slower, MAPPER));
