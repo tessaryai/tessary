@@ -621,16 +621,18 @@ test('an rca session puts the onset commit into each message (a prompt that tell
   assert.deepEqual(session.records()[0].prompts.map((p) => p.parts[0].text), [`commit ${live}; again ${live}`, `still ${live}`]);
 });
 
-test('an rca session with a system prompt runs it as the session agent and is still read-only (a system prompt that reopens edits)', async (t) => {
+test('an rca session has a checks/ dir for its scripts and still denies repo edits (an RCA agent that cannot script its checks, or a system prompt that reopens edits)', async (t) => {
   const { session } = await readySession(t, { input: { lane: 'rca' } });
 
+  assert.equal(fs.statSync(path.join(session.workDir, 'checks')).isDirectory(), true);
   await send(session, 'find the angry traces');
   await session.readEvents(0, 'message_end', 1);
 
   const [record] = session.records();
   assert.equal(record.config.agent['tessary-session'].prompt, SYSTEM_PROMPT);
   assert.deepEqual(record.config.permission.edit, { '*': 'deny' });
-  assert.deepEqual(record.config.permission.external_directory, { '*': 'deny' });
+  assert.equal(record.config.permission.external_directory['*'], 'deny');
+  assert.equal(Object.values(record.config.permission.external_directory).filter((v) => v === 'allow').length, 2);
   assert.match(record.config.mcp.alpha.url, /\/mcp\/alpha$/);
   assert.equal(record.prompts[0].agent, 'tessary-session');
 });

@@ -33,8 +33,9 @@ public record FindingEvidenceRow(
         public static final String MEMBER = "member";
 
         /**
-         * Enumerated like {@link #MEMBER}, captured at open. Absent where the reference is a fitted summary, which is a
-         * fact, not a failed write.
+         * Enumerated like {@link #MEMBER}, captured at open, except that a writer may store a sample when the payload
+         * declares the rule it was drawn by ({@code control.baseline} for metric drift). Absent where the reference is
+         * a fitted summary with no rows behind it, which is a fact, not a failed write.
          */
         public static final String BASELINE = "baseline";
 

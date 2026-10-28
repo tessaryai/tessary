@@ -10,7 +10,17 @@ import { describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { components } from "../../api/generated/schema";
 import { PairBlock, PatternBlock, changeOf, compact, prettyKey } from "./findingCharts";
-import { ShiftBehind, ShiftChart, ShiftPins, formatMeasure, measureNoun, pinsFor, referenceWords } from "./shiftStory";
+import {
+  ShiftBehind,
+  ShiftChart,
+  ShiftMean,
+  ShiftPins,
+  formatMeasure,
+  meanLine,
+  measureNoun,
+  pinsFor,
+  referenceWords,
+} from "./shiftStory";
 
 type Shift = components["schemas"]["ShiftDetail"];
 type Pair = components["schemas"]["Pair"];
@@ -26,9 +36,45 @@ function shift(over: Partial<Shift>): Shift {
     windowClosedAt: null, windowKind: null, windowOpenedAt: null, w1Log: 0.4, control: null, direction: "up",
     explains: [], floor: 0, measure: "cost",
     quantiles: q([1, 2.5], [10, 40]),
-    ratio: 2.5, reference: "previous", tokens: [], workload: [], ...over,
+    ratio: 2.5, reference: "previous", tokens: [], workload: [], mean: null, shift: null, ...over,
   };
 }
+
+describe("meanLine", () => {
+  // Bug: a falling mean read as a rise, or the mean shown as a ratio instead of in the measure's own units.
+  it("reads a falling mean as a decrease, in the measure's units and signed", () => {
+    expect(
+      meanLine(
+        shift({
+          measure: "duration",
+          mean: { key: "mean", then: 2000, now: 1500 },
+          shift: { mean: -500, p50: -400, p95: -900 },
+        }),
+      ),
+    ).toEqual({
+      label: "On average a call is 500ms faster",
+      detail: "Mean 2s to 1.5s (-500ms). p50 -400ms, p95 -900ms.",
+      tone: "positive",
+    });
+  });
+
+  it("reads a rising cost as more per turn", () => {
+    expect(
+      meanLine(shift({ mean: { key: "mean", then: 1, now: 1.3 }, shift: { mean: 0.3, p50: 1.5, p95: 30 } })),
+    ).toEqual({
+      label: "On average a turn is $0.30 more",
+      detail: "Mean $1.00 to $1.30 (+$0.30). p50 +$1.50, p95 +$30.00.",
+      tone: "negative",
+    });
+  });
+
+  it("says nothing for a finding written before the mean existed", () => {
+    expect(meanLine(shift({}))).toBeNull();
+    const { container } = render(<ShiftMean shift={shift({})} />);
+    expect(container.textContent).toBe("");
+    cleanup();
+  });
+});
 
 describe("formatMeasure", () => {
   it.each([

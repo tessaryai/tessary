@@ -138,6 +138,7 @@ describe("RcaReport", () => {
           evidence_session_ids: ["session-0000aa01", "session-0000aa02"],
           evidence_trace_ids: ["trace-0000bb01"],
           affected_count: 4,
+          affected_of: null,
         },
       ],
     };
@@ -163,7 +164,7 @@ describe("RcaReport", () => {
           ...GROUNDEDNESS_REPORT.causes[0],
           attribution: { kind: "prompt", path: "agent/system.md", commit: "c0ffee1234abcd", excerpt: null },
         },
-        ...["code", "model", "tool", "data", "a_kind_from_later"].map((kind) => ({
+        ...["code", "model", "tool", "data", "deploy", "config", "infra", "traffic", "upstream", "a_kind_from_later"].map((kind) => ({
           ...GROUNDEDNESS_REPORT.causes[0],
           attribution: { kind, path: `${kind}.py`, commit: null, excerpt: null },
         })),
@@ -173,9 +174,77 @@ describe("RcaReport", () => {
 
     expect(await screen.findByText("agent/system.md @ c0ffee1")).toBeTruthy();
     expect(screen.getByText("code.py")).toBeTruthy();
-    expect(["Prompt", "Code", "Model", "Tool", "Data", "Where"].map((label) => screen.getAllByText(label).length)).toEqual([
-      1, 1, 1, 1, 1, 1,
-    ]);
+    expect(
+      ["Prompt", "Code", "Model", "Tool", "Data", "Deploy", "Config", "Infrastructure", "Traffic", "Upstream", "Where"].map(
+        (label) => screen.getAllByText(label).length,
+      ),
+    ).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  });
+
+  // Bug: the flagged total never shown beside a cause's count, or an older cause without one reading "of null".
+  it("shows how many of the flagged rows each cause explains", async () => {
+    report = {
+      ...CURRENT_GROUNDEDNESS_REPORT,
+      causes: [
+        { ...CURRENT_GROUNDEDNESS_REPORT.causes[0], affected_count: 3, affected_of: 58 },
+        { ...CURRENT_GROUNDEDNESS_REPORT.causes[1], affected_of: null },
+      ],
+    };
+    renderReport();
+
+    expect(await screen.findByText("3 of 58 flagged answers")).toBeTruthy();
+    expect(screen.getByText("2 flagged answers")).toBeTruthy();
+  });
+
+  // Bug: what the analysis read shown nowhere.
+  it("shows what the analysis read under the verdict", async () => {
+    report = {
+      ...CURRENT_GROUNDEDNESS_REPORT,
+      coverage: {
+        read: [{ role: "witness", count: 58 }, { role: "baseline", count: 200 }],
+        how_chosen: "every witness row, baseline paged whole",
+      },
+    };
+    renderReport();
+
+    // The label's row, then the card body that holds the label row and the summary.
+    const verdict = (await screen.findByText("Verdict")).parentElement!.parentElement!;
+    expect(
+      within(verdict).getByText("Read 58 witness rows and 200 baseline rows · every witness row, baseline paged whole"),
+    ).toBeTruthy();
+  });
+
+  // Bug: a coverage line shown on an older report that recorded none.
+  it("shows no coverage line on a report that recorded none", async () => {
+    report = { ...CURRENT_GROUNDEDNESS_REPORT, coverage: null };
+    renderReport();
+
+    await screen.findByText("Verdict");
+    expect(screen.queryByText(/^Read /)).toBeNull();
+  });
+
+  // Bug: a drift report's mean of 2500 ms ran through the rate formatter and read as 250000%.
+  it("heads a drift report with the mean then and now in the measure's units", async () => {
+    report = {
+      ...GROUNDEDNESS_REPORT, report_kind: "metric_movement", metric: "duration_drift", subject_kind: "metric_baseline",
+      current_value: 2500, prior_value: 1000, delta: 1500,
+    };
+    renderReport();
+
+    expect(await screen.findByText(/^metric_baseline · Duration rose to 2\.5s from 1s \(\+1\.5s\) · .+ onward$/)).toBeTruthy();
+  });
+
+  // Bug: the header said "vs the 24h before" when the window started at the reference, days earlier.
+  it("names a movement report's reference window rather than assuming a day", async () => {
+    report = {
+      ...GROUNDEDNESS_REPORT, report_kind: "metric_movement", metric: "tool_error", subject_kind: "classifier",
+      current_value: 0, prior_value: 0, delta: 0,
+    };
+    renderReport();
+
+    const subtitle = await screen.findByText(/^classifier · /);
+    expect(subtitle.textContent).toMatch(/ onward vs .+ to .+$/);
+    expect(subtitle.textContent).not.toContain("24h");
   });
 
   // Bug: a report on a measure with no cause words of its own borrows another kind's, so a standing cause reads

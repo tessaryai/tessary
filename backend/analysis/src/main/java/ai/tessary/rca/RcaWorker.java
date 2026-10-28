@@ -163,7 +163,7 @@ public class RcaWorker {
         // The job's status is what stops the case page polling, so it changes last; a poll in between would stop
         // reading with the report still pending.
         try {
-            reports.complete(job.id(), RcaJobRow.FAILED, null, e.getMessage(), null, null, null, null);
+            reports.complete(job.id(), RcaJobRow.FAILED, null, e.getMessage(), null, null, null, null, null);
         } catch (RuntimeException stampFailure) {
             log.warn(Markers.OPS, "rca failed-report stamp failed job={}: {}", job.id(), stampFailure.getMessage());
         }

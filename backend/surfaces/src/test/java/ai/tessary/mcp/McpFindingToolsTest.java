@@ -22,6 +22,8 @@ import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedS
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
+import ai.tessary.classifier.finding.BehaviorDtos.EvidenceExportPage;
+import ai.tessary.classifier.finding.BehaviorDtos.EvidenceExportRow;
 import ai.tessary.classifier.finding.BehaviorDtos.EvidenceSpanView;
 import ai.tessary.classifier.finding.BehaviorDtos.FindingEvidencePage;
 import ai.tessary.classifier.finding.BehaviorDtos.FindingEvidenceSpanPage;
@@ -29,6 +31,7 @@ import ai.tessary.classifier.finding.ClassifierDetail;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
@@ -504,6 +507,19 @@ class McpFindingToolsTest {
                                 true,
                                 true,
                                 "otto-von-bismarck",
+                                "v-12",
+                                "user-3",
+                                4000L,
+                                100L,
+                                10L,
+                                5L,
+                                5L,
+                                4,
+                                9,
+                                812L,
+                                64L,
+                                true,
+                                Map.of("service.instance.id", "i-1"),
                                 "what the span was given",
                                 "what it returned",
                                 null,
@@ -529,6 +545,19 @@ class McpFindingToolsTest {
                                 false,
                                 false,
                                 "otto-von-bismarck",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                false,
+                                Map.of(),
                                 "tool input",
                                 "tool output",
                                 null,
@@ -564,7 +593,17 @@ class McpFindingToolsTest {
         assertTrue(first.get("partialCost").asBoolean(), "a whole-run row can flag unpriced spans");
         assertTrue(first.get("staleTotals").asBoolean(), "a whole-run row can flag an unsettled rollup");
         assertEquals("otto-von-bismarck", first.get("callSiteId").asText());
+        assertEquals(4000, first.get("inputTokens").asLong());
+        assertEquals(5, first.get("reasoningTokens").asLong());
+        assertEquals(4, first.get("traceIndex").asInt());
+        assertEquals(9, first.get("sessionTraces").asInt());
+        assertEquals("user-3", first.get("userId").asText());
+        assertEquals("v-12", first.get("projectVersionId").asText());
+        assertEquals(812, first.get("inputBytes").asLong());
+        assertTrue(first.get("payloadAvailable").asBoolean(), first.toString());
+        assertEquals("i-1", first.get("attributes").get("service.instance.id").asText());
         JsonNode second = body.get("rows").get(1);
+        assertEquals(0, second.get("attributes").size(), "an empty short list is {} on the wire, not absent");
         assertEquals("trace-8", second.get("traceId").asText());
         assertEquals("span-2", second.get("spanId").asText());
         assertEquals(3, second.get("rank").asInt());
@@ -647,6 +686,11 @@ class McpFindingToolsTest {
     }
 
     private static EvidenceSpanView evidenceRow(String role, String traceId, @Nullable String spanId) {
+        return evidenceRow(role, traceId, spanId, Map.of());
+    }
+
+    private static EvidenceSpanView evidenceRow(
+            String role, String traceId, @Nullable String spanId, Map<String, String> attributes) {
         return new EvidenceSpanView(
                 role,
                 0,
@@ -667,6 +711,19 @@ class McpFindingToolsTest {
                 false,
                 false,
                 "rag-answer",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false,
+                attributes,
                 "question",
                 "answer",
                 null,
@@ -715,5 +772,118 @@ class McpFindingToolsTest {
         assertEquals(0.62, sentences.get(1).get("score").asDouble());
         assertEquals(0, rows.get(2).get("flaggedSentences").size(), "a witness answer with no sentence left");
         assertFalse(rows.get(3).has("flaggedSentences"), "a member row is not a flagged answer");
+    }
+
+    private static EvidenceExportPage exportPage(EvidenceExportRow... rows) {
+        return new EvidenceExportPage(List.of(rows), "c-2", counts(2, 0), counts(2, 0), 4000);
+    }
+
+    /**
+     * The rows are flat on the wire, one level a script reads: the measured fields beside {@code input}, {@code
+     * output}, {@code attributes} and, on a frustration witness row only, {@code priorMessages}. Catches a nested or
+     * renamed key breaking every script an agent writes over the saved file.
+     */
+    @Test
+    void exportFindingEvidence_rowsAreFlatAndCarryTextAttributesAndPriorMessages() throws Exception {
+        when(behaviorDrift.exportEvidence(PROJECT_ID, "find-1", null, 4000, null))
+                .thenReturn(exportPage(
+                        new EvidenceExportRow(
+                                evidenceRow(
+                                        FindingEvidenceRow.Role.WITNESS,
+                                        "trace-1",
+                                        "span-1",
+                                        Map.of("service.name", "api")),
+                                "the question",
+                                null,
+                                Map.of("deploy", "v1"),
+                                List.of(new EarlierMessage("user", "a"))),
+                        new EvidenceExportRow(
+                                evidenceRow(FindingEvidenceRow.Role.MEMBER, "trace-2", "span-2"),
+                                "another",
+                                "an answer",
+                                null,
+                                null)));
+
+        Map<String, Object> result = mcp.callTool("export_finding_evidence", "{\"finding_id\":\"find-1\"}");
+        JsonNode body = structured(result);
+
+        JsonNode witness = body.get("rows").get(0);
+        // The row's own bag replaces the short list; two `attributes` keys on one object would be invalid for most
+        // readers.
+        assertEquals(1, witness.get("attributes").size(), witness.toString());
+        assertEquals(2, occurrences(textOf(result), "\"attributes\""), "one attributes key per row");
+        assertEquals("witness", witness.get("role").asText());
+        assertEquals("trace-1", witness.get("traceId").asText());
+        assertEquals("span-1", witness.get("spanId").asText());
+        assertEquals(900, witness.get("latencyMs").asLong());
+        assertEquals("rag-answer", witness.get("callSiteId").asText());
+        assertEquals("the question", witness.get("input").asText());
+        assertTrue(witness.has("output") && witness.get("output").isNull(), witness.toString());
+        assertEquals("v1", witness.get("attributes").get("deploy").asText());
+        assertEquals("user", witness.get("priorMessages").get(0).get("role").asText());
+        assertEquals("a", witness.get("priorMessages").get(0).get("content").asText());
+        assertFalse(witness.has("measured"), "the measured fields are flat on the row: " + witness);
+        assertFalse(witness.has("inputPreview"), "the preview is superseded by the text: " + witness);
+        JsonNode member = body.get("rows").get(1);
+        assertEquals("an answer", member.get("output").asText());
+        assertFalse(member.has("priorMessages"), "only a frustration witness row has prior messages: " + member);
+        assertEquals("c-2", body.get("nextCursor").asText());
+        assertEquals(4000, body.get("textChars").asInt());
+        assertEquals(2, body.get("counts").get("member").asLong());
+        assertEquals(2, body.get("recordedCounts").get("member").asLong());
+    }
+
+    /** Catches an unbounded {@code text_chars} turning one row into a whole page. */
+    @Test
+    void exportFindingEvidence_passesRoleAndCursorThroughAndClampsTextChars() throws Exception {
+        when(behaviorDrift.exportEvidence(eq(PROJECT_ID), eq("find-1"), any(), anyInt(), any()))
+                .thenReturn(exportPage());
+
+        structured(mcp.callTool(
+                "export_finding_evidence",
+                "{\"finding_id\":\"find-1\",\"role\":\"member\",\"text_chars\":50000,\"cursor\":\"c-1\"}"));
+        structured(mcp.callTool("export_finding_evidence", "{\"finding_id\":\"find-1\",\"text_chars\":1}"));
+        structured(mcp.callTool("export_finding_evidence", "{\"finding_id\":\"find-1\"}"));
+
+        verify(behaviorDrift).exportEvidence(PROJECT_ID, "find-1", FindingEvidenceRow.Role.MEMBER, 20000, "c-1");
+        verify(behaviorDrift).exportEvidence(PROJECT_ID, "find-1", null, 200, null);
+        verify(behaviorDrift).exportEvidence(PROJECT_ID, "find-1", null, 4000, null);
+    }
+
+    /** An unknown role is an error: an empty export would read as a finding with no evidence. */
+    @Test
+    void exportFindingEvidence_unknownRoleIsToolError_andNeverCallsService() throws Exception {
+        String text =
+                errorText(mcp.callTool("export_finding_evidence", "{\"finding_id\":\"find-1\",\"role\":\"members\"}"));
+
+        assertTrue(text.contains("members"), text);
+        assertTrue(text.contains("export_finding_evidence"), text);
+        assertTrue(text.contains(FindingEvidenceRow.Role.BASELINE), text);
+        verify(behaviorDrift, org.mockito.Mockito.never()).exportEvidence(any(), any(), any(), anyInt(), any());
+    }
+
+    /** Cross-tenant ids and ungranted detectors both read not-found, as for {@code get_finding_evidence}. */
+    @Test
+    void exportFindingEvidence_notFoundIsCleanToolError() throws Exception {
+        when(behaviorDrift.exportEvidence(eq(PROJECT_ID), eq("other-tenant"), any(), anyInt(), any()))
+                .thenThrow(new TessaryException(ClassifierError.FINDING_NOT_FOUND, "other-tenant"));
+
+        String text = errorText(mcp.callTool("export_finding_evidence", "{\"finding_id\":\"other-tenant\"}"));
+
+        assertTrue(text.contains("other-tenant"), text);
+    }
+
+    /** The serialized text block, where a duplicate key would still show; the parsed tree keeps only one. */
+    @SuppressWarnings("unchecked")
+    private static String textOf(Map<String, Object> result) {
+        List<Map<String, Object>> content =
+                (List<Map<String, Object>>) java.util.Objects.requireNonNull(result.get("content"));
+        return String.valueOf(content.get(0).get("text"));
+    }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length())) count++;
+        return count;
     }
 }

@@ -4,11 +4,21 @@ package ai.tessary.classifier.metric;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.metric.MetricDriftDetector.Decision;
 import ai.tessary.classifier.metric.MetricDriftDetector.Direction;
+import ai.tessary.classifier.metric.MetricDriftDetector.Reference;
+import ai.tessary.classifier.metric.MetricFindingEvidence.BaselineSample;
+import ai.tessary.classifier.metric.MetricFindingEvidence.ChangePoint;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Explains;
+import ai.tessary.classifier.metric.MetricFindingEvidence.Pair;
+import ai.tessary.classifier.metric.MetricFindingEvidence.PlainShift;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Read;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
+import ai.tessary.classifier.metric.MetricHistogram.Grid;
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
 import java.util.OptionalDouble;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -66,6 +76,110 @@ class MetricFindingEvidenceTest {
         assertEquals(1500.0, explained.refMillis());
         assertEquals(4500.0, explained.curMillis());
         assertEquals(1.0, explained.covered());
+        assertNull(detail.mean(), "a blob written before the mean existed reads it as absent");
+        assertNull(detail.shift(), "and its plain-unit shift too, rather than crashing on every older finding");
+    }
+
+    /**
+     * The shift in the measure's own units. On a grid of doubling bins (bin i is [2^i, 2^(i+1)), raw midpoint 2^(i +
+     * 0.5)), two rows in each of bins 0 and 1 against four rows in bin 2 give a mean of (2 x 1.4142 + 2 x 2.8284) / 4
+     * = 2.12 then and 5.66 now, so the mean rose by 3.54. The quantiles interpolate inside a bin: p50 2.0 to 5.66 and
+     * p95 2^1.9 = 3.73 to 2^2.95 = 7.73, so they rose by 3.66 and 4.0. The bug is a shift stated only as a ratio, or a
+     * mean taken from rows on one side and from the sketch on the other.
+     */
+    @Test
+    void payloadStatesTheMeanAndASignedShift() throws Exception {
+        Grid grid = new Grid(1.0, 2.0, 4);
+        MetricHistogram ref = new MetricHistogram(grid);
+        ref.add(Math.log(1.2));
+        ref.add(Math.log(1.2));
+        ref.add(Math.log(2.5));
+        ref.add(Math.log(2.5));
+        MetricHistogram cur = new MetricHistogram(grid);
+        for (int i = 0; i < 4; i++) cur.add(Math.log(5));
+        Decision fired =
+                new Decision(true, "turn_duration", Reference.PINNED, 0.98, 2.67, Direction.UP, 4, 4, 0.19, null);
+
+        String json = MetricFindingEvidence.toJson(
+                "turn_duration",
+                "call_site",
+                "cs-1",
+                fired,
+                ref,
+                cur,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-01T00:00:00Z",
+                "2026-06-01T00:00:07Z",
+                "count",
+                List.of(),
+                null,
+                null,
+                grid,
+                new ChangePoint("2026-06-01T00:00:04Z", ChangePoint.METHOD_CUSUM, 4, 4),
+                "2026-05-25T00:00:00Z");
+
+        JsonNode root = MetricHistogram.JSON.readTree(json);
+        assertEquals(2.12, root.path("mean").path(0).asDouble());
+        assertEquals(5.66, root.path("mean").path(1).asDouble());
+        assertEquals(3.54, root.path("shift").path("mean").asDouble());
+        assertEquals(3.66, root.path("shift").path("p50").asDouble());
+        assertEquals(4.0, root.path("shift").path("p95").asDouble());
+        JsonNode changepoint = root.path("changepoint");
+        assertEquals("2026-06-01T00:00:04Z", changepoint.path("at").asText());
+        assertEquals("cusum", changepoint.path("method").asText());
+        assertEquals(4, changepoint.path("index").asInt());
+        assertEquals(4, changepoint.path("rows_before").asInt());
+        assertEquals("2026-05-25T00:00:00Z", root.path("reference_from").asText());
+
+        ShiftDetail detail = MetricFindingEvidence.detail(json);
+        assertNotNull(detail);
+        assertEquals(new Pair("mean", 2.12, 5.66), detail.mean());
+        assertEquals(new PlainShift(3.54, 3.66, 4.0), detail.shift());
+    }
+
+    /**
+     * A reference reading with no rows has no then, so each shift is null rather than measured from zero. The bug is a
+     * shift equal to the whole current value.
+     */
+    @Test
+    void anEmptyReferenceWritesANullShift() throws Exception {
+        Grid grid = new Grid(1.0, 2.0, 4);
+        MetricHistogram ref = new MetricHistogram(grid);
+        MetricHistogram cur = new MetricHistogram(grid);
+        for (int i = 0; i < 4; i++) cur.add(Math.log(5));
+        Decision fired =
+                new Decision(true, "turn_duration", Reference.PINNED, 0.98, 2.67, Direction.UP, 0, 4, 0.19, null);
+
+        String json = MetricFindingEvidence.toJson(
+                "turn_duration",
+                "call_site",
+                "cs-1",
+                fired,
+                ref,
+                cur,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-01T00:00:00Z",
+                "2026-06-01T00:00:07Z",
+                "count",
+                List.of(),
+                null,
+                null,
+                grid,
+                new ChangePoint("2026-06-01T00:00:04Z", ChangePoint.METHOD_CUSUM, 4, 4),
+                null);
+
+        JsonNode shift = MetricHistogram.JSON.readTree(json).path("shift");
+        assertTrue(shift.path("mean").isNull(), json);
+        assertTrue(shift.path("p50").isNull(), json);
+        assertTrue(shift.path("p95").isNull(), json);
     }
 
     /** The headline a case is built from: the direction read as written, and the p50 pair split into its sides. */
@@ -106,5 +220,73 @@ class MetricFindingEvidenceTest {
     void anUnreadableOrKeylessBlobIsUnavailableToBothReaders(@Nullable String blob) {
         assertNull(MetricFindingEvidence.read(blob));
         assertNull(MetricFindingEvidence.detail(blob));
+    }
+
+    /**
+     * The rolling arm writes a sample as its {@code baseline} rows, which the role contract allows only with the rule
+     * declared beside it. The bug is a sample written without its rule, so a reader cannot audit the selection.
+     */
+    @Test
+    void theRollingArmDeclaresItsBaselineSample() throws Exception {
+        Grid grid = Grid.duration();
+        MetricHistogram window = new MetricHistogram(grid);
+        for (int i = 0; i < 50; i++) window.add(Math.log(2000));
+        MetricControl.Resolved control = MetricControl.empty()
+                .fold(
+                        grid,
+                        "2026-06-21",
+                        window,
+                        new MetricWorkload(MetricWorkload.grid(grid.bins())),
+                        new MetricTokens(MetricTokens.grid(grid.bins())),
+                        List.of())
+                .resolve(grid, "2026-06-22", java.util.Set.of());
+        assertNotNull(control);
+        Decision fired =
+                new Decision(true, "turn_duration", Reference.PREVIOUS, 0.4, 1.5, Direction.UP, 50, 50, 0.139, null);
+
+        JsonNode declared = MetricHistogram.JSON
+                .readTree(rollingArm(
+                        grid, window, fired, control, new BaselineSample(200, 1050, 21, "2026-06-01", "2026-06-21")))
+                .path("control")
+                .path("baseline");
+        assertEquals("spread", declared.path("rule").asText());
+        assertEquals(200, declared.path("rows").asInt());
+        assertEquals(1050, declared.path("of").asInt());
+        assertEquals(21, declared.path("days").asInt());
+        assertEquals("2026-06-01", declared.path("oldest_day").asText());
+        assertEquals("2026-06-21", declared.path("newest_day").asText());
+
+        JsonNode undeclared = MetricHistogram.JSON.readTree(rollingArm(grid, window, fired, control, null));
+        assertTrue(undeclared.path("control").isObject(), "the ring's composition is still reported");
+        assertTrue(undeclared.path("control").path("baseline").isMissingNode(), "no sample, no declaration");
+    }
+
+    private static String rollingArm(
+            Grid grid,
+            MetricHistogram window,
+            Decision fired,
+            MetricControl.Resolved control,
+            @Nullable BaselineSample baseline) {
+        return MetricFindingEvidence.toJson(
+                "turn_duration",
+                "call_site",
+                "cs-1",
+                fired,
+                control.measure(),
+                window,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "2026-06-22T00:00:00Z",
+                "2026-06-22T00:00:49Z",
+                "count",
+                List.of(),
+                control,
+                baseline,
+                grid,
+                new ChangePoint("2026-06-22T00:00:00Z", ChangePoint.METHOD_CUSUM, 0, 0),
+                "2026-06-21T00:00:00Z");
     }
 }

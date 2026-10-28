@@ -11,7 +11,7 @@ An RCA run starts when a person presses **Run RCA** on a case. The decision to r
 
 The run hands the investigation to an agent session with three sources of evidence.
 
-**The finding's dossier, as files.** What the classifier asserts, over what population, and since when; the classifier's own numbers, verbatim; how that classifier measures and how its evidence reads, for every built-in classifier; and the tools the agent can call. The dossier is a snapshot taken at trigger time, so a report still reads correctly after the finding it analyzed has been resolved.
+**The finding's dossier, as files.** What the classifier asserts, over what population, and since when; the classifier's own numbers, verbatim; how that classifier measures and how its evidence reads, for every built-in classifier; and the tools the agent can call. The dossier is a snapshot taken at trigger time, so a report still reads correctly after the finding it analyzed has been resolved. It also holds `checks.md`, computed in code before the agent starts: the series over time and its change point, the flagged rows against the comparison rows by every field that differs, and the mix within groups.
 
 **A live connection back to your instance**, over MCP (Model Context Protocol), authenticated with a short-lived key minted for the run and revoked when it ends. This is required rather than optional. The dossier states the claim, and every row of the evidence behind it is fetched on demand, so a run that cannot reach your instance cannot open a single trace it is investigating. Neither the triage agent nor the RCA agent copies trace rows into its prompt.
 
@@ -46,9 +46,9 @@ The agent is asked to consider every plausible cause and to try to disprove each
 
 Anything weaker is not a cause. It goes on the ruled-out list with its reason. Several causes can be `high` at once, and one flagged trace can belong to more than one cause. The size of the finding does not cap confidence: the standard of proof alone decides.
 
-The agent compares only against baseline traces the finding itself recorded. Today only duration and cost drift against a pinned window record them. Every other finding is investigated from its flagged traces alone, and the agent does not fetch normal traffic to build a comparison of its own.
+The agent compares the flagged rows with the comparison rows the finding itself recorded: the `baseline` rows of a duration or cost drift finding, or the unflagged `member` rows of a tool error, frustration, or groundedness finding. A malformed output or secret leak finding has no comparison side. The agent never fetches normal traffic to build a comparison of its own. A feature as common on the comparison side as among the flagged rows is not a cause.
 
-Each run has a time budget, stated in its instructions. When the budget runs short, the agent returns the causes it has at the confidence they earned and says in the written investigation what it did not check.
+The agent keeps reading until it is certain of the causes, or certain that none can be found, and the report states what it read. Each run also has a time budget, stated in its instructions, and the written investigation says what the agent did not check.
 
 ## Where the run happens
 
@@ -71,9 +71,11 @@ A report, immutable once written. Every kind of case gets the same shape.
 | `causes_identified` | Causes identified. At least one cause reached `medium`. |
 | `no_cause_found` | No cause found. Nothing reached `medium`. This is a full answer, with what was ruled out. |
 
-**Up to four causes, each with its receipts**, ranked `high` first, then by how many flagged traces or sessions they explain. A cause has a short title and three plain-language parts: what changed, or what the agent does when the cause is a standing behavior; how that caused the problem; and what to do. It also names its kind, such as code, prompt, model, or traffic, and, with a connected repository, the file, commit, and excerpt behind it. The case page shows every cause with a **High** or **Medium** tag.
+Under the verdict, the report states how many rows it read per role and how it chose them.
 
-Every cause carries the trace and session identifiers that support it, and every identifier is checked against the finding's own evidence. Anything the agent cites that the finding does not hold is dropped, and a cause left with nothing to cite is dropped too. If no cause survives, a `causes_identified` report is recorded as `no_cause_found`, with a note at the top of the written investigation saying why.
+**Up to four causes, each with its receipts**, ranked `high` first, then by how many flagged traces or sessions they explain. A cause has a short title and three plain-language parts: what changed, or what the agent does when the cause is a standing behavior; how that caused the problem; and what to do. It also names its kind, such as code, prompt, model, deploy, config, infra, or traffic, and, with a connected repository, the file, commit, and excerpt behind it. The case page shows every cause with a **High** or **Medium** tag.
+
+Every cause carries the trace and session identifiers that support it, and every identifier is checked against the finding's flagged rows. A cause can cite only flagged rows, because comparison rows prove nothing on their own. Anything else the agent cites, a comparison row included, is dropped, and a cause left with nothing to cite is dropped too. The number of flagged rows a cause explains is held between the flagged rows it cites and the flagged total, and the case page shows it as a count of that total. If no cause survives, a `causes_identified` report is recorded as `no_cause_found`, with a note at the top of the written investigation saying why.
 
 None of the plain-language parts carry trace identifiers, queries, or statistics. Those live in the identifiers, shown as links, and in the written investigation.
 
@@ -87,7 +89,7 @@ None of the plain-language parts carry trace identifiers, queries, or statistics
 
 ### On a frustration case
 
-A frustration finding cites the frustrated sessions, so a run on one counts and cites sessions. The agent is told that the flagged message marks where the user reacted, not the turn that prompted the reaction.
+A frustration finding cites the flagged messages, one per session and hour, so a run on one counts and cites those messages and the sessions they belong to. The agent is told that the flagged message marks where the user reacted, not the turn that prompted the reaction.
 
 ### On a groundedness case
 

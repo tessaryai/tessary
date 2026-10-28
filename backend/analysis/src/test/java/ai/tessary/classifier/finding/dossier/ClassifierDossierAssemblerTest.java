@@ -68,7 +68,7 @@ class ClassifierDossierAssemblerTest {
     }
 
     @Test
-    void frustrationShapeStatesTheRateInConversationsAndPairsSessionWithTraceWitnesses() throws Exception {
+    void frustrationShapeStatesTheRateInSessionHoursAndListsTurnWitnesses() throws Exception {
         String payload = """
                 {"call_site_id":"support-chat","direction":"up","baseline_conversations":200,
                  "baseline_frustrated":10,"baseline_rate":0.052,"current_rate":0.25,
@@ -83,9 +83,9 @@ class ClassifierDossierAssemblerTest {
                 .thenReturn(headOf(
                         List.of(
                                 new FindingEvidenceRow(
-                                        "e1", PROJECT_ID, FINDING_ID, "conv-1", null, null, "witness", 0, "t0"),
+                                        "e1", PROJECT_ID, FINDING_ID, "conv-1", "trace-1", null, "witness", 0, "t0"),
                                 new FindingEvidenceRow(
-                                        "e2", PROJECT_ID, FINDING_ID, null, "trace-1", null, "witness", 1, "t0")),
+                                        "e2", PROJECT_ID, FINDING_ID, "conv-2", "trace-2", null, "witness", 1, "t0")),
                         false));
 
         String dossier = ClassifierDossierAssembler.assemble(
@@ -94,10 +94,12 @@ class ClassifierDossierAssemblerTest {
 
         assertTrue(dossier.startsWith("# Frustration evidence"));
         assertTrue(dossier.contains("5.20% learned → 25.00% since onset"));
-        assertTrue(dossier.contains("since onset: 600 conversations, 150 frustrated"));
+        assertTrue(dossier.contains("learned from 200 session-hours, 10 frustrated"), dossier);
+        assertTrue(dossier.contains("since onset: 600 session-hours, 150 frustrated"), dossier);
+        assertTrue(dossier.contains("is also a `member`"), dossier);
         assertTrue(dossier.contains("There is no baseline side"));
-        assertTrue(dossier.contains("- `witness` session=`conv-1` trace=`-`"));
-        assertTrue(dossier.contains("- `witness` trace=`trace-1`"));
+        assertTrue(dossier.contains("- `witness` session=`conv-1` trace=`trace-1`"));
+        assertTrue(dossier.contains("- `witness` session=`conv-2` trace=`trace-2`"));
     }
 
     @Test
@@ -236,27 +238,70 @@ class ClassifierDossierAssemblerTest {
     }
 
     /**
-     * The rolling arm's token pairs and ring are the only account of the reference side; without them the agent has
-     * no "before".
+     * The rolling arm's token pairs and ring account for the reference side, and its declared sample says what its
+     * {@code baseline} rows are. The bug is a dossier that hides how the comparison rows were chosen, or claims rows
+     * where a ring folded before rows were kept wrote none.
      */
     @Test
     void theMetricDriftDossierCarriesTheTokenPairsAndTheReferenceRing() throws Exception {
-        String payload = "{\"bucket\":{\"key\":\"summarize\",\"kind\":\"call_site\"},\"reference\":\"previous\","
+        String head = "{\"bucket\":{\"key\":\"summarize\",\"kind\":\"call_site\"},\"reference\":\"previous\","
                 + "\"direction\":\"up\",\"w1_log\":0.5,\"ratio\":1.5,\"floor\":0.15,\"n_ref\":100,\"n_cur\":90,"
                 + "\"tokens\":{\"input_p50\":[500,800],\"output_p50\":[null,null]},"
-                + "\"control\":{\"days_used\":6,\"days_excluded_as_confirmed\":1,\"oldest_day\":\"2026-08-01\"}}";
+                + "\"control\":{\"days_used\":6,\"days_excluded_as_confirmed\":1,\"oldest_day\":\"2026-08-01\"";
+        String declared = head + ",\"baseline\":{\"rule\":\"spread\",\"rows\":200,\"of\":540,\"days\":6,"
+                + "\"oldest_day\":\"2026-08-01\",\"newest_day\":\"2026-08-07\"}}}";
+        String expectedHead = "# Metric drift evidence\n\n"
+                + "- bucket: `summarize` (call_site)\n"
+                + "- reference: previous\n"
+                + "- direction: up\n"
+                + "- effect: w1_log=0.5000 ratio=1.5000x (floor 0.1500)\n"
+                + "- population: n_ref=100, n_cur=90\n"
+                + "\n## Reference vs. current (the paired before/after aggregate)\n\n"
+                + "- input_p50: 500 → 800\n"
+                + "\nReference composition (rolling arm): 6 day(s) used, 1 excluded as already-confirmed, oldest day"
+                + " 2026-08-01. ";
+        String expectedTail = "\n## Concentration: which sibling buckets this drift explains\n\n"
+                + "This shift explains no sibling buckets (explains=[] or absent) — it did not"
+                + " suppress any other finding, so there is nothing to concentrate over.\n";
+
+        assertEquals(
+                expectedHead
+                        + "`baseline` rows are a spread sample: 200 of 540 rows from 6 day(s) of this ring"
+                        + " (2026-08-01 to 2026-08-07).\n"
+                        + expectedTail,
+                MetricDriftDossier.build(MAPPER.readTree(declared)));
+        assertEquals(
+                expectedHead + "No `baseline` sample: this ring was folded before its days kept rows.\n" + expectedTail,
+                MetricDriftDossier.build(MAPPER.readTree(head + "}}")));
+    }
+    /**
+     * The agent reads the shift in the measure's units and where it began. The bug is a dossier that states only a
+     * ratio, with no plain-unit mean and no change point.
+     */
+    @Test
+    void theMetricDriftDossierStatesTheMeanTheSignedShiftAndTheChangePoint() throws Exception {
+        String payload = "{\"bucket\":{\"key\":\"summarize\",\"kind\":\"call_site\"},\"reference\":\"pinned\","
+                + "\"direction\":\"up\",\"w1_log\":0.37,\"ratio\":1.45,\"floor\":0.15,\"n_ref\":50,\"n_cur\":50,"
+                + "\"quantiles\":{\"p50\":[2000.0,2840.0],\"p95\":[3000.0,4680.0]},"
+                + "\"mean\":[2000.0,2900.0],\"shift\":{\"mean\":900.0,\"p50\":840.0,\"p95\":-1680.0},"
+                + "\"window\":{\"opened_at\":\"2026-06-01T00:00:00Z\",\"closed_at\":\"2026-06-01T23:00:00Z\"},"
+                + "\"changepoint\":{\"at\":\"2026-06-01T12:00:00Z\",\"method\":\"cusum\",\"index\":20,"
+                + "\"rows_before\":10},\"reference_from\":\"2026-05-25T00:00:00Z\"}";
 
         assertEquals(
                 "# Metric drift evidence\n\n"
                         + "- bucket: `summarize` (call_site)\n"
-                        + "- reference: previous\n"
+                        + "- reference: pinned\n"
                         + "- direction: up\n"
-                        + "- effect: w1_log=0.5000 ratio=1.5000x (floor 0.1500)\n"
-                        + "- population: n_ref=100, n_cur=90\n"
+                        + "- effect: w1_log=0.3700 ratio=1.4500x (floor 0.1500)\n"
+                        + "- population: n_ref=50, n_cur=50\n"
+                        + "- change point: 2026-06-01T12:00:00Z (cusum; 20 rows before it in the window)\n"
+                        + "- reference from: 2026-05-25T00:00:00Z\n"
                         + "\n## Reference vs. current (the paired before/after aggregate)\n\n"
-                        + "- input_p50: 500 → 800\n"
-                        + "\nReference composition (rolling arm — no per-instance baseline rows exist for this arm,"
-                        + " only this ring): 6 day(s) used, 1 excluded as already-confirmed, oldest day 2026-08-01.\n"
+                        + "- p50: 2000.0 → 2840.0\n"
+                        + "- p95: 3000.0 → 4680.0\n"
+                        + "- mean: 2000.0 → 2900.0\n"
+                        + "- shift (now minus then): mean +900.0, p50 +840.0, p95 -1680.0\n"
                         + "\n## Concentration: which sibling buckets this drift explains\n\n"
                         + "This shift explains no sibling buckets (explains=[] or absent) — it did not"
                         + " suppress any other finding, so there is nothing to concentrate over.\n",

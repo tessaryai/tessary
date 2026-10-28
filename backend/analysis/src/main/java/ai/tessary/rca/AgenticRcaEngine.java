@@ -14,11 +14,13 @@ import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.prompt.PromptCraft;
 import ai.tessary.rca.RcaDtos.Cause;
+import ai.tessary.rca.RcaDtos.Coverage;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.KeyScope;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,15 +85,25 @@ public class AgenticRcaEngine {
             /**
              * Recorded per report, because the ceiling belongs to the run, not to whether a repo is connected later.
              */
-            boolean repoAvailable) {}
+            boolean repoAvailable,
+            @Nullable Coverage coverage) {}
 
     public record Subject(List<String> findingIds, String onsetAt, String lastSeenAt) {}
 
-    /** @param citableTraceIds what a cause may cite */
+    /**
+     * A cause cites only flagged rows: a comparison row proves nothing about the flagged ones, so a cited comparison id
+     * is dropped.
+     *
+     * @param baselinePresent a {@code baseline} row is on the comparison side, which unflagged members alone are not
+     * @param recordedByRole each role's count as {@code finding.md} showed it, summed over the subject's findings
+     */
     public record Evidence(
-            Set<String> citableTraceIds,
-            Set<String> citableSessionIds,
+            Set<String> flaggedTraceIds,
+            Set<String> flaggedSessionIds,
+            Set<String> comparisonTraceIds,
+            Set<String> comparisonSessionIds,
             boolean baselinePresent,
+            Map<String, Long> recordedByRole,
             int flaggedCount,
             String grain) {}
 
@@ -185,13 +197,8 @@ public class AgenticRcaEngine {
                     job.id(),
                     stepWords(job.metric(), evidence)));
 
-            RcaSynthesisOutput.Parsed parsed = RcaSynthesisOutput.parse(
-                    mapper,
-                    run.resultText(),
-                    evidence.citableTraceIds(),
-                    evidence.citableSessionIds(),
-                    clone.isPresent(),
-                    job.projectId());
+            RcaSynthesisOutput.Parsed parsed =
+                    RcaSynthesisOutput.parse(mapper, run.resultText(), evidence, clone.isPresent(), job.projectId());
             if (parsed.detailedReport() == null) {
                 // A schema-ignoring model must not sink an otherwise-valid verdict.
                 log.warn("rca agentic project={} job={} returned no detailed_report", job.projectId(), job.id());
@@ -207,17 +214,20 @@ public class AgenticRcaEngine {
                     parsed.ruledOut().size(),
                     clone.isPresent());
             String detailed = parsed.detailedReport() == null ? parsed.summary() : parsed.detailedReport();
-            if (parsed.verdictNote() != null) {
-                // The downgrade must be visible where the engineer reads, not only in a log line.
-                detailed = detailed == null ? parsed.verdictNote() : parsed.verdictNote() + "\n\n" + detailed;
-            }
+            // A correction must be visible where the engineer reads, not only in a log line.
+            List<String> notes = new ArrayList<>();
+            if (parsed.verdictNote() != null) notes.add(parsed.verdictNote());
+            notes.addAll(parsed.platformNotes());
+            if (detailed != null) notes.add(detailed);
+            detailed = notes.isEmpty() ? null : String.join("\n\n", notes);
             return new Result(
                     parsed.verdict(),
                     parsed.summary(),
                     parsed.causes(),
                     parsed.ruledOut(),
                     detailed,
-                    clone.isPresent());
+                    clone.isPresent(),
+                    parsed.coverage());
         } finally {
             revokeQuietly(issued.token().id(), keyPrincipal, job);
         }
@@ -232,8 +242,7 @@ public class AgenticRcaEngine {
                 switch (classifierKey) {
                     case BuiltInDetector.Kind.GROUNDEDNESS ->
                         Map.of(FindingEvidenceRow.Role.WITNESS, "flagged answers");
-                    case BuiltInDetector.Kind.FRUSTRATION ->
-                        Map.of(FindingEvidenceRow.Role.WITNESS, "flagged sessions");
+                    case BuiltInDetector.Kind.FRUSTRATION -> Map.of(FindingEvidenceRow.Role.WITNESS, "flagged turns");
                     default -> Map.of();
                 };
         return new StepWords.Context(nouns, Map.of(FindingEvidenceRow.Role.WITNESS, (long) evidence.flaggedCount()));

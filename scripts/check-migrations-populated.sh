@@ -229,7 +229,10 @@ expect "frustration built-in enabled (pre-0022)" 1 "SELECT count(*) FROM classif
 expect "eval_case.detector='classifier'"      3 "SELECT count(*) FROM eval_case WHERE detector='classifier'"
 expect "eval_case both finding arms"          3 "SELECT (SELECT count(*) FROM eval_case WHERE finding_id IS NOT NULL)
                                                       + (SELECT count(*) FROM eval_case WHERE finding_id IS NULL AND state='resolved')"
-expect "finding rows"                         8 "SELECT count(*) FROM finding"
+expect "finding rows"                         9 "SELECT count(*) FROM finding"
+expect "open frustration finding, session-grain rows (pre-0053)" "2|1" "SELECT count(*) FILTER (WHERE trace_id IS NULL)
+                                                      || '|' || count(*) FILTER (WHERE trace_id IS NOT NULL AND session_id IS NULL)
+                                                      FROM finding_evidence WHERE finding_id='fnd_fix_frustration'"
 expect "secret_leak findings open, unruled, one per band (pre-0013)" "high,low" "SELECT string_agg(payload->>'confidence', ',' ORDER BY payload->>'confidence')
                                                       FROM finding WHERE classifier_key='secret_leak' AND status='open' AND triage_verdict IS NULL"
 expect "finding ruled unclear (pre-0010)"     1 "SELECT count(*) FROM finding WHERE triage_verdict='unclear'"
@@ -381,6 +384,25 @@ if [ "$(q "SELECT EXISTS (SELECT 1 FROM databasechangelog WHERE id='0039-agent-r
                                   AND pg_get_constraintdef(oid) NOT LIKE '%authoring%')"
 else
   skip "0039 agent_run lane" "0039 is not in databasechangelog, it has not landed"
+fi
+
+echo
+echo "0053: frustration evidence rows become turns"
+if [ "$(q "SELECT EXISTS (SELECT 1 FROM databasechangelog WHERE id='0053-frustration-hour-trial')")" = "t" ]; then
+  expect "no frustration evidence row lacks a trace" 0 "SELECT count(*) FROM finding_evidence
+                                WHERE finding_id='fnd_fix_frustration' AND trace_id IS NULL"
+  expect "the witness turn is mirrored as a member" 1 "SELECT count(*) FROM finding_evidence
+                                WHERE finding_id='fnd_fix_frustration' AND role='member' AND trace_id='trc_fix'"
+  expect "evidence_counts recomputed"           t "SELECT evidence_counts = '{\"member\": 1, \"witness\": 1}'::jsonb
+                                FROM finding WHERE id='fnd_fix_frustration'"
+  expect "a row may name a session and a trace" 1 "WITH ins AS (
+                                INSERT INTO finding_evidence (id, project_id, finding_id, session_id, trace_id, span_id,
+                                                              role, rank, created_at)
+                                VALUES ('fe_fix_turn', 'prj_fix', 'fnd_fix', 'ses_fix', 'trc_fix', NULL, 'member', 0,
+                                        '2026-08-01T00:00:00Z') RETURNING 1)
+                                SELECT count(*) FROM ins"
+else
+  skip "0053 frustration turn rows" "0053 is not in databasechangelog, it has not landed"
 fi
 
 # ---------------------------------------------------------------- summary

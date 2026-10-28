@@ -127,6 +127,20 @@ VALUES ('fnd_fix_leak_low', 'prj_fix', 'secret_leak', 'fixture_cause_leak_low', 
         'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
         '{"confidence": "low"}');
 
+-- 0053: an open frustration finding in the session-grain shape: a member and a witness session row, and a witness
+-- trace row with no session. The session rows go, the trace row is mirrored as a member.
+INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, call_site_id,
+                     status, onset_at, last_seen_at, created_at, updated_at, payload, evidence_counts)
+VALUES ('fnd_fix_frustration', 'prj_fix', 'frustration', 'fixture_cause_frustration', 'classifier',
+        'cls_fix_frustration', 'cs_fix',
+        'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+        '{"cause_kind": "frustration_rate"}', '{"member": 1, "witness": 2}');
+
+INSERT INTO finding_evidence (id, project_id, finding_id, session_id, trace_id, span_id, role, rank, created_at)
+VALUES ('fe_fix_fr_member', 'prj_fix', 'fnd_fix_frustration', 'ses_fix', NULL, NULL, 'member', 0, '2026-08-01T00:00:00Z'),
+       ('fe_fix_fr_session', 'prj_fix', 'fnd_fix_frustration', 'ses_fix', NULL, NULL, 'witness', 0, '2026-08-01T00:00:00Z'),
+       ('fe_fix_fr_trace', 'prj_fix', 'fnd_fix_frustration', NULL, 'trc_fix', NULL, 'witness', 1, '2026-08-01T00:00:00Z');
+
 INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id, subject_label, call_site_id,
                        metric, state, title, basis, severity, onset_at, opened_at, last_seen_at, updated_at, finding_id)
 VALUES ('ec_fix_finding', 'prj_fix', 1, 'classifier', 'classifier', 'cls_fix', 'Fixture Classifier', 'cs_fix',

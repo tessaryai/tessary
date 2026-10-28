@@ -9,17 +9,21 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The evidence behind a finding: append-only, uncapped, written in the transaction that opens the finding. The whole
- * population is written, not a sample, so a claim can be audited; retention treats the rows as pinned. {@link #record}
- * bumps {@code finding.evidence_counts} in the same call, and {@code ux_finding_evidence_ref} makes repeats a no-op.
+ * The evidence behind a finding: append-only save {@link #remove} and {@link #replace}, uncapped, written in the
+ * transaction that opens the finding. The whole population is written, not a sample, so a claim can be audited;
+ * retention treats the rows as pinned. {@link #record} bumps {@code finding.evidence_counts} in the same call, and
+ * {@code ux_finding_evidence_ref} makes repeats a no-op.
  */
 @Repository
 public class FindingEvidenceRepository {
@@ -38,6 +42,54 @@ public class FindingEvidenceRepository {
 
     /** Enough to recognise the call and its error. Cut with SQL {@code left()} so the bytes never leave Postgres. */
     private static final int PREVIEW_CHARS = 200;
+
+    /** Both turn counts stop here, so a long session costs no more than this many index entries per row. */
+    static final int POSITION_CAP = 10_000;
+
+    /** The same columns on span and trace; a whole-run row reads the trace's rollup, a step its span. */
+    private static final List<String> TOKEN_BUCKETS =
+            List.of("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens");
+
+    /**
+     * A turn is a top-level trace of the session. Each count stops at {@link #POSITION_CAP} through its inner
+     * {@code LIMIT}; {@code ix_trace_session} serves both counts and the {@code (started_at, id)} comparison.
+     */
+    private static final String TURNS = " FROM trace x WHERE x.project_id = e.project_id AND x.session_id = ss.id"
+            + " AND x.parent_trace_id IS NULL AND NOT x.is_deleted";
+
+    private static final String POSITION_JOIN = " LEFT JOIN LATERAL ("
+            + "   SELECT (SELECT count(*) FROM (SELECT 1" + TURNS + " LIMIT " + POSITION_CAP + ") c) AS session_traces,"
+            + "          CASE WHEN t.id IS NOT NULL AND t.parent_trace_id IS NULL THEN"
+            + "            (SELECT count(*) FROM (SELECT 1" + TURNS
+            + "               AND (x.started_at, x.id) <= (t.started_at, t.id) LIMIT " + POSITION_CAP + ") c)"
+            + "          END AS trace_index"
+            + "    WHERE ss.id IS NOT NULL) pos ON true";
+
+    /**
+     * Deploy, host, instance and model identity, small enough to ride every row. No key that carries a prompt or a
+     * completion; {@code gen_ai.request.model} already rides {@code models}.
+     */
+    public static final List<String> SHORT_ATTRIBUTE_KEYS = List.of(
+            "service.name",
+            "service.version",
+            "service.instance.id",
+            "deployment.environment.name",
+            "vcs.ref.head.revision",
+            "host.name",
+            "k8s.pod.name",
+            "k8s.node.name",
+            "container.id",
+            "cloud.region",
+            "cloud.availability_zone",
+            "gen_ai.response.model",
+            "gen_ai.provider.name",
+            "gen_ai.system");
+
+    /** Rows read per query by {@link #exportPage}; not a page size. */
+    private static final int EXPORT_CHUNK = 200;
+
+    /** Charged per exported row on top of its text, for the measured fields that ride with it. */
+    private static final int EXPORT_ROW_OVERHEAD = 512;
 
     private static final char CURSOR_SEP = '\u001f';
 
@@ -66,6 +118,11 @@ public class FindingEvidenceRepository {
 
         public static Ref session(String sessionId) {
             return new Ref(sessionId, null, null);
+        }
+
+        /** A trace row that also names its session, so a clear, a citation check and the retention pin find it. */
+        public static Ref turn(String sessionId, String traceId) {
+            return new Ref(sessionId, traceId, null);
         }
     }
 
@@ -151,9 +208,65 @@ public class FindingEvidenceRepository {
     }
 
     /**
-     * The one exception to append-never-rewrite: callers must first establish that no ruling stands on the finding
-     * ({@code FindingRepository.Recorded#ruled()}). An empty {@code refs} is a no-op, since some references
-     * legitimately have no rows.
+     * Takes out rows whose ref no longer stands for the unit it was written for, as when a later turn replaces the one
+     * that stood for a conversation-hour, and recounts the role from what is left. Not for rows a claim still rests
+     * on.
+     */
+    public int remove(String projectId, String findingId, String role, List<Ref> refs) {
+        int removed = 0;
+        for (int from = 0; from < refs.size(); from += INSERT_CHUNK) {
+            List<Ref> chunk = refs.subList(from, Math.min(from + INSERT_CHUNK, refs.size()));
+            StringBuilder sql = new StringBuilder("DELETE FROM finding_evidence"
+                    + " WHERE project_id = :pid AND finding_id = :fid AND role = :role"
+                    + " AND (COALESCE(session_id, ''), COALESCE(trace_id, ''), COALESCE(span_id, '')) IN (");
+            for (int i = 0; i < chunk.size(); i++) {
+                if (i > 0) sql.append(',');
+                sql.append("(:session")
+                        .append(i)
+                        .append(", :trace")
+                        .append(i)
+                        .append(", :span")
+                        .append(i)
+                        .append(')');
+            }
+            sql.append(')');
+            var spec = jdbc.sql(sql.toString())
+                    .param("pid", projectId)
+                    .param("fid", findingId)
+                    .param("role", role);
+            for (int i = 0; i < chunk.size(); i++) {
+                Ref ref = chunk.get(i);
+                spec = spec.param("session" + i, nonNull(ref.sessionId()))
+                        .param("trace" + i, nonNull(ref.traceId()))
+                        .param("span" + i, nonNull(ref.spanId()));
+            }
+            removed += spec.update();
+        }
+        if (removed == 0) return 0;
+        jdbc.sql("""
+                UPDATE finding
+                   SET evidence_counts = jsonb_set(
+                           COALESCE(evidence_counts, '{}'::jsonb),
+                           ARRAY[CAST(:role AS text)],
+                           to_jsonb((SELECT count(*) FROM finding_evidence
+                                      WHERE project_id = :pid AND finding_id = :fid AND role = :role)))
+                 WHERE project_id = :pid AND id = :fid
+                """)
+                .param("role", role)
+                .param("pid", projectId)
+                .param("fid", findingId)
+                .update();
+        return removed;
+    }
+
+    private static String nonNull(@Nullable String value) {
+        return value == null ? "" : value;
+    }
+
+    /**
+     * Besides {@link #remove}, the one exception to append-never-rewrite: callers must first establish that no ruling
+     * stands on the finding ({@code FindingRepository.Recorded#ruled()}). An empty {@code refs} is a no-op, since
+     * some references legitimately have no rows.
      */
     public int replace(String projectId, String findingId, String role, List<Ref> refs, String now) {
         if (refs.isEmpty()) return 0;
@@ -185,6 +298,18 @@ public class FindingEvidenceRepository {
                         + " ORDER BY " + ORDER)
                 .param("pid", projectId)
                 .param("fid", findingId)
+                .query((rs, n) -> map(rs))
+                .list();
+    }
+
+    /** One role's rows in rank order, which is the order they were written in. */
+    public List<FindingEvidenceRow> listByRole(String projectId, String findingId, String role) {
+        return jdbc.sql("SELECT " + COLS + " FROM finding_evidence"
+                        + " WHERE project_id = :pid AND finding_id = :fid AND role = :role"
+                        + " ORDER BY " + ORDER)
+                .param("pid", projectId)
+                .param("fid", findingId)
+                .param("role", role)
                 .query((rs, n) -> map(rs))
                 .list();
     }
@@ -241,6 +366,30 @@ public class FindingEvidenceRepository {
             /** Late spans can still change the totals. */
             boolean staleTotals,
             @Nullable String callSiteId,
+            @Nullable String projectVersionId,
+            @Nullable String userId,
+            /** Like {@link #totalTokens}: the span's own on a single-step row, the trace rollup on a whole-run row. */
+            @Nullable Long inputTokens,
+            @Nullable Long outputTokens,
+            @Nullable Long cacheReadTokens,
+            @Nullable Long cacheWriteTokens,
+            @Nullable Long reasoningTokens,
+            /**
+             * The trace's 1-based turn in its session, capped at {@link FindingEvidenceRepository#POSITION_CAP}; null
+             * on a session row, a trace with no session and a sub-agent trace, which is not a turn.
+             */
+            @Nullable Integer traceIndex,
+            /** The session's turn count, capped likewise, so the cap reads as "at least". */
+            @Nullable Integer sessionTraces,
+            @Nullable Long inputBytes,
+            @Nullable Long outputBytes,
+            /** The payload row exists, even with null text; false once retention purged it. */
+            boolean payloadAvailable,
+            /**
+             * Only the keys of {@link FindingEvidenceRepository#SHORT_ATTRIBUTE_KEYS} the payload carries, masked;
+             * never null.
+             */
+            Map<String, String> attributes,
             /**
              * Truncated in SQL, since one LLM output can be megabytes; masked by
              * {@link ai.tessary.redaction.CredentialMasking#mask}, since a project with redaction off can store a raw
@@ -270,10 +419,41 @@ public class FindingEvidenceRepository {
             @Nullable String cursor,
             boolean secretLeak,
             boolean malformedOutput) {
-        Key key = decodeCursor(cursor);
+        record Seeded(SpanRef ref, String evidenceId) {}
+        List<Seeded> rows = evidenceRows(
+                projectId,
+                findingId,
+                role,
+                limit + 1,
+                decodeCursor(cursor),
+                secretLeak,
+                malformedOutput,
+                List.of(),
+                (rs, n) -> new Seeded(mapSpan(rs), rs.getString("evidence_id")));
+        List<SpanRef> refs = rows.stream().map(Seeded::ref).toList();
+        if (refs.size() <= limit) return new SpanPage(refs, null);
+        // Seeded from THIS page's last row; the over-fetched row starts the next page.
+        Seeded last = rows.get(limit - 1);
+        return new SpanPage(
+                List.copyOf(refs.subList(0, limit)),
+                encodeCursor(last.ref().role(), last.ref().rank(), last.evidenceId()));
+    }
+
+    /** {@link #spanPage}'s one SELECT, with {@code extraColumns} appended for a reader that needs more of the payload. */
+    private <T> List<T> evidenceRows(
+            String projectId,
+            String findingId,
+            @Nullable String role,
+            int fetch,
+            @Nullable Key key,
+            boolean secretLeak,
+            boolean malformedOutput,
+            List<String> extraColumns,
+            RowMapper<T> mapper) {
         StringBuilder sql = new StringBuilder("SELECT e.id AS evidence_id, e.role, e.rank, e.session_id,"
                 + " e.trace_id, e.span_id,"
-                + " s.name, s.kind, s.status, s.level, s.error_type, s.started_at, s.latency_ms,"
+                + " s.name, s.kind, s.status, s.level, s.error_type,"
+                + " COALESCE(s.started_at, t.started_at, ss.started_at) AS started_at, s.latency_ms,"
                 + " CASE WHEN e.span_id IS NULL THEN t.total_tokens ELSE s.total_tokens END AS total_tokens,"
                 + " CASE WHEN e.span_id IS NULL THEN t.total_cost ELSE s.total_cost END AS total_cost,"
                 + " m.models,"
@@ -281,6 +461,16 @@ public class FindingEvidenceRepository {
                 + " (e.span_id IS NULL AND COALESCE(t.unpriced_spans, 0) > 0) AS partial_cost,"
                 + " (e.span_id IS NULL AND COALESCE(t.is_settled, false) = false) AS stale_totals,"
                 + " CASE WHEN e.span_id IS NULL THEN t.call_site_id ELSE s.call_site_id END AS call_site_id,"
+                + TOKEN_BUCKETS.stream()
+                        .map(b -> " CASE WHEN e.span_id IS NULL THEN t." + b + " ELSE s." + b + " END AS " + b + ",")
+                        .collect(Collectors.joining())
+                + " COALESCE(s.project_version_id, t.project_version_id) AS project_version_id,"
+                + " COALESCE(s.user_id, t.user_id, ss.user_id) AS user_id,"
+                + " octet_length(pl.input)::bigint AS input_bytes,"
+                + " octet_length(pl.output)::bigint AS output_bytes,"
+                + " (pl.span_id IS NOT NULL) AS payload_available,"
+                + " pos.session_traces, pos.trace_index,"
+                + " attrs.keys AS attribute_keys, attrs.vals AS attribute_values,"
                 + " left(pl.input, " + PREVIEW_CHARS + ") AS input_preview,"
                 + " left(pl.output, " + PREVIEW_CHARS + ") AS output_preview,"
                 + (secretLeak
@@ -290,6 +480,7 @@ public class FindingEvidenceRepository {
                         ? " , CASE WHEN md.evidence ->> 'reason' = 'not_json' THEN 'not JSON'"
                                 + "        ELSE md.evidence -> 'violations' -> 0 ->> 'message' END AS violation"
                         : " , NULL::text AS violation")
+                + extraColumns.stream().map(c -> ", " + c).collect(Collectors.joining())
                 + " FROM finding_evidence e"
                 + " LEFT JOIN LATERAL ("
                 + "   SELECT sp.* FROM span sp"
@@ -310,6 +501,12 @@ public class FindingEvidenceRepository {
                 + "     FROM span sp2"
                 + "    WHERE sp2.project_id = e.project_id AND sp2.trace_id = e.trace_id AND sp2.is_deleted = false"
                 + "      AND (e.span_id IS NULL OR sp2.id = e.span_id)) m ON true"
+                + " LEFT JOIN session ss ON ss.project_id = e.project_id"
+                + "   AND ss.id = COALESCE(e.session_id, t.session_id) AND NOT ss.is_deleted"
+                + POSITION_JOIN
+                + " LEFT JOIN LATERAL ("
+                + "   SELECT array_agg(a.key ORDER BY a.key) AS keys, array_agg(a.value ORDER BY a.key) AS vals"
+                + "     FROM jsonb_each_text(pl.attributes) a WHERE a.key IN (:attrKeys)) attrs ON true"
                 + (secretLeak
                         ? " LEFT JOIN LATERAL (SELECT sld.evidence FROM secret_leak_detection sld"
                                 + "   WHERE sld.project_id = e.project_id AND sld.subject_trace_id = e.trace_id"
@@ -333,21 +530,104 @@ public class FindingEvidenceRepository {
         var spec = jdbc.sql(sql.toString())
                 .param("pid", projectId)
                 .param("fid", findingId)
-                .param("n", limit + 1);
+                .param("attrKeys", SHORT_ATTRIBUTE_KEYS)
+                .param("n", fetch);
         if (role != null) spec = spec.param("role", role);
         if (key != null) {
             spec = spec.param("cRole", key.role()).param("cRank", key.rank()).param("cId", key.id());
         }
-        record Seeded(SpanRef ref, String evidenceId) {}
-        List<Seeded> rows = spec.query((rs, n) -> new Seeded(mapSpan(rs), rs.getString("evidence_id")))
-                .list();
-        List<SpanRef> refs = rows.stream().map(Seeded::ref).toList();
-        if (refs.size() <= limit) return new SpanPage(refs, null);
-        // Seeded from THIS page's last row; the over-fetched row starts the next page.
-        Seeded last = rows.get(limit - 1);
-        return new SpanPage(
-                List.copyOf(refs.subList(0, limit)),
-                encodeCursor(last.ref().role(), last.ref().rank(), last.evidenceId()));
+        return spec.query(mapper).list();
+    }
+
+    public record ExportRow(
+            SpanRef measured,
+            @Nullable String input,
+            @Nullable String output,
+            @Nullable Map<String, Object> attributes) {}
+
+    public record ExportPage(List<ExportRow> rows, @Nullable String nextCursor) {}
+
+    /**
+     * @param witnessCharge charged to the budget per {@code witness} row for text the caller attaches after the page
+     *     closes, so the page still keeps to its bound
+     */
+    public record ExportLimits(int textChars, int maxRows, long textBudget, long witnessCharge) {
+
+        public ExportLimits(int textChars, int maxRows, long textBudget) {
+            this(textChars, maxRows, textBudget, 0);
+        }
+    }
+
+    /**
+     * {@link #spanPage}'s rows and cursor, plus the payload text cut in SQL at {@code textChars +}
+     * {@link EvidenceExportText#MARGIN} and masked before the final cut. Read in chunks; a page closes on the row that
+     * reaches {@code maxRows} or the text budget, so it always holds at least one row, and the cursor is seeded from
+     * that row so the next page starts on the first row not included.
+     */
+    public ExportPage exportPage(
+            String projectId,
+            String findingId,
+            @Nullable String role,
+            ExportLimits limits,
+            @Nullable String cursor,
+            boolean secretLeak,
+            boolean malformedOutput) {
+        int cut = limits.textChars() + EvidenceExportText.MARGIN;
+        List<String> text = List.of(
+                "left(pl.input, " + cut + ") AS input_text",
+                "left(pl.output, " + cut + ") AS output_text",
+                "pl.attributes::text AS attributes_json");
+        record Raw(
+                SpanRef ref,
+                String evidenceId,
+                @Nullable String input,
+                @Nullable String output,
+                @Nullable String attributes) {}
+        Key key = decodeCursor(cursor);
+        List<ExportRow> rows = new ArrayList<>();
+        long spent = 0;
+        while (true) {
+            List<Raw> chunk = evidenceRows(
+                    projectId,
+                    findingId,
+                    role,
+                    EXPORT_CHUNK + 1,
+                    key,
+                    secretLeak,
+                    malformedOutput,
+                    text,
+                    (rs, n) -> new Raw(
+                            mapSpan(rs),
+                            rs.getString("evidence_id"),
+                            rs.getString("input_text"),
+                            rs.getString("output_text"),
+                            rs.getString("attributes_json")));
+            int usable = Math.min(chunk.size(), EXPORT_CHUNK);
+            for (int i = 0; i < usable; i++) {
+                Raw raw = chunk.get(i);
+                ExportRow row = new ExportRow(
+                        raw.ref(),
+                        EvidenceExportText.maskThenCut(raw.input(), limits.textChars()),
+                        EvidenceExportText.maskThenCut(raw.output(), limits.textChars()),
+                        EvidenceExportText.attributes(raw.attributes(), limits.textChars()));
+                rows.add(row);
+                spent += EvidenceExportText.chars(row.input())
+                        + EvidenceExportText.chars(row.output())
+                        + EvidenceExportText.chars(row.attributes())
+                        + EXPORT_ROW_OVERHEAD
+                        + (FindingEvidenceRow.Role.WITNESS.equals(raw.ref().role()) ? limits.witnessCharge() : 0);
+                if (rows.size() >= limits.maxRows() || spent >= limits.textBudget()) {
+                    boolean more = i + 1 < chunk.size();
+                    return new ExportPage(
+                            rows,
+                            more ? encodeCursor(raw.ref().role(), raw.ref().rank(), raw.evidenceId()) : null);
+                }
+            }
+            if (chunk.size() <= EXPORT_CHUNK) return new ExportPage(rows, null);
+            Raw last = chunk.get(EXPORT_CHUNK - 1);
+            Integer lastRank = last.ref().rank();
+            key = new Key(last.ref().role(), lastRank == null ? RANK_TAIL : lastRank, last.evidenceId());
+        }
     }
 
     /** Counted now, so at or below {@code finding.evidence_counts} once refs age out. */
@@ -456,11 +736,50 @@ public class FindingEvidenceRepository {
                 rs.getBoolean("partial_cost"),
                 rs.getBoolean("stale_totals"),
                 rs.getString("call_site_id"),
+                rs.getString("project_version_id"),
+                rs.getString("user_id"),
+                (Long) rs.getObject("input_tokens"),
+                (Long) rs.getObject("output_tokens"),
+                (Long) rs.getObject("cache_read_tokens"),
+                (Long) rs.getObject("cache_write_tokens"),
+                (Long) rs.getObject("reasoning_tokens"),
+                count(rs, "trace_index"),
+                count(rs, "session_traces"),
+                (Long) rs.getObject("input_bytes"),
+                (Long) rs.getObject("output_bytes"),
+                rs.getBoolean("payload_available"),
+                attributes(rs),
                 CredentialMasking.mask(rs.getString("input_preview")),
                 CredentialMasking.mask(rs.getString("output_preview")),
                 rs.getString("secret_key"),
                 rs.getString("stored_as"),
                 rs.getString("violation"));
+    }
+
+    /** {@code count(*)} is a bigint; the cap keeps it inside an int. */
+    private static @Nullable Integer count(ResultSet rs, String column) throws SQLException {
+        Long n = (Long) rs.getObject(column);
+        return n == null ? null : n.intValue();
+    }
+
+    /** The two arrays are aggregated in one key order, so they zip; each value is masked, a JSON null left out. */
+    private static Map<String, String> attributes(ResultSet rs) throws SQLException {
+        Array keysArray = rs.getArray("attribute_keys");
+        Array valuesArray = rs.getArray("attribute_values");
+        try {
+            if (keysArray == null || valuesArray == null) return Map.of();
+            String[] keys = (String[]) keysArray.getArray();
+            String[] values = (String[]) valuesArray.getArray();
+            Map<String, String> out = new LinkedHashMap<>();
+            for (int i = 0; i < keys.length; i++) {
+                String value = CredentialMasking.mask(values[i]);
+                if (value != null) out.put(keys[i], value);
+            }
+            return Collections.unmodifiableMap(out);
+        } finally {
+            if (keysArray != null) keysArray.free();
+            if (valuesArray != null) valuesArray.free();
+        }
     }
 
     private int countFor(String findingId, String role) {

@@ -139,41 +139,33 @@ record ClassifierChartRepositoryIntegrationTest(
                 pid, signal, "t-late", "conv-late", "cs-a", Instant.parse("2026-10-05T23:30:00Z"), false, VERSION);
         jdbc.sql("SET LOCAL TIME ZONE 'Asia/Kolkata'").update();
 
-        List<RateRow> hours = charts.frustrationHours(pid, signal.id(), VERSION, "cs-a", FROM, FROM);
+        List<RateRow> hours = charts.frustrationHours(pid, signal.id(), VERSION, "cs-a", FROM);
 
         assertEquals(List.of(new RateRow(Instant.parse("2026-10-05T23:00:00Z"), 1, 0)), hours);
     }
 
     /**
-     * Grouped from the range's start, a session that began before a short range is a new trial at its first turn
-     * inside it, so the last seven days of a 7-day chart and a 28-day chart would disagree.
+     * The chart counts the replay's trial: a conversation in each hour it has a scored turn, frustrated only in the
+     * hour of its flagged turn. Grouped at its first turn, conv-1 is one frustrated trial at 10:00 and none at 11:00;
+     * failed for any flag of the conversation, its 10:00 hour fails too.
      */
     @Test
-    void frustrationHeadline_isTheSameAtSevenAndTwentyEightDays() {
-        String pid = project("chart-cross", Capability.FRUSTRATION);
-        ClassifierRow signal = enable(fixture.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION));
-        declare(pid, "cs-a", null);
-        Instant crossing = Instant.parse("2026-09-30T10:00:00Z"); // before the 7-day range, inside the 28-day one
-        fixture.frustrationAssessment(pid, signal, "t-1a", "conv-1", "cs-a", crossing, false, VERSION);
-        Instant flaggedAt = Instant.parse("2026-10-06T10:00:00Z");
+    void frustrationHours_countAConversationInEachHourAndFlagItInTheHourOfItsFlag() {
+        String pid = project("chart-hour", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION);
+        Instant calmAt = Instant.parse("2026-10-05T10:30:00Z");
+        Instant flaggedAt = Instant.parse("2026-10-05T11:10:00Z");
+        fixture.frustrationAssessment(pid, signal, "t-1a", "conv-1", "cs-a", calmAt, false, VERSION);
         fixture.frustrationAssessment(pid, signal, "t-1b", "conv-1", "cs-a", flaggedAt, true, VERSION);
         fixture.frustrationFlag(pid, signal, "t-1b", "conv-1", "cs-a", flaggedAt);
-        fixture.frustrationAssessment(
-                pid, signal, "t-2", "conv-2", "cs-a", Instant.parse("2026-10-05T10:00:00Z"), false, VERSION);
 
-        ChartCard week = card(service().charts(pid, "cs-a", null, 7), BuiltInDetector.Kind.FRUSTRATION);
-        ChartCard month = card(service().charts(pid, "cs-a", null, 28), BuiltInDetector.Kind.FRUSTRATION);
+        List<RateRow> hours = charts.frustrationHours(pid, signal.id(), VERSION, "cs-a", FROM);
 
-        assertEquals(0.0, week.headline().value(), "conv-1 is a trial of Sep 30, before the headline's week");
-        assertEquals(week.headline(), month.headline());
-        Instant oct5 = Instant.parse("2026-10-05T10:00:00Z");
         assertEquals(
                 List.of(
-                        ChartPoint.rate(crossing, crossing.plusSeconds(3600), false, 1, 1),
-                        ChartPoint.rate(oct5, oct5.plusSeconds(3600), false, 1, 0)),
-                month.points(),
-                "Oct 5 would stretch the Sep 30 point past a day, so it starts its own; a later turn is not a trial;"
-                        + " Oct 5 is days before now, so no hour can still join it");
+                        new RateRow(Instant.parse("2026-10-05T10:00:00Z"), 1, 0),
+                        new RateRow(Instant.parse("2026-10-05T11:00:00Z"), 1, 1)),
+                hours);
     }
 
     /** The sweep walks the ingest clock: a span stored after its cursor was never checked, whatever its start. */
@@ -531,25 +523,52 @@ record ClassifierChartRepositoryIntegrationTest(
                 quiet(service().charts(pid, null, "tool:search", 7)));
     }
 
-    /** A card still learning counts the trials its call site has seen toward the minimum. */
+    /**
+     * A card still learning counts the trials its call site has seen toward the minimum, in the hours that have
+     * settled on its own clock: the newest hour, which has not, is left out.
+     */
     @Test
     void learningCards_countTheirCallSitesTrials() {
-        String pid = project("chart-learning", Capability.GROUNDEDNESS, Capability.MALFORMED_OUTPUT);
+        String pid =
+                project("chart-learning", Capability.GROUNDEDNESS, Capability.MALFORMED_OUTPUT, Capability.FRUSTRATION);
         declare(pid, "cs-a", "{\"type\":\"object\"}");
         encoder.up();
         ClassifierRow groundedness = enable(fixture.builtIn(pid, BuiltInDetector.Kind.GROUNDEDNESS));
         ClassifierRow malformed = enable(fixture.builtIn(pid, BuiltInDetector.Kind.MALFORMED_OUTPUT));
+        ClassifierRow frustration = enable(fixture.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION));
         Instant at = Instant.parse("2026-10-06T10:00:00Z");
+        // One conversation with turns in two hours is a trial in each; at 13:00 both have settled under the one-hour
+        // delay, and the 13:00 hour has not.
+        fixture.frustrationAssessment(pid, frustration, "f-1", "conv-f", "cs-a", at, false, VERSION);
+        fixture.frustrationAssessment(
+                pid, frustration, "f-2", "conv-f", "cs-a", at.plus(Duration.ofMinutes(20)), false, VERSION);
+        fixture.frustrationAssessment(
+                pid, frustration, "f-3", "conv-f", "cs-a", at.plus(Duration.ofMinutes(70)), false, VERSION);
+        fixture.frustrationAssessment(
+                pid, frustration, "g-1", "conv-g", "cs-a", at.plus(Duration.ofHours(3)), false, VERSION);
         fixture.groundednessAnswer(pid, groundedness, "t-1", "s-1", "cs-a", at, false, "{}");
         fixture.groundednessAnswer(pid, groundedness, "t-2", "s-2", "cs-a", at, false, "{}");
+        // Seven hours on, the 10:00 hour has settled under groundedness's six-hour delay.
+        Instant later = at.plus(Duration.ofHours(7));
+        fixture.groundednessAnswer(pid, groundedness, "t-3", "s-3", "cs-a", later, false, "{}");
         fx.ingestedAt(output(pid, "cs-a", at), at);
+        // Two hours on, it has settled under malformed output's one-hour delay.
+        Instant next = at.plus(Duration.ofHours(2));
+        fx.ingestedAt(output(pid, "cs-a", next), next);
         assertEquals(0, learned(service().charts(pid, "cs-a", null, 7), BuiltInDetector.Kind.MALFORMED_OUTPUT));
         sweptTo(pid, malformed, "2026-10-08T00:00:00Z");
 
         ChartsView view = service().charts(pid, "cs-a", null, 7);
 
-        assertEquals(2, learned(view, BuiltInDetector.Kind.GROUNDEDNESS), "two traces scored");
-        assertEquals(1, learned(view, BuiltInDetector.Kind.MALFORMED_OUTPUT), "one output checked since the sweep");
+        assertEquals(2, learned(view, BuiltInDetector.Kind.GROUNDEDNESS), "two traces scored in a settled hour");
+        assertEquals(
+                1,
+                learned(view, BuiltInDetector.Kind.MALFORMED_OUTPUT),
+                "one output checked since the sweep, in a settled hour");
+        assertEquals(
+                2,
+                learned(view, BuiltInDetector.Kind.FRUSTRATION),
+                "one conversation in two settled hours, not one conversation and not three turns");
     }
 
     private static long learned(ChartsView view, String key) {

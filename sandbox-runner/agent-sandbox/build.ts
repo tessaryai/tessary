@@ -154,6 +154,7 @@ async function verify(version: string) {
       ['bash is the exec shell', 'echo "$BASH_VERSION" | grep -q .'],
       ['opencode runs', 'opencode --version'],
       ['jq runs', 'jq --version'],
+      ['python3 runs', 'python3 --version'],
       [
         'agent scripts are baked',
         'test -f /home/user/lane.js && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js'

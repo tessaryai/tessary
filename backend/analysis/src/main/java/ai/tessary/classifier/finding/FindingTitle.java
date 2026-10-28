@@ -75,7 +75,7 @@ public final class FindingTitle {
         return (callSite == null ? finding.nativeCauseKey() : callSite) + " outputs failing their schema";
     }
 
-    /** Rates are in the headline: both are shares of the same call site's own sessions. */
+    /** Rates are in the headline: both are shares of the same call site's own session-hours. */
     private static String frustrationRate(FindingRow finding) {
         String callSite = finding.callSiteId() == null ? finding.nativeCauseKey() : finding.callSiteId();
         JsonNode body = finding.payload();

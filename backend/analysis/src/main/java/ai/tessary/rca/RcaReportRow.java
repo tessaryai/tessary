@@ -33,6 +33,7 @@ public record RcaReportRow(
         @Nullable String detailedReport,
         String engine,
         @Nullable Boolean repoAvailable,
+        @Nullable String coverage,
         String createdAt,
         @Nullable String completedAt) {
 

@@ -88,6 +88,37 @@ class RcaMethodFilesTest {
         }
     }
 
+    /**
+     * A rate classifier's unflagged {@code member} rows are its comparison side. The bug is the method file telling
+     * RCA there is nothing to compare against, so a value as common in healthy rows as in flagged ones is called a
+     * cause.
+     */
+    @Test
+    void theRateMethodsNameUnflaggedMembersAsTheComparisonSide() {
+        for (String key : List.of(
+                BuiltInDetector.Kind.TOOL_ERROR, BuiltInDetector.Kind.FRUSTRATION, BuiltInDetector.Kind.GROUNDEDNESS)) {
+            String method = AgenticRcaEngine.method(key);
+
+            assertNotNull(method, key);
+            assertTrue(method.contains("comparison side"), key + ": " + method);
+            assertFalse(method.contains("the normal rate is a number, not a set of rows"), key + ": " + method);
+        }
+    }
+
+    /**
+     * Drift writes {@code baseline} rows on both arms and {@code changepoint} rows from the change point. The bug is
+     * RCA told a rolling-reference finding has no comparison side and skipping the baseline rows it has.
+     */
+    @Test
+    void theDriftMethodNamesBothComparisonRoles() {
+        String method = AgenticRcaEngine.method(BuiltInDetector.Kind.DURATION_DRIFT);
+
+        assertNotNull(method);
+        assertTrue(method.contains("`changepoint` rows"), method);
+        assertTrue(method.contains("`baseline` rows are the comparison"), method);
+        assertFalse(method.contains("A rolling reference has no rows behind it"), method);
+    }
+
     /** Groundedness sentences reach the agent over MCP, so the method file has to name where. */
     @Test
     void theGroundednessMethodNamesItsFlaggedSentences() {

@@ -58,18 +58,19 @@ const ANSWER_REPORT: RcaReport = {
       evidence_trace_ids: ["trace-0123456789"],
       evidence_session_ids: [],
       affected_count: 12,
+      affected_of: null,
     },
     {
       title: "Customers started pasting whole order histories", confidence: "high", change: null, type: null,
       what_changed: "Inputs grew to include order histories.", how_it_caused_this: "Longer inputs take longer to read.",
       next_step: "Expected traffic. Nothing to fix.", attribution: null, evidence_trace_ids: [],
-      evidence_session_ids: [], affected_count: 4,
+      evidence_session_ids: [], affected_count: 4, affected_of: null,
     },
     {
       title: "Traffic moved to longer inputs", confidence: "low", change: null, type: null,
       what_changed: "Inputs grew.", how_it_caused_this: "Maybe slower.",
       next_step: "Compare input lengths on both sides.", attribution: null, evidence_trace_ids: [],
-      evidence_session_ids: [], affected_count: 0,
+      evidence_session_ids: [], affected_count: 0, affected_of: null,
     },
   ],
   ruled_out: [
@@ -130,6 +131,7 @@ const SHIFT = {
   direction: "up", explains: [], floor: 0, measure: "duration",
   quantiles: [{ key: "p50", then: 1000, now: 2500 }, { key: "p95", then: 4000, now: 9000 }],
   ratio: 2.5, reference: "previous", tokens: [], workload: [],
+  mean: { key: "mean", then: 1000, now: 2500 }, shift: { mean: 1500, p50: 1500, p95: 5000 },
 } as unknown as NonNullable<CaseDetail["metric"]>;
 
 /** A drift case as the server writes it: onset is the sample that closed the window, last seen is the wall clock. */
@@ -266,6 +268,15 @@ it("the meta line: names the classifier as the classifiers page does, and no cal
 });
 
 describe("a metric-drift case's window", () => {
+  // Bug: the case showed the drift only as a ratio, never as the mean in the measure's own units.
+  it("states the mean's move in the measure's units", async () => {
+    api.getCase.mockResolvedValue(driftCase());
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.getByText("On average a call is 1.5s slower")).toBeTruthy();
+  });
+
   // Bug: the header read the case's onset (the sample that closed the window) and its wall-clock last
   // seen, so a five-hour window showed as fifteen minutes on two different clocks.
   // A half-known window must not pair the window's open with the case's wall-clock last seen.
@@ -704,7 +715,11 @@ describe("a frustration case", () => {
     expect(screen.getByText("Why users got frustrated")).toBeTruthy();
     expect(screen.getByText("agent/prompt.md @ c0ffee1")).toBeTruthy();
     expect(screen.getByText("Always retry.")).toBeTruthy();
-    expect(screen.getByText("Share of sessions with a user frustrated with the agent")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Share of sessions with a user frustrated with the agent, each session counted once in each hour it was active",
+      ),
+    ).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^Show \d+ sessions?$/ }).map((b) => b.textContent)).toEqual([
       "Show 1 session",
     ]);

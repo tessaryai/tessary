@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaDtos.Attribution;
 import ai.tessary.rca.RcaDtos.Cause;
+import ai.tessary.rca.RcaDtos.Coverage;
+import ai.tessary.rca.RcaDtos.RoleCount;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -20,9 +25,10 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Nothing the agent asserts reaches an immutable report unchecked: ids outside the finding's evidence are dropped (a
- * hallucinated receipt is worse than none), causes below {@code medium} or without a valid {@code change} are dropped,
- * and without a cloned repo {@code path} and {@code commit} are cleared. A {@code causes_identified} with no surviving
- * cause becomes {@code no_cause_found} with a note.
+ * hallucinated receipt is worse than none), causes below {@code medium}, without a valid {@code change} or citing no
+ * flagged row are dropped, each {@code affected_count} is held between the flagged rows its cause cites and the flagged
+ * total, coverage counts are held to what was recorded, and without a cloned repo {@code path} and {@code commit} are
+ * cleared. A {@code causes_identified} with no surviving cause becomes {@code no_cause_found} with a note.
  */
 final class RcaSynthesisOutput {
 
@@ -33,8 +39,8 @@ final class RcaSynthesisOutput {
     // `change` tells the UI a cause is new-format, so one without a valid value is dropped, never stored half-formed.
     private static final Set<String> CHANGES = Set.of("change", "standing");
 
-    private static final Set<String> TYPES =
-            Set.of("code", "prompt", "tool", "model", "traffic", "upstream", "data", "other");
+    private static final Set<String> TYPES = Set.of(
+            "code", "prompt", "tool", "model", "deploy", "config", "infra", "traffic", "upstream", "data", "other");
 
     private static final int MAX_CAUSES = 4;
 
@@ -49,7 +55,13 @@ final class RcaSynthesisOutput {
             @Nullable String verdict,
             @Nullable List<CauseBody> causes,
             @Nullable List<String> ruled_out,
+            @Nullable CoverageBody coverage,
             @Nullable String detailed_report) {}
+
+    record CoverageBody(
+            @Nullable List<ReadBody> read, @Nullable String how_chosen) {}
+
+    record ReadBody(@Nullable String role, @Nullable Integer count) {}
 
     record CauseBody(
             @Nullable String title,
@@ -75,18 +87,20 @@ final class RcaSynthesisOutput {
             List<Cause> causes,
             List<RuledOutCheck> ruledOut,
             @Nullable String detailedReport,
-            @Nullable String verdictNote) {}
+            @Nullable String verdictNote,
+            @Nullable Coverage coverage,
+            List<String> platformNotes) {}
 
     /** Throws when the text is not the expected shape: an immutable report must not degrade to unvalidated prose. */
     static Parsed parse(
             ObjectMapper mapper,
             String text,
-            Set<String> citableTraceIds,
-            Set<String> citableSessionIds,
+            AgenticRcaEngine.Evidence evidence,
             boolean repoCloned,
             String projectId) {
         ReportBody body = body(mapper, text, projectId);
         List<Cause> causes = new ArrayList<>();
+        List<String> platformNotes = new ArrayList<>();
         int unreceipted = 0;
         int belowMedium = 0;
         int unlabelled = 0;
@@ -105,13 +119,34 @@ final class RcaSynthesisOutput {
                 continue;
             }
             String type = TYPES.contains(label(c.type())) ? label(c.type()) : "other";
-            List<String> traces = kept(c.evidence_trace_ids(), citableTraceIds);
-            List<String> sessions = kept(c.evidence_session_ids(), citableSessionIds);
-            if (traces.isEmpty() && sessions.isEmpty()) {
+            // Only flagged rows are citable: a comparison row proves nothing about the flagged ones.
+            List<String> traces = kept(c.evidence_trace_ids(), evidence.flaggedTraceIds());
+            List<String> sessions = kept(c.evidence_session_ids(), evidence.flaggedSessionIds());
+            long flaggedTraces = traces.size();
+            long flaggedSessions = sessions.size();
+            if (flaggedTraces == 0 && flaggedSessions == 0) {
                 unreceipted++;
                 continue;
             }
+            // In session grain the cited traces are turns inside the cited sessions, not rows of their own.
+            long cited = EvidenceSides.SESSIONS.equals(evidence.grain())
+                    ? flaggedSessions
+                    : Math.max(flaggedTraces, flaggedSessions);
+            int ceiling = evidence.flaggedCount();
+            int floor = (int) Math.min(Math.max(1, cited), ceiling);
             Integer claimed = c.affected_count();
+            int count = Math.min(Math.max(claimed == null ? floor : claimed, floor), ceiling);
+            if (claimed != null && claimed != count) {
+                platformNotes.add(String.format(
+                        Locale.ROOT,
+                        "> **Count corrected by the platform.** \"%s\" claimed %d flagged rows; recorded as %d,"
+                                + " between the %d flagged rows it cites and the %d flagged in the evidence.",
+                        title,
+                        claimed,
+                        count,
+                        floor,
+                        ceiling));
+            }
             causes.add(new Cause(
                     title,
                     confidence,
@@ -123,11 +158,12 @@ final class RcaSynthesisOutput {
                     attribution(c.attribution(), repoCloned),
                     traces,
                     sessions,
-                    Math.max(claimed == null ? 0 : claimed, Math.max(traces.size(), sessions.size()))));
+                    count,
+                    ceiling));
         }
         if (unreceipted > 0 || belowMedium > 0 || unlabelled > 0) {
             log.warn(
-                    "rca analysis project={} dropped {} cause(s) citing nothing of this finding, {} below medium"
+                    "rca analysis project={} dropped {} cause(s) citing no flagged row of this finding, {} below medium"
                             + " and {} without a valid change",
                     projectId,
                     unreceipted,
@@ -149,7 +185,7 @@ final class RcaSynthesisOutput {
         if (claimed && causes.isEmpty()) {
             verdictNote = "> **Verdict downgraded by the platform.** The analysis returned `causes_identified`,"
                     + " but no cause survived validation: each needs high or medium confidence, a valid `change`,"
-                    + " and a trace or session from this finding's flagged or baseline evidence. Recorded as"
+                    + " and a flagged trace or session from this finding's evidence. Recorded as"
                     + " `no_cause_found`.";
             log.warn("rca analysis project={} downgraded verdict causes_identified -> no_cause_found", projectId);
         } else if (!claimed && !causes.isEmpty()) {
@@ -167,7 +203,30 @@ final class RcaSynthesisOutput {
                 List.copyOf(causes),
                 ruledOut(body.ruled_out()),
                 detailed,
-                verdictNote);
+                verdictNote,
+                coverage(body.coverage(), evidence.recordedByRole(), projectId),
+                List.copyOf(platformNotes));
+    }
+
+    /** In reply order; an unknown or repeated role is dropped, and each count is held to what was recorded. */
+    private static @Nullable Coverage coverage(
+            @Nullable CoverageBody body, Map<String, Long> recorded, String projectId) {
+        List<ReadBody> bodyRead = body == null ? null : body.read();
+        if (body == null || bodyRead == null) {
+            log.warn("rca analysis project={} returned no coverage", projectId);
+            return null;
+        }
+        Map<String, RoleCount> read = new LinkedHashMap<>();
+        for (ReadBody r : bodyRead) {
+            if (r == null) continue;
+            String role = label(r.role());
+            if (!FindingEvidenceRow.Role.ALL.contains(role) || read.containsKey(role)) continue;
+            long ceiling = recorded.getOrDefault(role, 0L);
+            Integer said = r.count();
+            long count = Math.min(Math.max(said == null ? 0 : said, 0), ceiling);
+            read.put(role, new RoleCount(role, (int) count));
+        }
+        return new Coverage(List.copyOf(read.values()), blankToNull(body.how_chosen()));
     }
 
     private static List<RuledOutCheck> ruledOut(@Nullable List<String> sentences) {

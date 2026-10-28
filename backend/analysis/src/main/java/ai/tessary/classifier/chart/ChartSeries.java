@@ -289,6 +289,16 @@ final class ChartSeries {
         };
     }
 
+    static int settleHours(ClassifierRow row, ObjectMapper mapper) {
+        return switch (row.detector()) {
+            case BuiltInDetector.Kind.FRUSTRATION ->
+                FrustrationConfig.of(mapper, row.configJson()).engine().referenceSettleHours();
+            case BuiltInDetector.Kind.GROUNDEDNESS ->
+                GroundednessConfig.of(mapper, row.configJson()).engine().referenceSettleHours();
+            default -> ToolErrorConfig.of(mapper, row.configJson()).referenceSettleHours();
+        };
+    }
+
     static @Nullable ArmingView armingView(ClassifierArming.@Nullable Config arming, ClassifierRow row) {
         if (arming == null) return null;
         return new ArmingView(
