@@ -456,10 +456,8 @@ public class FindingEvidenceRepository {
             }
             if (chunk.size() <= EXPORT_CHUNK) return new ExportPage(rows, null);
             Raw last = chunk.get(EXPORT_CHUNK - 1);
-            key = new Key(
-                    last.ref().role(),
-                    last.ref().rank() == null ? RANK_TAIL : last.ref().rank(),
-                    last.evidenceId());
+            Integer lastRank = last.ref().rank();
+            key = new Key(last.ref().role(), lastRank == null ? RANK_TAIL : lastRank, last.evidenceId());
         }
     }
 

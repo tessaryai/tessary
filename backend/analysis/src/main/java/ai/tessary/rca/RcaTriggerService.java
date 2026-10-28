@@ -78,8 +78,10 @@ public class RcaTriggerService {
             // A drift finding reads as its mean then and now, in the measure's own units.
             ShiftDetail detail = MetricFindingEvidence.detail(finding.payloadJson());
             Pair mean = detail == null ? null : detail.mean();
-            current = mean == null || mean.now() == null ? 0.0 : mean.now();
-            prior = mean == null || mean.then() == null ? 0.0 : mean.then();
+            Double now = mean == null ? null : mean.now();
+            Double then = mean == null ? null : mean.then();
+            current = now == null ? 0.0 : now;
+            prior = then == null ? 0.0 : then;
         } else {
             // No "before" number exists; inventing one would show a movement nobody measured.
             Double asserted = finding.severity();

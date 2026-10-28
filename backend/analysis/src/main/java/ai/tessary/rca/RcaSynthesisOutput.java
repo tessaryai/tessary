@@ -213,17 +213,19 @@ final class RcaSynthesisOutput {
     /** In reply order; an unknown or repeated role is dropped, and each count is held to what was recorded. */
     private static @Nullable Coverage coverage(
             @Nullable CoverageBody body, Map<String, Long> recorded, String projectId) {
-        if (body == null || body.read() == null) {
+        List<ReadBody> bodyRead = body == null ? null : body.read();
+        if (body == null || bodyRead == null) {
             log.warn("rca analysis project={} returned no coverage", projectId);
             return null;
         }
         Map<String, RoleCount> read = new LinkedHashMap<>();
-        for (ReadBody r : body.read()) {
+        for (ReadBody r : bodyRead) {
             if (r == null) continue;
             String role = label(r.role());
             if (!FindingEvidenceRow.Role.ALL.contains(role) || read.containsKey(role)) continue;
             long ceiling = recorded.getOrDefault(role, 0L);
-            long count = Math.min(Math.max(r.count() == null ? 0 : r.count(), 0), ceiling);
+            Integer said = r.count();
+            long count = Math.min(Math.max(said == null ? 0 : said, 0), ceiling);
             read.put(role, new RoleCount(role, (int) count));
         }
         return new Coverage(List.copyOf(read.values()), blankToNull(body.how_chosen()));
