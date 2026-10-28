@@ -95,9 +95,12 @@ public final class ToolErrorTrend {
         // next pass. Read once: two accessor calls only happen to agree.
         ToolErrorRate carriedBaseline = carried == null ? null : carried.baseline();
         String epoch = CarriedState.epochOf(config, schemaVersion);
+        // The key's own event clock: an hour may be learned only once its end plus the settle delay has passed on it.
+        String clock = buckets.getLast().bucket();
+        int settle = config.referenceSettleHours();
+        String learnedThrough = carried == null ? null : carried.learnedThrough();
+        String learnBefore = carried == null ? null : carried.learnBefore();
         ToolErrorRate baseline;
-        // Null when the leading fold below just built the reference: every hour after it is new.
-        String learnedThrough = null;
         int i;
         if (accepted != null) {
             baseline = accepted.asRate();
@@ -109,10 +112,10 @@ public final class ToolErrorTrend {
             // Re-learning would read the leading buckets of a window that has slid forward, walking after the
             // degradation. A copy, because one still learning grows below.
             baseline = carriedBaseline.copy();
-            learnedThrough = carried.learnedThrough();
             i = 0;
         } else {
             baseline = new ToolErrorRate();
+            learnedThrough = null;
             i = 0;
             // A reset that dropped the reference means "the old normal was wrong", so learn only after it.
             while (i < buckets.size()
@@ -120,9 +123,13 @@ public final class ToolErrorTrend {
                     && carried.fencedOff(buckets.get(i).bucket())) {
                 i++;
             }
+            // Stops at the first hour that has not settled, and at the learning fence.
             while (i < buckets.size() && baseline.calls() < config.minBaselineCalls()) {
                 HourlyToolTally b = buckets.get(i);
+                if (!CarriedState.settled(b.bucket(), clock, settle)) break;
+                if (carried != null && carried.fencedForLearning(b.bucket())) break;
                 fold(baseline, b.calls(), b.failures());
+                learnedThrough = b.bucket();
                 i++;
             }
         }
@@ -144,20 +151,25 @@ public final class ToolErrorTrend {
         for (int j = i; j < buckets.size(); j++) {
             HourlyToolTally b = buckets.get(j);
             // Strictly after the watermark: folding a bucket twice is how a retried sweep invents a case.
-            if (watermark != null && b.bucket().compareTo(watermark) <= 0) continue;
-            if (fence != null && fence.fencedOff(b.bucket())) continue;
-            state = ToolErrorDetector.advanceBucket(state, baseline, config, b.calls(), b.failures(), b.bucket());
-            watermark = b.bucket();
-            // Judged first, learned from second, so no hour is judged against a reference that holds it. A pinned
-            // reference never learns.
+            boolean afterWatermark = watermark == null || b.bucket().compareTo(watermark) > 0;
+            if (afterWatermark && !(fence != null && fence.fencedOff(b.bucket()))) {
+                state = ToolErrorDetector.advanceBucket(state, baseline, config, b.calls(), b.failures(), b.bucket());
+                watermark = b.bucket();
+            }
+            // Learning is gated by learnedThrough and the settle delay, never by the watermark: an hour judged while
+            // unsettled is learned on a later pass. Judged first, learned second, so no hour is judged against a
+            // reference that holds it. A pinned reference never learns.
             if (accepted == null
                     && baseline.calls() < config.freezeBaselineCalls()
-                    && (learnedThrough == null || b.bucket().compareTo(learnedThrough) > 0)) {
+                    && CarriedState.settled(b.bucket(), clock, settle)
+                    && (learnedThrough == null || b.bucket().compareTo(learnedThrough) > 0)
+                    && !(carried != null && carried.fencedForLearning(b.bucket()))) {
                 fold(baseline, b.calls(), b.failures());
+                learnedThrough = b.bucket();
             }
         }
 
-        // The pending absorb and reset fence are human decisions, carried through untouched.
+        // The pending absorb and both fences are human decisions, carried through untouched.
         CarriedState next = new CarriedState(
                 toolKey,
                 state,
@@ -166,7 +178,9 @@ public final class ToolErrorTrend {
                 epoch,
                 carried == null ? null : carried.pendingPinBy(),
                 carried == null ? null : carried.pendingPinAt(),
-                carried == null ? null : carried.resetAt());
+                carried == null ? null : carried.resetAt(),
+                learnedThrough,
+                learnBefore);
         Decision decision = ToolErrorDetector.decide(state, baseline, config);
         return new Replayed(
                 next, decision.fired() ? new Spell(toolKey, decision, baseline, decision.onsetAt(), watermark) : null);

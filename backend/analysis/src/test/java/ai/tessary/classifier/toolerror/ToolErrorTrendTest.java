@@ -27,6 +27,16 @@ class ToolErrorTrendTest {
     private static final String TOOL = "tool:search_docs";
     private static final Instant START = Instant.parse("2026-07-01T00:00:00Z");
 
+    private static String hour(int h) {
+        return START.plus(Duration.ofHours(h)).toString();
+    }
+
+    private static ToolErrorRate rate(long calls, long failures) {
+        ToolErrorRate r = new ToolErrorRate();
+        r.addCounts(calls, failures);
+        return r;
+    }
+
     private static List<HourlyToolTally> series(int hours, int callsPerHour, double rate) {
         return series(new ArrayList<>(), 0, hours, callsPerHour, rate);
     }
@@ -185,32 +195,32 @@ class ToolErrorTrendTest {
     }
 
     /**
-     * A rebuilding caller keeps its still-learning reference and learns only newer hours; learning every hour would
-     * count some twice.
+     * A rebuilding caller keeps its still-learning reference and learns only newer settled hours; learning every hour
+     * would count some twice.
      */
     @Test
     void aRebuildKeepsALearningReferenceAndLearnsOnlyTheNewHours() {
-        List<HourlyToolTally> s = series(7, 200, 0.01); // 1,400 calls, still learning
+        List<HourlyToolTally> s = series(7, 200, 0.01); // 1,400 calls; hours 5 and 6 have not settled
         Sweep first = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of());
-        assertEquals(1400, requireBaseline(first).calls());
+        assertEquals(1000, requireBaseline(first).calls());
 
         Sweep rebuilt = ToolErrorTrend.sweep(
                 s, LEARNING, Map.of(), Map.of(TOOL, first.advanced().get(0).rebuilding()));
-        assertEquals(1400, requireBaseline(rebuilt).calls(), "the same hours, learned once");
+        assertEquals(1000, requireBaseline(rebuilt).calls(), "the same hours, learned once");
 
         series(s, 7, 2, 200, 0.01);
         Sweep grown = ToolErrorTrend.sweep(
                 s, LEARNING, Map.of(), Map.of(TOOL, rebuilt.advanced().get(0).rebuilding()));
-        assertEquals(1800, requireBaseline(grown).calls(), "and then only the hours after them");
+        assertEquals(1400, requireBaseline(grown).calls(), "and then only the hours that settled after them");
     }
 
     @Test
     void aResetThatKeepsALearningReferenceKeepsWhatItLearned() {
-        List<HourlyToolTally> s = series(7, 200, 0.01); // 1,400 calls, still learning
+        List<HourlyToolTally> s = series(7, 200, 0.01); // 1,000 calls learned through hour 4, still learning
         CarriedState was =
                 ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of()).advanced().get(0);
 
-        // Reset keeps the reference and watermark, clears the arm, and fences at hour 8.
+        // Reset keeps the reference, watermark and learned_through, clears the arm, and fences at hour 8.
         String resetAt = START.plus(Duration.ofHours(8)).toString();
         CarriedState reset = new CarriedState(
                 TOOL,
@@ -220,13 +230,16 @@ class ToolErrorTrendTest {
                 was.stateEpoch(),
                 null,
                 null,
-                resetAt);
+                resetAt,
+                was.learnedThrough(),
+                null);
 
-        series(s, 7, 3, 200, 0.10); // hour 7 is before the fence; hours 8 and 9 after it
+        // Hours 5-7 are before the fence; 8 and 9 after it and settled; 10 and 11 not settled.
+        series(s, 7, 5, 200, 0.10);
         Sweep rebuilt = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of(TOOL, reset.rebuilding()));
         ToolErrorRate reference = requireBaseline(rebuilt);
-        assertEquals(1800, reference.calls(), "the hours it held, then the hours after the fence, not the one before");
-        assertEquals(14 + 40, reference.failures());
+        assertEquals(1400, reference.calls(), "the hours it held, then the settled hours after the fence, none before");
+        assertEquals(10 + 40, reference.failures());
         assertEquals(resetAt, rebuilt.advanced().get(0).resetAt());
     }
 
@@ -250,7 +263,10 @@ class ToolErrorTrendTest {
 
         series(s, 20, 5, 200, 0.05); // 1,000 calls after the reset, at the new normal
         Sweep partway = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of(TOOL, relearning));
-        assertEquals(1000, requireBaseline(partway).calls(), "learning again from the fence, not before it");
+        assertEquals(
+                600,
+                requireBaseline(partway).calls(),
+                "learning again from the fence, not before it, and only settled");
         assertTrue(rateOf(requireBaseline(partway)) > 0.04);
         assertTrue(partway.spells().isEmpty(), "and the new normal is not judged against the old one");
 
@@ -264,5 +280,100 @@ class ToolErrorTrendTest {
         Sweep rebuilt = ToolErrorTrend.sweep(s, LEARNING, Map.of(), rebuilding);
         assertEquals(2000, requireBaseline(rebuilt).calls(), "a rebuild relearns from the fence too");
         assertTrue(rateOf(requireBaseline(rebuilt)) > 0.04);
+    }
+
+    /**
+     * Every hour is judged, but an hour whose labels are still arriving must not join the reference the moment it is
+     * judged. With a one-hour delay, the newest two hours on the key's own clock have not settled.
+     */
+    @Test
+    void replay_judgesAnUnsettledHourWithoutLearningIt() {
+        Sweep first = ToolErrorTrend.sweep(series(7, 200, 0.01), LEARNING, Map.of(), Map.of());
+
+        CarriedState carried = first.advanced().get(0);
+        assertEquals(hour(6), carried.watermarkBucket(), "every hour is judged");
+        assertEquals(1000, requireBaseline(first).calls(), "hours 0-4 have settled; 5 and 6 have not");
+        assertEquals(hour(4), carried.learnedThrough());
+        assertTrue(first.spells().isEmpty());
+    }
+
+    /** A resumed key must learn, on a later pass, the hours that were unsettled when it judged them. */
+    @Test
+    void replay_learnsAnHourOnceItSettlesOnALaterPass() {
+        List<HourlyToolTally> s = series(7, 200, 0.01);
+        Sweep first = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of());
+
+        series(s, 7, 2, 200, 0.01);
+        Sweep later = ToolErrorTrend.sweep(s, LEARNING, Map.of(), carriedFrom(first));
+
+        CarriedState carried = later.advanced().get(0);
+        assertEquals(1400, requireBaseline(later).calls(), "hours 5 and 6 settle once hours 7 and 8 exist");
+        assertEquals(hour(6), carried.learnedThrough());
+        assertEquals(hour(8), carried.watermarkBucket());
+    }
+
+    /**
+     * A rebuild re-reads every hour; the hours between {@code learned_through} and the watermark must be learned once,
+     * not on every pass, and not lost.
+     */
+    @Test
+    void replay_neverLearnsTheSameHourTwiceAcrossRebuilds() {
+        List<HourlyToolTally> s = series(9, 200, 0.01);
+        CarriedState stored = new CarriedState(
+                TOOL,
+                ToolErrorDetector.State.EMPTY,
+                rate(1000, 10),
+                hour(6),
+                CarriedState.epochOf(LEARNING, ToolErrorTrend.STATE_SCHEMA_VERSION),
+                null,
+                null,
+                null,
+                hour(4),
+                null);
+
+        Sweep once = ToolErrorTrend.sweep(s, LEARNING, Map.of(), Map.of(TOOL, stored.rebuilding()));
+        assertEquals(1400, requireBaseline(once).calls(), "hours 5 and 6, learned once");
+
+        Sweep twice = ToolErrorTrend.sweep(
+                s, LEARNING, Map.of(), Map.of(TOOL, once.advanced().get(0).rebuilding()));
+        assertEquals(1400, requireBaseline(twice).calls(), "and not again");
+    }
+
+    /** Under an open finding, a real rise must be judged but never learned as normal. */
+    @Test
+    void replay_relearnsOnlyBeforeAnOpenFindingsOnset() {
+        ToolErrorConfig config = withFreeze(CONFIG, 5000);
+        CarriedState fenced = new CarriedState(
+                TOOL,
+                ToolErrorDetector.State.EMPTY,
+                null,
+                null,
+                CarriedState.epochOf(config, ToolErrorTrend.STATE_SCHEMA_VERSION),
+                null,
+                null,
+                null,
+                null,
+                hour(10));
+        List<HourlyToolTally> s = series(10, 200, 0.01);
+        series(s, 10, 20, 200, 0.10);
+
+        Sweep sweep = ToolErrorTrend.sweep(s, config, Map.of(), Map.of(TOOL, fenced));
+
+        ToolErrorRate reference = requireBaseline(sweep);
+        assertEquals(2000, reference.calls(), "only the hours before the onset");
+        assertEquals(20, reference.failures());
+        assertEquals(hour(9), sweep.advanced().get(0).learnedThrough());
+        assertEquals(1, sweep.spells().size());
+        assertEquals(Direction.UP, sweep.spells().get(0).decision().direction());
+        assertEquals(hour(10), sweep.spells().get(0).onsetBucket());
+    }
+
+    /** A reference built from unsettled hours would judge the next hour against labels that are still arriving. */
+    @Test
+    void replay_waitsWhileTheLeadingHoursAreUnsettled() {
+        Sweep sweep = ToolErrorTrend.sweep(series(3, 200, 0.01), CONFIG, Map.of(), Map.of());
+
+        assertTrue(sweep.advanced().isEmpty(), "600 calls, but only hour 0 has settled");
+        assertTrue(sweep.spells().isEmpty());
     }
 }
