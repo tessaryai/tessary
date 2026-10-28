@@ -236,31 +236,41 @@ class ClassifierDossierAssemblerTest {
     }
 
     /**
-     * The rolling arm's token pairs and ring are the only account of the reference side; without them the agent has
-     * no "before".
+     * The rolling arm's token pairs and ring account for the reference side, and its declared sample says what its
+     * {@code baseline} rows are. The bug is a dossier that hides how the comparison rows were chosen, or claims rows
+     * where a ring folded before rows were kept wrote none.
      */
     @Test
     void theMetricDriftDossierCarriesTheTokenPairsAndTheReferenceRing() throws Exception {
-        String payload = "{\"bucket\":{\"key\":\"summarize\",\"kind\":\"call_site\"},\"reference\":\"previous\","
+        String head = "{\"bucket\":{\"key\":\"summarize\",\"kind\":\"call_site\"},\"reference\":\"previous\","
                 + "\"direction\":\"up\",\"w1_log\":0.5,\"ratio\":1.5,\"floor\":0.15,\"n_ref\":100,\"n_cur\":90,"
                 + "\"tokens\":{\"input_p50\":[500,800],\"output_p50\":[null,null]},"
-                + "\"control\":{\"days_used\":6,\"days_excluded_as_confirmed\":1,\"oldest_day\":\"2026-08-01\"}}";
+                + "\"control\":{\"days_used\":6,\"days_excluded_as_confirmed\":1,\"oldest_day\":\"2026-08-01\"";
+        String declared = head + ",\"baseline\":{\"rule\":\"spread\",\"rows\":200,\"of\":540,\"days\":6,"
+                + "\"oldest_day\":\"2026-08-01\",\"newest_day\":\"2026-08-07\"}}}";
+        String expectedHead = "# Metric drift evidence\n\n"
+                + "- bucket: `summarize` (call_site)\n"
+                + "- reference: previous\n"
+                + "- direction: up\n"
+                + "- effect: w1_log=0.5000 ratio=1.5000x (floor 0.1500)\n"
+                + "- population: n_ref=100, n_cur=90\n"
+                + "\n## Reference vs. current (the paired before/after aggregate)\n\n"
+                + "- input_p50: 500 → 800\n"
+                + "\nReference composition (rolling arm): 6 day(s) used, 1 excluded as already-confirmed, oldest day"
+                + " 2026-08-01. ";
+        String expectedTail = "\n## Concentration: which sibling buckets this drift explains\n\n"
+                + "This shift explains no sibling buckets (explains=[] or absent) — it did not"
+                + " suppress any other finding, so there is nothing to concentrate over.\n";
 
         assertEquals(
-                "# Metric drift evidence\n\n"
-                        + "- bucket: `summarize` (call_site)\n"
-                        + "- reference: previous\n"
-                        + "- direction: up\n"
-                        + "- effect: w1_log=0.5000 ratio=1.5000x (floor 0.1500)\n"
-                        + "- population: n_ref=100, n_cur=90\n"
-                        + "\n## Reference vs. current (the paired before/after aggregate)\n\n"
-                        + "- input_p50: 500 → 800\n"
-                        + "\nReference composition (rolling arm — no per-instance baseline rows exist for this arm,"
-                        + " only this ring): 6 day(s) used, 1 excluded as already-confirmed, oldest day 2026-08-01.\n"
-                        + "\n## Concentration: which sibling buckets this drift explains\n\n"
-                        + "This shift explains no sibling buckets (explains=[] or absent) — it did not"
-                        + " suppress any other finding, so there is nothing to concentrate over.\n",
-                MetricDriftDossier.build(MAPPER.readTree(payload)));
+                expectedHead
+                        + "`baseline` rows are a spread sample: 200 of 540 rows from 6 day(s) of this ring"
+                        + " (2026-08-01 to 2026-08-07).\n"
+                        + expectedTail,
+                MetricDriftDossier.build(MAPPER.readTree(declared)));
+        assertEquals(
+                expectedHead + "No `baseline` sample: this ring was folded before its days kept rows.\n" + expectedTail,
+                MetricDriftDossier.build(MAPPER.readTree(head + "}}")));
     }
     /**
      * The agent reads the shift in the measure's units and where it began. The bug is a dossier that states only a
