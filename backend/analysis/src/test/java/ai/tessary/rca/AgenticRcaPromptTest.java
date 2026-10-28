@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.finding.BehaviorDtos;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -263,11 +266,30 @@ class AgenticRcaPromptTest {
                 "said whether or not there is a baseline");
     }
 
-    /** The bug is an agent reading a field the row does not carry: the row's field is {@code models}. */
+    /**
+     * The bug is an agent reading a field the row does not carry: every name in the {@code get_finding_evidence} row
+     * list must be a component of the row the surface returns.
+     */
     @Test
     void theToolsFileSpellsTheRowFieldsAsTheSurfaceDoes() {
-        assertFalse(AgenticRcaEngine.TOOLS.contains("`model`"), "the row carries no model field");
-        assertTrue(AgenticRcaEngine.TOOLS.contains("`models`"), AgenticRcaEngine.TOOLS);
+        String tools = AgenticRcaEngine.TOOLS;
+        int bullet = tools.indexOf("- `get_finding_evidence(finding_id, role=");
+        assertTrue(bullet >= 0, tools);
+        int from = tools.indexOf("Each row carries what was MEASURED on it:", bullet);
+        int to = tools.indexOf("Bodies come from", from);
+        assertTrue(from >= 0 && to > from, "the row field list in " + tools);
+        Set<String> components = Stream.of(BehaviorDtos.EvidenceSpanView.class.getRecordComponents())
+                .map(RecordComponent::getName)
+                .collect(Collectors.toSet());
+
+        List<String> named = new ArrayList<>();
+        Matcher m = Pattern.compile("`([^`]+)`").matcher(tools.substring(from, to));
+        while (m.find()) named.add(m.group(1));
+
+        assertTrue(named.contains("models"), "the list names models: " + named);
+        List<String> unknown =
+                named.stream().filter(n -> !components.contains(n)).toList();
+        assertEquals(List.of(), unknown, "named in tools.md but not on the row");
     }
 
     /** The bug is an agent stopping at a fraction of its budget with the right next step still on its own list. */

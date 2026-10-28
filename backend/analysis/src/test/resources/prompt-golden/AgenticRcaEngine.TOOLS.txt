@@ -8,14 +8,15 @@ finding is about. The dossier states the claim; you go and read it.
   `recordedCounts` is what the detector wrote at finding-open, so counts below recorded means
   substrate aged out, never a lost write.
 - `export_finding_evidence(finding_id, role=…, text_chars=…, cursor=…)` — every row with its
-  input and output text and every attribute, masked, saved as one file under `checks/mcp/`.
-  Export each role and script over the files; page on `nextCursor` until it is null.
+  input and output text and every attribute, masked, saved as one file under `checks/mcp/`;
+  it pages on `nextCursor`.
 - `get_finding_evidence(finding_id, role=…, limit=…, cursor=…)` — the rows themselves, under
   `rows`, in the detector's own stable order. Each row carries what was MEASURED on it: `role`,
   `rank`, `sessionId`, `traceId`, `spanId`, `name`, `kind`, `status`, `level`, `errorType`,
-  `startedAt`, `latencyMs`, `totalTokens`, the token split, `totalCost`, `models`,
-  `projectVersionId`, `userId`, `traceIndex`, `sessionTraces`, `inputBytes`, `outputBytes`,
-  `payloadAvailable`, `callSiteId` and a short `attributes` map. Bodies come from `get_span`. Field names are camelCase, and the
+  `startedAt`, `latencyMs`, `totalTokens`, `inputTokens`, `outputTokens`, `cacheReadTokens`,
+  `cacheWriteTokens`, `reasoningTokens`, `totalCost`, `models`, `projectVersionId`, `userId`,
+  `traceIndex`, `sessionTraces`, `inputBytes`, `outputBytes`, `payloadAvailable`, `callSiteId`
+  and a short `attributes` map. Bodies come from `get_span`. Field names are camelCase, and the
   next page's token is `nextCursor`. `method.md` says what each role holds. A row with a
   `sessionId` and no `traceId` is a whole conversation: read it with `get_conversation`.
 - `get_trace(trace_id)` and `get_span(trace_id, span_id)` — the bodies behind a ref. A span
