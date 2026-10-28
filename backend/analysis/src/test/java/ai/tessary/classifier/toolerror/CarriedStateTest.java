@@ -40,4 +40,18 @@ class CarriedStateTest {
                 "cs-a", State.EMPTY, null, null, "epoch", null, null, null, null, "2026-10-05T10:00:00Z");
         assertEquals(100, CarriedState.learned(fenced, TALLIES, 0), "only the hour before the fence");
     }
+
+    /**
+     * The fence is an onset, not an hour: an onset at 05:37 falls inside the 05:00 bucket, which holds the start of
+     * the rise. The bug is that bucket learned into the reference the fence exists to keep it out of.
+     */
+    @Test
+    void theHourHoldingTheFenceIsFenced() {
+        CarriedState fenced = new CarriedState(
+                "cs-a", State.EMPTY, null, null, "epoch", null, null, null, null, "2026-10-05T05:37:00Z");
+
+        assertEquals(false, fenced.fencedForLearning("2026-10-05T04:00:00Z"), "the hour that ends at the onset");
+        assertEquals(true, fenced.fencedForLearning("2026-10-05T05:00:00Z"), "the hour the onset falls in");
+        assertEquals(true, fenced.fencedForLearning("2026-10-05T06:00:00Z"));
+    }
 }

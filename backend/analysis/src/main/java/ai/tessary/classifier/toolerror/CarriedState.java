@@ -15,8 +15,8 @@ import org.jspecify.annotations.Nullable;
  * reference along @param watermarkBucket the next sweep folds only buckets strictly after it @param pendingPinBy a
  * human decision; {@link ToolErrorStateRepository#save} never writes it @param resetAt a fence: a rebuild skips buckets
  * before it so a closed spell cannot re-accumulate @param learnedThrough the newest hour folded into the reference,
- * stored as {@code learned_through}, so no pass ever counts an hour twice @param learnBefore a learning fence: hours at
- * or after it never join the reference. Changeset 0051 set it at an open finding's onset; {@link
+ * stored as {@code learned_through}, so no pass ever counts an hour twice @param learnBefore a learning fence: an hour
+ * that ends after it never joins the reference. Changeset 0051 set it at an open finding's onset; {@link
  * ToolErrorStateRepository#resetAndRelearn} lifts it, and a sweep never writes it
  */
 public record CarriedState(
@@ -58,10 +58,14 @@ public record CarriedState(
         return resetAt != null && Instant.parse(bucket).isBefore(Instant.parse(resetAt));
     }
 
-    /** Also true for an hour at or after the learning fence, which is judged but never learned. */
+    /**
+     * Also true for an hour that ends after the learning fence, which is judged but never learned. The fence is an
+     * onset, so the hour it falls in holds the start of the rise.
+     */
     public boolean fencedForLearning(String bucket) {
         return fencedOff(bucket)
-                || (learnBefore != null && !Instant.parse(bucket).isBefore(Instant.parse(learnBefore)));
+                || (learnBefore != null
+                        && Instant.parse(bucket).plus(Duration.ofHours(1)).isAfter(Instant.parse(learnBefore)));
     }
 
     /**
