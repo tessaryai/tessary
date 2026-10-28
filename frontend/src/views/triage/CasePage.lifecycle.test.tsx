@@ -130,6 +130,7 @@ const SHIFT = {
   direction: "up", explains: [], floor: 0, measure: "duration",
   quantiles: [{ key: "p50", then: 1000, now: 2500 }, { key: "p95", then: 4000, now: 9000 }],
   ratio: 2.5, reference: "previous", tokens: [], workload: [],
+  mean: { key: "mean", then: 1000, now: 2500 }, shift: { mean: 1500, p50: 1500, p95: 5000 },
 } as unknown as NonNullable<CaseDetail["metric"]>;
 
 /** A drift case as the server writes it: onset is the sample that closed the window, last seen is the wall clock. */
@@ -266,6 +267,15 @@ it("the meta line: names the classifier as the classifiers page does, and no cal
 });
 
 describe("a metric-drift case's window", () => {
+  // Bug: the case showed the drift only as a ratio, never as the mean in the measure's own units.
+  it("states the mean's move in the measure's units", async () => {
+    api.getCase.mockResolvedValue(driftCase());
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.getByText("On average a call is 1.5s slower")).toBeTruthy();
+  });
+
   // Bug: the header read the case's onset (the sample that closed the window) and its wall-clock last
   // seen, so a five-hour window showed as fifteen minutes on two different clocks.
   // A half-known window must not pair the window's open with the case's wall-clock last seen.

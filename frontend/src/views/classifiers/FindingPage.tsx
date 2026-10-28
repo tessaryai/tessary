@@ -17,6 +17,7 @@ import { PatternBlock } from "./findingCharts";
 import {
   ShiftBehind,
   ShiftChart,
+  ShiftMean,
   ShiftPins,
   formatMeasure,
   measureNoun,
@@ -219,6 +220,7 @@ export function FindingPage() {
           </div>
           <ShiftChart shift={shift} />
           <ShiftPins shift={shift} />
+          <ShiftMean shift={shift} />
         </section>
       )}
       {shift && <ShiftBehind shift={shift} />}

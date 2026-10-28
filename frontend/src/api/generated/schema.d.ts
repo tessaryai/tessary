@@ -3585,6 +3585,14 @@ export interface components {
             pipeline: components["schemas"]["Pipeline"];
             repairs: string[];
         };
+        PlainShift: {
+            /** Format: double */
+            mean: number | null;
+            /** Format: double */
+            p50: number | null;
+            /** Format: double */
+            p95: number | null;
+        };
         PlatformDescriptor: {
             auth: string;
             default_base_url: string;
@@ -4017,6 +4025,7 @@ export interface components {
             explains: components["schemas"]["Explains"][];
             /** Format: double */
             floor: number;
+            mean: components["schemas"]["Pair"] | null;
             measure: string;
             /** Format: int64 */
             nCur: number;
@@ -4026,6 +4035,7 @@ export interface components {
             /** Format: double */
             ratio: number;
             reference: string;
+            shift: components["schemas"]["PlainShift"] | null;
             sinceVersionId: string | null;
             tokens: components["schemas"]["Pair"][];
             /** Format: double */

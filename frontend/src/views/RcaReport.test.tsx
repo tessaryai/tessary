@@ -178,6 +178,30 @@ describe("RcaReport", () => {
     ]);
   });
 
+  // Bug: a drift report's mean of 2500 ms ran through the rate formatter and read as 250000%.
+  it("heads a drift report with the mean then and now in the measure's units", async () => {
+    report = {
+      ...GROUNDEDNESS_REPORT, report_kind: "metric_movement", metric: "duration_drift", subject_kind: "metric_baseline",
+      current_value: 2500, prior_value: 1000, delta: 1500,
+    };
+    renderReport();
+
+    expect(await screen.findByText(/^metric_baseline · Duration rose to 2\.5s from 1s \(\+1\.5s\) · .+ onward$/)).toBeTruthy();
+  });
+
+  // Bug: the header said "vs the 24h before" when the window started at the reference, days earlier.
+  it("names a movement report's reference window rather than assuming a day", async () => {
+    report = {
+      ...GROUNDEDNESS_REPORT, report_kind: "metric_movement", metric: "tool_error", subject_kind: "classifier",
+      current_value: 0, prior_value: 0, delta: 0,
+    };
+    renderReport();
+
+    const subtitle = await screen.findByText(/^classifier · /);
+    expect(subtitle.textContent).toMatch(/ onward vs .+ to .+$/);
+    expect(subtitle.textContent).not.toContain("24h");
+  });
+
   // Bug: a report on a measure with no cause words of its own borrows another kind's, so a standing cause reads
   // "Why it fails more".
   it("asks why it happens for a standing cause on a measure with no words of its own", async () => {
