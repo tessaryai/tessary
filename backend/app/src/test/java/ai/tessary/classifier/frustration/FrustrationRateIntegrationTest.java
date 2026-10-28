@@ -56,10 +56,11 @@ record FrustrationRateIntegrationTest(
         String pid = fixture.project("fr-case", Capability.FRUSTRATION);
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        // Judged from 100, and every hour is added to the reference until 1,000, the risen ones included.
+        // Judged from 100, and every settled hour is added to the reference until 1,000. The rise ends at hour 36,
+        // so hours up to 11 have settled, a day after they ended, and the risen ones have not.
         fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations at 5%
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40); // then 180 at 40%
-        fixture.frustrationHours(pid, signal, "cs-calm", start, 0, 13, 30, 0.05);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40); // then 180 at 40%
+        fixture.frustrationHours(pid, signal, "cs-calm", start, 0, 37, 30, 0.05);
 
         service.refresh(pid, signal, Instant.now());
 
@@ -74,7 +75,7 @@ record FrustrationRateIntegrationTest(
         String title = FindingTitle.of(finding);
         assertTrue(title.matches("Frustrated sessions increased from \\d+\\.\\d% to \\d+\\.\\d% on cs-chat"), title);
         assertEquals(180, finding.sampleCount(), "sessions since onset");
-        assertEquals(390, finding.payload().path("baseline_conversations").asLong());
+        assertEquals(210, finding.payload().path("baseline_conversations").asLong());
         assertEquals(VERSION, finding.payload().path("scorer_version").asText());
 
         List<FindingEvidenceRow> all = evidence.listByFinding(pid, finding.id());
@@ -111,12 +112,12 @@ record FrustrationRateIntegrationTest(
         assertNotNull(block, "the finding page gets its frustration block");
         assertEquals(180, block.rate().nCur());
         assertEquals(72, block.rate().failuresCur());
-        assertEquals(390, block.rate().nRef());
-        assertEquals(86, block.baselineFrustrated(), "two of every thirty for seven hours, then twelve for six");
+        assertEquals(210, block.rate().nRef());
+        assertEquals(14, block.baselineFrustrated(), "two of every thirty for seven hours, and not the rise");
         assertEquals(FrustrationDetailService.PAGE_SIZE, block.conversations().size(), "the first page");
         assertEquals("50", block.conversationsNextCursor());
         FrustratedConversationView row = block.conversations().get(0);
-        assertEquals("conv-cs-chat-12-11", row.conversationId(), "newest flag first");
+        assertEquals("conv-cs-chat-36-11", row.conversationId(), "newest flag first");
         assertEquals(0.71, row.score());
         assertEquals("cs-chat", row.callSiteId());
         assertFalse(row.cleared());
@@ -142,13 +143,13 @@ record FrustrationRateIntegrationTest(
                 "cs-chat",
                 "frustration_rate",
                 "frustration_causes",
-                "[{\"evidence_session_ids\":[\"conv-cs-chat-12-00\"],\"evidence_trace_ids\":[]},"
-                        + "{\"evidence_session_ids\":[\"conv-cs-chat-10-00\"],"
-                        + "\"evidence_trace_ids\":[\"cs-chat-11-01\"]}]");
+                "[{\"evidence_session_ids\":[\"conv-cs-chat-36-00\"],\"evidence_trace_ids\":[]},"
+                        + "{\"evidence_session_ids\":[\"conv-cs-chat-34-00\"],"
+                        + "\"evidence_trace_ids\":[\"cs-chat-35-01\"]}]");
         FrustratedSessionPage oneCause =
                 frustrationDetail.page(finding, new FrustrationRateRepository.CauseRef(report, 1), 50, null);
         assertEquals(
-                List.of("cs-chat-11-01", "cs-chat-10-00"),
+                List.of("cs-chat-35-01", "cs-chat-34-00"),
                 oneCause.rows().stream()
                         .map(FrustratedConversationView::traceId)
                         .toList(),
@@ -167,12 +168,12 @@ record FrustrationRateIntegrationTest(
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40);
         service.refresh(pid, signal, Instant.now());
         FindingRow before = findings.listByProject(pid, null, null, "frustration", false, 10)
                 .get(0);
 
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 13, 1, 30, 0.40); // the spell runs on another hour
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 37, 1, 30, 0.40); // the spell runs on another hour
         service.refresh(pid, signal, Instant.now());
 
         List<FindingRow> after = findings.listByProject(pid, null, null, "frustration", false, 10);
@@ -199,7 +200,7 @@ record FrustrationRateIntegrationTest(
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40);
         service.refresh(pid, signal, Instant.now());
         FindingRow finding = findings.listByProject(pid, null, null, "frustration", false, 10)
                 .get(0);
@@ -209,7 +210,7 @@ record FrustrationRateIntegrationTest(
         assertEquals(72, past.total(), "the finding still cites every frustrated session");
         assertNull(past.nextCursor());
 
-        String trace = "cs-chat-12-00";
+        String trace = "cs-chat-36-00";
         jdbc.sql("UPDATE frustration_detection SET evidence = CAST(:evidence AS jsonb)"
                         + " WHERE project_id = :pid AND subject_trace_id = :trace")
                 .param("evidence", "{\"score\":\"high\",\"call_site_id\":\"cs-chat\"}")
