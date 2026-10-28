@@ -182,18 +182,16 @@ public class FindingService {
                 secretLeak,
                 malformedOutput);
         List<String> witnessTraces = new ArrayList<>();
-        List<String> witnessSessions = new ArrayList<>();
         for (FindingEvidenceRepository.ExportRow row : page.rows()) {
-            if (!FindingEvidenceRow.Role.WITNESS.equals(row.measured().role())) continue;
-            if (row.measured().traceId() != null)
+            if (FindingEvidenceRow.Role.WITNESS.equals(row.measured().role())
+                    && row.measured().traceId() != null) {
                 witnessTraces.add(row.measured().traceId());
-            else if (row.measured().sessionId() != null)
-                witnessSessions.add(row.measured().sessionId());
+            }
         }
         // Masked and cut like every other exported string: a user may have pasted a credential into an earlier turn.
         Map<String, List<EarlierMessage>> prior = new LinkedHashMap<>();
         frustrations
-                .priorMessages(finding, witnessTraces, witnessSessions)
+                .priorMessages(finding, witnessTraces)
                 .forEach((key, messages) -> prior.put(
                         key,
                         messages.stream()
@@ -203,9 +201,10 @@ public class FindingService {
                                 .toList()));
         List<BehaviorDtos.EvidenceExportRow> rows = page.rows().stream()
                 .map(row -> {
+                    // A witness is a turn; its prior messages are keyed by trace.
                     String key = FindingEvidenceRow.Role.WITNESS.equals(
                                     row.measured().role())
-                            ? priorKey(row.measured())
+                            ? row.measured().traceId()
                             : null;
                     return new BehaviorDtos.EvidenceExportRow(
                             BehaviorDtos.EvidenceSpanView.of(row.measured()),
@@ -217,11 +216,6 @@ public class FindingService {
                 .toList();
         return new BehaviorDtos.EvidenceExportPage(
                 rows, page.nextCursor(), evidence.countsByRole(projectId, findingId), recorded, textChars);
-    }
-
-    /** A trace witness is looked up by its trace, a session witness (no trace) by its session. */
-    private static @Nullable String priorKey(FindingEvidenceRepository.SpanRef row) {
-        return row.traceId() != null ? row.traceId() : row.sessionId();
     }
 
     /**

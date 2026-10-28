@@ -12,7 +12,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The Frustration classifier's operating point, clamped on construction. Its own keys because the rate test counts
- * conversations where tool_error counts tool calls; defaults are derived in {@code devdocs/concepts/deviation-math.md}
+ * conversation-hours where tool_error counts tool calls; defaults are derived in {@code devdocs/concepts/deviation-math.md}
  * §2. @param freezeBaselineConversations never below {@code minBaselineConversations}, and equal to it when the blob
  * does not name one
  */
@@ -57,10 +57,10 @@ public record FrustrationConfig(
     private static final int UNSET_FREEZE = 0;
 
     /**
-     * EXPERIMENT(frustration-tuning): a session's later turns are scored after its first, so its flag arrives within
-     * a day of the hour it counts in.
+     * EXPERIMENT(frustration-tuning): an hour's count is final once its turns are scored; one hour covers the scorer's
+     * lag, as tool_error. A conversation's later flag lands in its own hour, never this one.
      */
-    public static final int DEFAULT_REFERENCE_SETTLE_HOURS = 24;
+    public static final int DEFAULT_REFERENCE_SETTLE_HOURS = 1;
 
     public FrustrationConfig {
         threshold = threshold > 0 && threshold < 1 ? threshold : JevFrustrationQuestion.DEFAULT_THRESHOLD;
@@ -137,12 +137,15 @@ public record FrustrationConfig(
         return JevFrustrationQuestion.scorerVersion(threshold);
     }
 
-    /** The engine's schema version plus the scorer and floor, which the engine's epoch does not carry. */
+    /**
+     * The engine's schema version, the trial ({@code frustration-hour} since the conversation-hour trial), and the
+     * scorer and floor, which the engine's epoch does not carry.
+     */
     public String schemaVersion() {
         return String.join(
                 "|",
                 ToolErrorTrend.STATE_SCHEMA_VERSION,
-                "frustration",
+                "frustration-hour",
                 String.format(Locale.ROOT, "%.2f", minDecisionInterval),
                 scorerVersion());
     }

@@ -1354,16 +1354,12 @@ final class SampleShowcase {
         return rate(GENERATE, trials, onset);
     }
 
-    /** A thread is one trial, failing when its scored turn was flagged. */
+    /** One scored turn per thread, so a thread is one trial in its turn's hour, failing when that turn was flagged. */
     private static RateStat frustrationRate(List<ScoredTurn> turns, Instant onset) {
         List<Trial> trials = new ArrayList<>();
         for (ScoredTurn t : turns) {
-            List<FindingEvidenceRepository.Ref> witness = t.frustrated()
-                    ? List.of(
-                            FindingEvidenceRepository.Ref.session(t.conversationId()),
-                            FindingEvidenceRepository.Ref.trace(t.traceId()))
-                    : List.of();
-            trials.add(new Trial(t.startedAt(), FindingEvidenceRepository.Ref.session(t.conversationId()), witness));
+            FindingEvidenceRepository.Ref turn = FindingEvidenceRepository.Ref.turn(t.conversationId(), t.traceId());
+            trials.add(new Trial(t.startedAt(), turn, t.frustrated() ? List.of(turn) : List.of()));
         }
         return rate(ASSEMBLE, trials, onset);
     }

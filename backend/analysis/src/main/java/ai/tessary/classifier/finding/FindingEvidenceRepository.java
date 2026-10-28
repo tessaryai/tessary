@@ -118,6 +118,11 @@ public class FindingEvidenceRepository {
         public static Ref session(String sessionId) {
             return new Ref(sessionId, null, null);
         }
+
+        /** A trace row that also names its session, so a clear, a citation check and the retention pin find it. */
+        public static Ref turn(String sessionId, String traceId) {
+            return new Ref(sessionId, traceId, null);
+        }
     }
 
     /**

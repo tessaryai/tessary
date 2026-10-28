@@ -175,13 +175,14 @@ record FindingEvidenceExportIntegrationTest(
     }
 
     /**
-     * A frustration witness is a session row and a trace row; both carry the last four messages the detector judged
-     * the flagged turn against, roles kept, and the member row carries none. Catches the session row (no trace, no
-     * span, no payload) reading as a bare id, so the agent cannot see the exchange that led to the flag.
+     * A frustration witness is a turn row that names its session; it carries the last four messages the detector
+     * judged the flagged turn against, roles kept, and the member rows carry none, the flagged turn's own member row
+     * included. Catches the prior messages looked up by the row's session, which a turn row also names: they are keyed by
+     * trace, so the witness would export none.
      */
     @Test
     @DisplayName("a frustration witness row carries the messages before the flagged turn")
-    void export_sessionRowCarriesThePriorTurns() {
+    void export_witnessTurnRowCarriesThePriorTurns() {
         String pid = rates.project("finding-export-frustration", Capability.FRUSTRATION);
         String findingId = frustrationFinding(
                 pid,
@@ -196,7 +197,7 @@ record FindingEvidenceExportIntegrationTest(
                 new EarlierMessage("user", "c"),
                 new EarlierMessage("assistant", "d"),
                 new EarlierMessage("user", "e"));
-        assertEquals(3, page.rows().size());
+        assertEquals(5, page.rows().size());
         for (BehaviorDtos.EvidenceExportRow row : page.rows()) {
             String label = row.measured().role() + ":" + row.measured().sessionId() + ":"
                     + row.measured().traceId();
@@ -239,7 +240,7 @@ record FindingEvidenceExportIntegrationTest(
 
     /**
      * Prior messages are attached after the repository closes its page, so each witness row is charged their ceiling
-     * up front. The member row costs its overhead and the first witness row reaches the budget, so the page closes
+     * up front. The member rows cost their overhead and the first witness row reaches the budget, so the page closes
      * there and resumes on the second. Catches a page the messages push past its stated bound.
      */
     @Test
@@ -258,7 +259,11 @@ record FindingEvidenceExportIntegrationTest(
                 false);
 
         assertEquals(
-                List.of(FindingEvidenceRow.Role.MEMBER, FindingEvidenceRow.Role.WITNESS),
+                List.of(
+                        FindingEvidenceRow.Role.MEMBER,
+                        FindingEvidenceRow.Role.MEMBER,
+                        FindingEvidenceRow.Role.MEMBER,
+                        FindingEvidenceRow.Role.WITNESS),
                 page.rows().stream().map(r -> r.measured().role()).toList());
         assertNotNull(page.nextCursor(), "the second witness row is on the next page");
     }
@@ -275,13 +280,16 @@ record FindingEvidenceExportIntegrationTest(
 
         BehaviorDtos.EvidenceExportPage page = behaviorDrift.exportEvidence(pid, findingId, null, 4_000, null);
 
-        assertEquals(3, page.rows().size());
+        assertEquals(5, page.rows().size());
         for (BehaviorDtos.EvidenceExportRow row : page.rows()) {
             assertNull(row.priorMessages(), row.measured().role());
         }
     }
 
-    /** A frustration finding on one conversation: a member session, and a witness session and turn. */
+    /**
+     * A frustration finding over two conversation-hours, each a turn row naming its session: a calm hour's last turn
+     * and the flagged turn of each frustrated hour as members, the flagged turns also as witnesses.
+     */
     private String frustrationFinding(String pid, String earlierMessages) {
         return frustrationFindingRaw(pid, "[" + earlierMessages + "]");
     }
@@ -291,7 +299,10 @@ record FindingEvidenceExportIntegrationTest(
         ClassifierRow signal = rates.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION);
         String callSite = "cs-support";
         String conv = "conv-export";
+        String calm = "trace-export-calm";
         String trace = "trace-export-flagged";
+        String laterConv = "conv-export-later";
+        String later = "trace-export-later";
         Instant onset = Instant.parse("2026-10-01T10:00:00Z");
         String findingId = Objects.requireNonNull(findings.recordRecomputedRate(
                         Ids.ulid(),
@@ -312,30 +323,23 @@ record FindingEvidenceExportIntegrationTest(
                         onset.minusSeconds(3_600).toString(),
                         onset.plusSeconds(7_200).toString()))
                 .findingId();
+        String request = "{\"state\":{\"current_user_message\":\"still broken\",\"earlier_messages\":" + earlierMessages
+                + "},\"questions\":[]}";
+        String version = JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
+        rates.frustrationAssessment(pid, signal, calm, conv, callSite, onset.plusSeconds(30), false, version, request);
+        rates.frustrationAssessment(pid, signal, trace, conv, callSite, onset.plusSeconds(60), true, version, request);
         rates.frustrationAssessment(
-                pid,
-                signal,
-                trace,
-                conv,
-                callSite,
-                onset.plusSeconds(60),
-                true,
-                JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD),
-                "{\"state\":{\"current_user_message\":\"still broken\",\"earlier_messages\":" + earlierMessages
-                        + "},\"questions\":[]}");
+                pid, signal, later, laterConv, callSite, onset.plusSeconds(3_660), true, version, request);
+        FindingEvidenceRepository.Ref flagged = FindingEvidenceRepository.Ref.turn(conv, trace);
+        FindingEvidenceRepository.Ref laterFlagged = FindingEvidenceRepository.Ref.turn(laterConv, later);
         String now = Instant.now().toString();
         evidence.record(
                 pid,
                 findingId,
                 FindingEvidenceRow.Role.MEMBER,
-                List.of(FindingEvidenceRepository.Ref.session(conv)),
+                List.of(FindingEvidenceRepository.Ref.turn(conv, calm), flagged, laterFlagged),
                 now);
-        evidence.record(
-                pid,
-                findingId,
-                FindingEvidenceRow.Role.WITNESS,
-                List.of(FindingEvidenceRepository.Ref.session(conv), FindingEvidenceRepository.Ref.trace(trace)),
-                now);
+        evidence.record(pid, findingId, FindingEvidenceRow.Role.WITNESS, List.of(flagged, laterFlagged), now);
         return findingId;
     }
 

@@ -9,7 +9,7 @@ import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
-import ai.tessary.classifier.frustration.FrustrationRateRepository.FrustratedConversation;
+import ai.tessary.classifier.frustration.FrustrationRateRepository.Trial;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorDetector;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Direction;
@@ -38,9 +38,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
- * Frustration's rate test on tool_error's engine: a session on a call site is a Bernoulli trial that fails when it
- * carries an uncleared frustration flag. Rebuilt every pass, because a later flag or a {@code false_alarm} resolve
- * changes an earlier hour. A spell files a finding already ruled positive and opens its case in the same transaction;
+ * Frustration's rate test on tool_error's engine: a conversation on a call site, in each UTC hour it has a scored turn,
+ * is a Bernoulli trial that fails when a turn in that hour was flagged and the flag stands. Rebuilt every pass, because
+ * a {@code false_alarm} resolve changes an earlier hour. A spell files a finding already ruled positive and opens its case in the same transaction;
  * its evidence is uncapped, since a cap is a sample with an undeclared selection rule.
  */
 @Service
@@ -159,14 +159,12 @@ public class FrustrationRateService implements ClassifierCatchUp {
         String eventAt = spell.lastBucket() != null ? spell.lastBucket() : now;
         String onset = spell.decision().onsetAt();
         Instant since = onset != null ? Instant.parse(onset) : windowFrom;
-        // The end of the last hour the replay folded, not now: the sessions stop where the spell's counts stop.
+        // The end of the last hour the replay folded, not now: the trials stop where the spell's counts stop.
         Instant until =
                 spell.lastBucket() != null ? Instant.parse(spell.lastBucket()).plus(Duration.ofHours(1)) : at;
-        List<String> scored =
-                rates.scoredSince(projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
-        List<FrustratedConversation> frustrated = rates.frustratedSince(
-                projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
-        ToolErrorDetector.Decision d = ToolErrorDetector.counted(spell.decision(), frustrated.size());
+        List<Trial> trials = rates.trialsSince(projectId, signal.id(), config.scorerVersion(), callSite, since, until);
+        int frustrated = (int) trials.stream().filter(Trial::flagged).count();
+        ToolErrorDetector.Decision d = ToolErrorDetector.counted(spell.decision(), frustrated);
         String causeKey = CauseKey.frustration(signal.id(), callSite);
         String payload = FrustrationEvidence.payload(
                 mapper, callSite, d, spell.baseline().failures(), config);
@@ -216,12 +214,14 @@ public class FrustrationRateService implements ClassifierCatchUp {
             }
         }
 
-        List<FindingEvidenceRepository.Ref> members = new ArrayList<>();
-        for (String session : scored) members.add(FindingEvidenceRepository.Ref.session(session));
-        List<FindingEvidenceRepository.Ref> witnesses = new ArrayList<>(frustrated.size() * 2);
-        for (FrustratedConversation c : frustrated) {
-            witnesses.add(FindingEvidenceRepository.Ref.session(c.conversationId()));
-            witnesses.add(FindingEvidenceRepository.Ref.trace(c.flaggedTraceId()));
+        // Each row names its session: the clearer, the retention pin and RCA's session citations read it off the
+        // trace row.
+        List<FindingEvidenceRepository.Ref> members = new ArrayList<>(trials.size());
+        List<FindingEvidenceRepository.Ref> witnesses = new ArrayList<>(frustrated);
+        for (Trial t : trials) {
+            FindingEvidenceRepository.Ref turn = FindingEvidenceRepository.Ref.turn(t.conversationId(), t.traceId());
+            members.add(turn);
+            if (t.flagged()) witnesses.add(turn);
         }
         // Rows already stored are skipped by the ref's unique index, so each pass adds only what is new.
         int stored = evidence.record(projectId, findingId, FindingEvidenceRow.Role.MEMBER, members, now)
@@ -229,7 +229,7 @@ public class FrustrationRateService implements ClassifierCatchUp {
 
         StructuredLog.info(log, Markers.OPS, "frustration.spell")
                 .message(
-                        "%s: %.1f%% of sessions frustrated since %s, against a learned %.1f%%",
+                        "%s: %.1f%% of conversation-hours frustrated since %s, against a learned %.1f%%",
                         callSite,
                         d.currentRate() * 100,
                         onset == null ? "the window's start" : onset,
@@ -239,7 +239,7 @@ public class FrustrationRateService implements ClassifierCatchUp {
                 .field("callSiteId", callSite)
                 .field("finding", findingId)
                 .field("opened", filed)
-                .field("sessionsSinceOnset", d.callsSinceOnset())
+                .field("trialsSinceOnset", d.callsSinceOnset())
                 .field("frustratedSinceOnset", d.failuresSinceOnset())
                 .field("criticality", d.criticality())
                 .field("evidenceStored", stored)

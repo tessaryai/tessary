@@ -26,13 +26,15 @@ import ai.tessary.testsupport.RateClassifierFixture;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * A rising call site against Postgres: one finding per spell, ruled positive at filing, scored sessions as members
- * and frustrated ones as witnesses, paged; the case opens under {@code frustration}; a second pass refreshes; after
+ * A rising call site against Postgres: one finding per spell, ruled positive at filing, a turn per session-hour as
+ * members and the frustrated ones' flagged turns as witnesses, paged; the case opens under {@code frustration}; a second pass refreshes; after
  * RCA runs, the next spell opens a new case.
  */
 @SpringBootTest
@@ -51,16 +53,18 @@ record FrustrationRateIntegrationTest(
     private static final String VERSION =
             JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
 
+    /**
+     * Session rows written beside or instead of turn rows, a witness turn that is not also a member, or a turn row
+     * without its session (which the clearer, the retention pin and RCA's session citations read) are the bugs; so is
+     * a grain check that refuses a row naming both a session and a trace.
+     */
     @Test
-    void aRiseFilesOneRuledFindingWithEverySessionAsEvidenceAndOpensItsCase() {
+    void aRiseFilesOneRuledFindingWithEveryTrialAsATurnRowAndOpensItsCase() {
         String pid = fixture.project("fr-case", Capability.FRUSTRATION);
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        // Judged from 100, and every settled hour is added to the reference until 1,000. The rise ends at hour 36,
-        // so hours up to 11 have settled, a day after they ended, and the risen ones have not.
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations at 5%
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40); // then 180 at 40%
-        fixture.frustrationHours(pid, signal, "cs-calm", start, 0, 37, 30, 0.05);
+        risenCallSite(pid, signal, start);
+        fixture.frustrationHours(pid, signal, "cs-calm", start, 0, 46, 30, 0.05);
 
         service.refresh(pid, signal, Instant.now());
 
@@ -74,8 +78,8 @@ record FrustrationRateIntegrationTest(
         assertNull(finding.escalatedAt(), "never escalated to Layer 2");
         String title = FindingTitle.of(finding);
         assertTrue(title.matches("Frustrated sessions increased from \\d+\\.\\d% to \\d+\\.\\d% on cs-chat"), title);
-        assertEquals(180, finding.sampleCount(), "sessions since onset");
-        assertEquals(210, finding.payload().path("baseline_conversations").asLong());
+        assertEquals(180, finding.sampleCount(), "session-hours since onset");
+        assertEquals(1020, finding.payload().path("baseline_conversations").asLong());
         assertEquals(VERSION, finding.payload().path("scorer_version").asText());
 
         List<FindingEvidenceRow> all = evidence.listByFinding(pid, finding.id());
@@ -85,17 +89,19 @@ record FrustrationRateIntegrationTest(
         List<FindingEvidenceRow> rows = all.stream()
                 .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()))
                 .toList();
-        assertEquals(180, members.size(), "every session the rate counted, calm ones included");
-        assertTrue(members.stream().allMatch(r -> "session".equals(grain(r))));
-        long sessions = rows.stream().filter(r -> "session".equals(grain(r))).count();
-        long traces = rows.stream().filter(r -> "trace".equals(grain(r))).count();
-        assertEquals(72, sessions, "every frustrated session, not a sample of them");
-        assertEquals(sessions, traces, "each session beside the turn that fired in it");
-        FindingEvidenceRow first = rows.get(0);
-        FindingEvidenceRow second = rows.get(1);
-        assertEquals("session", grain(first));
-        assertEquals("trace", grain(second));
-        assertEquals("conv-" + second.traceId(), first.sessionId(), "the pair names one session");
+        assertEquals(252, all.size(), "a member row per trial and a witness row per frustrated one, nothing else");
+        assertTrue(
+                all.stream().allMatch(r -> r.traceId() != null && r.spanId() == null),
+                "every row is a turn, no session rows");
+        assertTrue(
+                all.stream().allMatch(r -> ("conv-" + r.traceId()).equals(r.sessionId())),
+                "every turn row names its own session");
+        assertEquals(180, members.size(), "every session-hour the rate counted, calm ones included");
+        assertEquals(72, rows.size(), "every frustrated session-hour, not a sample of them");
+        Set<String> memberTraces =
+                members.stream().map(FindingEvidenceRow::traceId).collect(Collectors.toSet());
+        assertTrue(
+                rows.stream().allMatch(r -> memberTraces.contains(r.traceId())), "every witness turn is also a member");
 
         assertNotNull(finding.caseId(), "the case opened in the same pass");
         CaseRow opened = cases.findById(pid, finding.caseId()).orElseThrow();
@@ -104,7 +110,7 @@ record FrustrationRateIntegrationTest(
         assertEquals("cs-chat", opened.subjectId());
         assertEquals(FrustrationEvidence.MEASURE, opened.metric());
         assertEquals(FindingTitle.of(finding), opened.title());
-        assertTrue(opened.basis().startsWith("72 of the 180 sessions since"), opened.basis());
+        assertTrue(opened.basis().startsWith("72 of the 180 session-hours since"), opened.basis());
 
         BehaviorFindingDetailView detail =
                 triageSource.detail(pid, finding.id()).orElseThrow();
@@ -112,12 +118,12 @@ record FrustrationRateIntegrationTest(
         assertNotNull(block, "the finding page gets its frustration block");
         assertEquals(180, block.rate().nCur());
         assertEquals(72, block.rate().failuresCur());
-        assertEquals(210, block.rate().nRef());
-        assertEquals(14, block.baselineFrustrated(), "two of every thirty for seven hours, and not the rise");
+        assertEquals(1020, block.rate().nRef());
+        assertEquals(68, block.baselineFrustrated(), "two of every thirty for 34 hours, and not the rise");
         assertEquals(FrustrationDetailService.PAGE_SIZE, block.conversations().size(), "the first page");
         assertEquals("50", block.conversationsNextCursor());
         FrustratedConversationView row = block.conversations().get(0);
-        assertEquals("conv-cs-chat-36-11", row.conversationId(), "newest flag first");
+        assertEquals("conv-cs-chat-45-11", row.conversationId(), "newest flag first");
         assertEquals(0.71, row.score());
         assertEquals("cs-chat", row.callSiteId());
         assertFalse(row.cleared());
@@ -143,13 +149,13 @@ record FrustrationRateIntegrationTest(
                 "cs-chat",
                 "frustration_rate",
                 "frustration_causes",
-                "[{\"evidence_session_ids\":[\"conv-cs-chat-36-00\"],\"evidence_trace_ids\":[]},"
-                        + "{\"evidence_session_ids\":[\"conv-cs-chat-34-00\"],"
-                        + "\"evidence_trace_ids\":[\"cs-chat-35-01\"]}]");
+                "[{\"evidence_session_ids\":[\"conv-cs-chat-45-00\"],\"evidence_trace_ids\":[]},"
+                        + "{\"evidence_session_ids\":[\"conv-cs-chat-43-00\"],"
+                        + "\"evidence_trace_ids\":[\"cs-chat-44-01\"]}]");
         FrustratedSessionPage oneCause =
                 frustrationDetail.page(finding, new FrustrationRateRepository.CauseRef(report, 1), 50, null);
         assertEquals(
-                List.of("cs-chat-35-01", "cs-chat-34-00"),
+                List.of("cs-chat-44-01", "cs-chat-43-00"),
                 oneCause.rows().stream()
                         .map(FrustratedConversationView::traceId)
                         .toList(),
@@ -167,13 +173,12 @@ record FrustrationRateIntegrationTest(
         String pid = fixture.project("fr-refresh", Capability.FRUSTRATION);
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40);
+        risenCallSite(pid, signal, start);
         service.refresh(pid, signal, Instant.now());
         FindingRow before = findings.listByProject(pid, null, null, "frustration", false, 10)
                 .get(0);
 
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 37, 1, 30, 0.40); // the spell runs on another hour
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 46, 1, 30, 0.40); // the spell runs on another hour
         service.refresh(pid, signal, Instant.now());
 
         List<FindingRow> after = findings.listByProject(pid, null, null, "frustration", false, 10);
@@ -199,18 +204,17 @@ record FrustrationRateIntegrationTest(
         String pid = fixture.project("fr-past-end", Capability.FRUSTRATION);
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40);
+        risenCallSite(pid, signal, start);
         service.refresh(pid, signal, Instant.now());
         FindingRow finding = findings.listByProject(pid, null, null, "frustration", false, 10)
                 .get(0);
 
         FrustratedSessionPage past = frustrationDetail.page(finding, null, 50, "500");
         assertEquals(List.of(), past.rows());
-        assertEquals(72, past.total(), "the finding still cites every frustrated session");
+        assertEquals(72, past.total(), "the finding still cites every frustrated session-hour");
         assertNull(past.nextCursor());
 
-        String trace = "cs-chat-36-00";
+        String trace = "cs-chat-45-00";
         jdbc.sql("UPDATE frustration_detection SET evidence = CAST(:evidence AS jsonb)"
                         + " WHERE project_id = :pid AND subject_trace_id = :trace")
                 .param("evidence", "{\"score\":\"high\",\"call_site_id\":\"cs-chat\"}")
@@ -224,9 +228,12 @@ record FrustrationRateIntegrationTest(
         assertEquals("cs-chat", turn.callSiteId());
     }
 
-    /** A span ref carries a span id, a trace ref a trace id, a session ref neither. */
-    private static String grain(FindingEvidenceRow row) {
-        if (row.spanId() != null) return "span";
-        return row.traceId() != null ? "trace" : "session";
+    /**
+     * 34 hours at 5%, which freezes the reference at 1,020 session-hours with 68 frustrated, then 180 at 40% from hour
+     * 40: one-turn conversations, so each is one trial.
+     */
+    private void risenCallSite(String pid, ClassifierRow signal, Instant start) {
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 34, 30, 0.05);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 40, 6, 30, 0.40);
     }
 }

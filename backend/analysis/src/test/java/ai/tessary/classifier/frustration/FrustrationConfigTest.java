@@ -5,7 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.toolerror.CarriedState;
+import ai.tessary.classifier.toolerror.ToolErrorTrend;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -86,12 +89,30 @@ class FrustrationConfigTest {
     }
 
     /**
-     * A conversation is flagged on a later turn, up to a day after its first: learning its hour sooner reads the
-     * reference low, and a calm call site alarms.
+     * A stored accumulator and reference counted conversations at their first scored turn. Resumed under the
+     * conversation-hour trial, they would judge new hours against a rate of another unit; a blob that pins
+     * {@code reference_settle_hours} would keep its epoch if only the settle default moved.
      */
     @Test
+    void theEpochChangesWithTheTrial() {
+        FrustrationConfig pinned = FrustrationConfig.of(MAPPER, "{\"reference_settle_hours\":24}");
+        String sessionTrial = CarriedState.epochOf(
+                pinned.engine(),
+                String.join(
+                        "|",
+                        ToolErrorTrend.STATE_SCHEMA_VERSION,
+                        "frustration",
+                        String.format(Locale.ROOT, "%.2f", pinned.minDecisionInterval()),
+                        pinned.scorerVersion()));
+
+        assertNotEquals(sessionTrial, pinned.stateEpoch());
+        assertTrue(pinned.schemaVersion().contains("|frustration-hour|"), pinned.schemaVersion());
+    }
+
+    /** An hour's count is final once its turns are scored: one hour covers the scorer's lag, as tool_error. */
+    @Test
     void engine_carriesTheClassifiersSettleDelay() {
-        assertEquals(24, FrustrationConfig.defaults().engine().referenceSettleHours());
+        assertEquals(1, FrustrationConfig.defaults().engine().referenceSettleHours());
         assertEquals(
                 12,
                 FrustrationConfig.of(MAPPER, "{\"reference_settle_hours\":12}")

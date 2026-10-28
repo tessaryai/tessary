@@ -92,7 +92,9 @@ record FrustrationResolveIntegrationTest(
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         CaseRow opened = rise(pid, signal);
         FindingRow finding = findings.listByCase(pid, opened.id()).get(0);
-        List<String> cited = evidence.listByFinding(pid, finding.id()).stream()
+        List<FindingEvidenceRow> rows = evidence.listByFinding(pid, finding.id());
+        assertTrue(rows.stream().allMatch(r -> r.traceId() != null), "turn rows only, each naming its session");
+        List<String> cited = rows.stream()
                 .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()))
                 .map(FindingEvidenceRow::sessionId)
                 .filter(s -> s != null)
@@ -151,13 +153,13 @@ record FrustrationResolveIntegrationTest(
     // ---- fixtures
 
     /**
-     * A call site at 5% for 210 conversations, then, a day later so those hours have settled, 40% for 180: one spell,
-     * one finding, one case.
+     * A call site at 5% for 1,020 session-hours, which freezes its reference, then 40% for 180: one spell, one
+     * finding, one case.
      */
     private CaseRow rise(String pid, ClassifierRow signal) {
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        fixture.frustrationHours(pid, signal, "cs-chat", start, 31, 6, 30, 0.40);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 34, 30, 0.05);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 40, 6, 30, 0.40);
         rates.refresh(pid, signal, Instant.now());
         List<CaseRow> live = cases.listLive(pid);
         assertEquals(1, live.size());
