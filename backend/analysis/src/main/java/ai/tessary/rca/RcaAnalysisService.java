@@ -79,7 +79,8 @@ public class RcaAnalysisService {
                             evidence.listByFinding(finding.projectId(), finding.id())));
         }
         AgenticRcaEngine.Evidence ev = evidence(sides.values(), subject);
-        if (ev.citableTraceIds().isEmpty() && ev.citableSessionIds().isEmpty()) {
+        // Nothing flagged is nothing to explain, however many comparison rows the finding holds.
+        if (ev.flaggedTraceIds().isEmpty() && ev.flaggedSessionIds().isEmpty()) {
             throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, job.findingId());
         }
 
@@ -115,8 +116,8 @@ public class RcaAnalysisService {
     }
 
     /**
-     * A cause may cite a flagged row or a comparison row; the two sides are {@link EvidenceSides}, the rule checks.md
-     * reads too. Session grain when any finding flags whole sessions.
+     * A cause may cite only a flagged row. The two sides are {@link EvidenceSides}, the rule checks.md reads too.
+     * Session grain when any finding flags whole sessions.
      */
     private static AgenticRcaEngine.Evidence evidence(Collection<EvidenceSides> all, List<FindingClaim> subject) {
         Set<String> flaggedTraces = new LinkedHashSet<>();

@@ -119,13 +119,11 @@ final class RcaSynthesisOutput {
                 continue;
             }
             String type = TYPES.contains(label(c.type())) ? label(c.type()) : "other";
-            List<String> traces = kept(c.evidence_trace_ids(), evidence.citableTraceIds());
-            List<String> sessions = kept(c.evidence_session_ids(), evidence.citableSessionIds());
-            long flaggedTraces =
-                    traces.stream().filter(evidence.flaggedTraceIds()::contains).count();
-            long flaggedSessions = sessions.stream()
-                    .filter(evidence.flaggedSessionIds()::contains)
-                    .count();
+            // Only flagged rows are citable: a comparison row proves nothing about the flagged ones.
+            List<String> traces = kept(c.evidence_trace_ids(), evidence.flaggedTraceIds());
+            List<String> sessions = kept(c.evidence_session_ids(), evidence.flaggedSessionIds());
+            long flaggedTraces = traces.size();
+            long flaggedSessions = sessions.size();
             if (flaggedTraces == 0 && flaggedSessions == 0) {
                 unreceipted++;
                 continue;

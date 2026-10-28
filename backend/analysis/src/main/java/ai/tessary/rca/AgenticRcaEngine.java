@@ -21,9 +21,7 @@ import ai.tessary.tenant.KeyScope;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -93,7 +91,8 @@ public class AgenticRcaEngine {
     public record Subject(List<String> findingIds, String onsetAt, String lastSeenAt) {}
 
     /**
-     * A cause may cite a flagged or a comparison row, and only its flagged rows count toward what it explains.
+     * A cause cites only flagged rows: a comparison row proves nothing about the flagged ones, so a cited comparison id
+     * is dropped.
      *
      * @param baselinePresent a {@code baseline} row is on the comparison side, which unflagged members alone are not
      * @param recordedByRole each role's count as {@code finding.md} showed it, summed over the subject's findings
@@ -106,22 +105,7 @@ public class AgenticRcaEngine {
             boolean baselinePresent,
             Map<String, Long> recordedByRole,
             int flaggedCount,
-            String grain) {
-
-        public Set<String> citableTraceIds() {
-            return union(flaggedTraceIds, comparisonTraceIds);
-        }
-
-        public Set<String> citableSessionIds() {
-            return union(flaggedSessionIds, comparisonSessionIds);
-        }
-
-        private static Set<String> union(Set<String> a, Set<String> b) {
-            Set<String> all = new LinkedHashSet<>(a);
-            all.addAll(b);
-            return Collections.unmodifiableSet(all);
-        }
-    }
+            String grain) {}
 
     private final RcaProperties props;
     private final Map<String, RcaSandbox> sandboxes;

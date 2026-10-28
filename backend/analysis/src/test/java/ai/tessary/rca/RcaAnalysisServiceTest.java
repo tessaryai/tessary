@@ -245,7 +245,7 @@ class RcaAnalysisServiceTest {
 
     /**
      * The checks and the output check read one rule for which rows are flagged. The bug is the two disagreeing, so
-     * checks.md compares against rows a cause may not cite, or the other way round.
+     * checks.md flags rows a cause may not cite, or the other way round.
      */
     @Test
     void checksFlagTheSameRowsACauseMayCite() {
@@ -264,7 +264,8 @@ class RcaAnalysisServiceTest {
 
         ArgumentCaptor<AgenticRcaEngine.Evidence> ev = ArgumentCaptor.forClass(AgenticRcaEngine.Evidence.class);
         verify(agenticEngine).run(eq(JOB), eq(REPORT), any(), any(), ev.capture());
-        assertEquals(Set.of("t1", "t2", "t0"), ev.getValue().citableTraceIds());
+        assertEquals(Set.of("t1"), ev.getValue().flaggedTraceIds());
+        assertEquals(Set.of("t2", "t0"), ev.getValue().comparisonTraceIds());
         assertEquals(1, ev.getValue().flaggedCount());
         assertEquals(
                 List.of(

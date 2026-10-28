@@ -115,10 +115,11 @@ record RcaWorkerTest(
         assertEquals(1, ev.flaggedCount(), "the flagged side counted the whole population instead of the failures");
         assertEquals("traces", ev.grain());
         assertTrue(ev.baselinePresent());
+        assertEquals(Set.of(failingTrace), ev.flaggedTraceIds(), "only the failure may be cited");
         assertEquals(
-                Set.of(failingTrace, baselineTrace, healthyA, healthyB),
-                ev.citableTraceIds(),
-                "unflagged members are the comparison side and may be cited");
+                Set.of(baselineTrace, healthyA, healthyB),
+                ev.comparisonTraceIds(),
+                "unflagged members are the comparison side");
     }
 
     @Test
@@ -284,6 +285,27 @@ record RcaWorkerTest(
         assertEquals("RCA.SUBJECT_NOT_FOUND", run.stopCode());
     }
 
+    /**
+     * A finding whose only rows are comparison rows flags nothing, so there is nothing to explain. The bug is an RCA
+     * run over healthy rows alone, whose causes could cite nothing.
+     */
+    @Test
+    void aFindingWithOnlyComparisonRowsHasNothingToExplain() {
+        String pid = TenantFixture.bootstrap(tenants, "rca-run-comparison-only")
+                .project()
+                .id();
+        String healthy = seedTrace(pid, seedSession(pid), FROM.plus(Duration.ofHours(2)));
+        stubEngine();
+
+        RcaJobRow job =
+                enqueue(pid, seedFinding(pid, List.of(healthy), List.of(), FindingRow.Cause.DISTRIBUTION_SHIFT));
+        worker.run(job);
+
+        AgentRunRepository.RunSummary run = runOf(pid, job);
+        assertEquals(Outcome.FAILED, run.outcome());
+        assertEquals("RCA.SUBJECT_NOT_FOUND", run.stopCode());
+    }
+
     /** A finished RCA still shown as running: a run that answers closes its run as done. */
     @Test
     void aRunThatAnswersClosesItsRunAsDone() {
@@ -397,9 +419,9 @@ record RcaWorkerTest(
         assertEquals(2, ev.flaggedCount(), "the frustrated sessions, not the calm one");
         assertEquals("sessions", ev.grain());
         assertFalse(ev.baselinePresent());
-        assertTrue(ev.citableSessionIds().containsAll(Set.of(sessionA, sessionB)), ev.toString());
-        assertTrue(ev.citableSessionIds().contains(calm), "a calm session is the comparison side");
-        assertTrue(ev.citableTraceIds().containsAll(Set.of(turnA, turnB)), ev.toString());
+        assertTrue(ev.flaggedSessionIds().containsAll(Set.of(sessionA, sessionB)), ev.toString());
+        assertTrue(ev.comparisonSessionIds().contains(calm), "a calm session is the comparison side");
+        assertTrue(ev.flaggedTraceIds().containsAll(Set.of(turnA, turnB)), ev.toString());
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("done", report.status());
@@ -474,10 +496,8 @@ record RcaWorkerTest(
         assertEquals(2, ev.flaggedCount(), "the flagged traces, not the clean member");
         assertEquals("traces", ev.grain());
         assertFalse(ev.baselinePresent());
-        assertEquals(
-                Set.of(flaggedA, flaggedB, clean),
-                ev.citableTraceIds(),
-                "unflagged members are the comparison side and may be cited");
+        assertEquals(Set.of(flaggedA, flaggedB), ev.flaggedTraceIds(), "only the flagged answers may be cited");
+        assertEquals(Set.of(clean), ev.comparisonTraceIds(), "unflagged members are the comparison side");
         assertFalse(capturedDossier().containsKey("detections.md"), "flagged sentences are read over MCP");
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
@@ -531,7 +551,7 @@ record RcaWorkerTest(
         ArgumentCaptor<AgenticRcaEngine.Subject> subject = ArgumentCaptor.forClass(AgenticRcaEngine.Subject.class);
         verify(engine).run(any(), any(), subject.capture(), anyMap(), any());
         assertEquals(List.of(older, newer), subject.getValue().findingIds());
-        assertEquals(Set.of(olderTrace, newerTrace), capturedEvidence().citableTraceIds());
+        assertEquals(Set.of(olderTrace, newerTrace), capturedEvidence().flaggedTraceIds());
     }
 
     private static CaseDetection detection(String findingId) {

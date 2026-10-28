@@ -327,8 +327,29 @@ class RcaSynthesisOutputTest {
     }
 
     /**
+     * Only flagged rows are citable. A cause that also cites a flagged row keeps it, and the comparison id is removed.
+     * The bug is a comparison id stored as the cause's evidence, which the case page then shows as a row the cause
+     * explains.
+     */
+    @Test
+    void aComparisonIdIsRemovedFromACauseThatAlsoCitesAFlaggedRow() {
+        AgenticRcaEngine.Evidence evidence = new AgenticRcaEngine.Evidence(
+                TRACES, SESSIONS, Set.of("tb-1"), Set.of("sb-1"), true, Map.of("witness", 3L), 3, "traces");
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(
+                MAPPER,
+                reply("causes_identified", cause("B", "medium", null, "\"tb-1\",\"tr-1\"", "\"sb-1\",\"s-2\"")),
+                evidence,
+                true,
+                "proj");
+
+        Cause b = out.causes().get(0);
+        assertEquals(List.of("tr-1"), b.evidenceTraceIds());
+        assertEquals(List.of("s-2"), b.evidenceSessionIds());
+    }
+
+    /**
      * Citing only comparison rows proves nothing about the flagged ones. The bugs are such a cause surviving, and a
-     * comparison id counted toward {@code affected_count}; the comparison receipt itself stays on a kept cause.
+     * comparison id counted toward {@code affected_count}.
      */
     @Test
     void aCauseCitingOnlyComparisonRowsIsDropped() {
@@ -339,7 +360,7 @@ class RcaSynthesisOutputTest {
 
         assertEquals(List.of("B"), titles(out));
         Cause b = out.causes().get(0);
-        assertEquals(List.of("tr-1", "tb-1"), b.evidenceTraceIds());
+        assertEquals(List.of("tr-1"), b.evidenceTraceIds());
         assertEquals(1, b.affectedCount());
         assertEquals(List.of(), out.platformNotes());
 
