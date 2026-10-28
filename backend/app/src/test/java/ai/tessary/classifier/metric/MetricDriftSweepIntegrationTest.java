@@ -273,6 +273,64 @@ record MetricDriftSweepIntegrationTest(
                 1, findings.listByProject(pid, null, null, null, false, 100).size());
     }
 
+    /**
+     * The second window runs 20 rows at the pinned 2s, then 30 at 8s. The onset is the 21st row, not the window close;
+     * the ten rows from it on are the changepoint sample, and the ten just before it join the pinned window's 50 on the
+     * baseline side. The mean then is 2s and now 0.4 x 2s + 0.6 x 8s = 5.6s; the 5% bins put each reading up to 2.5%
+     * off its value, so the plain-unit numbers are held to 3%. The bugs are the onset at the window close, healthy rows
+     * written as changepoint, and a baseline missing the rows just before the step.
+     */
+    @Test
+    @DisplayName("a step inside the window puts the onset at the step, with rows on both sides of it")
+    void aStepInsideTheWindowPutsTheOnsetAtTheStep() {
+        String pid = project("metric-sweep-change-point");
+        ClassifierRow signal = signal(pid);
+        Instant lateJune = Instant.parse("2026-06-24T10:00:00Z");
+        Instant earlyJuly = lateJune.plus(7, ChronoUnit.DAYS);
+
+        seedTurnsAt(pid, lateJune, 50, 2_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).windowsClosed(), "the bootstrap pin");
+
+        seedTurnsAt(pid, earlyJuly, 20, 2_000, null);
+        seedTurnsAt(pid, earlyJuly.plusSeconds(20), 30, 8_000, null);
+        assertEquals(1, sweep.sweepMetrics(claim(pid, signal), signal).fired());
+
+        FindingRow finding = findings.listByProject(pid, null, null, null, false, 100).stream()
+                .filter(f -> f.nativeCauseKey().endsWith(":pinned"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no finding fired on the pinned arm"));
+        assertEquals(
+                earlyJuly.plusSeconds(20),
+                Instant.parse(finding.onsetAt()),
+                "the onset is the first 8s row, where the shift began");
+        assertEquals(earlyJuly.plusSeconds(49), Instant.parse(finding.lastSeenAt()), "last seen is the window close");
+
+        assertEquals(50, finding.evidenceCount(FindingEvidenceRow.Role.MEMBER), "every row the window measured");
+        assertEquals(
+                10,
+                finding.evidenceCount(FindingEvidenceRow.Role.CHANGEPOINT),
+                "ten rows from the change point on, none before it");
+        assertEquals(
+                60,
+                finding.evidenceCount(FindingEvidenceRow.Role.BASELINE),
+                "the pinned window's 50 and the 10 healthy rows just before the step");
+
+        JsonNode payload = evidence(finding);
+        JsonNode changepoint = payload.path("changepoint");
+        assertEquals("cusum", changepoint.path("method").asText());
+        assertEquals(20, changepoint.path("index").asInt());
+        assertEquals(10, changepoint.path("rows_before").asInt());
+        assertEquals(
+                earlyJuly.plusSeconds(20), Instant.parse(changepoint.path("at").asText()));
+        assertEquals(
+                lateJune,
+                Instant.parse(payload.path("reference_from").asText()),
+                "the reference starts at the pinned window's first row");
+        assertEquals(2_000, payload.path("mean").path(0).asDouble(), 2_000 * 0.03, "mean then, within the bin error");
+        assertEquals(5_600, payload.path("mean").path(1).asDouble(), 5_600 * 0.03, "mean now, within the bin error");
+        assertEquals(3_600, payload.path("shift").path("mean").asDouble(), 3_600 * 0.03, "a signed rise in ms");
+    }
+
     @Test
     @DisplayName("a window filled across two pages enumerates both, not just the page its close landed in")
     void windowRefsSurviveThePageBoundary() {
