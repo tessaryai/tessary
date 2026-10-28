@@ -135,45 +135,33 @@ public class ClassifierChartRepository {
         this.detections = detections;
     }
 
-    /**
-     * Grouped from {@code groupFrom}, before the range, so a session that began before {@code from} keeps its own first
-     * hour.
-     */
+    /** The replay's trial: a conversation in each UTC hour it has a scored turn, failing on its own hour's flag. */
     public List<RateRow> frustrationHours(
-            String projectId,
-            String classifierId,
-            String scorerVersion,
-            String callSite,
-            Instant groupFrom,
-            Instant from) {
+            String projectId, String classifierId, String scorerVersion, String callSite, Instant from) {
         String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
         return jdbc.sql("""
-                        WITH conv AS (
-                          SELECT a.conversation_id,
-                                 MIN(a.turn_started_at) AS first_scored_at,
-                                 BOOL_OR(a.frustrated) AS any_flag
+                        WITH trial AS (
+                          SELECT a.conversation_id, date_trunc('hour', a.turn_started_at, 'UTC') AS hour,
+                                 BOOL_OR(a.frustrated AND EXISTS (
+                                     SELECT 1 FROM {detections} d
+                                      WHERE d.project_id = a.project_id AND d.classifier_id = a.classifier_id
+                                        AND d.subject_trace_id = a.trace_id
+                                        AND COALESCE(d.evidence ->> 'call_site_id', '') = :callSite
+                                        AND d.cleared_at IS NULL)) AS flagged
                             FROM frustration_assessment a
                            WHERE a.project_id = :pid AND a.classifier_id = :cid
-                             AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :groupFrom
+                             AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :from
                              AND COALESCE(a.call_site_id, '') = :callSite
-                           GROUP BY a.conversation_id)
-                        SELECT date_trunc('hour', c.first_scored_at, 'UTC') AS hour,
-                               COUNT(*) AS checked,
-                               COUNT(*) FILTER (WHERE c.any_flag AND EXISTS (
-                                   SELECT 1 FROM {detections} d
-                                    WHERE d.project_id = :pid AND d.classifier_id = :cid
-                                      AND d.subject_session_id = c.conversation_id
-                                      AND COALESCE(d.evidence ->> 'call_site_id', '') = :callSite
-                                      AND d.cleared_at IS NULL)) AS flagged
-                          FROM conv c
-                         WHERE c.first_scored_at >= :from
+                           GROUP BY 1, 2)
+                        SELECT hour, COUNT(*) AS checked, COUNT(*) FILTER (WHERE flagged) AS flagged
+                          FROM trial
                          GROUP BY 1
+                         ORDER BY 1
                         """.replace("{detections}", table))
                 .param("pid", projectId)
                 .param("cid", classifierId)
                 .param("scorerVersion", scorerVersion)
                 .param("callSite", callSite)
-                .param("groupFrom", at(groupFrom))
                 .param("from", at(from))
                 .query((rs, n) -> rateRow(rs))
                 .list();
