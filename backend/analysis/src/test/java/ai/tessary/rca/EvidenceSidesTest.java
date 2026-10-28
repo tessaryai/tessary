@@ -2,6 +2,7 @@
 package ai.tessary.rca;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.finding.FindingEvidenceRepository.SpanRef;
 import ai.tessary.classifier.finding.FindingEvidenceRow.Role;
@@ -32,7 +33,8 @@ class EvidenceSidesTest {
 
     /**
      * A row that is flagged stays flagged, whatever other role names it. The bug is a flagged row read as healthy,
-     * which makes its cause look explained by normal traffic.
+     * which makes its cause look explained by normal traffic. A shift's member row that is also a baseline row is the
+     * one exception: it is a healthy row just before the change point, written to both roles.
      */
     @Test
     void flaggedMembersNeverJoinTheComparisonSide() {
@@ -49,7 +51,64 @@ class EvidenceSidesTest {
                 SpanRefs.row(Role.BASELINE).trace("t3").build());
         EvidenceSides shift = EvidenceSides.of(ClaimShape.DISTRIBUTION_SHIFT, SpanRefs.recorded(drift));
         assertEquals(EvidenceSides.Side.FLAGGED, shift.sideOf(Role.MEMBER));
-        assertEquals(Set.of("t3"), shift.comparisonTraces());
+        assertEquals(Set.of("t2", "t3"), shift.comparisonTraces());
+        assertEquals(Set.of(), shift.flaggedTraces());
+        assertEquals(List.of(drift.get(0), drift.get(2)), shift.split(drift).comparison());
+    }
+
+    /**
+     * A pinned drift whose reference a person moved: the pinned rows aged out, so its only baseline rows are the ten
+     * window rows just before the change point, which are members too. The bugs are those rows read as flagged and
+     * citable, and the finding read as having no comparison side.
+     */
+    @Test
+    void aMovedPinComparesAgainstTheRowsBeforeTheStep() {
+        List<SpanRef> rows = List.of(
+                SpanRefs.row(Role.MEMBER).trace("b1").build(),
+                SpanRefs.row(Role.MEMBER).trace("b2").build(),
+                SpanRefs.row(Role.MEMBER).trace("a1").build(),
+                SpanRefs.row(Role.MEMBER).trace("a2").build(),
+                SpanRefs.row(Role.BASELINE).trace("b1").build(),
+                SpanRefs.row(Role.BASELINE).trace("b2").build(),
+                SpanRefs.row(Role.CHANGEPOINT).trace("a1").build());
+
+        EvidenceSides sides = EvidenceSides.of(ClaimShape.DISTRIBUTION_SHIFT, SpanRefs.recorded(rows));
+
+        assertEquals(Set.of("a1", "a2"), sides.flaggedTraces());
+        assertEquals(Set.of("b1", "b2"), sides.comparisonTraces());
+        assertTrue(sides.baselinePresent());
+        assertEquals(2, sides.flaggedCount());
+        EvidenceSides.Split split = sides.split(rows);
+        assertEquals(List.of(rows.get(2), rows.get(3)), split.flagged());
+        assertEquals(List.of(rows.get(0), rows.get(1)), split.comparison());
+    }
+
+    /**
+     * Frustration flags a conversation with a session row and a trace row for its flagged turn, and its members are
+     * sessions; groundedness flags an answer with a trace row and a span row, and its members are traces. The bug is
+     * both rows counted on the flagged side, so it holds two rows per unit against one on the comparison side.
+     */
+    @Test
+    void theFlaggedSideHoldsOneRowPerFlaggedUnit() {
+        List<SpanRef> frustration = List.of(
+                SpanRefs.row(Role.WITNESS).session("s1").build(),
+                SpanRefs.row(Role.WITNESS).trace("t1").session("s1").build(),
+                SpanRefs.row(Role.MEMBER).session("s1").build(),
+                SpanRefs.row(Role.MEMBER).session("s2").build());
+        EvidenceSides.Split sessions = EvidenceSides.of(ClaimShape.RATE_RISE, SpanRefs.recorded(frustration))
+                .split(frustration);
+        assertEquals(List.of(frustration.get(0)), sessions.flagged());
+        assertEquals(List.of(frustration.get(3)), sessions.comparison());
+
+        List<SpanRef> groundedness = List.of(
+                SpanRefs.row(Role.WITNESS).trace("t1").build(),
+                SpanRefs.row(Role.WITNESS).span("t1", "sp1").build(),
+                SpanRefs.row(Role.MEMBER).trace("t1").build(),
+                SpanRefs.row(Role.MEMBER).trace("t2").build());
+        EvidenceSides.Split traces = EvidenceSides.of(ClaimShape.RATE_RISE, SpanRefs.recorded(groundedness))
+                .split(groundedness);
+        assertEquals(List.of(groundedness.get(0)), traces.flagged());
+        assertEquals(List.of(groundedness.get(3)), traces.comparison());
     }
 
     /** The bug is a presence event compared against its own window. */

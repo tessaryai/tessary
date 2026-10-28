@@ -195,12 +195,14 @@ final class EvidenceChecks {
             ClaimShape shape, List<SpanRef> rows, EvidenceSides sides, EvidenceSides.Split split, int recordedRows) {
         Set<String> flaggedKeys = new HashSet<>();
         for (SpanRef row : split.flagged()) flaggedKeys.add(EvidenceSides.key(row));
+        Set<String> comparisonKeys = new HashSet<>();
+        for (SpanRef row : split.comparison()) comparisonKeys.add(EvidenceSides.key(row));
         StringBuilder sb = new StringBuilder("# Checks\n\n");
         sb.append("Computed in code over this finding's evidence rows only. Shape: ")
                 .append(shape.label)
                 .append(".\n");
         sb.append("Flagged rows: ")
-                .append(roleCounts(rows, sides.roles(Side.FLAGGED), Set.of(), false))
+                .append(roleCounts(rows, sides.roles(Side.FLAGGED), flaggedKeys, false))
                 .append(". Comparison rows: ");
         if (split.comparison().isEmpty()) {
             sb.append("none. No comparison side: ")
@@ -209,7 +211,7 @@ final class EvidenceChecks {
                                     ? "a presence event has nothing it is compared against."
                                     : "the evidence holds no row this shape compares against.");
         } else {
-            sb.append(roleCounts(rows, sides.roles(Side.COMPARISON), flaggedKeys, sides.anyWitness()))
+            sb.append(roleCounts(rows, sides.roles(Side.COMPARISON), comparisonKeys, sides.anyWitness()))
                     .append('.');
         }
         sb.append(String.format(Locale.ROOT, "\nRows read: %,d of %,d recorded.", rows.size(), recordedRows));
@@ -232,14 +234,17 @@ final class EvidenceChecks {
         return sb.toString();
     }
 
-    /** Distinct rows per role; a comparison role leaves out rows that are flagged under another role. */
-    private static String roleCounts(List<SpanRef> rows, List<String> roles, Set<String> exclude, boolean unflagged) {
+    /**
+     * Distinct rows per role, counting only the rows on that side of the split: a row flagged under another role, a
+     * shift's pre-step row, and a turn folded onto its session are left out.
+     */
+    private static String roleCounts(List<SpanRef> rows, List<String> roles, Set<String> include, boolean unflagged) {
         List<String> parts = new ArrayList<>();
         for (String role : roles) {
             Set<String> keys = new HashSet<>();
             for (SpanRef row : rows) {
                 String key = EvidenceSides.key(row);
-                if (role.equals(row.role()) && !exclude.contains(key)) keys.add(key);
+                if (role.equals(row.role()) && include.contains(key)) keys.add(key);
             }
             String prefix = unflagged && Role.MEMBER.equals(role) ? "unflagged " : "";
             parts.add(String.format(Locale.ROOT, "%s`%s` (%,d)", prefix, role, keys.size()));

@@ -6,11 +6,13 @@ import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingEvidenceRow.Role;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Which of a finding's evidence rows are flagged and which are the comparison side. The one rule both
@@ -19,6 +21,8 @@ import java.util.Set;
  * @param roleCounts recorded rows per role, only the roles present
  * @param flaggedSessions every session a flagged row names, a trace row's included
  * @param flaggedSessionRefs the session-grain flagged rows, which the flagged count counts in session grain
+ * @param shiftBaselineKeys in a shift, the row keys a {@code baseline} row names; a {@code member} row with one of them
+ *     is a healthy row just before the change point, so it is comparison. Empty for other shapes.
  */
 public record EvidenceSides(
         ClaimShape shape,
@@ -30,7 +34,8 @@ public record EvidenceSides(
         Set<String> comparisonTraces,
         Set<String> comparisonSessions,
         String grain,
-        boolean baselinePresent) {
+        boolean baselinePresent,
+        Set<String> shiftBaselineKeys) {
 
     public static final String TRACES = "traces";
     public static final String SESSIONS = "sessions";
@@ -41,15 +46,23 @@ public record EvidenceSides(
         NONE
     }
 
-    /** Each row once; a comparison row that is also a flagged row is flagged only. */
+    /**
+     * Each row once, and one flagged row per flagged unit. A comparison row that is also a flagged row is flagged only,
+     * except a shift's pre-step row, which is comparison only.
+     */
     public record Split(List<SpanRef> flagged, List<SpanRef> comparison) {}
 
     public static EvidenceSides of(ClaimShape shape, List<FindingEvidenceRow> rows) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (FindingEvidenceRow row : rows) counts.merge(row.role(), 1, Integer::sum);
         boolean anyWitness = counts.containsKey(Role.WITNESS);
-        Set<String> flaggedRoles = flaggedRoles(anyWitness);
-        Set<String> comparisonRoles = comparisonRoles(shape, anyWitness);
+        Set<String> shiftBaselineKeys = new HashSet<>();
+        if (shape == ClaimShape.DISTRIBUTION_SHIFT) {
+            for (FindingEvidenceRow row : rows) {
+                if (Role.BASELINE.equals(row.role()))
+                    shiftBaselineKeys.add(key(row.traceId(), row.spanId(), row.sessionId()));
+            }
+        }
 
         Set<String> flaggedTraces = new LinkedHashSet<>();
         Set<String> flaggedSessions = new LinkedHashSet<>();
@@ -58,11 +71,17 @@ public record EvidenceSides(
         Set<String> comparisonSessions = new LinkedHashSet<>();
         Set<String> baselineTraces = new LinkedHashSet<>();
         for (FindingEvidenceRow row : rows) {
-            if (flaggedRoles.contains(row.role())) {
+            Side side = side(
+                    shape,
+                    anyWitness,
+                    shiftBaselineKeys,
+                    row.role(),
+                    key(row.traceId(), row.spanId(), row.sessionId()));
+            if (side == Side.FLAGGED) {
                 if (row.traceId() != null) flaggedTraces.add(row.traceId());
                 else if (row.sessionId() != null) flaggedSessionRefs.add(row.sessionId());
                 if (row.sessionId() != null) flaggedSessions.add(row.sessionId());
-            } else if (comparisonRoles.contains(row.role())) {
+            } else if (side == Side.COMPARISON) {
                 if (row.traceId() != null) comparisonTraces.add(row.traceId());
                 if (row.sessionId() != null) comparisonSessions.add(row.sessionId());
                 if (Role.BASELINE.equals(row.role()) && row.traceId() != null) baselineTraces.add(row.traceId());
@@ -82,7 +101,22 @@ public record EvidenceSides(
                 Collections.unmodifiableSet(comparisonTraces),
                 Collections.unmodifiableSet(comparisonSessions),
                 flaggedSessionRefs.isEmpty() ? TRACES : SESSIONS,
-                !baselineTraces.isEmpty());
+                !baselineTraces.isEmpty(),
+                Collections.unmodifiableSet(shiftBaselineKeys));
+    }
+
+    /**
+     * A shift writes the healthy rows just before its change point as both {@code member} and {@code baseline}; they
+     * are comparison rows, never flagged.
+     */
+    private static Side side(
+            ClaimShape shape, boolean anyWitness, Set<String> shiftBaselineKeys, String role, String key) {
+        if (shape == ClaimShape.DISTRIBUTION_SHIFT && Role.MEMBER.equals(role) && shiftBaselineKeys.contains(key)) {
+            return Side.COMPARISON;
+        }
+        if (flaggedRoles(anyWitness).contains(role)) return Side.FLAGGED;
+        if (comparisonRoles(shape, anyWitness).contains(role)) return Side.COMPARISON;
+        return Side.NONE;
     }
 
     /**
@@ -105,10 +139,15 @@ public record EvidenceSides(
         };
     }
 
+    /** The side a role reads on; a row's own side is {@link #sideOf(SpanRef)}. */
     public Side sideOf(String role) {
         if (flaggedRoles(anyWitness).contains(role)) return Side.FLAGGED;
         if (comparisonRoles(shape, anyWitness).contains(role)) return Side.COMPARISON;
         return Side.NONE;
+    }
+
+    public Side sideOf(SpanRef row) {
+        return side(shape, anyWitness, shiftBaselineKeys, row.role(), key(row));
     }
 
     /** In {@link Role#ALL} order. */
@@ -144,20 +183,43 @@ public record EvidenceSides(
      * {@code member} row is flagged.
      */
     public Split split(List<SpanRef> rows) {
+        Set<String> wholeTraces = new HashSet<>();
+        for (SpanRef row : rows) {
+            if (sideOf(row) == Side.FLAGGED && row.traceId() != null && row.spanId() == null) {
+                wholeTraces.add(row.traceId());
+            }
+        }
+        Set<String> flaggedKeys = new HashSet<>();
         Map<String, SpanRef> flagged = new LinkedHashMap<>();
         for (SpanRef row : rows) {
-            if (sideOf(row.role()) == Side.FLAGGED) flagged.putIfAbsent(key(row), row);
+            if (sideOf(row) != Side.FLAGGED) continue;
+            String key = key(row);
+            flaggedKeys.add(key);
+            if (!folded(row, wholeTraces)) flagged.putIfAbsent(key, row);
         }
         Map<String, SpanRef> comparison = new LinkedHashMap<>();
         for (SpanRef row : rows) {
             String key = key(row);
-            if (sideOf(row.role()) == Side.COMPARISON && !flagged.containsKey(key)) comparison.putIfAbsent(key, row);
+            if (sideOf(row) == Side.COMPARISON && !flaggedKeys.contains(key)) comparison.putIfAbsent(key, row);
         }
         return new Split(List.copyOf(flagged.values()), List.copyOf(comparison.values()));
     }
 
+    /**
+     * A flagged row that names a unit another flagged row already stands for: a session's turn in session grain, and a
+     * span of a trace that is flagged whole. The comparison side holds one row per unit, so the flagged side does too.
+     */
+    private boolean folded(SpanRef row, Set<String> wholeTraces) {
+        if (SESSIONS.equals(grain)) return row.traceId() != null;
+        return row.spanId() != null && wholeTraces.contains(row.traceId());
+    }
+
     /** A span is named by its trace and span ids; the session on it is denormalised. */
     static String key(SpanRef row) {
-        return row.traceId() != null ? "t " + row.traceId() + ' ' + row.spanId() : "s " + row.sessionId();
+        return key(row.traceId(), row.spanId(), row.sessionId());
+    }
+
+    private static String key(@Nullable String traceId, @Nullable String spanId, @Nullable String sessionId) {
+        return traceId != null ? "t " + traceId + ' ' + spanId : "s " + sessionId;
     }
 }

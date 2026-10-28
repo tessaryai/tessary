@@ -155,6 +155,46 @@ class EvidenceChecksTest {
     }
 
     /**
+     * Frustration-shaped evidence: every conversation is a {@code member} session, and each flagged one is also a
+     * {@code witness} twice, as its session and as its flagged turn. One of four sessions is flagged in the first hour
+     * and three of four in the second. The bug is the turn counted beside its session, which doubles the flagged side
+     * and every share read off it.
+     */
+    @Test
+    void aSessionFindingCountsEachFlaggedSessionOnce() {
+        List<SpanRef> rows = new ArrayList<>();
+        for (int hour = 0; hour < 2; hour++) {
+            int flagged = hour == 0 ? 1 : 3;
+            for (int i = 0; i < 4; i++) {
+                String session = "s" + hour + "-" + i;
+                rows.add(SpanRefs.row(Role.MEMBER)
+                        .session(session)
+                        .startedAt(hour(hour))
+                        .build());
+                if (i >= flagged) continue;
+                rows.add(SpanRefs.row(Role.WITNESS)
+                        .session(session)
+                        .startedAt(hour(hour))
+                        .build());
+                rows.add(SpanRefs.row(Role.WITNESS)
+                        .trace("t" + hour + "-" + i)
+                        .session(session)
+                        .startedAt(hour(hour))
+                        .name("turn")
+                        .build());
+            }
+        }
+
+        String text = render(ClaimShape.RATE_RISE, Metric.LATENCY_MS, rows);
+
+        assertEquals(
+                "Flagged rows: `witness` (4). Comparison rows: unflagged `member` (4), `baseline` (0).",
+                lineStarting(text, "Flagged rows"));
+        assertEquals("Before: share 25.0% over 4 rows. After: share 75.0% over 4 rows.", lineStarting(text, "Before"));
+        assertFalse(text.contains("### name"), "a turn's fields are not compared against sessions: " + text);
+    }
+
+    /**
      * Within each call site the latency is unchanged; only the mix of call sites moved. The bugs are a mix change
      * reported as two causes, or as a per-group slowdown.
      */
