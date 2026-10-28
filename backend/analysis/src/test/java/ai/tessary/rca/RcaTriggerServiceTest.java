@@ -246,6 +246,47 @@ class RcaTriggerServiceTest {
         driftReported("fnd_f", Instant.parse("2026-05-31T12:00:00Z"), split, split);
     }
 
+    /**
+     * A drift finding written before its payload carried the mean pair, or with one half of it missing, reads as its
+     * asserted severity, as any finding with no measured before does. The bug is a 0-to-0 header, a movement nobody
+     * measured.
+     */
+    @Test
+    void aDriftFindingWithoutBothMeansReadsItsSeverity() {
+        String noMean = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"cost\",\"bucket\":{\"key\":\"cs-1\"}}";
+        String halfMean = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"cost\","
+                + "\"bucket\":{\"key\":\"cs-1\"},\"mean\":[1.0,null]}";
+        when(findings.findClaim("proj", "fnd_old"))
+                .thenReturn(Optional.of(driftClaim("fnd_old", "2026-06-02T00:00:00Z", noMean)));
+        when(findings.findClaim("proj", "fnd_half"))
+                .thenReturn(Optional.of(driftClaim("fnd_half", "2026-06-02T00:00:00Z", halfMean)));
+        jobIs("job_d");
+
+        trigger.trigger("proj", "fnd_old", "user_1", null);
+        trigger.trigger("proj", "fnd_half", "user_1", null);
+
+        for (String findingId : List.of("fnd_old", "fnd_half")) {
+            verify(reports)
+                    .insertPendingIfAbsent(
+                            eq("proj"),
+                            eq("job_d"),
+                            eq(findingId),
+                            anyString(),
+                            anyString(),
+                            anyString(),
+                            anyString(),
+                            anyString(),
+                            eq(RcaReportRow.ReportKind.METRIC_MOVEMENT),
+                            any(),
+                            any(),
+                            any(),
+                            eq(0.3),
+                            eq(0.0),
+                            eq(0.3),
+                            eq(RcaReportRow.Engine.AGENTIC));
+        }
+    }
+
     private void driftReported(String findingId, Instant from, Instant split, Instant to) {
         verify(reports)
                 .insertPendingIfAbsent(

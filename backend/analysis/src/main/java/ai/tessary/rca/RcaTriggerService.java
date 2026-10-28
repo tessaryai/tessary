@@ -69,19 +69,23 @@ public class RcaTriggerService {
                 : RcaReportRow.ReportKind.forClassifier(finding.classifierKey());
         double current;
         double prior;
+        Pair mean = null;
+        if (FindingRow.Cause.DISTRIBUTION_SHIFT.equals(finding.causeKind())) {
+            ShiftDetail detail = MetricFindingEvidence.detail(finding.payloadJson());
+            mean = detail == null ? null : detail.mean();
+        }
+        Double meanNow = mean == null ? null : mean.now();
+        Double meanThen = mean == null ? null : mean.then();
         if (RcaReportRow.ReportKind.namesCauses(reportKind)) {
             // A frustration, groundedness or adapter-owned finding measured a rate against a reference, so the
             // header reads as that rate: the flagged share since onset over the reference rate.
             current = finding.payloadNumber("current_rate");
             prior = finding.payloadNumber("baseline_rate");
-        } else if (FindingRow.Cause.DISTRIBUTION_SHIFT.equals(finding.causeKind())) {
-            // A drift finding reads as its mean then and now, in the measure's own units.
-            ShiftDetail detail = MetricFindingEvidence.detail(finding.payloadJson());
-            Pair mean = detail == null ? null : detail.mean();
-            Double now = mean == null ? null : mean.now();
-            Double then = mean == null ? null : mean.then();
-            current = now == null ? 0.0 : now;
-            prior = then == null ? 0.0 : then;
+        } else if (meanNow != null && meanThen != null) {
+            // A drift finding reads as its mean then and now, in the measure's own units. One written before the
+            // payload carried both falls through to its severity.
+            current = meanNow;
+            prior = meanThen;
         } else {
             // No "before" number exists; inventing one would show a movement nobody measured.
             Double asserted = finding.severity();
