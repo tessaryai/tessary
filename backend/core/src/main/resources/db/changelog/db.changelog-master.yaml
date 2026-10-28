@@ -179,8 +179,17 @@ databaseChangeLog:
       file: db/changelog/changes/0050-job-queued-at.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0051-prompt-library.sql
+      file: db/changelog/changes/0051-reference-learned-through.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0052-span-prompt-link.sql
+      file: db/changelog/changes/0052-rca-report-coverage.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0053-frustration-hour-trial.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0054-prompt-library.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0055-span-prompt-link.sql
       relativeToChangelogFile: false

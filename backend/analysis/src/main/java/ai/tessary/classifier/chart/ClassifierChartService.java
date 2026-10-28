@@ -119,7 +119,7 @@ public class ClassifierChartService {
     private static final Duration LEARNING_WINDOW = Duration.ofDays(28);
 
     /**
-     * So a session or trace that began before the range keeps its own first hour and every range reads the same trials.
+     * So a trace that began before the range keeps its own first hour and every range reads the same trials.
      */
     private static final Duration TRIAL_LOOKBACK = Duration.ofDays(28);
 
@@ -534,7 +534,7 @@ public class ClassifierChartService {
                 : GroundednessConfig.of(mapper, row.configJson()).scorerVersion();
         Range r = p.range;
         List<RateRow> rows = frustration
-                ? charts.frustrationHours(p.id, row.id(), scorerVersion, cs, r.groupFrom(), r.fromAt())
+                ? charts.frustrationHours(p.id, row.id(), scorerVersion, cs, r.fromAt())
                 : charts.groundednessHours(p.id, row.id(), scorerVersion, cs, r.groupFrom(), r.fromAt());
         ChartBaseline baseline =
                 ChartSeries.rateBaseline(p.states(row.detector()).get(cs), null, ChartSeries.minBaseline(row, mapper));
@@ -626,7 +626,8 @@ public class ClassifierChartService {
         List<HourlyToolTally> mine =
                 tallies.read().stream().filter(t -> key.equals(t.toolKey())).toList();
         return new LearningView(
-                CarriedState.learned(p.states(row.detector()).get(key), mine), ChartSeries.minBaseline(row, mapper));
+                CarriedState.learned(p.states(row.detector()).get(key), mine, ChartSeries.settleHours(row, mapper)),
+                ChartSeries.minBaseline(row, mapper));
     }
 
     private ChartCard rateCard(

@@ -19,6 +19,7 @@ import ai.tessary.classifier.ClassifierRowBuilder;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.CauseKey;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
+import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingRowBuilder;
@@ -39,7 +40,7 @@ import org.springframework.transaction.support.TransactionOperations;
 /**
  * What a rising spell writes, with every repository mocked: one finding per spell, ruled positive when it is filed
  * and handed to the case opener; the same spell on a later pass refreshes that finding instead; and the evidence
- * is the frustrated conversations since onset as session and trace witness pairs.
+ * is one turn per conversation-hour since onset, the flagged ones also as witnesses.
  */
 class FrustrationRateServiceTest {
 
@@ -118,6 +119,63 @@ class FrustrationRateServiceTest {
         verify(caseOpener).ensureCaseFor(PROJECT, "f2", null);
         verify(findings, never())
                 .refreshRuledObservation(eq(PROJECT), eq("f0"), anyLong(), anyString(), anyString(), anyString());
+    }
+
+    /**
+     * Every trial is a turn row naming its session, and each flagged one is also a witness. A session row, a turn row
+     * without its session, or a calm trial as witness is the bug.
+     */
+    @Test
+    void aSpellRecordsEachTrialAsATurnAndEachFlaggedOneAsAWitness() {
+        String hour = START.plus(Duration.ofHours(39)).toString();
+        when(rates.trialsSince(anyString(), anyString(), anyString(), eq(CALL_SITE), any(), any()))
+                .thenReturn(List.of(
+                        new FrustrationRateRepository.Trial(hour, "conv-c", "tr-c3", true),
+                        new FrustrationRateRepository.Trial(hour, "conv-a", "tr-a3", true),
+                        new FrustrationRateRepository.Trial(hour, "conv-d", "tr-d1", false),
+                        new FrustrationRateRepository.Trial(hour, "conv-b", "tr-b2", false)));
+        when(findings.recordRecomputedRate(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        isNull(),
+                        anyLong(),
+                        any(),
+                        any(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString()))
+                .thenReturn(new FindingRepository.Recorded("f3", true, 0, null));
+
+        service.refresh(PROJECT, signal(), at);
+
+        verify(evidence)
+                .record(
+                        PROJECT,
+                        "f3",
+                        FindingEvidenceRow.Role.MEMBER,
+                        List.of(
+                                FindingEvidenceRepository.Ref.turn("conv-c", "tr-c3"),
+                                FindingEvidenceRepository.Ref.turn("conv-a", "tr-a3"),
+                                FindingEvidenceRepository.Ref.turn("conv-d", "tr-d1"),
+                                FindingEvidenceRepository.Ref.turn("conv-b", "tr-b2")),
+                        at.toString());
+        verify(evidence)
+                .record(
+                        PROJECT,
+                        "f3",
+                        FindingEvidenceRow.Role.WITNESS,
+                        List.of(
+                                FindingEvidenceRepository.Ref.turn("conv-c", "tr-c3"),
+                                FindingEvidenceRepository.Ref.turn("conv-a", "tr-a3")),
+                        at.toString());
     }
 
     @Test

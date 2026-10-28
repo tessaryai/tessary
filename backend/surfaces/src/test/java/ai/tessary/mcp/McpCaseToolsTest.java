@@ -306,10 +306,12 @@ class McpCaseToolsTest {
                         null,
                         List.of("tr-1"),
                         List.of(),
-                        0)),
+                        0,
+                        null)),
                 "## Why\nThe judge model changed.",
                 "agentic",
                 true,
+                null,
                 "2026-08-15T01:00:00Z",
                 "2026-08-15T01:20:00Z",
                 null);

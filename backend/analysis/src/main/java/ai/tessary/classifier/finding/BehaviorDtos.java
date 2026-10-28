@@ -5,6 +5,7 @@ import ai.tessary.agentrun.AgentRunRepository.RunSummary;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.TriageJobState;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
@@ -71,6 +72,23 @@ public final class BehaviorDtos {
             boolean partialCost,
             boolean staleTotals,
             @Nullable String callSiteId,
+            @Nullable String projectVersionId,
+            @Nullable String userId,
+            /** Null is "not reported", never zero. */
+            @Nullable Long inputTokens,
+            @Nullable Long outputTokens,
+            @Nullable Long cacheReadTokens,
+            @Nullable Long cacheWriteTokens,
+            @Nullable Long reasoningTokens,
+            /** The turn's 1-based position in its session, capped at 10,000; null on a sub-agent trace. */
+            @Nullable Integer traceIndex,
+            /** The session's turn count, capped at 10,000. */
+            @Nullable Integer sessionTraces,
+            @Nullable Long inputBytes,
+            @Nullable Long outputBytes,
+            boolean payloadAvailable,
+            /** A short fixed set of deploy, host, instance and model keys, masked; empty, never null. */
+            Map<String, String> attributes,
             /** Null where the payload aged out. */
             @Nullable String inputPreview,
             @Nullable String outputPreview,
@@ -101,6 +119,19 @@ public final class BehaviorDtos {
                     r.partialCost(),
                     r.staleTotals(),
                     r.callSiteId(),
+                    r.projectVersionId(),
+                    r.userId(),
+                    r.inputTokens(),
+                    r.outputTokens(),
+                    r.cacheReadTokens(),
+                    r.cacheWriteTokens(),
+                    r.reasoningTokens(),
+                    r.traceIndex(),
+                    r.sessionTraces(),
+                    r.inputBytes(),
+                    r.outputBytes(),
+                    r.payloadAvailable(),
+                    r.attributes(),
                     r.inputPreview(),
                     r.outputPreview(),
                     r.secretKey(),
@@ -115,6 +146,24 @@ public final class BehaviorDtos {
             @Nullable String nextCursor,
             Map<String, Long> counts,
             Map<String, Long> recordedCounts) {}
+
+    /**
+     * One evidence row with its payload text, masked and cut to the page's {@code textChars}. {@code priorMessages} is
+     * set only on a frustration finding's witness rows, and is null there once the assessment's request aged out.
+     */
+    public record EvidenceExportRow(
+            EvidenceSpanView measured,
+            @Nullable String input,
+            @Nullable String output,
+            @Nullable Map<String, Object> attributes,
+            @Nullable List<EarlierMessage> priorMessages) {}
+
+    public record EvidenceExportPage(
+            List<EvidenceExportRow> rows,
+            @Nullable String nextCursor,
+            Map<String, Long> counts,
+            Map<String, Long> recordedCounts,
+            int textChars) {}
 
     /**
      * At most one of the cause-kind blocks is set; none for behaviour drift or an unreadable blob, and the finding

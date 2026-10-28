@@ -90,7 +90,7 @@ record RcaWorkerTest(
         String healthyA = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(3)));
         String healthyB = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(4)));
 
-        String findingId = seedFinding(pid, List.of(baselineTrace), List.of(failingTrace));
+        String findingId = seedFinding(pid, List.of(baselineTrace), List.of(failingTrace), FindingRow.Cause.RATE_SHIFT);
         String now = Instant.now().toString();
         for (String traceId : List.of(failingTrace, healthyA, healthyB)) {
             evidence.record(
@@ -115,7 +115,11 @@ record RcaWorkerTest(
         assertEquals(1, ev.flaggedCount(), "the flagged side counted the whole population instead of the failures");
         assertEquals("traces", ev.grain());
         assertTrue(ev.baselinePresent());
-        assertEquals(Set.of(failingTrace, baselineTrace), ev.citableTraceIds(), "a healthy member is not citable");
+        assertEquals(Set.of(failingTrace), ev.flaggedTraceIds(), "only the failure may be cited");
+        assertEquals(
+                Set.of(baselineTrace, healthyA, healthyB),
+                ev.comparisonTraceIds(),
+                "unflagged members are the comparison side");
     }
 
     @Test
@@ -138,8 +142,11 @@ record RcaWorkerTest(
                 new RcaDtos.Attribution(null, "agent/system.md", "abc123", "Refuse when unsure."),
                 List.of(failingTrace),
                 List.of(),
+                1,
                 1);
         RuledOutCheck ruledOut = RuledOutCheck.ruledOut(1, "The serving model did not change.");
+        RcaDtos.Coverage coverage = new RcaDtos.Coverage(
+                List.of(new RcaDtos.RoleCount("exemplar", 1), new RcaDtos.RoleCount("baseline", 1)), "all of them");
         when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
@@ -147,7 +154,8 @@ record RcaWorkerTest(
                         List.of(cause),
                         List.of(ruledOut),
                         "## Investigation",
-                        true));
+                        true,
+                        coverage));
 
         RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(passingTrace), List.of(failingTrace)));
         worker.run(job);
@@ -161,13 +169,16 @@ record RcaWorkerTest(
         assertEquals(Map.of("ruled_out_1", ruledOut), storedChecks(report));
 
         RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
-        assertEquals(List.of(cause), view.causes(), "change and type survive the round trip");
+        assertEquals(List.of(cause), view.causes(), "change, type and affected_of survive the round trip");
+        assertEquals(coverage, view.coverage(), "the run's coverage is stored");
 
         // The dossier is the claim, the numbers, the method and the tools only: the agent pages evidence over MCP,
         // so nothing pre-chooses a sample.
         Map<String, String> dossier = capturedDossier();
         String folder = "findings/1-" + job.findingId() + "/";
-        assertEquals(Set.of(folder + "finding.md", folder + "evidence.md", "method.md", "tools.md"), dossier.keySet());
+        assertEquals(
+                Set.of(folder + "finding.md", folder + "checks.md", folder + "evidence.md", "method.md", "tools.md"),
+                dossier.keySet());
         assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.SECRET_LEAK), dossier.get("method.md"));
         assertEquals(AgenticRcaEngine.TOOLS, dossier.get("tools.md"));
         String findingDoc = dossier.get(folder + "finding.md");
@@ -274,6 +285,27 @@ record RcaWorkerTest(
         assertEquals("RCA.SUBJECT_NOT_FOUND", run.stopCode());
     }
 
+    /**
+     * A finding whose only rows are comparison rows flags nothing, so there is nothing to explain. The bug is an RCA
+     * run over healthy rows alone, whose causes could cite nothing.
+     */
+    @Test
+    void aFindingWithOnlyComparisonRowsHasNothingToExplain() {
+        String pid = TenantFixture.bootstrap(tenants, "rca-run-comparison-only")
+                .project()
+                .id();
+        String healthy = seedTrace(pid, seedSession(pid), FROM.plus(Duration.ofHours(2)));
+        stubEngine();
+
+        RcaJobRow job =
+                enqueue(pid, seedFinding(pid, List.of(healthy), List.of(), FindingRow.Cause.DISTRIBUTION_SHIFT));
+        worker.run(job);
+
+        AgentRunRepository.RunSummary run = runOf(pid, job);
+        assertEquals(Outcome.FAILED, run.outcome());
+        assertEquals("RCA.SUBJECT_NOT_FOUND", run.stopCode());
+    }
+
     /** A finished RCA still shown as running: a run that answers closes its run as done. */
     @Test
     void aRunThatAnswersClosesItsRunAsDone() {
@@ -319,11 +351,12 @@ record RcaWorkerTest(
     }
 
     /**
-     * A frustration finding: the frustrated sessions are what was flagged, counted in sessions, and causes persist on a
-     * frustration_causes report.
+     * A frustration finding: the flagged turns are what was flagged, one per frustrated session-hour, and each names
+     * its session, so a cause may cite the sessions; causes persist on a frustration_causes report. A turn row without
+     * its session leaves the flagged sessions empty, and the cause's session citations are refused.
      */
     @Test
-    void aFrustrationReportCountsSessionsAndPersistsItsCauses() {
+    void aFrustrationReportCountsFlaggedTurnsAndPersistsItsCauses() {
         var fix = TenantFixture.bootstrap(tenants, "rca-frustration");
         String pid = fix.project().id();
         String sessionA = seedSession(pid);
@@ -331,31 +364,18 @@ record RcaWorkerTest(
         String turnA = seedTrace(pid, sessionA, SPLIT.plus(Duration.ofHours(2)));
         String turnB = seedTrace(pid, sessionB, SPLIT.plus(Duration.ofHours(3)));
         String calm = seedSession(pid);
-        String findingId = seedFinding(pid, List.of(), List.of());
+        String calmTurn = seedTrace(pid, calm, SPLIT.plus(Duration.ofHours(4)));
+        String findingId = seedFinding(pid, List.of(), List.of(), FindingRow.Cause.FRUSTRATION_RATE);
         String now = Instant.now().toString();
+        FindingEvidenceRepository.Ref flaggedA = FindingEvidenceRepository.Ref.turn(sessionA, turnA);
+        FindingEvidenceRepository.Ref flaggedB = FindingEvidenceRepository.Ref.turn(sessionB, turnB);
         evidence.record(
                 pid,
                 findingId,
                 FindingEvidenceRow.Role.MEMBER,
-                List.of(
-                        FindingEvidenceRepository.Ref.session(sessionA),
-                        FindingEvidenceRepository.Ref.session(calm),
-                        FindingEvidenceRepository.Ref.session(sessionB)),
+                List.of(flaggedA, FindingEvidenceRepository.Ref.turn(calm, calmTurn), flaggedB),
                 now);
-        evidence.record(
-                pid,
-                findingId,
-                FindingEvidenceRow.Role.WITNESS,
-                List.of(
-                        FindingEvidenceRepository.Ref.session(sessionA),
-                        FindingEvidenceRepository.Ref.session(sessionB)),
-                now);
-        evidence.record(
-                pid,
-                findingId,
-                FindingEvidenceRow.Role.WITNESS,
-                List.of(FindingEvidenceRepository.Ref.trace(turnA), FindingEvidenceRepository.Ref.trace(turnB)),
-                now);
+        evidence.record(pid, findingId, FindingEvidenceRow.Role.WITNESS, List.of(flaggedA, flaggedB), now);
 
         RcaDtos.Cause cause = new RcaDtos.Cause(
                 "Ignores the attached file",
@@ -368,6 +388,7 @@ record RcaWorkerTest(
                 new RcaDtos.Attribution(null, "agent/system.md", "abc123", "Answer briefly."),
                 List.of(turnA),
                 List.of(sessionA, sessionB),
+                2,
                 2);
         when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
@@ -376,18 +397,20 @@ record RcaWorkerTest(
                         List.of(cause),
                         List.of(RuledOutCheck.ruledOut(1, "Frustration is not concentrated on one model.")),
                         "## Investigation",
-                        true));
+                        true,
+                        null));
 
         RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
         worker.run(job);
 
         AgenticRcaEngine.Evidence ev = capturedEvidence();
-        assertEquals(2, ev.flaggedCount(), "the frustrated sessions, not the calm one");
-        assertEquals("sessions", ev.grain());
+        assertEquals(2, ev.flaggedCount(), "the flagged turns, not the calm one");
+        assertEquals("traces", ev.grain());
         assertFalse(ev.baselinePresent());
-        assertTrue(ev.citableSessionIds().containsAll(Set.of(sessionA, sessionB)), ev.toString());
-        assertFalse(ev.citableSessionIds().contains(calm), "a calm session is not citable");
-        assertTrue(ev.citableTraceIds().containsAll(Set.of(turnA, turnB)), ev.toString());
+        assertTrue(ev.flaggedSessionIds().containsAll(Set.of(sessionA, sessionB)), ev.toString());
+        assertTrue(ev.comparisonSessionIds().contains(calm), "a calm session is the comparison side");
+        assertTrue(ev.comparisonTraceIds().contains(calmTurn), "and its turn");
+        assertTrue(ev.flaggedTraceIds().containsAll(Set.of(turnA, turnB)), ev.toString());
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("done", report.status());
@@ -410,7 +433,7 @@ record RcaWorkerTest(
         String flaggedA = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
         String flaggedB = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(3)));
         String clean = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(4)));
-        String findingId = seedFinding(pid, List.of(), List.of());
+        String findingId = seedFinding(pid, List.of(), List.of(), FindingRow.Cause.GROUNDEDNESS_RATE);
         String now = Instant.now().toString();
         evidence.record(
                 pid,
@@ -443,6 +466,7 @@ record RcaWorkerTest(
                 new RcaDtos.Attribution(null, "rag/retrieve.py", "abc123", "top_k=1"),
                 List.of(flaggedA, flaggedB),
                 List.of(),
+                2,
                 2);
         when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
@@ -451,7 +475,8 @@ record RcaWorkerTest(
                         List.of(cause),
                         List.of(RuledOutCheck.ruledOut(1, "Flagged answers are not concentrated on one model.")),
                         "## Investigation",
-                        true));
+                        true,
+                        null));
 
         RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
         worker.run(job);
@@ -460,7 +485,8 @@ record RcaWorkerTest(
         assertEquals(2, ev.flaggedCount(), "the flagged traces, not the clean member");
         assertEquals("traces", ev.grain());
         assertFalse(ev.baselinePresent());
-        assertEquals(Set.of(flaggedA, flaggedB), ev.citableTraceIds(), "a clean member is not citable");
+        assertEquals(Set.of(flaggedA, flaggedB), ev.flaggedTraceIds(), "only the flagged answers may be cited");
+        assertEquals(Set.of(clean), ev.comparisonTraceIds(), "unflagged members are the comparison side");
         assertFalse(capturedDossier().containsKey("detections.md"), "flagged sentences are read over MCP");
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
@@ -514,7 +540,7 @@ record RcaWorkerTest(
         ArgumentCaptor<AgenticRcaEngine.Subject> subject = ArgumentCaptor.forClass(AgenticRcaEngine.Subject.class);
         verify(engine).run(any(), any(), subject.capture(), anyMap(), any());
         assertEquals(List.of(older, newer), subject.getValue().findingIds());
-        assertEquals(Set.of(olderTrace, newerTrace), capturedEvidence().citableTraceIds());
+        assertEquals(Set.of(olderTrace, newerTrace), capturedEvidence().flaggedTraceIds());
     }
 
     private static CaseDetection detection(String findingId) {
@@ -572,7 +598,7 @@ record RcaWorkerTest(
     private void stubEngine() {
         when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
-                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "summary", List.of(), List.of(), "## report", true));
+                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "summary", List.of(), List.of(), "## report", true, null));
     }
 
     private static Map<String, RuledOutCheck> storedChecks(RcaReportRow report) {
@@ -600,11 +626,13 @@ record RcaWorkerTest(
         return ev.getValue();
     }
 
-    /** An armed-window finding, which rules by the verb alone. */
-    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
-
     /** One open finding citing {@code baseline} and {@code flagged} traces as its two sides. */
     private String seedFinding(String pid, List<String> baseline, List<String> flagged) {
+        return seedFinding(pid, baseline, flagged, FindingRow.Cause.ARMED_WINDOW);
+    }
+
+    /** The cause kind decides the claim's shape, and so which rows are its comparison side. */
+    private String seedFinding(String pid, List<String> baseline, List<String> flagged, String causeKind) {
         String now = Instant.now().toString();
         String cause = "cause-" + Ids.ulid();
         String findingId = Objects.requireNonNull(findings.recordArmedWindow(
@@ -615,7 +643,7 @@ record RcaWorkerTest(
                         cause,
                         1,
                         "cs_extract",
-                        ARMED_PAYLOAD,
+                        "{\"cause_kind\":\"" + causeKind + "\"}",
                         now,
                         now,
                         now,

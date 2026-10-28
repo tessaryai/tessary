@@ -67,10 +67,10 @@ public class RateCaseSource implements CaseSource {
                     CaseRow.Detector.FRUSTRATION,
                     FrustrationEvidence.MEASURE,
                     FrustrationEvidence::rateDetail,
-                    "sessions",
+                    "session-hours",
                     "were frustrated with the agent",
                     "Learned",
-                    "sessions"));
+                    "session-hours"));
 
     @Override
     public boolean owns(String classifierKey) {

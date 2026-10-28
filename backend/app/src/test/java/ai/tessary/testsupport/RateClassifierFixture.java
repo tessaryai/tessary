@@ -102,6 +102,20 @@ public class RateClassifierFixture {
             Instant at,
             boolean frustrated,
             String version) {
+        frustrationAssessment(pid, signal, traceId, conversation, callSite, at, frustrated, version, null);
+    }
+
+    /** @param requestJson the body sent to the scorer; null once retention cleared it */
+    public void frustrationAssessment(
+            String pid,
+            ClassifierRow signal,
+            String traceId,
+            String conversation,
+            @Nullable String callSite,
+            Instant at,
+            boolean frustrated,
+            String version,
+            @Nullable String requestJson) {
         frustrationAssessments.insert(new FrustrationAssessmentRepository.Assessment(
                 Ids.ulid(),
                 pid,
@@ -115,7 +129,7 @@ public class RateClassifierFixture {
                 version,
                 "TYPESAFE",
                 "typesafe/jev-1.13-20260917",
-                null,
+                requestJson,
                 "{}",
                 null,
                 null,

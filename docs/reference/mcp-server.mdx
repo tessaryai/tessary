@@ -1,6 +1,6 @@
 ---
 title: "MCP Server"
-description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 22 tools with their arguments, and how to configure a client."
+description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 23 tools with their arguments, and how to configure a client."
 ---
 
 Tessary speaks MCP (Model Context Protocol) at `POST /mcp` on the same service that serves the web UI and the REST API. It ships with the backend, so there is no separate server to install or version.
@@ -64,22 +64,22 @@ Three tools strip the triage ruling before their response leaves the server. [Ro
 
 Two fields deliberately survive: `triageStatus`, which says only whether a ruling exists and which the findings list needs to render, and a case's inline `rca`, which is the analysis lane's own prior work rather than the gate the redaction exists to protect. The redaction applies to every MCP caller, not only to keys minted for analysis. The full ruling is one click away in the UI, which reads these fields over REST and is untouched.
 
-A high-confidence secret leak and a frustration finding have no triage run to strip: each is filed already ruled, and `triageStatus` reflects that ruling. On a frustration finding or case, the `frustration` block also comes back with an empty `conversations` list, so the frustrated sessions' ids do not reach a caller through it. `get_finding_evidence` pages them as refs.
+A high-confidence secret leak and a frustration finding have no triage run to strip: each is filed already ruled, and `triageStatus` reflects that ruling. On a frustration finding or case, the `frustration` block also comes back with an empty `conversations` list, so the frustrated sessions' ids do not reach a caller through it. `get_finding_evidence` pages them as evidence rows.
 
-A groundedness finding goes through triage like any other, so its ruling is stripped as the table says. On a groundedness finding or case, the `groundedness` block comes back with an empty `answers` list and a null `answersNextCursor`, so the flagged answers' trace and span ids do not reach a caller through it. `get_finding_evidence` pages them as `witness` refs.
+A groundedness finding goes through triage like any other, so its ruling is stripped as the table says. On a groundedness finding or case, the `groundedness` block comes back with an empty `answers` list and a null `answersNextCursor`, so the flagged answers' trace and span ids do not reach a caller through it. `get_finding_evidence` pages them as `witness` rows.
 
 ## Conventions the tools share
 
 - **Read-only.** Nothing writes, spends, or starts an agent run.
 - **Project-scoped by the token.** No tool takes a project argument.
-- **Paging** on `list_cases`, `list_traces`, `list_spans`, and `list_sessions`: `limit` in, default 50 and capped at 100, plus `cursor` in and `next_cursor` out. An unreadable or stale cursor restarts at the newest page rather than returning an error. `query_search` and `get_finding_evidence` page at a wider bound: `limit` default 100, capped at 1,000.
-- **Lists find, gets read.** List rows carry typed columns plus the stored `input_preview` and `output_preview` and a `payload_available` flag, never the full payload. Raw text comes from `get_span`, or from `get_trace` and `list_spans` with `fields: ["payload"]` on a page already scoped to one trace or to a window of at most 24 hours.
+- **Paging** on `list_cases`, `list_traces`, `list_spans`, and `list_sessions`: `limit` in, default 50 and capped at 100, plus `cursor` in and `next_cursor` out. An unreadable or stale cursor restarts at the newest page rather than returning an error. `query_search` and `get_finding_evidence` page at a wider bound: `limit` default 100, capped at 1,000. `export_finding_evidence` pages by size rather than by `limit`: a page stops at 2,000 rows or about 6 MB of text, with `cursor` in and `nextCursor` out.
+- **Lists find, gets read.** List rows carry typed columns plus the stored `input_preview` and `output_preview` and a `payload_available` flag, never the full payload. Raw text comes from `get_span`, or from `get_trace` and `list_spans` with `fields: ["payload"]` on a page already scoped to one trace or to a window of at most 24 hours. The one exception is `export_finding_evidence`, which returns the text of one finding's evidence rows, masked.
 - **Every input schema sets `additionalProperties: false`.** An argument that is not listed is rejected.
 - **Timestamps are ISO-8601.** The snake_case wire shape is identical to REST.
 
 ## The tools
 
-Tessary lists all 22 tools for every organization, so `tools/list` returns the whole catalog for any valid token. The two prompt tools also check on each call that prompt management is on for the organization.
+Tessary lists all 23 tools for every organization, so `tools/list` returns the whole catalog for any valid token. The two prompt tools also check on each call that prompt management is on for the organization.
 
 `tools/list` is the authoritative schema. The tables below name each tool's arguments so you can see the shape of the surface; they are not a schema copy.
 
@@ -100,7 +100,7 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 | `list_cases` | none | `state` (`open` \| `resolved`, default `open`), `detector`, `call_site_id`, `limit`, `cursor` | Paged case rows. Open pages are worst-first by severity then most recently opened; a resolved page is newest-closure-first |
 | `get_case` | `id` | none | The case, its activity trail, `latest_finding_id` and `finding_count`, the classifier's summary numbers, and the root-cause report inline in `rca` once one has finished: its summary, verdict, causes, the checks it ruled out, and the full investigation. The ruling, exemplars, and every trace and span id are redacted on this surface; page the finding's rows with `get_finding_evidence` and `latest_finding_id` |
 
-On a frustration case, `frustration` carries the call site's learned and current rates of frustrated sessions with the session counts behind each, and the scoring settings the finding was filed under.
+On a frustration case, `frustration` carries the call site's learned and current rates of frustrated sessions with the session-hour counts behind each, and the scoring settings the finding was filed under.
 
 On a groundedness case, `groundedness` carries the call site's learned and current rates of flagged answers with the trace counts behind each, the score at which a sentence is flagged (`flagThreshold`), and the rate test's settings the finding was filed under.
 
@@ -112,13 +112,18 @@ On a groundedness case, `groundedness` carries the call site's learned and curre
 | --- | --- | --- | --- |
 | `list_findings` | none | `status`, `call_site_id`, `detector`, `include` (`confirmed` \| `all`, default `confirmed`) | Headline finding rows without the evidence blob |
 | `get_finding` | `id` | none | One finding with its parsed evidence, including the `frustration` block on a frustration finding and the `groundedness` block on a groundedness finding |
-| `get_finding_evidence` | `finding_id` | `role` (`exemplar` \| `member` \| `baseline` \| `witness` \| `changepoint`), `count_only`, `limit`, `cursor` | Paged refs shaped `{role, grain, session_id?, trace_id?, span_id?, rank?}`, plus live and as-written per-role counts |
+| `get_finding_evidence` | `finding_id` | `role` (`exemplar` \| `member` \| `baseline` \| `witness` \| `changepoint`), `count_only`, `limit`, `cursor` | Paged rows, one per unit the detector measured, each joined to its span: `role`, `rank`, `sessionId`, `traceId`, `spanId`, `name`, `kind`, `status`, `level`, `errorType`, `startedAt`, `latencyMs`, `totalTokens`, `totalCost`, `models`, `notRolledUp`, `partialCost`, `staleTotals`, `callSiteId`, `projectVersionId`, `userId`, the token split (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`), `traceIndex`, `sessionTraces`, `inputBytes`, `outputBytes`, `payloadAvailable`, and `attributes`. Field names are camelCase. Plus live and as-written per-role counts |
+| `export_finding_evidence` | `finding_id` | `role`, `text_chars` (default 4,000, from 200 to 20,000), `cursor` | Every evidence row of the finding with the same fields, its input and output text cut at `text_chars`, and every attribute, all masked. A page stops at 2,000 rows or about 6 MB of text and carries `nextCursor` |
 
 A finding is the aggregated cause behind many classifier firings, distinct from a single firing in the `classifier_events` dataset.
 
-`get_finding_evidence` pages the population a detector actually measured, one ref per measured row, uncapped at write time. Refs are ids rather than bodies: follow one with `get_trace`, `get_span`, or `list_spans`. Call it with `count_only=true` first for the per-role sizes with no rows.
+`get_finding_evidence` pages the population a detector actually measured, one row per measured unit, uncapped at write time. A row carries ids and measurements rather than bodies: follow one with `get_trace`, `get_span`, or `list_spans`. Call it with `count_only=true` first for the per-role sizes with no rows.
 
-Two details worth knowing before you read the counts. `counts` is what survives and can still be opened; `recorded_counts` is what the detector wrote at finding-open, so `counts` below `recorded_counts` means substrate aged out rather than a lost write. A zero under a role is a real answer, not missing evidence: several detectors compare against a fitted model and therefore have no baseline rows to point at.
+A null token count means the producer did not report it, never zero. On a whole-run row the token split is the trace's rollup, on a span row the span's own. `traceIndex` is the turn's 1-based position in its session and `sessionTraces` the session's turn count, both capped at 10,000. `traceIndex` is null on a session row and on a sub-agent trace, which is not a turn. `inputBytes` and `outputBytes` are the payload's size in bytes. `payloadAvailable` is false once retention has removed the payload. `attributes` is a short fixed set of deploy, host, instance and model keys, such as `service.version` and `host.name`, with values masked. It never holds a prompt or a completion.
+
+`export_finding_evidence` is the bulk read. It returns the same rows with their text and every attribute, masked: there `attributes` holds every key, not the short set, so a reader can take in a whole population in a few calls instead of one `get_span` per row. A text value longer than `text_chars` is cut and marked `…[cut]`. Masking runs before the cut. On a frustration finding, each `witness` row also carries `priorMessages`, up to 4 messages before the flagged turn.
+
+Two details worth knowing before you read the counts. `counts` is what survives and can still be opened; `recordedCounts` is what the detector wrote at finding-open, so `counts` below `recordedCounts` means substrate aged out rather than a lost write. A zero under a role is a real answer, not missing evidence. Only duration and cost drift findings write `baseline` rows: the pinned window's rows, or under the rolling reference a spread sample of up to 200 rows from the reference's days, plus up to 10 rows just before the change point. `changepoint` holds up to 10 rows from the change point on. A tool error, frustration, or groundedness finding has no `baseline` rows: its unflagged `member` rows are the comparison side. A malformed output or secret leak finding has no comparison side.
 
 There is deliberately no server-side sampling mode. An agent that wants a stride or a random draw takes it and says so in its citation.
 
@@ -210,7 +215,7 @@ While prompt management is off for the organization, both tools return a tool er
   <Step title="Restart the client">
     Restart Claude Code so it reads the new configuration.
 
-    <Check>`tools/list` returns 22 tools, and `get_project` names the project the token is bound to.</Check>
+    <Check>`tools/list` returns 23 tools, and `get_project` names the project the token is bound to.</Check>
   </Step>
 </Steps>
 

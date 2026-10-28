@@ -4,6 +4,7 @@ package ai.tessary.classifier.metric;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
+import ai.tessary.classifier.finding.EvidenceSample;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -15,6 +16,7 @@ import ai.tessary.classifier.metric.MetricDriftConfig.Measured;
 import ai.tessary.classifier.metric.MetricDriftDetector.Decision;
 import ai.tessary.classifier.metric.MetricDriftDetector.Reference;
 import ai.tessary.classifier.metric.MetricDriftDetector.Silence;
+import ai.tessary.classifier.metric.MetricEvidenceRefs.Timed;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Explained;
 import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import ai.tessary.classifier.metric.MetricSource.Measurement;
@@ -31,6 +33,7 @@ import ai.tessary.classifier.worker.SweepOutcome;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
@@ -60,6 +63,9 @@ public class MetricDriftSweep implements ClassifierSweep {
      * a thick bucket closes about one window per pass.
      */
     static final int PAGE_SIZE = 500;
+
+    /** Rows the rolling arm's {@code baseline} sample holds at most. */
+    static final int BASELINE_SAMPLE = 200;
 
     /**
      * Named rather than derived: {@code classifier_key} is what every shared reader routes on and must match the
@@ -241,7 +247,8 @@ public class MetricDriftSweep implements ClassifierSweep {
 
     /**
      * A finding one closed window earned, held until the whole page has been folded at both grains.
-     * {@code baselineRefs} is empty for the rolling-control arm, which has no set of rows behind it.
+     * {@code baselineRefs} is the pinned window's rows, or on the rolling-control arm a spread sample of the rows its
+     * days kept, declared by {@code baselineSample}.
      */
     private record Pending(
             Measured spec,
@@ -256,9 +263,10 @@ public class MetricDriftSweep implements ClassifierSweep {
             @Nullable String windowOpenedAt,
             Sample last,
             Map<String, Long> callSites,
-            List<FindingEvidenceRepository.Ref> memberRefs,
-            List<FindingEvidenceRepository.Ref> baselineRefs,
-            @Nullable Resolved control) {}
+            List<Timed> memberRefs,
+            List<Timed> baselineRefs,
+            @Nullable Resolved control,
+            MetricFindingEvidence.@Nullable BaselineSample baselineSample) {}
 
     /**
      * How many leading heads may be folded now: up to the first trace whose root span has not arrived and is younger
@@ -449,7 +457,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             @Nullable MetricSketch sketch,
             @Nullable MetricWorkload workload,
             @Nullable MetricTokens tokens,
-            List<FindingEvidenceRepository.Ref> refs,
+            List<Timed> refs,
             @Nullable String versionId) {}
 
     /**
@@ -512,8 +520,7 @@ public class MetricDriftSweep implements ClassifierSweep {
         Map<String, Long> callSites = new LinkedHashMap<>();
         // Rehydrated from the row, not started empty: a window spans pages, and member evidence must cover the whole
         // population, not the page its close landed in.
-        List<FindingEvidenceRepository.Ref> windowRefs =
-                new ArrayList<>(MetricEvidenceRefs.fromJson(row.currentRefsJson()));
+        List<Timed> windowRefs = new ArrayList<>(MetricEvidenceRefs.fromJson(row.currentRefsJson()));
         if (countZeroed) {
             // The stale-grid branch discarded the window, so its refs go with it.
             windowRefs.clear();
@@ -525,7 +532,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             }
             current.add(sample);
             callSites.merge(sample.callSiteId(), 1L, Long::sum);
-            windowRefs.add(refOf(sample));
+            windowRefs.add(refOf(sample, grid));
             count++;
             if (!shouldClose(count, openedAt, sample.eventAt(), config)) continue;
 
@@ -551,7 +558,12 @@ public class MetricDriftSweep implements ClassifierSweep {
                     Map.copyOf(callSites),
                     List.copyOf(windowRefs));
             control = control.fold(
-                    grid, eventDay, closedWindow.measure(), closedWindow.workload(), closedWindow.tokens());
+                    grid,
+                    eventDay,
+                    closedWindow.measure(),
+                    closedWindow.workload(),
+                    closedWindow.tokens(),
+                    List.copyOf(windowRefs));
             baselines.closeWindow(row.id(), control.toJson(), now);
             pinned = compared.pinned();
             if (compared.pending() != null) pending.add(compared.pending());
@@ -615,7 +627,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             @Nullable String windowOpenedAt,
             Sample last,
             Map<String, Long> callSites,
-            List<FindingEvidenceRepository.Ref> windowRefs) {
+            List<Timed> windowRefs) {
         MetricSketch cur = closedWindow.measure();
         Decision againstPrevious = MetricDriftDetector.decide(
                 spec.measure(), Reference.PREVIOUS, control == null ? null : control.measure(), cur, config);
@@ -642,8 +654,12 @@ public class MetricDriftSweep implements ClassifierSweep {
                     callSites,
                     windowRefs,
                     pinned.refs(),
+                    null,
                     null);
         } else if (againstPrevious.fired() && control != null) {
+            List<Timed> candidates = MetricControl.rows(control.days());
+            List<Timed> sample = EvidenceSample.spread(candidates, BASELINE_SAMPLE);
+            List<MetricControl.Day> days = control.days();
             pending = new Pending(
                     spec,
                     bucket,
@@ -658,10 +674,14 @@ public class MetricDriftSweep implements ClassifierSweep {
                     last,
                     callSites,
                     windowRefs,
-                    // The rolling control has no window of rows behind it, so this arm carries a member set and no
-                    // baseline set.
-                    List.of(),
-                    control);
+                    sample,
+                    control,
+                    new MetricFindingEvidence.BaselineSample(
+                            sample.size(),
+                            candidates.size(),
+                            days.size(),
+                            days.get(0).day(),
+                            days.get(days.size() - 1).day()));
         }
 
         boolean unusable =
@@ -682,7 +702,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             Sample last,
             MetricDriftConfig config,
             @Nullable Pending pending,
-            List<FindingEvidenceRepository.Ref> windowRefs) {
+            List<Timed> windowRefs) {
         if (cur.count() < config.minSample()) return new Compared(pinned, pending);
         baselines.repin(
                 row.id(),
@@ -808,13 +828,73 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
+     * Where the window's shift began, and the rows on either side of it. A window holding rows written before refs
+     * carried values has no located change point, so its onset falls back to the window open.
+     */
+    private record Onset(
+            String at,
+            MetricFindingEvidence.ChangePoint changePoint,
+            List<FindingEvidenceRepository.Ref> fromRows,
+            List<FindingEvidenceRepository.Ref> beforeRows) {}
+
+    private static Onset onsetOf(Pending pending) {
+        List<Timed> window = pending.memberRefs();
+        MetricChangePoint.Located located = MetricChangePoint.locate(
+                window, pending.refSketch().meanLog(), pending.decision().direction());
+        if (located == null) {
+            String opened = pending.windowOpenedAt();
+            String at = opened != null ? opened : pending.last().eventAt();
+            return new Onset(
+                    at,
+                    new MetricFindingEvidence.ChangePoint(
+                            at, MetricFindingEvidence.ChangePoint.METHOD_UNAVAILABLE, 0, 0),
+                    List.of(),
+                    List.of());
+        }
+        List<Timed> ordered = MetricChangePoint.ordered(window);
+        List<FindingEvidenceRepository.Ref> before =
+                MetricChangePoint.before(ordered, located.index(), MetricChangePoint.ROWS_AROUND);
+        return new Onset(
+                located.at(),
+                new MetricFindingEvidence.ChangePoint(
+                        located.at(), MetricFindingEvidence.ChangePoint.METHOD_CUSUM, located.index(), before.size()),
+                MetricChangePoint.from(ordered, located.index(), MetricChangePoint.ROWS_AROUND),
+                before);
+    }
+
+    /**
+     * The event time the reference starts at: the pinned window's first row, or the rolling control's oldest day. Null
+     * when the pinned rows predate stored event times.
+     */
+    private static @Nullable String referenceFrom(Pending pending) {
+        Resolved control = pending.control();
+        if (control != null) {
+            String oldestDay = control.oldestDay();
+            return oldestDay == null ? null : oldestDay + "T00:00:00Z";
+        }
+        String earliest = null;
+        Instant earliestAt = null;
+        for (Timed ref : pending.baselineRefs()) {
+            String at = ref.at();
+            if (at == null) return null;
+            Instant parsed = Instant.parse(at);
+            if (earliestAt == null || parsed.isBefore(earliestAt)) {
+                earliest = at;
+                earliestAt = parsed;
+            }
+        }
+        return earliest;
+    }
+
+    /**
      * Write or bump the per-cause finding for one shifted window. The exemplar sticks on first write; the evidence blob
-     * is refreshed every window so absorb absorbs where the bucket sits now.
+     * is refreshed every window so absorb absorbs where the bucket sits now. The onset is the window's change point.
      */
     private Recorded openFinding(
             String projectId, Pending pending, List<Explained> explains, MetricDriftConfig config) {
         Measured spec = pending.spec();
         Window closedWindow = pending.closedWindow();
+        Onset onset = onsetOf(pending);
         String causeKey =
                 MetricFindingEvidence.causeKey(spec.measure(), pending.bucket().key(), pending.decision());
         String evidence = MetricFindingEvidence.toJson(
@@ -834,9 +914,14 @@ public class MetricDriftSweep implements ClassifierSweep {
                 pending.last().eventAt(),
                 closedWindow.measure().count() >= config.windowTargetCount() ? "count" : "elapsed",
                 explains,
-                pending.control());
+                pending.control(),
+                pending.baselineSample(),
+                spec.grid(),
+                onset.changePoint(),
+                referenceFrom(pending));
         Instant at = Instant.now();
-        // EVENT time of the window's close, so a backfill reads each window's spell as it read at the time.
+        // EVENT time of the window's change point and close, so a backfill reads each window's spell as it read at the
+        // time.
         Instant eventAt = Instant.parse(pending.last().eventAt());
         var recorded = findings.recordShift(
                 Ids.ulid(),
@@ -848,21 +933,31 @@ public class MetricDriftSweep implements ClassifierSweep {
                 pending.sinceVersionId(),
                 primaryCallSite(pending.callSites()),
                 evidence,
+                onset.at(),
                 pending.last().eventAt(),
                 // Deliberately the SAME expression MetricDriftSource uses for its quiet window, so a bucket that
                 // recovered and broke again reopens its case.
                 eventAt.minus(Duration.ofHours(config.windowMaxHours())).toString(),
                 at.toString());
-        // Both evidence windows move to the window that just fired: `recordShift` replaces the stated quantiles, and
+        // Every evidence set moves to the window that just fired: `recordShift` replaces the stated quantiles, and
         // stale evidence would contradict them. `recordShift` already excludes a ruled row.
-        evidenceRefs.replace(
-                projectId, recorded.findingId(), FindingEvidenceRow.Role.MEMBER, pending.memberRefs(), at.toString());
         evidenceRefs.replace(
                 projectId,
                 recorded.findingId(),
-                FindingEvidenceRow.Role.BASELINE,
-                pending.baselineRefs(),
+                FindingEvidenceRow.Role.MEMBER,
+                MetricEvidenceRefs.refs(pending.memberRefs()),
                 at.toString());
+        writeBaseline(projectId, pending, recorded, onset, at.toString());
+        MetricFindingEvidence.BaselineSample sample = pending.baselineSample();
+        // The change point moves with the onset: within a spell `recordShift` keeps both, so the rows stay too.
+        if (recorded.onsetSet()) {
+            evidenceRefs.replace(
+                    projectId,
+                    recorded.findingId(),
+                    FindingEvidenceRow.Role.CHANGEPOINT,
+                    onset.fromRows(),
+                    at.toString());
+        }
         StructuredLog.info(log, Markers.OPS, "metric.finding.recorded")
                 .field("project", projectId)
                 .field("baseline", pending.row().id())
@@ -871,15 +966,57 @@ public class MetricDriftSweep implements ClassifierSweep {
                 .field("created", recorded.created())
                 .field("samples", recorded.sampleCount())
                 .field("explains", explains.size())
+                .field("baselineRows", pending.baselineRefs().size())
+                .field("baselineOf", sample == null ? null : sample.of())
                 .log();
         return recorded;
     }
 
-    private static FindingEvidenceRepository.Ref refOf(Sample sample) {
+    /**
+     * The {@code baseline} rows: the reference's rows, then the healthy rows just before the onset's step, in one list
+     * so the step's rows are comparison rows, never citable. The rows before the step move only with the onset, like
+     * the change point; within a spell a later window's rows before its own step are shifted rows. The rolling arm
+     * draws its sample once, when the finding has none: a later ring has folded the shifted days, so a redraw would
+     * sample the shift into its own baseline. A new spell keeps that sample and swaps only the rows before the step.
+     */
+    private void writeBaseline(String projectId, Pending pending, Recorded recorded, Onset onset, String now) {
+        String findingId = recorded.findingId();
+        boolean stored =
+                evidenceRefs.countsByRole(projectId, findingId).getOrDefault(FindingEvidenceRow.Role.BASELINE, 0L) > 0;
+        if (stored && !recorded.onsetSet()) return;
+        List<FindingEvidenceRepository.Ref> baseline = new ArrayList<>(
+                stored && pending.control() != null
+                        ? storedSample(projectId, findingId)
+                        : MetricEvidenceRefs.refs(pending.baselineRefs()));
+        if (recorded.onsetSet()) baseline.addAll(onset.beforeRows());
+        // Empty is a no-op, so a moved pin with no rows behind it keeps what was stored.
+        evidenceRefs.replace(projectId, findingId, FindingEvidenceRow.Role.BASELINE, baseline, now);
+    }
+
+    /**
+     * The rolling sample a finding already holds: its first {@code control.baseline.rows} {@code baseline} rows, since
+     * the sample is written ahead of the rows before the step and {@code recordShift} keeps that declaration.
+     */
+    private List<FindingEvidenceRepository.Ref> storedSample(String projectId, String findingId) {
+        List<FindingEvidenceRow> rows = evidenceRefs.listByRole(projectId, findingId, FindingEvidenceRow.Role.BASELINE);
+        int declared = findings.findById(projectId, findingId)
+                .map(f -> f.payload().path("control").path("baseline").path("rows"))
+                .filter(JsonNode::isInt)
+                .map(JsonNode::asInt)
+                .orElse(rows.size());
+        List<FindingEvidenceRepository.Ref> sample = new ArrayList<>();
+        for (FindingEvidenceRow row : rows.subList(0, Math.min(declared, rows.size()))) {
+            sample.add(new FindingEvidenceRepository.Ref(row.sessionId(), row.traceId(), row.spanId()));
+        }
+        return sample;
+    }
+
+    private static Timed refOf(Sample sample, Grid grid) {
         String spanId = sample.spanId();
-        return spanId == null
+        FindingEvidenceRepository.Ref ref = spanId == null
                 ? FindingEvidenceRepository.Ref.trace(sample.traceId())
                 : FindingEvidenceRepository.Ref.span(sample.traceId(), spanId);
+        return Timed.measured(ref, sample.eventAt(), sample.logValue(), grid);
     }
 
     /**

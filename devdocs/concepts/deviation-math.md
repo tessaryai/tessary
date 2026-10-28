@@ -340,7 +340,9 @@ numerator and denominator drop together. The reference is built from the leading
 `min_baseline_calls`, then **frozen** — a reference that moved with the traffic would drift along with
 a slow degradation and never notice it. A classifier may set `freeze_baseline_calls` above the minimum:
 judging still starts at `min_baseline_calls`, and each later hour is judged against the reference and
-then added to it, until the reference holds `freeze_baseline_calls` and stops moving.
+then added to it, until the reference holds `freeze_baseline_calls` and stops moving. An hour is added
+only once it has settled: its end plus `reference_settle_hours` (1 for tool_error, Malformed Output and Frustration)
+has passed on the key's own event clock, its newest hour.
 
 Recompute-per-read deletes the cursor/watermark/double-count bug class rather than defending against
 it, and a retuned threshold takes effect on the next pass instead of invalidating stored state. The
@@ -364,15 +366,14 @@ traffic after the reset only.
 ### The same engine on other trials
 
 Malformed Output runs this engine per call site, a trial being one output checked against its schema.
-Frustration runs it per call site with a **session**, a conversation on one call site, as the trial
-(`FrustrationRateService`): a session is a failure when it holds an uncleared frustration detection on
-that call site. Like Malformed Output it rebuilds every pass, because a later turn can flag a session
-first scored hours ago and a `false_alarm` resolve can clear one; the replay reads
-it in its original hour either way. Judging starts at `min_baseline_conversations = 100`, and the
+Frustration runs it per call site with a **conversation-hour**, a conversation on one call site in one
+UTC hour it has a scored turn, as the trial (`FrustrationRateService`): it fails when a turn in that
+hour holds an uncleared frustration detection on that call site. Like Malformed Output it rebuilds every
+pass, because a `false_alarm` resolve can clear an old hour's flag. Judging starts at `min_baseline_conversations = 100`, and the
 reference keeps learning until `freeze_baseline_conversations = 1,000`, as Groundedness's does. A
 state row built under another scorer version or other dials is reset with the note `tuning changed`
 and re-learns, because a reference learned under other weights is not comparable. Its budget is in
-conversations, so its dials differ (`FrustrationConfig`, whose engine config carries the floor as
+conversation-hours, so its dials differ (`FrustrationConfig`, whose engine config carries the floor as
 `ToolErrorConfig.minDecisionInterval`; tool_error's stays 6 and no tool-error blob can lower it):
 `arl_target = 10,000`, `shift_floor = 0.02` and a clamp floor of 4 on `h` instead of 6, giving
 
@@ -381,7 +382,7 @@ h(p0) = clamp(11.42 + 1.088·ln(p0) + ln(10000 / 250000), 4, 12)
       = clamp( 8.20 + 1.088·ln(p0), 4, 12)
 ```
 
-The shipped line against the exact solve (all counts are conversations). **Starting values**, owed a
+The shipped line against the exact solve (all counts are conversation-hours). **Starting values**, owed a
 null replay on real traffic like `tool_error`'s:
 
 | p0 | p1 | exact h | fitted h | ARL₀ at exact | ARL₀ at fitted | lag at p1, exact | lag at p1, fitted |

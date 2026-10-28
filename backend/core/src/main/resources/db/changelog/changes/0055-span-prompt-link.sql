@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0052-span-prompt-link-columns
+--changeset evals:0055-span-prompt-link-columns
 -- A span produced from a managed prompt carries the prompt's name and the version string the producer sent, so the
 -- Prompts page can count calls per version and the traces list can keep the traces of one prompt. Text, not integer:
 -- the attribute is a string and a producer may send a label such as prod. No foreign key: spans predate and outlive
@@ -8,7 +8,7 @@
 ALTER TABLE span ADD COLUMN prompt_name text, ADD COLUMN prompt_version text;
 --rollback ALTER TABLE span DROP COLUMN prompt_version, DROP COLUMN prompt_name;
 
---changeset evals:0052-span-prompt-link-index runInTransaction:false
+--changeset evals:0055-span-prompt-link-index runInTransaction:false
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'ix_span_prompt' AND NOT i.indisvalid
 -- The Prompts page groups a prompt's llm spans by version over a window, and the traces filter asks whether a trace

@@ -3,7 +3,9 @@ package ai.tessary.rca;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -67,6 +69,7 @@ class RcaAnalysisServiceTest {
             null,
             RcaReportRow.Engine.AGENTIC,
             null,
+            null,
             "2026-10-02T00:00:00Z",
             null);
 
@@ -112,15 +115,21 @@ class RcaAnalysisServiceTest {
     private static final FindingEvidenceRow WITNESS_ROW = new FindingEvidenceRow(
             "ev-1", PROJECT, "f1", "s1", "t1", "sp1", FindingEvidenceRow.Role.WITNESS, null, "2026-10-01T00:00:00Z");
 
+    private static final FindingEvidenceRepository.SpanRef WITNESS_SPAN = SpanRefs.row(FindingEvidenceRow.Role.WITNESS)
+            .session("s1")
+            .span("t1", "sp1")
+            .build();
+
     @BeforeEach
     void stubTheSubject() {
         when(reports.findByJobId(PROJECT, "job-1")).thenReturn(Optional.of(REPORT));
         when(findings.caseSiblingIds(PROJECT, "f1")).thenReturn(List.of());
         when(findings.findClaim(PROJECT, "f1")).thenReturn(Optional.of(CLAIM));
         when(evidence.listByFinding(PROJECT, "f1")).thenReturn(List.of(WITNESS_ROW));
+        stubPage(FindingEvidenceRow.Role.WITNESS, WITNESS_SPAN);
         when(agenticEngine.run(eq(JOB), eq(REPORT), any(), any(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
-                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "nothing found", List.of(), List.of(), null, false));
+                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "nothing found", List.of(), List.of(), null, false, null));
     }
 
     /**
@@ -139,7 +148,12 @@ class RcaAnalysisServiceTest {
                 List.of(FakeFindingAdapter.owning("custom-x", "# Triage method\n", "# RCA method\n", null))));
 
         assertEquals(
-                Set.of("findings/1-f1/finding.md", "findings/1-f1/evidence.md", "method.md", "tools.md"),
+                Set.of(
+                        "findings/1-f1/finding.md",
+                        "findings/1-f1/checks.md",
+                        "findings/1-f1/evidence.md",
+                        "method.md",
+                        "tools.md"),
                 dossier.keySet());
         assertEquals("# RCA method\n", dossier.get("method.md"));
         assertEquals(
@@ -227,6 +241,65 @@ class RcaAnalysisServiceTest {
                 FakeFindingAdapter.owning(BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n", "# Method x\n", null))));
 
         assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.TOOL_ERROR), dossier.get("method.md"));
+    }
+
+    /**
+     * The checks and the output check read one rule for which rows are flagged. The bug is the two disagreeing, so
+     * checks.md flags rows a cause may not cite, or the other way round.
+     */
+    @Test
+    void checksFlagTheSameRowsACauseMayCite() {
+        FindingEvidenceRepository.SpanRef healthySameTrace =
+                SpanRefs.row(FindingEvidenceRow.Role.MEMBER).span("t1", "sp2").build();
+        FindingEvidenceRepository.SpanRef healthy =
+                SpanRefs.row(FindingEvidenceRow.Role.MEMBER).span("t2", "sp3").build();
+        FindingEvidenceRepository.SpanRef before =
+                SpanRefs.row(FindingEvidenceRow.Role.BASELINE).trace("t0").build();
+        when(evidence.listByFinding(PROJECT, "f1"))
+                .thenReturn(SpanRefs.recorded(List.of(WITNESS_SPAN, healthySameTrace, healthy, before)));
+        stubPage(FindingEvidenceRow.Role.MEMBER, healthySameTrace, healthy);
+        stubPage(FindingEvidenceRow.Role.BASELINE, before);
+
+        Map<String, String> dossier = dossierOf(FindingAdapters.of(List.of()));
+
+        ArgumentCaptor<AgenticRcaEngine.Evidence> ev = ArgumentCaptor.forClass(AgenticRcaEngine.Evidence.class);
+        verify(agenticEngine).run(eq(JOB), eq(REPORT), any(), any(), ev.capture());
+        assertEquals(Set.of("t1"), ev.getValue().flaggedTraceIds());
+        assertEquals(Set.of("t2", "t0"), ev.getValue().comparisonTraceIds());
+        assertEquals(1, ev.getValue().flaggedCount());
+        assertEquals(
+                List.of(
+                        "Flagged rows: `witness` (1). Comparison rows: unflagged `member` (2), `baseline` (1).",
+                        "Rows read: 4 of 4 recorded."),
+                Objects.requireNonNull(dossier.get("findings/1-f1/checks.md"))
+                        .lines()
+                        .toList()
+                        .subList(3, 5));
+    }
+
+    /**
+     * A finding an adapter owns gets checks.md beside the owner's evidence file. The bug is checks.md written only on
+     * the built-in path, so a custom classifier's RCA starts with nothing computed.
+     */
+    @Test
+    void anAdapterOwnedFindingStillGetsChecks() {
+        when(evidence.claimFirst(PROJECT, "f1", ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP))
+                .thenReturn(new FindingEvidenceRepository.Head(List.of(WITNESS_ROW), false));
+
+        Map<String, String> dossier = dossierOf(
+                FindingAdapters.of(List.of(FakeFindingAdapter.owning("custom-x", null, null, "# Owner evidence\n"))));
+
+        assertEquals(
+                List.of("# Checks", "", "Computed in code over this finding's evidence rows only. Shape: rate rise."),
+                Objects.requireNonNull(dossier.get("findings/1-f1/checks.md"))
+                        .lines()
+                        .toList()
+                        .subList(0, 3));
+    }
+
+    private void stubPage(String role, FindingEvidenceRepository.SpanRef... rows) {
+        when(evidence.spanPage(eq(PROJECT), eq("f1"), eq(role), anyInt(), isNull(), eq(false), eq(false)))
+                .thenReturn(new FindingEvidenceRepository.SpanPage(List.of(rows), null));
     }
 
     @SuppressWarnings("unchecked")

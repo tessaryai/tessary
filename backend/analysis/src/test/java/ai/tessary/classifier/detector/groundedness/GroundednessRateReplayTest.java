@@ -212,6 +212,37 @@ class GroundednessRateReplayTest {
                 "the retuned row, saved before the replay advances it");
     }
 
+    /**
+     * The upgrade cleared this row's reference and fenced its learning at an open finding's onset. Its first sweep
+     * under the new epoch must keep both fences and cut no new one, or the settled history before the onset is never
+     * re-learned.
+     */
+    @Test
+    void aRetuneOfARowWithNoReferenceKeepsItsFence() {
+        CarriedState cleared = new CarriedState(
+                CALL_SITE, ToolErrorDetector.State.EMPTY, null, null, "old-epoch", null, null, hour(2), null, hour(5));
+        Harness h = new Harness(series(new ArrayList<>(), 0, 10, 0.05), List.of(cleared));
+        h.refresh();
+
+        assertEquals(List.of(), h.states.resets, "nothing was learned under the old tuning, so nothing is reset");
+        assertEquals(
+                new Save(
+                        "p1",
+                        new CarriedState(
+                                CALL_SITE,
+                                ToolErrorDetector.State.EMPTY,
+                                null,
+                                null,
+                                CONFIG.stateEpoch(),
+                                null,
+                                null,
+                                hour(2),
+                                null,
+                                hour(5)),
+                        h.now),
+                h.states.saves.getFirst());
+    }
+
     private record Reset(
             String projectId, String key, @Nullable String resetBy, String note, String resetAt) {}
 

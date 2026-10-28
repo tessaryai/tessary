@@ -69,7 +69,7 @@ token binds the session to one project; every tool reads `ctx.projectId()`.
 
 ## Tools shipped today
 
-**22 tools, all listed.** All delegate to the same services REST uses. **Authoritative names +
+**23 tools, all listed.** All delegate to the same services REST uses. **Authoritative names +
 schemas:** `backend/.../mcp/McpToolRegistry.java` — the argument column below names each tool's filters so
 you can see the shape of the surface; it is not a schema copy, and it is not the contract.
 
@@ -82,12 +82,15 @@ Conventions the tools share, stated here once rather than per row:
   stale cursor restarts at the newest page rather than erroring. `query_search` keeps its own older
   limits (default 100, capped 1000), and `get_finding_evidence` pages at the same wider bound — its rows
   are ids and numbers rather than prose, and the set it pages is a whole measured population.
+  `export_finding_evidence` pages by size: a page stops at 2,000 rows or about 6 MB of text, `cursor`
+  in and `nextCursor` out, with no `limit`.
 - **Lists find, gets read.** List rows carry typed columns and the stored `input_preview`/`output_preview`
   plus `payload_available`, never the full payload. Raw text comes from `get_span`, or from `get_trace` /
-  `list_spans` with `fields: ["payload"]` on a page already scoped to one trace or ≤ 24h.
-- Timestamps ISO-8601; the snake_case wire shape is identical to REST. The one exception is
-  `get_finding_evidence`, whose response fields are camelCase; its arguments are snake_case like
-  every other tool's.
+  `list_spans` with `fields: ["payload"]` on a page already scoped to one trace or ≤ 24h. The one exception
+  is `export_finding_evidence`: the text of one finding's evidence rows, masked, under that budget.
+- Timestamps ISO-8601; the snake_case wire shape is identical to REST. The exceptions are
+  `get_finding_evidence` and `export_finding_evidence`, whose response fields are camelCase; their arguments are snake_case
+  like every other tool's.
 
 | Tool | Args (`limit`/`cursor` omitted — see above) | Returns |
 |---|---|---|
@@ -98,7 +101,8 @@ Conventions the tools share, stated here once rather than per row:
 | `get_case` | `id` (stored id or `C-118`) | case + activity trail + `latest_finding_id` + `finding_count` + exemplars + the **RCA report inline in `rca`** when one has finished: `summary`, `verdict`, `causes` (one shape for every case type), `ruled_out`, `detailed_report` |
 | `list_findings` | `status`, `call_site_id`, `detector`, `include` | headline finding rows (no evidence blob) |
 | `get_finding` | `id` | finding + parsed evidence |
-| `get_finding_evidence` | `finding_id`, `role` (exemplar\|member\|baseline\|witness\|changepoint), `count_only` | paged `rows` into the population the detector measured, each joined to its span — `{role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType, startedAt, latencyMs, totalTokens, totalCost, model, callSiteId}`, camelCase, no payload text — + live and as-written per-role counts. `count_only` answers with counts alone under `refs` |
+| `get_finding_evidence` | `finding_id`, `role` (exemplar\|member\|baseline\|witness\|changepoint), `count_only` | paged `rows` into the population the detector measured, each joined to its span — `{role, rank, sessionId, traceId, spanId, name, kind, status, level, errorType, startedAt, latencyMs, totalTokens, totalCost, models, notRolledUp, partialCost, staleTotals, callSiteId, projectVersionId, userId, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens, traceIndex, sessionTraces, inputBytes, outputBytes, payloadAvailable, attributes}`, camelCase, no payload text; `traceIndex`/`sessionTraces` are the turn's position and the session's turn count (capped 10,000), `attributes` a short masked set of deploy, host, instance and model keys — + live and as-written per-role counts. `count_only` answers with counts alone under `refs` |
+| `export_finding_evidence` | `finding_id`, `role`, `text_chars` (default 4000, 200 to 20000) | every evidence row with the same fields, its input and output text (cut at `text_chars`, marked `…[cut]`) and every attribute under `attributes` (not the short set), all masked; a page stops at 2,000 rows or about 6 MB of text; a frustration `witness` row also carries `priorMessages`, up to 4 messages before the flagged turn |
 | `list_traces` | `model`, `kind`, `call_site_id`, `status`, `range`, `q` | paged trace rollup rows + previews |
 | `get_trace` | `trace_id`, `fields` | rollup + spans, oldest-first, capped 200 + `spans_truncated`; skeleton rows (typed columns + previews + `payload_available`) unless `fields: ["payload"]` |
 | `list_spans` | `trace_id`, `call_site_id`, `kind`, `name`, `status`, `model_id`, `session_id`, `range`, `q`, `mode` (keyword), `fields` | paged compact span rows; full payloads only when scoped |
@@ -114,7 +118,7 @@ Conventions the tools share, stated here once rather than per row:
 | `list_prompts` | `folder`, `label` (no `limit`/`cursor`) | at most 100 prompt rows, newest change first: `name`, `type`, `tags`, `latest_version`, `version_count`, `labels`, `updated_at` |
 | `get_prompt` | `name`; `version` **or** `label` (neither reads `production`; `latest` is the newest version) | one prompt version: `body` (a string, or an array of chat messages and placeholders), `config`, `labels`, `commit_message`, `created_by`, `created_at` |
 
-**Nothing on this surface is gated in the listing**: all 22 rows are listed, so a launch partner's
+**Nothing on this surface is gated in the listing**: all 23 rows are listed, so a launch partner's
 `tools/list` is the whole catalogue. The two prompt tools check `Capability.PROMPT_MANAGEMENT` on each
 call instead, and answer a tool error while an org has it off. It was 22 with two gated on `GRADERS` until grading was deleted — the two grader reads
 and `list_quality_dimensions` went with it, and `Capability.GRADERS` itself no longer exists.

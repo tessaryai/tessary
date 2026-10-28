@@ -18,12 +18,17 @@ import {
 import { CauseCard } from "./components/CauseCard";
 import { ConnectRepositoryDialog } from "./components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "./components/useRepoPrompt";
+import { formatMeasure, signedMeasure } from "./classifiers/shiftStory";
 import type { RcaReport as RcaReportView, RcaRuledOutCheck } from "../api/types";
 
 const METRIC_LABEL: Record<string, string> = {
   frustration: "Frustrated sessions",
   groundedness: "Flagged answers",
 };
+
+/** A drift report's values are a mean in the measure's own units, never a rate. */
+const DRIFT_MEASURE: Record<string, string> = { duration_drift: "duration", cost_drift: "cost" };
+const DRIFT_LABEL: Record<string, string> = { duration_drift: "Duration", cost_drift: "Cost" };
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
 /** Frustration and groundedness rates sit at a few percent, where a whole-percent round hides the rise. */
@@ -88,6 +93,15 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
       </div>
     </Card>
   );
+}
+
+/** What the analysis says it read, built as one string so it reads as one sentence. */
+function CoverageLine({ coverage }: { coverage: RcaReportView["coverage"] }) {
+  if (!coverage) return null;
+  const parts = coverage.read.map((r) => `${r.count.toLocaleString()} ${r.role} rows`);
+  const read = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
+  const text = [read && `Read ${read}`, coverage.how_chosen].filter(Boolean).join(" · ");
+  return text ? <p className="text-small text-muted mt-1">{text}</p> : null;
 }
 
 function reportCauseKind(r: RcaReportView): CauseKind {
@@ -189,13 +203,23 @@ export function RcaReport() {
   const kind = reportCauseKind(r);
   const proven = r.causes.filter(shownAsCause);
   const leads = r.causes.filter((c) => !shownAsCause(c));
+  const driftMeasure = DRIFT_MEASURE[r.metric];
   const subtitle = frustration || groundedness
     ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}${
         groundedness ? "Flagged answers" : "Frustrated sessions"
       } rose to ${pct1(r.current_value)} from a learned ${pct1(r.prior_value)} · ${windowLabel(r.window_split)} onward`
-    : `${r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
-        worse ? "fell" : "moved"
-      } to ${pct(r.current_value)} from ${pct(r.prior_value)} · ${windowLabel(r.window_split)} onward vs the 24h before`;
+    : driftMeasure
+      ? `${r.subject_kind} · ${DRIFT_LABEL[r.metric]} ${worse ? "fell" : "rose"} to ${formatMeasure(
+          driftMeasure,
+          r.current_value,
+        )} from ${formatMeasure(driftMeasure, r.prior_value)} (${signedMeasure(driftMeasure, r.delta)}) · ${windowLabel(
+          r.window_split,
+        )} onward`
+      : `${r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
+          worse ? "fell" : "moved"
+        } to ${pct(r.current_value)} from ${pct(r.prior_value)} · ${windowLabel(r.window_split)} onward vs ${windowLabel(
+          r.window_from,
+        )} to ${windowLabel(r.window_split)}`;
 
   return (
     <PageBody>
@@ -290,6 +314,7 @@ export function RcaReport() {
                   </Badge>
                 </div>
                 {r.summary && <p className="text-small text-fg mt-2">{r.summary}</p>}
+                <CoverageLine coverage={r.coverage} />
               </div>
             </Card>
           )}

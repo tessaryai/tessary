@@ -13,6 +13,7 @@ const path = require('node:path');
 // Compact JSON length / 4 as a cheap token proxy.
 const INLINE_TOKEN_BUDGET = 2000;
 const PREVIEW_ROW_COUNT = 3;
+const PREVIEW_STRING_CHARS = 200;
 const SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 
 function tokenEstimate(compactJson) {
@@ -35,6 +36,18 @@ function fieldNamesOf(rows) {
   return first ? Object.keys(first) : [];
 }
 
+// A copy with every string over PREVIEW_STRING_CHARS cut, so a preview row cannot carry a page of text.
+function cutStrings(value) {
+  if (typeof value === 'string') {
+    return value.length > PREVIEW_STRING_CHARS ? `${value.slice(0, PREVIEW_STRING_CHARS)}…` : value;
+  }
+  if (Array.isArray(value)) return value.map(cutStrings);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cutStrings(v)]));
+  }
+  return value;
+}
+
 function withFile(parsed, workRelativeFile) {
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { ...parsed, file: workRelativeFile };
   if (Array.isArray(parsed)) return { file: workRelativeFile, rows: parsed };
@@ -49,7 +62,7 @@ function summarize(parsed, workRelativeFile) {
       file: workRelativeFile,
       row_count: rows.length,
       fields: fieldNamesOf(rows),
-      first_rows: rows.slice(0, PREVIEW_ROW_COUNT),
+      first_rows: rows.slice(0, PREVIEW_ROW_COUNT).map(cutStrings),
     };
     if (cursor !== undefined) summary.cursor = cursor;
     return summary;
@@ -88,23 +101,26 @@ function startMcpRelay({ servers, workDir }) {
   fs.mkdirSync(mcpDir, { recursive: true });
   let seq = 0;
 
-  function saveResult(toolName, payload) {
+  function saveResult(toolName, serialized) {
     seq += 1;
     const n = String(seq).padStart(3, '0');
     const safeName = String(toolName || 'call').replace(/[^A-Za-z0-9_-]/g, '_') || 'call';
     const absFile = path.join(mcpDir, `${n}-${safeName}.json`);
-    fs.writeFileSync(absFile, JSON.stringify(payload, null, 2));
+    fs.writeFileSync(absFile, serialized);
     return path.relative(workDir, absFile);
   }
 
+  // A result small enough to inline is saved pretty-printed for reading; a large one is saved compact,
+  // since the agent parses it rather than reads it, and indentation would roughly double a big page.
   function rewriteToolCallResult(toolName, respObj) {
     if (!respObj || typeof respObj !== 'object' || respObj.error) return respObj;
     const result = respObj.result;
     const payload = payloadOf(result);
     if (payload === undefined) return respObj; // nothing JSON-shaped to save; pass through.
-    const relFile = saveResult(toolName, payload);
     const compact = JSON.stringify(payload);
-    const body = tokenEstimate(compact) <= INLINE_TOKEN_BUDGET ? withFile(payload, relFile) : summarize(payload, relFile);
+    const inline = tokenEstimate(compact) <= INLINE_TOKEN_BUDGET;
+    const relFile = saveResult(toolName, inline ? JSON.stringify(payload, null, 2) : compact);
+    const body = inline ? withFile(payload, relFile) : summarize(payload, relFile);
     const rewritten = { ...respObj, result: { ...result } };
     if (result.structuredContent !== undefined) rewritten.result.structuredContent = body;
     rewritten.result.content = [{ type: 'text', text: JSON.stringify(body) }];

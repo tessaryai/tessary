@@ -17,6 +17,7 @@ import { PatternBlock } from "./findingCharts";
 import {
   ShiftBehind,
   ShiftChart,
+  ShiftMean,
   ShiftPins,
   formatMeasure,
   measureNoun,
@@ -29,6 +30,7 @@ import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
 import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
 import {
   FRUSTRATION_LIST_COPY,
+  FRUSTRATION_SHARE,
   FrustrationHeader,
   FrustrationRate,
   frustrationLoader,
@@ -219,6 +221,7 @@ export function FindingPage() {
           </div>
           <ShiftChart shift={shift} />
           <ShiftPins shift={shift} />
+          <ShiftMean shift={shift} />
         </section>
       )}
       {shift && <ShiftBehind shift={shift} />}
@@ -286,7 +289,7 @@ export function FindingPage() {
           >
             <div className="flex items-baseline gap-3">
               <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
-              <span className="text-subtle text-small">Share of sessions with a user frustrated with the agent</span>
+              <span className="text-subtle text-small">{FRUSTRATION_SHARE}</span>
             </div>
             <FrustrationRate detail={frustration} />
           </section>

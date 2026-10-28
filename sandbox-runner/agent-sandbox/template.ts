@@ -16,7 +16,7 @@ export const template = Template()
   .runCmd('apk upgrade --no-cache && apk add --no-cache bash git ca-certificates python3 py3-pip make g++ jq', { user: 'root' })
   // Same version as @opencode-ai/sdk below: agent-stream.js reads message parts whose field names move
   // between releases.
-  .npmInstall('opencode-ai@1.18.30', { g: true })
+  .npmInstall('opencode-ai@1.18.35', { g: true })
   // Size only: npm installs every ~180 MB platform variant on musl. Prune by the inode backing
   // bin/opencode.exe, since npm's pick differs per arch; the empty-inode guard must abort. Mirrored in
   // the sibling Dockerfile.
@@ -30,7 +30,7 @@ export const template = Template()
   // npm, not pnpm: no lockfile to honour and npm is already in the base image. Byte-identical to the
   // sibling Dockerfile's install line; undici is also pinned in package.json, bump all three together.
   .runCmd(
-    'mkdir -p /home/user && cd /home/user && npm install @opencode-ai/sdk@1.18.30 undici@^6.28.0 && npm cache clean --force',
+    'mkdir -p /home/user && cd /home/user && npm install @opencode-ai/sdk@1.18.35 undici@^6.29.1 && npm cache clean --force',
   )
   .setEnvs({ HOME: '/home/user', PIP_BREAK_SYSTEM_PACKAGES: '1' })
   .runCmd('mkdir -p /home/user')

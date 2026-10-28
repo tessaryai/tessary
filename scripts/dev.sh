@@ -45,9 +45,10 @@ dev_choices_export_sandbox_env
 # Fetched here so profiling composes with every dev mode; idempotent. The version must match backend/Dockerfile
 # and io.pyroscope:agent in backend/shared/pom.xml, or the tessary_pool label silently vanishes.
 if [ "${TESSARY_PROFILING:-0}" = "1" ]; then
-    PYROSCOPE_AGENT_VERSION="2.8.0"
+    PYROSCOPE_AGENT_VERSION="2.9.2"
     PROFILER_DIR="$REPO_ROOT/.local/pyroscope"
-    if [ ! -f "$PROFILER_DIR/pyroscope.jar" ]; then
+    # Keyed on the version file, so a bump refetches instead of keeping the old jar.
+    if [ ! -f "$PROFILER_DIR/pyroscope.jar" ] || [ "$(cat "$PROFILER_DIR/VERSION" 2>/dev/null)" != "$PYROSCOPE_AGENT_VERSION" ]; then
         echo "fetching pyroscope agent v${PYROSCOPE_AGENT_VERSION}..."
         mkdir -p "$PROFILER_DIR"
         # Temp path then move, so a failed fetch never leaves a truncated jar.
@@ -58,6 +59,7 @@ if [ "${TESSARY_PROFILING:-0}" = "1" ]; then
             exit 1
         fi
         mv "$PROFILER_DIR/pyroscope.jar.tmp" "$PROFILER_DIR/pyroscope.jar"
+        printf '%s\n' "$PYROSCOPE_AGENT_VERSION" > "$PROFILER_DIR/VERSION"
     fi
     # Profiling needs Alloy as the relay to Pyroscope, so force the `observability` profile, keeping any others.
     case ",${COMPOSE_PROFILES:-}," in

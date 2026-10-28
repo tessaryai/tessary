@@ -52,6 +52,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -68,6 +69,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.AbstractQueuedSynchronizer;
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -279,12 +283,18 @@ class JevFrustrationDetectorTest {
         SubstrateObservation second = eligibleTurn("t-2", "conv-b");
         AtomicInteger sends = new AtomicInteger();
         CountDownLatch inCall = new CountDownLatch(1);
+        AtomicReference<Thread> sweeping = new AtomicReference<>();
         DecisionClient hangs = (projectId, lane, t, request) -> {
             sends.incrementAndGet();
             inCall.countDown();
             try {
                 new CountDownLatch(1).await();
             } catch (InterruptedException e) {
+                // Keep the permit until close() has interrupted every session thread and parked again. Released
+                // sooner, the waiter can take the permit before its own interrupt lands.
+                awaitTrue(
+                        () -> awaitsTermination(Objects.requireNonNull(sweeping.get())),
+                        "the sweep interrupted every session");
                 Thread.currentThread().interrupt();
             }
             throw new IllegalStateException("the provider call was interrupted");
@@ -296,6 +306,7 @@ class JevFrustrationDetectorTest {
             page.set(d.score(signal("{}"), List.of(first, second)));
             keptInterrupt.set(Thread.currentThread().isInterrupted());
         });
+        sweeping.set(sweep);
 
         sweep.start();
         assertTrue(inCall.await(10, TimeUnit.SECONDS), "one turn reached the provider");
@@ -574,6 +585,20 @@ class JevFrustrationDetectorTest {
 
     private static Message text(String role, String text) {
         return new Message(role, text, true, false);
+    }
+
+    /** Whether {@code t} is parked in an executor's close(), whose termination wait names a latch's sync as blocker. */
+    private static boolean awaitsTermination(Thread t) {
+        return LockSupport.getBlocker(t) instanceof AbstractQueuedSynchronizer sync
+                && sync.getClass().getName().startsWith(CountDownLatch.class.getName() + "$");
+    }
+
+    private static void awaitTrue(BooleanSupplier condition, String what) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) throw new AssertionError("timed out waiting until " + what);
+            LockSupport.parkNanos(Duration.ofMillis(1).toNanos());
+        }
     }
 
     private static List<String> fieldNames(JsonNode node) {

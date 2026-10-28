@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -67,6 +68,37 @@ class ClassifierMethodCardTest {
             assertTrue(
                     cardOf(module.key()).contains("**The claim\'s numbers**"),
                     module.key() + "'s card never says where in get_finding its numbers sit");
+        }
+    }
+
+    /**
+     * Drift writes {@code changepoint} rows, and {@code baseline} rows on both arms. The bug is triage reading that the
+     * rows in front of it cannot exist and ruling the finding a defect.
+     */
+    @Test
+    void theDriftCardDoesNotDenyRolesTheDetectorWrites() {
+        String card = cardOf(BuiltInDetector.Kind.DURATION_DRIFT);
+
+        assertFalse(card.contains("No `changepoint`"), card);
+        assertFalse(card.contains("No `baseline` on a `:previous`"), card);
+        assertTrue(card.contains("- `changepoint`:"), card);
+    }
+
+    /**
+     * A change in who the users are or what they asked is a fact about the window, not a reason the claim fails. The
+     * bug is a real rise closed because the mix of users or questions moved.
+     */
+    @Test
+    void noCardMakesATrafficChangeANegativeByItself() {
+        for (ClassifierModelModule module : BuiltInClassifierCatalog.MODULES) {
+            String card = cardOf(module.key());
+            for (String phrase : List.of(
+                    "not who the users are",
+                    "not which documents were retrieved",
+                    "not from what it was",
+                    "Inputs that moved with the measure is the traffic changing")) {
+                assertFalse(card.contains(phrase), module.key() + "'s card rules on the traffic: " + phrase);
+            }
         }
     }
 

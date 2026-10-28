@@ -2835,6 +2835,8 @@ export interface components {
         Cause: {
             /** Format: int32 */
             affected_count: number;
+            /** Format: int32 */
+            affected_of: number | null;
             attribution: components["schemas"]["Attribution"] | null;
             change: string | null;
             confidence: string;
@@ -3074,6 +3076,10 @@ export interface components {
             /** Format: int64 */
             count: number;
         };
+        Coverage: {
+            how_chosen: string | null;
+            read: components["schemas"]["RoleCount"][];
+        };
         CreateOrgRequest: {
             name: string;
         };
@@ -3157,9 +3163,20 @@ export interface components {
             message?: string | null;
         };
         EvidenceSpanView: {
+            attributes: {
+                [key: string]: string;
+            };
+            /** Format: int64 */
+            cacheReadTokens: number | null;
+            /** Format: int64 */
+            cacheWriteTokens: number | null;
             callSiteId: string | null;
             errorType: string | null;
+            /** Format: int64 */
+            inputBytes: number | null;
             inputPreview: string | null;
+            /** Format: int64 */
+            inputTokens: number | null;
             kind: string | null;
             /** Format: int64 */
             latencyMs: number | null;
@@ -3167,13 +3184,23 @@ export interface components {
             models: string[];
             name: string | null;
             notRolledUp: boolean;
+            /** Format: int64 */
+            outputBytes: number | null;
             outputPreview: string | null;
+            /** Format: int64 */
+            outputTokens: number | null;
             partialCost: boolean;
+            payloadAvailable: boolean;
+            projectVersionId: string | null;
             /** Format: int32 */
             rank: number | null;
+            /** Format: int64 */
+            reasoningTokens: number | null;
             role: string;
             secretKey: string | null;
             sessionId: string | null;
+            /** Format: int32 */
+            sessionTraces: number | null;
             spanId: string | null;
             staleTotals: boolean;
             startedAt: string | null;
@@ -3184,6 +3211,9 @@ export interface components {
             /** Format: int64 */
             totalTokens: number | null;
             traceId: string | null;
+            /** Format: int32 */
+            traceIndex: number | null;
+            userId: string | null;
             violation: string | null;
         };
         EvidencedSignal: {
@@ -3856,6 +3886,14 @@ export interface components {
             pipeline: components["schemas"]["Pipeline"];
             repairs: string[];
         };
+        PlainShift: {
+            /** Format: double */
+            mean: number | null;
+            /** Format: double */
+            p50: number | null;
+            /** Format: double */
+            p95: number | null;
+        };
         PlatformDescriptor: {
             auth: string;
             default_base_url: string;
@@ -4123,6 +4161,7 @@ export interface components {
             call_site_id: string | null;
             causes: components["schemas"]["Cause"][];
             completed_at: string | null;
+            coverage: components["schemas"]["Coverage"] | null;
             created_at: string;
             /** Format: double */
             current_value: number;
@@ -4214,6 +4253,11 @@ export interface components {
         RetrievedDocumentView: {
             text: string;
             title: string | null;
+        };
+        RoleCount: {
+            /** Format: int32 */
+            count: number;
+            role: string;
         };
         RuleListView: {
             rules: components["schemas"]["RuleView"][];
@@ -4442,6 +4486,7 @@ export interface components {
             explains: components["schemas"]["Explains"][];
             /** Format: double */
             floor: number;
+            mean: components["schemas"]["Pair"] | null;
             measure: string;
             /** Format: int64 */
             nCur: number;
@@ -4451,6 +4496,7 @@ export interface components {
             /** Format: double */
             ratio: number;
             reference: string;
+            shift: components["schemas"]["PlainShift"] | null;
             sinceVersionId: string | null;
             tokens: components["schemas"]["Pair"][];
             /** Format: double */

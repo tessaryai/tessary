@@ -151,8 +151,8 @@ export function FrustrationEnableModal({
                   : `Costs about $0.04 per 1,000 messages on your ${choice.label} key.`}
               </li>
               <li>
-                Watches each call site from its first 100 sessions, keeps learning its normal rate until
-                1,000, and opens a case when the rate rises.
+                Watches each call site from its first 100 session-hours, keeps learning its normal rate until
+                1,000, and opens a case when the rate rises. A session counts once in each hour it is active.
               </li>
             </ul>
           </div>

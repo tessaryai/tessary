@@ -27,7 +27,7 @@ public class RcaReportRepository {
             + "r.subject_label, r.call_site_id, r.metric, r.report_kind, r.window_from, r.window_split, r.window_to, "
             + "r.current_value, r.prior_value, r.delta, j.status AS status, r.verdict, r.summary, "
             + "r.ruled_out, r.hypotheses, r.causes, r.detailed_report, r.engine, r.repo_available, "
-            + "r.created_at, r.completed_at";
+            + "r.coverage, r.created_at, r.completed_at";
 
     private static final String FROM = "FROM rca_report r JOIN job j ON j.id = r.job_id";
 
@@ -240,12 +240,13 @@ public class RcaReportRepository {
             @Nullable String ruledOutJson,
             @Nullable String causesJson,
             @Nullable String detailedReport,
-            @Nullable Boolean repoAvailable) {
+            @Nullable Boolean repoAvailable,
+            @Nullable String coverageJson) {
         jdbc.sql("""
                 UPDATE rca_report SET status = :status, verdict = :verdict, summary = :summary,
                     ruled_out = :ruledOut::jsonb, causes = :causes::jsonb,
                     detailed_report = :detailedReport, repo_available = :repoAvailable,
-                    completed_at = :now
+                    coverage = :coverage::jsonb, completed_at = :now
                 WHERE job_id = :jobId
                 """)
                 .param("status", status)
@@ -255,6 +256,7 @@ public class RcaReportRepository {
                 .param("causes", causesJson)
                 .param("detailedReport", detailedReport)
                 .param("repoAvailable", repoAvailable)
+                .param("coverage", coverageJson)
                 .param("now", Instant.now().toString())
                 .param("jobId", jobId)
                 .update();
@@ -291,6 +293,7 @@ public class RcaReportRepository {
                 rs.getString("detailed_report"),
                 rs.getString("engine"),
                 readNullableBoolean(rs, "repo_available"),
+                rs.getString("coverage"),
                 rs.getString("created_at"),
                 rs.getString("completed_at"));
     }

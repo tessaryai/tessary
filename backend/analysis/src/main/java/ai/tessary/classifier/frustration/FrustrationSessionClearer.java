@@ -16,8 +16,9 @@ import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
- * A {@code false_alarm} resolve clears the flags of every session a frustration case cites. The witness rows are every
- * frustrated session on the finding's call site, not a sample. Clearing makes the next replay count them calm and lets
+ * A {@code false_alarm} resolve clears the flags of every session a frustration case cites. The witness rows are the
+ * first flagged turn of every frustrated conversation-hour on the finding's call site, not a sample, each naming its
+ * session. Clearing makes the next replay count them calm and lets
  * the sweep send later turns again; earlier turns are not rescored and {@code frustration_assessment} is never touched.
  * Only the finding's call site is cleared.
  */

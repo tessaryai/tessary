@@ -85,27 +85,39 @@ no registered tool name is write-shaped, and none of the tools removed by the cu
 population its claim rests on at finding-open — one `finding_evidence` ref per measured row, uncapped —
 and this tool pages those rows back out joined to the span each names, so a row says what was measured
 on it rather than only where to find it: `{role, rank, sessionId, traceId, spanId, name, kind, status,
-level, errorType, startedAt, latencyMs, totalTokens, totalCost, model, callSiteId}` + `nextCursor`
+level, errorType, startedAt, latencyMs, totalTokens, totalCost, models, notRolledUp, partialCost,
+staleTotals, callSiteId, projectVersionId, userId, inputTokens, outputTokens, cacheReadTokens,
+cacheWriteTokens, reasoningTokens, traceIndex, sessionTraces, inputBytes, outputBytes,
+payloadAvailable, attributes}` + `nextCursor`
 (camelCase, unlike the snake_case tools around it), plus `count_only=true` for the per-role sizes with
 no rows, which answers in the ref shape under `refs`. The join is read-time, so it holds for evidence
-already recorded. Payload text is not on the page; the caller follows a row with `get_trace` /
-`get_span` / `list_spans`. Rows carrying their own numbers is what lets a lane rank a population of
+already recorded. `FindingEvidenceRepository.spanPage` computes the extra fields in the same SELECT:
+`startedAt` and `userId` fall back from the span to the trace to the session, so a session row has
+both; the turn position counts top-level traces of the session ordered `(started_at, id)`, stopping at
+`POSITION_CAP` (10,000); `attributes` is `SHORT_ATTRIBUTE_KEYS` filtered in SQL with
+`jsonb_each_text`, so a payload's message arrays never leave Postgres, and each value is masked.
+`FindingEvidenceSpanPageIntegrationTest` pins the null rules. Payload text is not on the page; the caller follows a row with `get_trace` /
+`get_span` / `list_spans`, or reads the whole population through `export_finding_evidence`, which pages
+every row of one finding with its text and every attribute, masked, under a row and byte budget. Rows carrying their own numbers is what lets a lane rank a population of
 hundreds and open the handful it chose, instead of opening a handful and calling that the population. That is what lets triage and RCA
 ship a dossier of the finding's *claim* alone and fetch the traffic on demand, rather than hydrating
 traces into a prompt — the materialize-what-is-finding-specific, read-substrate-over-MCP posture both
-lanes take. It is scoped and gated exactly like `get_finding` (same service, same project scope, a
+lanes take. The RCA dossier also carries a `checks.md` computed over the evidence rows alone, before the
+agent starts: the series and its change point, the flagged rows against the comparison rows by every
+field that differs, and the mix within groups. It is finding-specific, so it is materialized. It is scoped and gated exactly like `get_finding` (same service, same project scope, a
 cross-tenant id reads as not-found), and there is deliberately **no server-side sampling mode**: an
 agent that wants a stride or a draw takes it and says so in its citation.
 
 The launch product's own output is open (project, imported taxonomy, cases and the RCA reports they
 carry, findings, query, the substrate list/read tools, and the managed prompts). The full catalogue is
-**22 tools, and every one of them is listed**: `tools/list` returns all of them for any valid token. It
-was 22 once before, with two gated on `GRADERS`, until grading was deleted and took three with it:
-`list_graders` and `get_grader` (the gated pair) plus the open `list_quality_dimensions`, whose axes each
-named a grader. The per-tool capability field went later, once no tool declared one. The two prompt
-tools, `list_prompts(folder?, label?)` (at most 100 prompts, newest change first) and
-`get_prompt(name, version?, label?)` (one version; neither argument reads `production`), came back to 22
-without one: each checks `PROMPT_MANAGEMENT` in its handler and answers a tool error while it is off,
+**23 tools, and every one of them is listed**: `tools/list` returns all of them for any valid token.
+`export_finding_evidence` joined in 2026-10 as the bulk read of one finding's evidence. It was 22 with
+two gated on `GRADERS` until grading was deleted and took three with it: `list_graders` and
+`get_grader` (the gated pair) plus the open `list_quality_dimensions`, whose axes each named a grader.
+The per-tool capability field went later, once no tool declared one. The two prompt tools,
+`list_prompts(folder?, label?)` (at most 100 prompts, newest change first) and
+`get_prompt(name, version?, label?)` (one version; neither argument reads `production`), carry no such
+field either: each checks `PROMPT_MANAGEMENT` in its handler and answers a tool error while it is off,
 and both return the snake_case `PromptDtos` records. `McpCapabilityGateTest` pins the count alongside
 the read-only invariant.
 

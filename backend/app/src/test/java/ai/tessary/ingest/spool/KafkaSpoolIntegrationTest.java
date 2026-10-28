@@ -51,6 +51,11 @@ record KafkaSpoolIntegrationTest(
         var noRebalanceDelay =
                 REDPANDA.execInContainer("rpk", "cluster", "config", "set", "group_initial_rebalance_delay", "0");
         assertEquals(0, noRebalanceDelay.getExitCode(), noRebalanceDelay.getStderr());
+        // Like the rebalance delay, this container does not get dev-container mode's 10 MiB disk floor, so the broker
+        // keeps the 5 GiB production one and refuses every produce once Docker's disk has less free than that.
+        var smallDiskFloor = REDPANDA.execInContainer(
+                "rpk", "cluster", "config", "set", "storage_min_free_bytes", String.valueOf(10L * 1024 * 1024));
+        assertEquals(0, smallDiskFloor.getExitCode(), smallDiskFloor.getStderr());
         r.add("tessary.ingest.spool.mode", () -> "kafka");
         r.add("tessary.ingest.spool.kafka.bootstrap-servers", REDPANDA::getBootstrapServers);
         r.add("tessary.ingest.spool.kafka.partitions", () -> "4");

@@ -3,6 +3,7 @@ package ai.tessary.classifier.toolerror;
 
 import ai.tessary.classifier.toolerror.ToolErrorDetector.State;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -13,8 +14,10 @@ import org.jspecify.annotations.Nullable;
  * {@link ToolErrorConfig#freezeBaselineCalls()}; re-learning from a sliding window let a slow degradation drag its
  * reference along @param watermarkBucket the next sweep folds only buckets strictly after it @param pendingPinBy a
  * human decision; {@link ToolErrorStateRepository#save} never writes it @param resetAt a fence: a rebuild skips buckets
- * before it so a closed spell cannot re-accumulate @param learnedThrough not stored; kept across {@link #rebuilding} so
- * a rebuild never counts the reference's hours twice
+ * before it so a closed spell cannot re-accumulate @param learnedThrough the newest hour folded into the reference,
+ * stored as {@code learned_through}, so no pass ever counts an hour twice @param learnBefore a learning fence: an hour
+ * that ends after it never joins the reference. Changeset 0051 set it at an open finding's onset; {@link
+ * ToolErrorStateRepository#resetAndRelearn} lifts it, and a sweep never writes it
  */
 public record CarriedState(
         String toolKey,
@@ -25,7 +28,8 @@ public record CarriedState(
         @Nullable String pendingPinBy,
         @Nullable String pendingPinAt,
         @Nullable String resetAt,
-        @Nullable String learnedThrough) {
+        @Nullable String learnedThrough,
+        @Nullable String learnBefore) {
 
     public CarriedState(
             String toolKey,
@@ -45,7 +49,8 @@ public record CarriedState(
                 pendingPinBy,
                 pendingPinAt,
                 resetAt,
-                watermarkBucket);
+                watermarkBucket,
+                null);
     }
 
     /** Compared as instants: {@code Instant.toString} drops a zero fraction, so the strings do not order lexically. */
@@ -53,22 +58,52 @@ public record CarriedState(
         return resetAt != null && Instant.parse(bucket).isBefore(Instant.parse(resetAt));
     }
 
-    /** {@code state} is null for a key that has never swept. */
-    public static long learned(@Nullable CarriedState state, List<HourlyToolTally> tallies) {
+    /**
+     * Also true for an hour that ends after the learning fence, which is judged but never learned. The fence is an
+     * onset, so the hour it falls in holds the start of the rise.
+     */
+    public boolean fencedForLearning(String bucket) {
+        return fencedOff(bucket)
+                || (learnBefore != null
+                        && Instant.parse(bucket).plus(Duration.ofHours(1)).isAfter(Instant.parse(learnBefore)));
+    }
+
+    /**
+     * Whether the hour starting at {@code bucket} may join the reference: its end plus {@code settleHours} is not after
+     * {@code clock}, the key's newest bucket. Late spans and labels for it have landed by then.
+     */
+    public static boolean settled(String bucket, String clock, int settleHours) {
+        return !Instant.parse(bucket).plus(Duration.ofHours(1L + settleHours)).isAfter(Instant.parse(clock));
+    }
+
+    /** {@code state} is null for a key that has never swept. @param tallies one key's, oldest first */
+    public static long learned(@Nullable CarriedState state, List<HourlyToolTally> tallies, int settleHours) {
+        if (tallies.isEmpty()) return 0;
+        String clock = tallies.getLast().bucket();
         long learned = 0;
         for (HourlyToolTally t : tallies) {
-            if (state == null || !state.fencedOff(t.bucket())) learned += t.calls();
+            if (!settled(t.bucket(), clock, settleHours)) continue;
+            if (state == null || !state.fencedForLearning(t.bucket())) learned += t.calls();
         }
         return learned;
     }
 
     /**
      * For a classifier whose hourly tallies are not final when first read, which a resume would keep at their first
-     * partial count. The reference, pending pin, reset fence and {@link #learnedThrough} are kept.
+     * partial count. The reference, pending pin, both fences and {@link #learnedThrough} are kept.
      */
     public CarriedState rebuilding() {
         return new CarriedState(
-                toolKey, State.EMPTY, baseline, null, stateEpoch, pendingPinBy, pendingPinAt, resetAt, learnedThrough);
+                toolKey,
+                State.EMPTY,
+                baseline,
+                null,
+                stateEpoch,
+                pendingPinBy,
+                pendingPinAt,
+                resetAt,
+                learnedThrough,
+                learnBefore);
     }
 
     public boolean hasPendingPin() {
@@ -86,7 +121,8 @@ public record CarriedState(
                 Long.toString(config.arlTarget()),
                 Double.toString(config.shiftMultiple()),
                 Double.toString(config.shiftFloor()),
-                Double.toString(config.downArmMinRate()));
+                Double.toString(config.downArmMinRate()),
+                "settle=" + config.referenceSettleHours());
         if (!config.learnsWhileJudging()) return epoch;
         return epoch + "|learn=" + config.minBaselineCalls() + "-" + config.freezeBaselineCalls();
     }

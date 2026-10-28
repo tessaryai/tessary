@@ -38,11 +38,37 @@ final class MetricDriftDossier {
                 .append(", n_cur=")
                 .append(root.path("n_cur").asLong(0))
                 .append('\n');
+        JsonNode changepoint = root.path("changepoint");
+        if (changepoint.isObject()) {
+            sb.append("- change point: ")
+                    .append(changepoint.path("at").asText("?"))
+                    .append(" (")
+                    .append(changepoint.path("method").asText("?"))
+                    .append("; ")
+                    .append(changepoint.path("index").asInt(0))
+                    .append(" rows before it in the window)\n");
+        }
+        if (root.path("reference_from").isTextual()) {
+            sb.append("- reference from: ")
+                    .append(root.path("reference_from").asText())
+                    .append('\n');
+        }
 
         JsonNode q = root.path("quantiles");
         sb.append("\n## Reference vs. current (the paired before/after aggregate)\n\n");
         appendPair(sb, "p50", q.path("p50"));
         appendPair(sb, "p95", q.path("p95"));
+        appendPair(sb, "mean", root.path("mean"));
+        JsonNode shift = root.path("shift");
+        if (shift.isObject()) {
+            sb.append("- shift (now minus then): mean ")
+                    .append(signed(shift.path("mean")))
+                    .append(", p50 ")
+                    .append(signed(shift.path("p50")))
+                    .append(", p95 ")
+                    .append(signed(shift.path("p95")))
+                    .append('\n');
+        }
         JsonNode workload = root.path("workload");
         if (!workload.isMissingNode()) {
             appendPair(sb, "input_tokens_p50", workload.path("input_tokens_p50"));
@@ -59,14 +85,29 @@ final class MetricDriftDossier {
         }
         if (root.hasNonNull("control")) {
             JsonNode c = root.path("control");
-            sb.append("\nReference composition (rolling arm — no per-instance baseline rows exist for"
-                            + " this arm, only this ring): ")
+            sb.append("\nReference composition (rolling arm): ")
                     .append(c.path("days_used").asInt(0))
                     .append(" day(s) used, ")
                     .append(c.path("days_excluded_as_confirmed").asInt(0))
                     .append(" excluded as already-confirmed, oldest day ")
                     .append(c.path("oldest_day").asText("?"))
-                    .append(".\n");
+                    .append(". ");
+            JsonNode sample = c.path("baseline");
+            if (sample.isObject()) {
+                sb.append("`baseline` rows are a spread sample: ")
+                        .append(sample.path("rows").asInt(0))
+                        .append(" of ")
+                        .append(sample.path("of").asInt(0))
+                        .append(" rows from ")
+                        .append(sample.path("days").asInt(0))
+                        .append(" day(s) of this ring (")
+                        .append(sample.path("oldest_day").asText("?"))
+                        .append(" to ")
+                        .append(sample.path("newest_day").asText("?"))
+                        .append(").\n");
+            } else {
+                sb.append("No `baseline` sample: this ring was folded before its days kept rows.\n");
+            }
         }
 
         JsonNode explains = root.path("explains");
@@ -99,6 +140,11 @@ final class MetricDriftDossier {
         }
 
         return sb.toString();
+    }
+
+    private static String signed(JsonNode difference) {
+        if (!difference.isNumber()) return "—";
+        return (difference.asDouble() >= 0 ? "+" : "") + difference.asText();
     }
 
     private static void appendPair(StringBuilder sb, String label, JsonNode pair) {

@@ -231,7 +231,7 @@ describe("pointTooltip", () => {
     expect(pointTooltip(c, 0)).toEqual([
       "Oct 8, 09:00-12:00 UTC",
       "6.9% flagged",
-      "8 of 116 conversations",
+      "8 of 116 sessions",
       "+2.7 pp against baseline",
     ]);
   });
@@ -245,7 +245,7 @@ describe("pointTooltip", () => {
     expect(pointTooltip(c, 0)).toEqual([
       "Oct 8, 12:00-15:00 UTC, still filling",
       "5.0% flagged",
-      "2 of 40 conversations",
+      "2 of 40 sessions",
       "No baseline yet",
     ]);
   });

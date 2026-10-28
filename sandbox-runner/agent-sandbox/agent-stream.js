@@ -16,7 +16,7 @@ const { startMcpRelay } = require('./mcp-relay');
 const TRIAGE_AGENT = 'tessary-triage';
 
 // opencode's own scratch dirs, where its bash tool tells the model it may write; denying them would
-// contradict that. Only the run lane under a system prompt and the agent_run and triage sessions.
+// contradict that. Only the run lane under a system prompt and every session lane.
 const OPENCODE_TMP_GLOB = path.join(os.tmpdir(), 'opencode', '*');
 const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
   process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
@@ -193,12 +193,13 @@ function onsetCommit(onsetAt) {
 
 /**
  * The posture of each session.js lane. Edit is a blanket allow where allowed, because opencode
- * matches an edit glob against `/` when WORK is not a git repo. rca is read-only and may clone.
+ * matches an edit glob against `/` when WORK is not a git repo. rca may clone and denies the edit
+ * tool, so the cloned repo stays as checked out; its agent writes scripts to checks/ through bash.
  */
 const SESSION_LANES = Object.freeze({
   agent_run: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: null, clones: false }),
   triage: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: 'checks', clones: false }),
-  rca: Object.freeze({ edit: { '*': 'deny' }, scratchDirs: false, checksDir: null, clones: true }),
+  rca: Object.freeze({ edit: { '*': 'deny' }, scratchDirs: true, checksDir: 'checks', clones: true }),
 });
 
 // --- server lifecycle --------------------------------------------------------

@@ -48,7 +48,7 @@ const SCHEMAS_EXPLAINED =
   "Schemas arrive when your repository is connected and assessed.";
 
 const RATE_SUBJECTS: Record<string, string> = {
-  frustration: "conversations",
+  frustration: "sessions",
   groundedness: "answers",
   malformed_output: "outputs",
 };

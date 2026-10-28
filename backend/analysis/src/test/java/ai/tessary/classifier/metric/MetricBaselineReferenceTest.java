@@ -85,7 +85,8 @@ class MetricBaselineReferenceTest {
                         day,
                         window(grid, n, value),
                         new MetricWorkload(MetricWorkload.grid(grid.bins())),
-                        new MetricTokens(MetricTokens.grid(grid.bins())))
+                        new MetricTokens(MetricTokens.grid(grid.bins())),
+                        List.of())
                 .toJson();
     }
 

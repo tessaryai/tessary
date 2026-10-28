@@ -451,7 +451,8 @@ public class SampleProjectSeedListener {
                 null,
                 stat.sampleTraceIdsPost(),
                 List.of(),
-                stat.sampleTraceIdsPost().size()));
+                stat.sampleTraceIdsPost().size(),
+                null));
 
         String detailedReport = caseADetailedReport(stat, onsetDate, preInputTokens, postInputTokens, ratio);
 

@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.finding.BehaviorDtos;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -58,6 +61,7 @@ class AgenticRcaPromptTest {
      */
     private static final List<String> EXPECTED_TOOLS = List.of(
             "get_finding_evidence",
+            "export_finding_evidence",
             "get_trace",
             "get_span",
             "list_traces",
@@ -175,6 +179,9 @@ class AgenticRcaPromptTest {
         assertTrue(
                 AgenticRcaEngine.SYSTEM_PROMPT.contains("`dossier/findings/<n>-<id>/evidence.md`"),
                 "evidence.md is a first read");
+        assertTrue(
+                AgenticRcaEngine.SYSTEM_PROMPT.contains("`dossier/findings/<n>-<id>/checks.md`"),
+                "checks.md is a first read");
     }
 
     /** Nothing fills a placeholder in the fixed part, so the agent would read a literal one on every run. */
@@ -242,16 +249,54 @@ class AgenticRcaPromptTest {
         assertEquals(method, prompt.contains("dossier/method.md"), "no line points at a file that is not there");
     }
 
-    /** {@code member} rows are not a comparison side; only the finding's own {@code baseline} rows are. */
+    /**
+     * The comparison side is the finding's own {@code baseline} rows, else its unflagged {@code member} rows. The bug
+     * is a cause called on a value as common in healthy rows as in flagged ones, because the agent was told it had
+     * nothing to compare against.
+     */
     @ParameterizedTest(name = "repo={0} baseline={1} method={2}")
     @MethodSource("runs")
-    void theBaselineSnippetAppearsOnlyWithBaselineRows(boolean repo, boolean baseline, boolean method) {
+    void theComparisonSideIsBaselineElseUnflaggedMembers(boolean repo, boolean baseline, boolean method) {
         String prompt = prompt(repo, baseline, method);
 
         assertEquals(baseline, prompt.contains("are the traffic before the onset"));
+        assertFalse(AgenticRcaEngine.SYSTEM_PROMPT.contains("`member` rows are not"), "members are a comparison side");
         assertTrue(
-                AgenticRcaEngine.SYSTEM_PROMPT.contains("`member` rows are not\na comparison side"),
-                "said whether or not there is one");
+                AgenticRcaEngine.SYSTEM_PROMPT.contains("the unflagged\n`member` rows where there is no `baseline`"),
+                "said whether or not there is a baseline");
+    }
+
+    /**
+     * The bug is an agent reading a field the row does not carry: every name in the {@code get_finding_evidence} row
+     * list must be a component of the row the surface returns.
+     */
+    @Test
+    void theToolsFileSpellsTheRowFieldsAsTheSurfaceDoes() {
+        String tools = AgenticRcaEngine.TOOLS;
+        int bullet = tools.indexOf("- `get_finding_evidence(finding_id, role=");
+        assertTrue(bullet >= 0, tools);
+        int from = tools.indexOf("Each row carries what was MEASURED on it:", bullet);
+        int to = tools.indexOf("Bodies come from", from);
+        assertTrue(from >= 0 && to > from, "the row field list in " + tools);
+        Set<String> components = Stream.of(BehaviorDtos.EvidenceSpanView.class.getRecordComponents())
+                .map(RecordComponent::getName)
+                .collect(Collectors.toSet());
+
+        List<String> named = new ArrayList<>();
+        Matcher m = Pattern.compile("`([^`]+)`").matcher(tools.substring(from, to));
+        while (m.find()) named.add(m.group(1));
+
+        assertTrue(named.contains("models"), "the list names models: " + named);
+        List<String> unknown =
+                named.stream().filter(n -> !components.contains(n)).toList();
+        assertEquals(List.of(), unknown, "named in tools.md but not on the row");
+    }
+
+    /** The bug is an agent stopping at a fraction of its budget with the right next step still on its own list. */
+    @Test
+    void theSystemPromptStopsOnCertaintyNotOnTheClock() {
+        assertFalse(AgenticRcaEngine.SYSTEM_PROMPT.contains("When the time budget runs short"));
+        assertTrue(AgenticRcaEngine.SYSTEM_PROMPT.contains("Keep reading until you are certain"));
     }
 
     /** No repo is a lower ceiling, not a refusal: the agent is told the code side is unread and to attribute nothing. */
@@ -305,12 +350,31 @@ class AgenticRcaPromptTest {
                 List.of("change", "standing"),
                 texts(cause.path("properties").path("change").path("enum")));
         assertEquals(
-                List.of("code", "prompt", "tool", "model", "traffic", "upstream", "data", "other"),
+                List.of(
+                        "code",
+                        "prompt",
+                        "tool",
+                        "model",
+                        "deploy",
+                        "config",
+                        "infra",
+                        "traffic",
+                        "upstream",
+                        "data",
+                        "other"),
                 texts(cause.path("properties").path("type").path("enum")));
         assertEquals(4, props.path("causes").path("maxItems").asInt());
         assertEquals(
-                List.of("summary", "verdict", "causes", "ruled_out", "detailed_report"),
+                List.of("summary", "verdict", "causes", "ruled_out", "coverage", "detailed_report"),
                 texts(schema.path("required")));
+        assertEquals(List.of("read", "how_chosen"), texts(props.path("coverage").path("required")));
+        assertEquals(
+                List.of("role", "count"),
+                texts(props.path("coverage")
+                        .path("properties")
+                        .path("read")
+                        .path("items")
+                        .path("required")));
         assertEquals(
                 List.of(
                         "title",
@@ -360,6 +424,7 @@ class AgenticRcaPromptTest {
                 null,
                 null,
                 RcaReportRow.Engine.AGENTIC,
+                null,
                 null,
                 "2026-05-08T01:00:00Z",
                 null);

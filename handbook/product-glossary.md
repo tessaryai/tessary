@@ -86,7 +86,7 @@ Do not use “case” for every finding or suspected issue. A case indicates tha
 
 ## Session
 
-The messages that share a trace's session. For the frustration classifier, a session is the trace's thread when it has one, and its session otherwise; it counts frustrated sessions.
+The messages that share a trace's session. The frustration classifier counts a session once in each hour it has a scored message; a total across hours is session-hours.
 
 Use:
 

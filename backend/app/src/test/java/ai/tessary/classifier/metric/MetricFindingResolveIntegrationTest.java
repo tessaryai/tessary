@@ -175,6 +175,7 @@ record MetricFindingResolveIntegrationTest(
                         "discover-sales-prospects",
                         "{\"measure\":\"turn_duration\",\"ratio\":1.4,\"w1_log\":0.34}",
                         eventAt,
+                        eventAt,
                         Instant.parse(eventAt).minus(QUIET_WINDOW).toString(),
                         now)
                 .findingId();

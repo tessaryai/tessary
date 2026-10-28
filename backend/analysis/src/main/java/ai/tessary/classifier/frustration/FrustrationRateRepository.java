@@ -3,25 +3,33 @@ package ai.tessary.classifier.frustration;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * A session is one trial: a conversation on one call site, bucketed in the hour of its first scored turn there; a flag
- * on one call site never counts against another. Rebuilt from these counts every pass, since a later turn can flag an
- * old conversation.
+ * A conversation-hour is one trial: a conversation on one call site, in one UTC hour it has a scored turn there; it
+ * fails when a turn in that hour was flagged and the flag stands. A flag on one call site never counts against another.
+ * Rebuilt every pass, since a clear changes an old hour.
  */
 @Repository
 public class FrustrationRateRepository {
@@ -29,70 +37,75 @@ public class FrustrationRateRepository {
     /** Never alarms; the Tuning view counts it so the gap is visible. */
     public static final String UNASSIGNED = "";
 
+    /**
+     * A turn fails its hour only through its own detection, so a later turn's flag never fails an earlier hour of the
+     * same conversation.
+     */
+    private static final String FLAGGED_TURN = """
+            (a.frustrated AND EXISTS (
+                SELECT 1 FROM {detections} d
+                 WHERE d.project_id = a.project_id AND d.classifier_id = a.classifier_id
+                   AND d.subject_trace_id = a.trace_id
+                   AND COALESCE(d.evidence ->> 'call_site_id', '') = COALESCE(a.call_site_id, '')
+                   AND d.cleared_at IS NULL))""";
+
     /** Hours are truncated in UTC: in a half-hour session zone every bucket would sit at :30. */
     static final String HOURLY_TALLIES = """
-            WITH conv AS (
+            WITH trial AS (
               SELECT a.conversation_id,
                      COALESCE(a.call_site_id, '') AS call_site_id,
-                     MIN(a.turn_started_at) AS first_scored_at,
-                     BOOL_OR(a.frustrated) AS any_flag
+                     date_trunc('hour', a.turn_started_at, 'UTC') AS bucket,
+                     BOOL_OR({flaggedTurn}) AS flagged
                 FROM frustration_assessment a
                WHERE a.project_id = :pid AND a.classifier_id = :cid
                  AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :from
-               GROUP BY a.conversation_id, COALESCE(a.call_site_id, ''))
-            SELECT date_trunc('hour', c.first_scored_at, 'UTC') AS bucket, c.call_site_id,
+               GROUP BY 1, 2, 3)
+            SELECT bucket, call_site_id,
                    COUNT(*) AS conversations,
-                   COUNT(*) FILTER (WHERE c.any_flag AND EXISTS (
-                       SELECT 1 FROM {detections} d
-                        WHERE d.project_id = :pid AND d.classifier_id = :cid
-                          AND d.subject_session_id = c.conversation_id
-                          AND COALESCE(d.evidence ->> 'call_site_id', '') = c.call_site_id
-                          AND d.cleared_at IS NULL)) AS frustrated
-              FROM conv c
+                   COUNT(*) FILTER (WHERE flagged) AS frustrated
+              FROM trial
              GROUP BY 1, 2
              ORDER BY 1, 2
-            """;
+            """.replace("{flaggedTurn}", FLAGGED_TURN);
 
     /**
-     * {@code :windowFrom} is the replay window's start, so the first scored turn is found over the rows the tally read.
-     * Reads neither {@code request} nor {@code response}.
+     * Every turn in the window, ranked within its conversation-hour: {@code rn = 1} is its earliest flagged turn when
+     * one stands, else its latest turn. Reads neither {@code request} nor {@code response}.
      */
-    private static final String SPELL_SESSIONS = """
-            WITH conv AS (
-              SELECT a.conversation_id,
-                     MIN(a.turn_started_at) AS first_scored_at
+    private static final String RANKED_TURNS = """
+            turn AS (
+              SELECT a.conversation_id, a.trace_id, a.turn_started_at,
+                     date_trunc('hour', a.turn_started_at, 'UTC') AS bucket,
+                     {flaggedTurn} AS flagged
                 FROM frustration_assessment a
-               WHERE a.project_id = :pid AND a.classifier_id = :cid
-                 AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :windowFrom
+               WHERE a.project_id = :pid AND a.classifier_id = :cid AND a.scorer_version = :scorerVersion
                  AND COALESCE(a.call_site_id, '') = :callSite
-               GROUP BY a.conversation_id
-              {frustrated})
-            SELECT c.conversation_id{flaggedColumn}
-              FROM conv c
-              {flaggedJoin}
-             WHERE c.first_scored_at >= :onset AND c.first_scored_at < :until
-             ORDER BY c.first_scored_at DESC, c.conversation_id DESC
+                 AND a.turn_started_at >= :onset AND a.turn_started_at < :until),
+            ranked AS (
+              SELECT t.*, ROW_NUMBER() OVER (
+                         PARTITION BY t.conversation_id, t.bucket
+                         ORDER BY t.flagged DESC,
+                                  CASE WHEN t.flagged THEN t.turn_started_at END ASC,
+                                  t.turn_started_at DESC, t.trace_id DESC) AS rn
+                FROM turn t)""".replace("{flaggedTurn}", FLAGGED_TURN);
+
+    /** Per conversation-hour, the turn that stands for it. */
+    static final String TRIALS_SINCE = "WITH " + RANKED_TURNS + """
+
+            SELECT bucket, conversation_id, trace_id, flagged
+              FROM ranked
+             WHERE rn = 1
+             ORDER BY bucket DESC, flagged DESC, turn_started_at DESC, conversation_id DESC
             """;
 
-    private static final String FLAGGED_JOIN = """
-            JOIN LATERAL (
-                SELECT d.subject_trace_id
-                  FROM {detections} d
-                 WHERE d.project_id = :pid AND d.classifier_id = :cid
-                   AND d.subject_session_id = c.conversation_id
-                   AND COALESCE(d.evidence ->> 'call_site_id', '') = :callSite AND d.cleared_at IS NULL
-                 ORDER BY d.subject_started_at DESC NULLS LAST, d.id DESC
-                 LIMIT 1) d ON true""";
+    /** A finding's turn rows whose turn no longer stands for its conversation-hour. */
+    static final String SUPERSEDED = "WITH " + RANKED_TURNS + """
 
-    static final String FRUSTRATED_SINCE = SPELL_SESSIONS
-            .replace("{frustrated}", "HAVING BOOL_OR(a.frustrated)")
-            .replace("{flaggedColumn}", ", d.subject_trace_id")
-            .replace("{flaggedJoin}", FLAGGED_JOIN);
-
-    static final String SCORED_SINCE = SPELL_SESSIONS
-            .replace("{frustrated}", "")
-            .replace("{flaggedColumn}", "")
-            .replace("{flaggedJoin}", "");
+            SELECT e.role, e.session_id, e.trace_id
+              FROM finding_evidence e
+              JOIN ranked r ON r.trace_id = e.trace_id AND r.conversation_id = e.session_id
+             WHERE e.project_id = :pid AND e.finding_id = :fid AND e.span_id IS NULL AND r.rn > 1
+            """;
 
     /**
      * With {@code {filter}} set, only one RCA cause's share, read off the stored report so the request carries two
@@ -122,7 +135,8 @@ public class FrustrationRateRepository {
         }
     }
 
-    public record FrustratedConversation(String conversationId, String flaggedTraceId) {}
+    /** One trial of a spell: the turn that stands for a conversation in one hour. */
+    public record Trial(String bucket, String conversationId, String traceId, boolean flagged) {}
 
     /** @param message null once retention cleared the request or no assessment is kept */
     public record FlaggedTurn(
@@ -133,6 +147,11 @@ public class FrustrationRateRepository {
             @Nullable String startedAt,
             boolean cleared,
             @Nullable String message) {}
+
+    private static final ObjectMapper MAPPER =
+            new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+    private static final TypeReference<List<EarlierMessage>> EARLIER = new TypeReference<>() {};
 
     private final JdbcClient jdbc;
     private final ClassifierDetectionWriteRepository detections;
@@ -165,7 +184,7 @@ public class FrustrationRateRepository {
                 .map(OffsetDateTime::toInstant);
     }
 
-    /** {@code calls} is sessions, {@code failures} frustrated ones. */
+    /** {@code calls} is conversation-hours, {@code failures} frustrated ones. */
     public List<HourlyToolTally> hourlyTallies(
             String projectId, String classifierId, String scorerVersion, Instant from) {
         String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
@@ -182,45 +201,57 @@ public class FrustrationRateRepository {
                 .list();
     }
 
-    public List<FrustratedConversation> frustratedSince(
+    /** Newest hour first; within an hour, frustrated conversations first. */
+    public List<Trial> trialsSince(
             String projectId,
             String classifierId,
             String scorerVersion,
             String callSiteId,
-            Instant windowFrom,
             Instant onset,
             Instant until) {
         String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
-        return spellSessions(FRUSTRATED_SINCE.replace("{detections}", table), projectId, classifierId, scorerVersion)
+        return jdbc.sql(TRIALS_SINCE.replace("{detections}", table))
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("scorerVersion", scorerVersion)
                 .param("callSite", callSiteId)
-                .param("windowFrom", Timestamp.from(windowFrom))
                 .param("onset", Timestamp.from(onset))
                 .param("until", Timestamp.from(until))
-                .query((rs, n) ->
-                        new FrustratedConversation(rs.getString("conversation_id"), rs.getString("subject_trace_id")))
+                .query((rs, n) -> new Trial(
+                        rs.getObject("bucket", OffsetDateTime.class).toInstant().toString(),
+                        rs.getString("conversation_id"),
+                        rs.getString("trace_id"),
+                        rs.getBoolean("flagged")))
                 .list();
     }
 
-    public List<String> scoredSince(
+    /** A stored turn row of {@code findingId} whose turn no longer stands for its conversation-hour. */
+    public record Superseded(String role, String sessionId, String traceId) {}
+
+    /**
+     * Over the same window as {@link #trialsSince}: a later turn of the same hour was scored, or an earlier one was
+     * flagged, since the row was written.
+     */
+    public List<Superseded> superseded(
             String projectId,
             String classifierId,
             String scorerVersion,
             String callSiteId,
-            Instant windowFrom,
+            String findingId,
             Instant onset,
             Instant until) {
-        return spellSessions(SCORED_SINCE, projectId, classifierId, scorerVersion)
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
+        return jdbc.sql(SUPERSEDED.replace("{detections}", table))
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("scorerVersion", scorerVersion)
                 .param("callSite", callSiteId)
-                .param("windowFrom", Timestamp.from(windowFrom))
+                .param("fid", findingId)
                 .param("onset", Timestamp.from(onset))
                 .param("until", Timestamp.from(until))
-                .query((rs, n) -> rs.getString("conversation_id"))
+                .query((rs, n) ->
+                        new Superseded(rs.getString("role"), rs.getString("session_id"), rs.getString("trace_id")))
                 .list();
-    }
-
-    private JdbcClient.StatementSpec spellSessions(
-            String sql, String projectId, String classifierId, String scorerVersion) {
-        return jdbc.sql(sql).param("pid", projectId).param("cid", classifierId).param("scorerVersion", scorerVersion);
     }
 
     private static final String CAUSE_FILTER = """
@@ -306,6 +337,43 @@ public class FrustrationRateRepository {
                 .list()
                 .forEach(t -> out.put(t.traceId(), t));
         return out;
+    }
+
+    /**
+     * The {@code earlier_messages} each turn was judged against, read from the stored scorer request, keyed by trace
+     * id; the newest assessment of that trace on the call site decides. If retention cleared its request, the key has
+     * no entry.
+     */
+    public Map<String, List<EarlierMessage>> earlierMessages(
+            String projectId, String classifierId, String callSiteId, Collection<String> traceIds) {
+        Map<String, List<EarlierMessage>> out = new HashMap<>();
+        if (traceIds.isEmpty()) return out;
+        Set<String> decided = new HashSet<>();
+        jdbc.sql("SELECT a.trace_id, (a.request -> 'state' -> 'earlier_messages')::text AS earlier"
+                        + " FROM frustration_assessment a"
+                        + " WHERE a.project_id = :pid AND a.classifier_id = :cid"
+                        + " AND COALESCE(a.call_site_id, '') = :callSite"
+                        + " AND a.trace_id IN (:traces)"
+                        + " ORDER BY a.created_at DESC, a.id DESC")
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("callSite", callSiteId)
+                .param("traces", Set.copyOf(traceIds))
+                .query(rs -> {
+                    String trace = rs.getString("trace_id");
+                    List<EarlierMessage> messages = parseEarlier(rs.getString("earlier"));
+                    if (decided.add(trace) && messages != null) out.put(trace, messages);
+                });
+        return out;
+    }
+
+    private static @Nullable List<EarlierMessage> parseEarlier(@Nullable String json) {
+        if (json == null) return null;
+        try {
+            return MAPPER.readValue(json, EARLIER);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 
     /** @param sessionId null when the flagged trace carries no session */

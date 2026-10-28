@@ -268,6 +268,11 @@ window closed — the ring stays an exact record and the late verdict is retroac
 itself — `finding.onset_at`/`last_seen_at` for a metric-drift cause — is now also EVENT time, so it
 lines up with the ring's own day keys.
 
+Each day also keeps up to 100 of the rows folded into it, sampled rank-even and shared between that
+day's windows in proportion to their sample counts. When a finding opens against the control, it
+writes a spread sample of up to 200 of the used days' rows as `baseline`, once, and declares the
+sample under `control.baseline` in its payload.
+
 The wire word stays `previous`. It is the last segment of every `cause_key` ever written, so renaming
 it would split one bucket's history into two causes and reopen everything already resolved.
 
@@ -468,8 +473,9 @@ Fields to fill on `CaseDetection`:
 - `basis` — why this crossed **its own** bar, in this detector's terms. The ranked list mixes
   detectors that share no threshold, so say "distribution shift against the window pinned at the
   last deploy, W₁ 0.34 on logs over 1,180 turns" rather than normalizing to someone else's scale.
-- `onsetAt` — when the spell began. The close time of the first window that showed the shift,
-  not when the sweep noticed.
+- `onsetAt` — when the spell began. The change point inside the first window that showed the
+  shift, a one-sided CUSUM of log values against the reference mean, not the window close and not
+  when the sweep noticed.
 - `severity` — 0..1, for ordering only, never rendered as a number.
 
 ### 8.2 Catalog
