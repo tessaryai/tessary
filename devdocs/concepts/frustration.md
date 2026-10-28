@@ -90,7 +90,8 @@ one cleared by a `false_alarm` resolve stops being one.
 Each call site starts being judged once its reference holds `min_baseline_conversations` (100), and
 the reference keeps learning each later hour until it holds `freeze_baseline_conversations` (1,000),
 then stops moving. A blob without `freeze_baseline_conversations` freezes the reference the moment
-judging starts. The reference is its own past, not a shipped number. The consequence is plain: a call
+judging starts. An hour is learned only 24 hours after it ends on the call site's own clock
+(`reference_settle_hours`), since a session's flag can arrive on a later turn. The reference is its own past, not a shipped number. The consequence is plain: a call
 site that frustrates users from its first day learns that as its normal and is flagged only if it gets
 worse. A call site too quiet to reach 100 sessions inside the 28-day replay window is never
 judged, and its Tuning row says `learning n/100`.

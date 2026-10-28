@@ -75,7 +75,8 @@ Only a rise is reported.
 
 Each call site starts being judged once its reference holds `min_baseline_traces` (100), and the
 reference keeps learning each later hour until it holds `freeze_baseline_traces` (1,000), then stops
-moving. `arl_target` is 50,000: the traces a healthy call site runs between false alarms.
+moving. An hour is learned only 6 hours after it ends on the call site's own clock
+(`reference_settle_hours`), by when its traces' answers have been scored. `arl_target` is 50,000: the traces a healthy call site runs between false alarms.
 `shift_floor` is 0.02, the model's own false-alarm rate at the default threshold. Judging from 100
 while learning to 1,000 keeps false findings during learning low (0.6% to 2.6% on simulated null
 traffic) and matches waiting for 1,000 afterwards; freezing at 100 roughly doubles the false findings

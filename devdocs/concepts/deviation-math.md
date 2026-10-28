@@ -340,7 +340,9 @@ numerator and denominator drop together. The reference is built from the leading
 `min_baseline_calls`, then **frozen** — a reference that moved with the traffic would drift along with
 a slow degradation and never notice it. A classifier may set `freeze_baseline_calls` above the minimum:
 judging still starts at `min_baseline_calls`, and each later hour is judged against the reference and
-then added to it, until the reference holds `freeze_baseline_calls` and stops moving.
+then added to it, until the reference holds `freeze_baseline_calls` and stops moving. An hour is added
+only once it has settled: its end plus `reference_settle_hours` (1 for tool_error and Malformed Output)
+has passed on the key's own event clock, its newest hour.
 
 Recompute-per-read deletes the cursor/watermark/double-count bug class rather than defending against
 it, and a retuned threshold takes effect on the next pass instead of invalidating stored state. The
