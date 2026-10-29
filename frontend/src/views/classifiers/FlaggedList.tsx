@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The pane draws the real traces, not the scored request: that copy is clipped, text-only and cleared
 // by retention. Only the selected row's traces are fetched, keyed like the trace page's read.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   infiniteQueryOptions,
@@ -18,6 +18,9 @@ import { useListPaging } from "./useListPaging";
 import { useSkeletonFlag } from "./useSkeletonFlag";
 
 const FLAGGED_BOTTOM_GAP = 24;
+
+/** The most rows a reader can pick at once. */
+const MAX_PICKS = 20;
 
 const FRAME = "grid rounded-card border border-border overflow-hidden bg-surface";
 const FRAME_STYLE = { gridTemplateColumns: "320px minmax(0, 1fr)", height: 720 };
@@ -78,6 +81,8 @@ export function FlaggedList({
   missingText,
   dim = true,
   contextNote,
+  rowAction,
+  selectionActions,
 }: {
   first?: FlaggedPage;
   loadPage: FlaggedLoader;
@@ -91,6 +96,10 @@ export function FlaggedList({
   missingText: string;
   dim?: boolean;
   contextNote?: string;
+  /** Drawn in the pane's header for the open row. */
+  rowAction?: (row: FlaggedRow) => ReactNode;
+  /** Passing it gives each row a checkbox; drawn in a bar above the list for every picked row, in pick order. */
+  selectionActions?: (rows: FlaggedRow[]) => ReactNode;
 }) {
   const { api } = useTenant();
   const [one, many] = unit;
@@ -112,42 +121,97 @@ export function FlaggedList({
   const shown = pages.data?.pages.flatMap((p) => p.rows) ?? [];
   const total = pages.data?.pages[0]?.total ?? first?.total ?? 0;
 
-  const [picked, setPicked] = useState<{ filterKey: string; key: string } | null>(null);
-  const pickedKey = picked?.filterKey === filterKey ? picked.key : null;
-  const selected = shown.find((r) => rowKey(r) === pickedKey) ?? shown[0];
+  const [opened, setOpened] = useState<{ filterKey: string; key: string } | null>(null);
+  const openedKey = opened?.filterKey === filterKey ? opened.key : null;
+  const selected = shown.find((r) => rowKey(r) === openedKey) ?? shown[0];
+
+  // Picks hold the row itself, not its place, so they outlive Load more and a filter that hides them.
+  const [picks, setPicks] = useState<{ listKey: string; rows: FlaggedRow[] }>({ listKey, rows: [] });
+  const picked = picks.listKey === listKey ? picks.rows : [];
+  const pickedKeys = new Set(picked.map(rowKey));
+  const full = picked.length >= MAX_PICKS;
+  const togglePick = (row: FlaggedRow) => {
+    const key = rowKey(row);
+    setPicks({
+      listKey,
+      rows: pickedKeys.has(key) ? picked.filter((r) => rowKey(r) !== key) : [...picked, row],
+    });
+  };
+  const bar = selectionActions && picked.length > 0 && (
+    <div
+      role="toolbar"
+      aria-label={`Selected ${many}`}
+      className="mb-2.5 flex flex-wrap items-center gap-3 rounded-card border border-border-strong bg-raised py-2 pr-2.5 pl-3.5 text-small text-fg"
+    >
+      <span>{picked.length} selected</span>
+      {selectionActions(picked)}
+      {full && (
+        <span className="text-muted">
+          You can pick up to {MAX_PICKS} {many}.
+        </span>
+      )}
+      <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setPicks({ listKey, rows: [] })}>
+        Clear
+      </Button>
+    </div>
+  );
+  // The bar takes the first slot even when it is empty, so a first pick never remounts the list beside it.
+  const withBar = (content: ReactNode) => (
+    <>
+      {bar}
+      {content}
+    </>
+  );
 
   const { isFetchingNextPage, fetchNextPage } = pages;
   const { list, end, hasNextPage } = useListPaging(filterKey, pages);
 
   if (pages.isLoading || skeleton) {
-    return <RowsSkeleton label={`Loading ${many}`} />;
+    return withBar(<RowsSkeleton label={`Loading ${many}`} />);
   }
   if (shown.length === 0) {
-    return (
+    return withBar(
       <p className="text-subtle m-0 text-body" style={{ maxWidth: 560 }}>
         {emptyText}
-      </p>
+      </p>,
     );
   }
 
-  return (
+  return withBar(
     <div className={FRAME} style={FRAME_STYLE}>
       <div className="flex flex-col min-h-0 border-r border-border">
         <ul ref={list} className="m-0 p-0 list-none overflow-y-auto flex-1" aria-label={listLabel}>
           {shown.map((r) => {
             const key = rowKey(r);
             const on = key === (selected && rowKey(selected));
+            const isPicked = pickedKeys.has(key);
             return (
-              <li key={key}>
+              <li
+                key={key}
+                className={cn(
+                  "flex border-b border-border transition-colors",
+                  on ? "bg-raised" : "bg-surface hover:bg-hover",
+                )}
+                style={{ transitionDuration: "var(--duration-micro)" }}
+              >
+                {selectionActions && (
+                  <input
+                    type="checkbox"
+                    aria-label={`Pick this ${one}`}
+                    checked={isPicked}
+                    disabled={full && !isPicked}
+                    onChange={() => togglePick(r)}
+                    className="mt-3.5 ml-4 size-4 shrink-0 cursor-pointer accent-accent disabled:cursor-not-allowed"
+                  />
+                )}
                 <button
                   type="button"
                   aria-pressed={on}
-                  onClick={() => setPicked({ filterKey, key })}
+                  onClick={() => setOpened({ filterKey, key })}
                   className={cn(
-                    "flex w-full flex-col text-left cursor-pointer border-b border-border py-3 px-4 transition-colors",
-                    on ? "bg-raised" : "bg-surface hover:bg-hover",
+                    "flex min-w-0 flex-1 flex-col text-left cursor-pointer py-3 pr-4",
+                    selectionActions ? "pl-2.5" : "pl-4",
                   )}
-                  style={{ transitionDuration: "var(--duration-micro)" }}
                 >
                   <span className="flex justify-between font-mono text-small text-muted">
                     <span>{r.flaggedAt ? new Date(r.flaggedAt).toLocaleString(undefined, DAY_TIME) : "–"}</span>
@@ -187,9 +251,10 @@ export function FlaggedList({
           missingText={missingText}
           dim={dim}
           contextNote={contextNote}
+          action={rowAction?.(selected)}
         />
       )}
-    </div>
+    </div>,
   );
 }
 
@@ -247,6 +312,7 @@ function Traces({
   missingText,
   dim,
   contextNote,
+  action,
 }: {
   row: FlaggedRow;
   basePath: string;
@@ -254,6 +320,7 @@ function Traces({
   missingText: string;
   dim: boolean;
   contextNote?: string;
+  action?: ReactNode;
 }) {
   const { api } = useTenant();
   const ids = row.contextTraceIds.length > 0 ? row.contextTraceIds : [row.traceId];
@@ -317,6 +384,7 @@ function Traces({
               View session
             </Link>
           )}
+          {action}
         </span>
       </div>
       {/* No scroll anchoring: the browser's adjustment would undo the alignment above. */}
