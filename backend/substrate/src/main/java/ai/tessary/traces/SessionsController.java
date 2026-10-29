@@ -78,7 +78,7 @@ public class SessionsController {
                 filter));
     }
 
-    /** Given the traces list's filters, also names the traces that pass them. */
+    /** Given the traces list's filters, also names the traces that pass them, with any picked detection. */
     @GetMapping("/{sessionId}")
     public ApiResponse<SessionDtos.SessionDetail> detail(
             TenantContext ctx,

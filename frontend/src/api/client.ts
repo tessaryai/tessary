@@ -477,7 +477,7 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     listSessions: (params?: { limit?: number; cursor?: string; include?: "totals" } & TraceFilterParams) =>
       http<SessionsPageView>(withQuery(`${base}/sessions`, params)),
 
-    /** `matched_trace_ids` names the traces that pass the filters. */
+    /** `matched_trace_ids` names the traces that pass the filters, with any picked detection. */
     getSession: (sessionId: string, filters?: TraceFilterParams) =>
       http<SessionDetailView>(withQuery(`${base}/sessions/${enc(sessionId)}`, filters)),
 
