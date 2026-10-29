@@ -16,6 +16,7 @@ import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.ToolCallRepository;
 import ai.tessary.storage.ToolCallRow;
 import ai.tessary.storage.TraceDetectionRepository;
+import ai.tessary.storage.TraceFilters;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
@@ -166,8 +167,9 @@ public class TracesController {
             // when (default) | tokens | cost | latency — each an indexed rollup column, NULLS LAST so a
             // trace that has not rolled up sorts to the end rather than to either extreme.
             @RequestParam(required = false) @Nullable String sort,
-            // A classifier id, or "any": keeps a trace a classifier flagged.
-            @RequestParam(required = false) @Nullable String detectedBy,
+            // Classifier ids, comma-separated: keeps a trace every one of them flagged. "any" alone keeps a
+            // trace any classifier flagged.
+            @RequestParam(required = false) @Nullable List<String> detectedBy,
             // Keeps a trace when any of its spans was produced from this managed prompt.
             @RequestParam(required = false) @Nullable String promptName,
             // Narrows promptName to the spans that sent this version; ignored without promptName.
@@ -185,7 +187,7 @@ public class TracesController {
                 toTimestamp,
                 status,
                 q,
-                detectedBy,
+                TraceFilters.detectedBy(detectedBy),
                 promptName,
                 promptVersion);
         int pageSize = TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT);

@@ -341,7 +341,8 @@ export type TraceFilterParams = {
   q?: string;
   callSite?: string;
   hasCallSite?: boolean;
-  detectedBy?: string;
+  /** Classifier ids a trace must all have, or ["any"]. */
+  detectedBy?: string[];
   promptName?: string;
   /** Sent only with promptName; the server ignores it alone. */
   promptVersion?: string;
@@ -489,8 +490,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       q?: string;
       callSite?: string;
       hasCallSite?: boolean;
-      /** A classifier id, or "any". */
-      detectedBy?: string;
+      /** Classifier ids a trace must all have, or ["any"]. */
+      detectedBy?: string[];
       promptName?: string;
       /** Sent only with promptName; the server ignores it alone. */
       promptVersion?: string;
@@ -506,7 +507,7 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     listSessions: (params?: { limit?: number; cursor?: string; include?: "totals" } & TraceFilterParams) =>
       http<SessionsPageView>(withQuery(`${base}/sessions`, params)),
 
-    /** `matched_trace_ids` names the traces that pass the filters. */
+    /** `matched_trace_ids` names the traces that pass the filters, with any picked detection. */
     getSession: (sessionId: string, filters?: TraceFilterParams) =>
       http<SessionDetailView>(withQuery(`${base}/sessions/${enc(sessionId)}`, filters)),
 

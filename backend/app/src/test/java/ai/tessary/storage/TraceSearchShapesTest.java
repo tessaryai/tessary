@@ -107,6 +107,6 @@ record TraceSearchShapesTest(
     }
 
     private static TraceV2Repository.TraceQuery query(String q) {
-        return new TraceV2Repository.TraceQuery(null, null, null, null, null, null, null, q, null, null, null);
+        return new TraceV2Repository.TraceQuery(null, null, null, null, null, null, null, q, List.of(), null, null);
     }
 }

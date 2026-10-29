@@ -125,6 +125,27 @@ class McpSubstrateReadToolsTest {
         assertNull(sort.getValue(), "list_traces must not ask the repository for a rollup sort");
     }
 
+    /**
+     * {@code detected_by} reaches the query as the list of ids a trace must all have; "any" beside an id is the REST
+     * surface's 400 as a tool error, and a bare string is refused. The bugs are an argument the tool drops, and one it
+     * quietly reinterprets.
+     */
+    @Test
+    void listTraces_detectedByReachesTheQueryAndAnyBesideAnIdIsAnError() throws Exception {
+        structured(mcp.callTool("list_traces", "{\"detected_by\":[\"c-1\",\"c-2\"]}"));
+        ArgumentCaptor<TraceV2Repository.TraceQuery> query =
+                ArgumentCaptor.forClass(TraceV2Repository.TraceQuery.class);
+        verify(traces).list(eq(PROJECT_ID), query.capture(), any(), anyInt(), any(), any(), any());
+        assertEquals(List.of("c-1", "c-2"), query.getValue().detectedBy());
+
+        assertEquals(
+                "detectedBy takes 'any' on its own, or up to 10 classifier ids",
+                errorText(mcp.callTool("list_traces", "{\"detected_by\":[\"any\",\"c-1\"]}")));
+        assertEquals(
+                "argument detected_by must be an array of classifier id strings",
+                errorText(mcp.callTool("list_traces", "{\"detected_by\":\"c-1\"}")));
+    }
+
     @Test
     void listTraces_clampsAnOversizedLimitToTheHundredRowCap() throws Exception {
         List<TraceV2Repository.Summary> rows = new ArrayList<>();

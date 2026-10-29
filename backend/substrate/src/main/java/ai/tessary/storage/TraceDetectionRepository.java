@@ -5,7 +5,7 @@ import ai.tessary.detection.DetectionTable;
 import ai.tessary.detection.DetectionTableRegistry;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -85,43 +85,61 @@ public class TraceDetectionRepository {
     }
 
     /**
-     * Classifier ids are looked up first and bound, never joined: bound, the planner uses that classifier's statistics
-     * (887 ms vs 43 ms over 2M traces, {@code TraceDetectionQueryPlanIT}).
+     * One {@code EXISTS} over {@code t} per picked classifier, or a single one for {@link #ANY}; joined with AND a trace
+     * has every pick, with OR any of them. An arm per id rather than per table, since classifiers share a table. A pick
+     * the lookup does not find is a {@code FALSE} arm. Ids are looked up first and bound, never joined: bound, the
+     * planner uses that classifier's statistics (887 ms vs 43 ms over 2M traces).
      */
-    public void appendFilter(String projectId, StringBuilder where, Map<String, Object> params, String detectedBy) {
-        boolean any = ANY.equals(detectedBy);
-        Map<String, List<String>> idsByDetector = new HashMap<>();
+    public List<String> arms(String projectId, Map<String, Object> params, List<String> detectedBy) {
+        boolean any = detectedBy.equals(List.of(ANY));
+        Map<String, List<String>> idsByDetector = new LinkedHashMap<>();
+        Map<String, String> detectorById = new LinkedHashMap<>();
         if (!sources.isEmpty()) {
             var lookup = jdbc.sql(
                             "SELECT id, detector FROM classifier WHERE project_id = :pid AND detector IN (:detectors)"
-                                    + (any ? "" : " AND id = :id"))
+                                    + (any ? "" : " AND id IN (:ids)"))
                     .param("pid", projectId)
                     .param(
                             "detectors",
                             sources.stream().map(DetectionTable::detectorKind).toList());
             if (!any) {
-                lookup = lookup.param("id", detectedBy);
+                lookup = lookup.param("ids", detectedBy);
             }
             lookup.query((rs, n) -> Map.entry(rs.getString("detector"), rs.getString("id")))
                     .list()
-                    .forEach(e -> idsByDetector
-                            .computeIfAbsent(e.getKey(), k -> new ArrayList<>())
-                            .add(e.getValue()));
+                    .forEach(e -> {
+                        idsByDetector
+                                .computeIfAbsent(e.getKey(), k -> new ArrayList<>())
+                                .add(e.getValue());
+                        detectorById.put(e.getValue(), e.getKey());
+                    });
         }
         List<String> arms = new ArrayList<>();
-        for (DetectionTable s : sources) {
-            List<String> ids = idsByDetector.get(s.detectorKind());
-            if (ids == null) {
-                continue;
+        if (any) {
+            List<String> perTable = new ArrayList<>();
+            for (DetectionTable s : sources) {
+                List<String> ids = idsByDetector.get(s.detectorKind());
+                if (ids != null) {
+                    perTable.add(exists(s, params, ids));
+                }
             }
-            String name = "detectedBy" + arms.size();
-            params.put(name, ids);
-            arms.add("EXISTS (SELECT 1 FROM " + s.table() + " d WHERE d.project_id = t.project_id"
-                    + " AND d.classifier_id IN (:" + name + ") AND d.subject_trace_id = t.id" + uncleared(s) + ")");
+            arms.add(perTable.isEmpty() ? "FALSE" : "(" + String.join(" OR ", perTable) + ")");
+            return arms;
         }
-        where.append(" AND (")
-                .append(arms.isEmpty() ? "FALSE" : String.join(" OR ", arms))
-                .append(')');
+        Map<String, DetectionTable> sourceByDetector =
+                sources.stream().collect(Collectors.toMap(DetectionTable::detectorKind, s -> s));
+        for (String id : detectedBy) {
+            String detector = detectorById.get(id);
+            arms.add(detector == null ? "FALSE" : exists(sourceByDetector.get(detector), params, List.of(id)));
+        }
+        return arms;
+    }
+
+    private static String exists(DetectionTable s, Map<String, Object> params, List<String> ids) {
+        String name = "detectedBy" + params.size();
+        params.put(name, ids);
+        return "EXISTS (SELECT 1 FROM " + s.table() + " d WHERE d.project_id = t.project_id"
+                + " AND d.classifier_id IN (:" + name + ") AND d.subject_trace_id = t.id" + uncleared(s) + ")";
     }
 
     private static String uncleared(DetectionTable s) {

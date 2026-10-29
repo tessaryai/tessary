@@ -151,11 +151,7 @@ public class SessionRepository {
         }
         try {
             if (TraceFilters.narrows(filter)) {
-                var traceWhere =
-                        new StringBuilder(" AND EXISTS (SELECT 1 FROM trace t WHERE t.project_id = s.project_id"
-                                + " AND t.session_id = s.id AND NOT t.is_deleted");
-                filters.append(projectId, traceWhere, params, filter);
-                where.append(traceWhere).append(')');
+                filters.appendForSessions(projectId, where, params, filter);
             }
             String cols = Arrays.stream(COLS.split(", ")).map(c -> "s." + c).collect(Collectors.joining(", "));
             return jdbc.sql("SELECT " + cols + " FROM session s " + where

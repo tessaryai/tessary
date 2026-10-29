@@ -15,6 +15,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
@@ -24,7 +25,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  */
 @SpringBootTest
 record TraceDetectionRepositoryTest(
-        JdbcClient jdbc, TenantService tenants, ClassifierRepository classifiers, TraceV2Repository traces) {
+        JdbcClient jdbc,
+        NamedParameterJdbcTemplate named,
+        TenantService tenants,
+        ClassifierRepository classifiers,
+        TraceV2Repository traces,
+        SpanPayloadRepository payloads,
+        TraceSearchProperties search) {
 
     private static final String T0 = "2026-08-01T00:00:00Z";
 
@@ -70,6 +77,33 @@ record TraceDetectionRepositoryTest(
         assertEquals(List.of(), listedBy(pid, malformed));
     }
 
+    /**
+     * A pick of several classifiers keeps a trace only when every one of them flagged it, and a pick the project has no
+     * classifier for keeps nothing. The bugs are picks joined with OR, and two classifiers of one table read as a
+     * single {@code IN} that either one satisfies.
+     */
+    @Test
+    void aPickOfSeveralKeepsOnlyTracesEveryOneFlagged() {
+        String pid = project("trace-filter-all-of");
+        String frustration = classifier(pid, "frustration", "Frustration");
+        String malformedA = classifier(pid, "k-malformed-a", "malformed_output", "Malformed A");
+        String malformedB = classifier(pid, "k-malformed-b", "malformed_output", "Malformed B");
+        for (String trace : List.of("tr-both", "tr-frustration", "tr-malformed", "tr-two-malformed")) {
+            seedTrace(pid, trace);
+        }
+        flag("frustration_detection", pid, frustration, "tr-both");
+        flag("frustration_detection", pid, frustration, "tr-frustration");
+        flag("malformed_output_detection", pid, malformedA, "tr-both");
+        flag("malformed_output_detection", pid, malformedA, "tr-malformed");
+        flag("malformed_output_detection", pid, malformedA, "tr-two-malformed");
+        flag("malformed_output_detection", pid, malformedB, "tr-two-malformed");
+
+        var shown = new TraceV2Repository(jdbc, named, new TraceFilters(repository(true), payloads, search));
+        assertEquals(List.of("tr-both"), listedBy(shown, pid, frustration, malformedA));
+        assertEquals(List.of("tr-two-malformed"), listedBy(shown, pid, malformedA, malformedB));
+        assertEquals(List.of(), listedBy(shown, pid, frustration, "no-such-classifier"));
+    }
+
     /** An empty traces page or sessions page has no flags. The bug is an {@code IN ()} that Postgres rejects. */
     @Test
     void anEmptyPageReadsNoFlags() {
@@ -92,9 +126,13 @@ record TraceDetectionRepositoryTest(
     }
 
     private List<String> listedBy(String pid, String classifierId) {
+        return listedBy(traces, pid, classifierId);
+    }
+
+    private static List<String> listedBy(TraceV2Repository repo, String pid, String... classifierIds) {
         var query = new TraceV2Repository.TraceQuery(
-                null, null, null, null, null, null, null, null, classifierId, null, null);
-        return traces.list(pid, query, null, 10, null, null, null).stream()
+                null, null, null, null, null, null, null, null, List.of(classifierIds), null, null);
+        return repo.list(pid, query, null, 10, null, null, null).stream()
                 .map(TraceV2Repository.Summary::id)
                 .toList();
     }
@@ -104,7 +142,11 @@ record TraceDetectionRepositoryTest(
     }
 
     private String classifier(String pid, String detector, String name) {
-        return ClassifierRows.insert(classifiers, pid, "k-" + detector, name, detector, null);
+        return classifier(pid, "k-" + detector, detector, name);
+    }
+
+    private String classifier(String pid, String key, String detector, String name) {
+        return ClassifierRows.insert(classifiers, pid, key, name, detector, null);
     }
 
     private void seedTrace(String pid, String traceId) {
@@ -136,7 +178,7 @@ record TraceDetectionRepositoryTest(
                 confidence)
             VALUES (:id, :pid, :cid, 'k', :sid, :tid, :spid, CAST(:t0 AS timestamptz), 'warn', 'high')
             """.replace("{table}", table))
-                .param("id", pid + "-" + table + "-" + traceId)
+                .param("id", pid + "-" + classifierId + "-" + traceId)
                 .param("pid", pid)
                 .param("cid", classifierId)
                 .param("sid", "s-" + traceId)

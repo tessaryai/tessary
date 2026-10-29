@@ -8252,7 +8252,7 @@ export interface operations {
                 toTimestamp?: string;
                 status?: string;
                 q?: string;
-                detectedBy?: string;
+                detectedBy?: string[];
                 promptName?: string;
                 promptVersion?: string;
             };
@@ -8288,7 +8288,7 @@ export interface operations {
                 toTimestamp?: string;
                 status?: string;
                 q?: string;
-                detectedBy?: string;
+                detectedBy?: string[];
                 promptName?: string;
                 promptVersion?: string;
             };
@@ -8433,7 +8433,7 @@ export interface operations {
                 status?: string;
                 q?: string;
                 sort?: string;
-                detectedBy?: string;
+                detectedBy?: string[];
                 promptName?: string;
                 promptVersion?: string;
             };

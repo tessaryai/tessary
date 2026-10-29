@@ -19637,7 +19637,10 @@
             "name" : "detectedBy",
             "required" : false,
             "schema" : {
-              "type" : "string"
+              "items" : {
+                "type" : "string"
+              },
+              "type" : "array"
             }
           },
           {
@@ -19779,7 +19782,10 @@
             "name" : "detectedBy",
             "required" : false,
             "schema" : {
-              "type" : "string"
+              "items" : {
+                "type" : "string"
+              },
+              "type" : "array"
             }
           },
           {
@@ -20138,7 +20144,10 @@
             "name" : "detectedBy",
             "required" : false,
             "schema" : {
-              "type" : "string"
+              "items" : {
+                "type" : "string"
+              },
+              "type" : "array"
             }
           },
           {
