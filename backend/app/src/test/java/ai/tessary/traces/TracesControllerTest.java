@@ -90,7 +90,8 @@ record TracesControllerTest(
         fx.rollup(t.pid(), traceId, t0, null, true);
 
         var page = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null));
         assertEquals(1, page.traces().size());
         var item = page.traces().get(0);
         assertEquals(traceId, item.id(), "the producer's trace id, not a surrogate");
@@ -159,7 +160,7 @@ record TracesControllerTest(
 
         var byId = ok(controller.list(
                         t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null,
-                        null))
+                        null, null, null))
                 .traces()
                 .stream()
                 .collect(java.util.stream.Collectors.toMap(TraceDtos.TraceListItem::id, i -> i));
@@ -189,7 +190,8 @@ record TracesControllerTest(
         // The v1 cursor: [occurred_at, id] in a PreviewCursor envelope, no version tag.
         String legacy = ai.tessary.ingest.PreviewCursor.encode(t0 + "\u001f" + Ids.ulid(), 0);
         var page = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null, null, null,
+                null, null));
         assertEquals(
                 List.of(traceId),
                 page.traces().stream().map(TraceDtos.TraceListItem::id).toList(),
@@ -200,7 +202,7 @@ record TracesControllerTest(
                 1,
                 ok(controller.list(
                                 t.ctx(), t.org(), t.proj(), null, garbage, null, null, null, null, null, null, null,
-                                null, null, null))
+                                null, null, null, null, null))
                         .traces()
                         .size(),
                 "and a garbled one does the same rather than 500");
@@ -217,7 +219,8 @@ record TracesControllerTest(
         fx.trace(t.pid(), newer, t0.plusSeconds(60));
 
         var first = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), 1, null, null, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), 1, null, null, null, null, null, null, null, null, null, null, null, null,
+                null));
         assertEquals(
                 List.of(newer),
                 first.traces().stream().map(TraceDtos.TraceListItem::id).toList());
@@ -229,6 +232,8 @@ record TracesControllerTest(
                 t.proj(),
                 1,
                 first.nextCursor(),
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -370,7 +375,8 @@ record TracesControllerTest(
 
         var label = new TraceDtos.DetectionLabel(frustration.id(), frustration.name());
         var all = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null));
         assertEquals(
                 List.of(List.of(), List.of(), List.of(label)),
                 all.traces().stream().map(TraceDtos.TraceListItem::detectedBy).toList(),
@@ -391,7 +397,9 @@ record TracesControllerTest(
                 null,
                 null,
                 null,
-                List.of(frustration.id())));
+                List.of(frustration.id()),
+                null,
+                null));
         assertEquals(
                 List.of(flagged),
                 byClassifier.traces().stream().map(TraceDtos.TraceListItem::id).toList());
@@ -411,7 +419,9 @@ record TracesControllerTest(
                 null,
                 null,
                 null,
-                List.of("any")));
+                List.of("any"),
+                null,
+                null));
         assertEquals(
                 List.of(flagged),
                 anyDetection.traces().stream().map(TraceDtos.TraceListItem::id).toList());
@@ -438,6 +448,76 @@ record TracesControllerTest(
         assertEquals(
                 List.of(),
                 ok(controller.detail(t.ctx(), t.org(), t.proj(), clearedTrace)).detections());
+    }
+
+    @Test
+    @DisplayName("promptName keeps the traces holding a span of that prompt, and promptVersion narrows to one version")
+    void promptNameKeepsTracesWithALinkedSpan() {
+        // Bug: the filter is dropped, matches the wrong column, or ignores the version.
+        Tenant t = tenant("traces-prompt-filter");
+        Instant t0 = Instant.parse("2026-10-01T12:00:00Z");
+        SpanRow v1 = fx.spanSeed(t.pid()).prompt("p", "1").at(t0).write();
+        SpanRow v2 =
+                fx.spanSeed(t.pid()).prompt("p", "2").at(t0.plusSeconds(10)).write();
+        fx.spanSeed(t.pid()).prompt("q", "2").at(t0.plusSeconds(20)).write();
+        fx.spanSeed(t.pid()).at(t0.plusSeconds(30)).write();
+
+        assertEquals(List.of(v2.traceId(), v1.traceId()), listByPrompt(t, "p", null));
+        assertEquals(List.of(v2.traceId()), listByPrompt(t, "p", "2"));
+    }
+
+    @Test
+    @DisplayName("the prompt name and version must sit on the same span")
+    void nameAndVersionMustSitOnOneSpan() {
+        // Bug: two EXISTS clauses let a trace match on one span's name and another span's version.
+        Tenant t = tenant("traces-prompt-one-span");
+        Instant t0 = Instant.parse("2026-10-01T12:00:00Z");
+        SpanRow a = fx.spanSeed(t.pid()).prompt("p", null).at(t0).write();
+        fx.spanSeed(t.pid())
+                .traceId(a.traceId())
+                .parentSpanId(a.id())
+                .prompt("q", "2")
+                .at(t0.plusSeconds(1))
+                .write();
+
+        assertEquals(List.of(), listByPrompt(t, "p", "2"));
+    }
+
+    @Test
+    @DisplayName("promptVersion alone filters nothing")
+    void promptVersionAloneIsIgnored() {
+        // Bug: a version with no name narrows to spans of any prompt that sent it, or to nothing.
+        Tenant t = tenant("traces-prompt-version-alone");
+        Instant t0 = Instant.parse("2026-10-01T12:00:00Z");
+        SpanRow linked = fx.spanSeed(t.pid()).prompt("p", "2").at(t0).write();
+        SpanRow plain = fx.spanSeed(t.pid()).at(t0.plusSeconds(10)).write();
+
+        assertEquals(List.of(plain.traceId(), linked.traceId()), listByPrompt(t, null, "2"));
+    }
+
+    private List<String> listByPrompt(Tenant t, @Nullable String promptName, @Nullable String promptVersion) {
+        return ok(controller.list(
+                        t.ctx(),
+                        t.org(),
+                        t.proj(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        promptName,
+                        promptVersion))
+                .traces()
+                .stream()
+                .map(TraceDtos.TraceListItem::id)
+                .toList();
     }
 
     private Tenant frustrationTenant(String slug) {

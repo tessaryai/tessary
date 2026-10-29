@@ -112,7 +112,8 @@ function TracesList() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const patch = searchPatch(searchParams, setSearchParams);
-  const { state, setRange, setFacet, setCallSite, setSearch, clearAll, activeCount } = useTraceQueryState();
+  const { state, setRange, setFacet, clearFacets, setCallSite, setSearch, clearAll, activeCount } =
+    useTraceQueryState();
   const { range, facets, callSite, q: submittedQuery } = state;
   // `q` is a server-side filter, so it fires on submit, not per keystroke.
   const [query, setQuery] = useState(submittedQuery);
@@ -161,6 +162,8 @@ function TracesList() {
     from: bounds.from,
     to: bounds.to,
     detectedBy: picked.length > 0 ? picked : undefined,
+    promptName: facets.prompt ?? undefined,
+    promptVersion: facets.prompt ? facets.prompt_version ?? undefined : undefined,
   };
   const q = useTracesIndex(filters, epoch, !groupBySession);
   const sq = useSessionsIndex(filters, epoch, groupBySession);
@@ -176,6 +179,7 @@ function TracesList() {
     !!facets.status ||
     !!facets.kind ||
     !!facets.detected_by ||
+    !!facets.prompt ||
     (callSite !== "any" && callSite !== "all") ||
     !!submittedQuery;
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.traces) ?? [], [q.data]);
@@ -342,6 +346,12 @@ function TracesList() {
             <FilterChip
               label={`call site: ${typeof callSite === "object" ? callSite.id : callSite}`}
               onRemove={() => setCallSite("any")}
+            />
+          )}
+          {facets.prompt && (
+            <FilterChip
+              label={`prompt: ${facets.prompt}${versionSuffix(facets.prompt_version)}`}
+              onRemove={() => clearFacets(["prompt", "prompt_version"])}
             />
           )}
           {submittedQuery && (
@@ -672,6 +682,12 @@ function useInfiniteScroll(onHit: () => void, enabled: boolean) {
     return () => io.disconnect();
   }, [onHit, enabled]);
   return ref;
+}
+
+/** ` v3` for a version number, ` (prod)` for a label a producer sent, nothing when there is no version. */
+function versionSuffix(version: string | null): string {
+  if (!version) return "";
+  return /^\d+$/.test(version) ? ` v${version}` : ` (${version})`;
 }
 
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {

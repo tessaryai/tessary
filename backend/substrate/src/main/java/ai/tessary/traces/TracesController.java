@@ -119,6 +119,8 @@ public class TracesController {
             @Nullable String level,
             @JsonProperty("error_type") @Nullable String errorType,
             @JsonProperty("call_site_id") @Nullable String callSiteId,
+            @JsonProperty("prompt_name") @Nullable String promptName,
+            @JsonProperty("prompt_version") @Nullable String promptVersion,
             @JsonProperty("input_tokens") @Nullable Long inputTokens,
             @JsonProperty("output_tokens") @Nullable Long outputTokens,
             @JsonProperty("cache_read_tokens") @Nullable Long cacheReadTokens,
@@ -167,7 +169,11 @@ public class TracesController {
             @RequestParam(required = false) @Nullable String sort,
             // Classifier ids, comma-separated: keeps a trace every one of them flagged. "any" alone keeps a
             // trace any classifier flagged.
-            @RequestParam(required = false) @Nullable List<String> detectedBy) {
+            @RequestParam(required = false) @Nullable List<String> detectedBy,
+            // Keeps a trace when any of its spans was produced from this managed prompt.
+            @RequestParam(required = false) @Nullable String promptName,
+            // Narrows promptName to the spans that sent this version; ignored without promptName.
+            @RequestParam(required = false) @Nullable String promptVersion) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view traces");
 
@@ -181,7 +187,9 @@ public class TracesController {
                 toTimestamp,
                 status,
                 q,
-                TraceFilters.detectedBy(detectedBy));
+                TraceFilters.detectedBy(detectedBy),
+                promptName,
+                promptVersion);
         int pageSize = TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT);
         String projectId = r.project().id();
 
@@ -298,6 +306,8 @@ public class TracesController {
                 s.level(),
                 s.errorType(),
                 s.callSiteId(),
+                s.promptName(),
+                s.promptVersion(),
                 s.inputTokens(),
                 s.outputTokens(),
                 s.cacheReadTokens(),

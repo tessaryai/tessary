@@ -22,15 +22,16 @@ import org.junit.jupiter.api.Test;
  * does.
  *
  * <ul>
- *   <li>{@code tools/list} names exactly the open set, 21 tools.</li>
+ *   <li>{@code tools/list} names exactly the open set, 23 tools.</li>
  *   <li>{@code tools/call} on a removed tool reads as <b>unknown</b>, and the handler never runs.</li>
  *   <li>{@code initialize} instructions are built from the same catalogue, so the prose cannot advertise a
  *       tool that is gone.</li>
  * </ul>
  *
- * <p><b>The surface is read-only and entirely ungated.</b> {@code Capability.RCA} used to gate five tools
+ * <p><b>The surface is read-only and its listing is ungated.</b> {@code Capability.RCA} used to gate five tools
  * here; a case now carries its own RCA report inline, so the gate moved from the tool to the data. Grading
- * was deleted from the platform, taking {@code list_graders} and {@code get_grader} with it.
+ * was deleted from the platform, taking {@code list_graders} and {@code get_grader} with it. The two prompt
+ * tools are listed for every org and answer a tool error on each call while {@code PROMPT_MANAGEMENT} is off.
  * {@link #theSurfaceHasNoWriteToolAndNoneOfTheRemovedSix} is the invariant that keeps the surface read-only:
  * it walks the full catalogue rather than a list maintained here, so a future write tool fails this test at
  * registration instead of shipping.
@@ -99,14 +100,17 @@ class McpCapabilityGateTest {
             "get_session",
             "get_conversation",
             "get_span",
-            "get_trace");
+            "get_trace",
+            // Open in the listing; the handler checks PROMPT_MANAGEMENT per call.
+            "list_prompts",
+            "get_prompt");
 
     @Test
     void everyOrgIsOfferedExactlyTheOpenTools() throws Exception {
         Set<String> offered = registryWith().pipeline(Pipeline.empty()).build().listToolNames();
 
         assertEquals(OPEN_TOOLS, offered, "every org should be offered exactly the open set");
-        assertEquals(21, offered.size(), "the surface is 21 tools, all open");
+        assertEquals(23, offered.size(), "the surface is 23 tools, all listed");
     }
 
     /**

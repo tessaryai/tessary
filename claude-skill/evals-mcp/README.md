@@ -69,7 +69,7 @@ token binds the session to one project; every tool reads `ctx.projectId()`.
 
 ## Tools shipped today
 
-**21 tools, all open.** All delegate to the same services REST uses. **Authoritative names +
+**23 tools, all listed.** All delegate to the same services REST uses. **Authoritative names +
 schemas:** `backend/.../mcp/McpToolRegistry.java` — the argument column below names each tool's filters so
 you can see the shape of the surface; it is not a schema copy, and it is not the contract.
 
@@ -115,9 +115,12 @@ Conventions the tools share, stated here once rather than per row:
 | `query_timeseries` | `dataset`, `interval`, `range`, `filters` | buckets |
 | `query_facets` | `dataset`, `field`, `range`, `filters`, `top_n` | top-N breakdown |
 | `query_search` | `dataset` (**`tool_calls` \| `classifier_events`**), `q`, `mode`, `range`, `filters` | paged rows |
+| `list_prompts` | `folder`, `label` (no `limit`/`cursor`) | at most 100 prompt rows, newest change first: `name`, `type`, `tags`, `latest_version`, `version_count`, `labels`, `updated_at` |
+| `get_prompt` | `name`; `version` **or** `label` (neither reads `production`; `latest` is the newest version) | one prompt version: `body` (a string, or an array of chat messages and placeholders), `config`, `labels`, `commit_message`, `created_by`, `created_at` |
 
-**Nothing on this surface is gated**: all 21 rows are open, so a launch partner's `tools/list` is the
-whole catalogue. It was 22 with two gated on `GRADERS` until grading was deleted — the two grader reads
+**Nothing on this surface is gated in the listing**: all 23 rows are listed, so a launch partner's
+`tools/list` is the whole catalogue. The two prompt tools check `Capability.PROMPT_MANAGEMENT` on each
+call instead, and answer a tool error while an org has it off. It was 22 with two gated on `GRADERS` until grading was deleted — the two grader reads
 and `list_quality_dimensions` went with it, and `Capability.GRADERS` itself no longer exists.
 **`Capability.RCA` gates nothing here any more** — a case
 carries its own report, so an org without RCA simply has no report rows to inline. Where the line falls, and

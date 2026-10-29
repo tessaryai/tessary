@@ -90,6 +90,34 @@ public class LlmUsageAccountant {
                 null);
     }
 
+    /** One chat call on the org's own key, already priced by the caller; funding is always byo. */
+    public void recordChatCall(
+            @Nullable String projectId,
+            String lane,
+            String model,
+            @Nullable Integer inputTokens,
+            @Nullable Integer outputTokens,
+            @Nullable Integer cacheReadTokens,
+            @Nullable Integer cacheWriteTokens,
+            @Nullable BigDecimal costUsd,
+            @Nullable String priceBookVersion,
+            int latencyMs,
+            @Nullable Subject subject) {
+        record(
+                projectId,
+                lane,
+                model,
+                false,
+                inputTokens,
+                outputTokens,
+                cacheReadTokens,
+                cacheWriteTokens,
+                costUsd,
+                priceBookVersion,
+                latencyMs,
+                subject);
+    }
+
     private void record(
             @Nullable String projectId,
             String lane,

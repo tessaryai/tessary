@@ -217,6 +217,8 @@ erDiagram
         NUMERIC total_cost
         TEXT cost_source
         TEXT price_book_version FK
+        TEXT prompt_name
+        TEXT prompt_version
     }
     span_payload {
         TEXT project_id PK
@@ -430,6 +432,40 @@ erDiagram
 
     project ||--o{ llm_call : "spent on"
 
+    %% ===== Prompt library (managed prompts; latest is derived, never stored) =====
+    prompt {
+        TEXT id PK
+        TEXT project_id FK
+        TEXT name
+        TEXT type
+        JSONB tags
+        TEXT created_by
+        TIMESTAMPTZ updated_at
+    }
+    prompt_version {
+        TEXT id PK
+        TEXT project_id FK
+        TEXT prompt_id FK
+        INTEGER version
+        JSONB body
+        JSONB config
+        TEXT commit_message
+        TEXT created_via
+    }
+    prompt_label {
+        TEXT prompt_id PK
+        TEXT label PK
+        TEXT project_id FK
+        TEXT version_id FK
+        TEXT updated_by
+    }
+
+    project        ||--o{ prompt : "authors"
+    prompt         ||--|{ prompt_version : "numbered versions"
+    prompt         ||--o{ prompt_label : "deployment labels"
+    prompt_version ||--o{ prompt_label : "pointed at by"
+    prompt         ||..o{ span : "named by prompt_name (no FK)"
+
     %% ===== Operational envelope (governance) =====
     retention_policy {
         TEXT id PK
@@ -466,7 +502,7 @@ erDiagram
 
 ## Table inventory by domain
 
-Purpose-level summary. The SQL baseline (`db/changelog/changes/`) is the source of truth for exact columns. Jump: [Tenancy](#tenancy--auth--organization) · [Ingestion](#ingestion--sources) · [Substrate](#telemetry-substrate-run-independent-append-only) · [Pipeline](#pipeline-content-per-project-synthesized) · [Classifiers](#classifiers) · [Jobs](#unified-job-queue) · [Notes](#notes--gotchas)
+Purpose-level summary. The SQL baseline (`db/changelog/changes/`) is the source of truth for exact columns. Jump: [Tenancy](#tenancy--auth--organization) · [Ingestion](#ingestion--sources) · [Substrate](#telemetry-substrate-run-independent-append-only) · [Pipeline](#pipeline-content-per-project-synthesized) · [Classifiers](#classifiers) · [Prompt library](#prompt-library) · [Jobs](#unified-job-queue) · [Notes](#notes--gotchas)
 
 ### Tenancy / Auth / Organization
 | Table | Purpose |
@@ -492,7 +528,7 @@ Purpose-level summary. The SQL baseline (`db/changelog/changes/`) is the source 
 |---|---|
 | `session` | One continuous interaction with one user: `(project_id, id)` where `id` is the producer's own session string, verbatim. `started_at` / `last_activity_at` are the only in-place updates in the substrate and are `LEAST`/`GREATEST`, so they are idempotent under replay. Sessions never nest — a provider's conversation or thread id is `trace.thread_id`, a column, not a second tree level. |
 | `trace` | One turn — one thing the user asked for and waited on — keyed `(project_id, id)` on the OTel trace id. Carries identity (`session_id`, `parent_trace_id` for a detached sub-agent, `thread_id`, `name`, denorm `project_version_id`/`call_site_id`), timing (`started_at`/`ended_at`, generated `latency_ms`; `created_at` is the ingest time, added in `0024` so billing counts a trace in the hour it arrived), and **the rollups**: `span_count`, `error_count`, the five token buckets, the costs, and `unpriced_spans`. Every rollup column is written by the rollup worker as a wholesale REPLACEMENT, never a delta; NULL means "not rolled up yet", which is a different sentence from 0. `rollup_due_at` / `is_settled` are the worker's own bookkeeping, on the same row so claiming and settling are one row lock. The session timeline reads a session's traces latest end first through two partial indexes (`0038`): `ix_trace_session_unended` holds the traces with no settled end (not settled, or settled with no ended span), read whole, and `ix_trace_session_ended` holds the settled traces with an end in `(ended_at, started_at, id)` descending order, read a page at a time after the last trace read, so a tail of a long session reads only its newest rows. The traces list reads `ix_trace_project_started_id` `(project_id, started_at DESC, id DESC)`, its own order (`0043` replaced `ix_trace_project_started`, which lacked `id`): a page stops after its last row even inside a run of traces that share a start instant, which is what keeps a content search from checking the payloads of every trace in such a run. |
-| `span` | One step — an LLM call, a tool call, a sub-agent — keyed `(project_id, trace_id, id)` on the OTel span id. **The full key is all three**: a span id alone does not identify a row. Nests within its trace via `parent_span_id` + a materialized ltree `path`; `correlation_state`/`path_state` are the resolvers' terminal-state flags. Correlation handles (`session_id`, `call_site_id`, `trace_name`) are denormalized onto every row so no read joins upward — `environment_id` was one of them until `0016` (see the no-environment-scope note at the top of this page). Usage and cost are typed columns — `cost_source` says how a row was priced and `price_book_version` says at what, so a recorded cost is a fact about what a call was billed at rather than a derivation that moves when a rate changes. `error_type` holds the CLASS of a failure (the producer's `error.type` attribute, or a capped signature of its status message) and `error_message` the prose, capped at write — `0001` split them because the class column held the whole status message, so a facet key was routinely kilobytes of agent markdown and no two failures of one kind ever grouped. Metrics reads a window's llm spend and tokens (its `llm_calls` view) through `ix_span_llm_usage` (`0042`), a partial index over the live llm spans keyed `(project_id, started_at)` that carries every column the sum reads, so the read never touches span rows; it costs a write only for llm spans. `ix_span_untagged` (`0044`) holds a project's spans with no `call_site_id`, which the substrate status counts up to 1,000, so a project that tags every span answers zero without reading any; a tagged span is never written to it. A trace's turn is its first live parentless span by `(started_at, id)`, and `ix_span_root` (`0045`) holds exactly those rows in that order with their `ended_at`, so the turn-duration reads (the Classifiers chart, the metric drift sweep, the latency measures of Metrics' `traces` view) find a trace's turn from the index alone instead of fetching and sorting every span of the trace. |
+| `span` | One step — an LLM call, a tool call, a sub-agent — keyed `(project_id, trace_id, id)` on the OTel span id. **The full key is all three**: a span id alone does not identify a row. Nests within its trace via `parent_span_id` + a materialized ltree `path`; `correlation_state`/`path_state` are the resolvers' terminal-state flags. Correlation handles (`session_id`, `call_site_id`, `trace_name`) are denormalized onto every row so no read joins upward — `environment_id` was one of them until `0016` (see the no-environment-scope note at the top of this page). Usage and cost are typed columns — `cost_source` says how a row was priced and `price_book_version` says at what, so a recorded cost is a fact about what a call was billed at rather than a derivation that moves when a rate changes. `error_type` holds the CLASS of a failure (the producer's `error.type` attribute, or a capped signature of its status message) and `error_message` the prose, capped at write — `0001` split them because the class column held the whole status message, so a facet key was routinely kilobytes of agent markdown and no two failures of one kind ever grouped. Metrics reads a window's llm spend and tokens (its `llm_calls` view) through `ix_span_llm_usage` (`0042`), a partial index over the live llm spans keyed `(project_id, started_at)` that carries every column the sum reads, so the read never touches span rows; it costs a write only for llm spans. `ix_span_untagged` (`0044`) holds a project's spans with no `call_site_id`, which the substrate status counts up to 1,000, so a project that tags every span answers zero without reading any; a tagged span is never written to it. A trace's turn is its first live parentless span by `(started_at, id)`, and `ix_span_root` (`0045`) holds exactly those rows in that order with their `ended_at`, so the turn-duration reads (the Classifiers chart, the metric drift sweep, the latency measures of Metrics' `traces` view) find a trace's turn from the index alone instead of fetching and sorting every span of the trace. `prompt_name` and `prompt_version` (`0055`) are the managed prompt a span was produced from, read at ingest from `tessary.prompt.*` (then the two third-party prompt dialects) and kept as the producer's text: no FK, because spans predate and outlive prompts, and a name or version over 512 characters drops the link, not the span. `ix_span_prompt` (`0055`), partial on `prompt_name IS NOT NULL`, is keyed `(project_id, prompt_name, started_at DESC)` with `prompt_version` included, so the per-version usage read of one prompt scans only its window. |
 | `span_payload` | The heavy half of a span, split out: `input`, `output`, `attributes` jsonb, and `provided_usage` (an audit copy of the producer's raw usage object, never read for arithmetic). One row per span, written in the same transaction under the same `event_ts` guard, so the two can never disagree about which version they hold. It ages out ahead of `span`: a span whose payload has been purged stays fully functional on every list and rollup surface. `redactions` jsonb (`0003`) is what the `Credentials` redaction rule removed from this payload, as `[{rule, field, anchored, masked}]` and never any part of the credential; `masked` (forward-only, null on a row written before it existed) is the provider prefix plus the last 4 characters of the credential that was there, computed before the substitution — it is written in the same statement as the text it describes, so a newer version of the span replaces both, and it is how `secret_leak` names a leak, and which key leaked, whose credential is already gone. |
 | `tool_call` | A tool invocation hung off the span that made it, by producer key (`trace_id`, `span_id`): provider `tool_call_id`, `tool_type`, `error_type`/`error_message` (the same class/prose split `span` carries), `arguments`/`result` jsonb. Its own `id` is derived from `(project, trace, span, seq)`, which is what makes an at-least-once redelivery collide on the primary key instead of minting a second row. The `arguments_ref`/`result_ref` media columns were dropped by `0001`: declared with FKs into `media_object` and NULL on every row ever written, they were the fiction that made the media leak invisible. Tool Errors names a call `COALESCE(NULLIF(name, ''), 'unnamed')` and filters one tool with that expression, so `st_tool_call_tool_name` (`0046`) keeps statistics on it: without them Postgres guesses 0.5% of calls match one tool and plans those reads as a serial nested loop over span, trace and span_payload. |
 | `retrieved_doc` | A retrieved passage hung off its RETRIEVAL/RERANKER span, same producer keying and same derived id: `list_role` (candidate/result), `rank`, `title`, `source_uri`, `data_source_id`. Its `content_ref`/`media_ref` columns went the same way as `tool_call`'s in `0001`, and for the same reason. |
@@ -682,11 +718,18 @@ ISO-8601 `text` timestamps.
 | `alert_event` | A fired alert: a **real** `alert_rule_id` FK. Two idempotency keys, as partial uniques (`0053`): `(alert_rule_id, window_start)` where `case_id IS NULL` (window-shaped rules) and `(alert_rule_id, case_id)` otherwise — a case-opened rule fires once per case, and two cases opening in the same second share a `window_start`. |
 | `alert_delivery_attempt` | One outbound send per `(event, channel)`; at-most-once guard on `(alert_event_id, channel_id)`. |
 
+### Prompt library
+| Table | Purpose |
+|---|---|
+| `prompt` | A managed prompt (`0054`): a name per project (`ux_prompt_project_name`; a `/` in the name makes folders, and `ck_prompt_name` backs the Java name rule), a `type` of `text` or `chat` fixed at creation, `tags` (a jsonb array), and `last_version` (the highest version number ever handed out; it only grows, `ck_prompt_last_version` keeps it at 0 or more). `updated_at` moves on every version, label and tag write, which is what the public list's `fromUpdatedAt`/`toUpdatedAt` filter on. Every version and label write takes `SELECT ... FOR UPDATE` on this row first, so writes to one prompt queue. Cascades from `project`. |
+| `prompt_version` | One immutable numbered version of a prompt: `version` (positive, unique per prompt, the next number is `prompt.last_version + 1` taken under the prompt lock, so a deleted number is never reused), `body` (a JSON string for text, an array of messages and placeholders for chat), `config` (a jsonb object), `commit_message` (at most 500 characters), `created_via` (`ui`/`api`). A prompt holds at most 1000. `latest` is not a column or a label row: it is the highest version, derived on every read, so deleting the top version moves it with no write. |
+| `prompt_label` | A deployment label pointing at one version: primary key `(prompt_id, label)`, so a label names one version at a time and moving it is an upsert. `ck_prompt_label_name` holds the label rule and forbids `latest`. A labeled version cannot be deleted. `production` is the label a read with neither version nor label resolves. |
+
 ### Metric rollups
 | Table | Purpose |
 |---|---|
 | `metric_rollup` | One aggregated **metric** per `(org, project, metric, bucket_start, granularity)`: an open `metric` vocabulary, a NUMERIC `value` (so a fractional metric — cost, latency — is representable) and a `granularity`. Billing reads from it. `0016` dropped `environment_id` from the key and SUM-merged the rows that collided, because a metric summed over environments is the same metric summed over one scope. The metered units (`UsageUnit`) are `ingested_spans`, `ingested_traces` (the billable one, on `trace.created_at`) and `l1_evals`. |
-| `llm_call` | One row per LLM call the **platform** made for a project: the `lane` (`ModelLane` wire value, plus `observer` on historical rows), model, `funding` (`platform`/`byo`), the four token buckets kept apart (`input`/`output`/`cache_read`/`cache_write`, summed into a GENERATED `total_tokens`), and cost. A sandbox-run row carries the cost OpenCode reported from models.dev rates and no `price_book_version`; a decision call carries OpenRouter's reported cost (no version) on OpenRouter, or the book's price (with its version) on TypeSafe direct. **This is the ledger that survived the eval-half removal intact** — it is written at the call, not derived from a verdict, so removing grading did not touch it. |
+| `llm_call` | One row per LLM call the **platform** made for a project: the `lane` (`ModelLane` wire value, plus `observer` on historical rows and `playground`, which is not a `ModelLane`: a person's prompt-playground run, always `byo`, with the prompt version as subject when the run named one), model, `funding` (`platform`/`byo`), the four token buckets kept apart (`input`/`output`/`cache_read`/`cache_write`, summed into a GENERATED `total_tokens`), and cost. A sandbox-run row carries the cost OpenCode reported from models.dev rates and no `price_book_version`; a decision call carries OpenRouter's reported cost (no version) on OpenRouter, or the book's price (with its version) on TypeSafe direct. **This is the ledger that survived the eval-half removal intact** — it is written at the call, not derived from a verdict, so removing grading did not touch it. |
 
 > Usage-rollup work rides `job` rows with `kind='usage_rollup'`.
 

@@ -95,6 +95,16 @@
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/vitals"
   },
   {
+    "path": "prompts",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/prompts"
+  },
+  {
+    "path": "prompts/:promptId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/prompts/:promptId"
+  },
+  {
     "path": "rca/:reportId",
     "kind": "view",
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/rca/:reportId"

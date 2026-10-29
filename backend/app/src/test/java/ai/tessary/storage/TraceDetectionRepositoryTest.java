@@ -131,7 +131,7 @@ record TraceDetectionRepositoryTest(
 
     private static List<String> listedBy(TraceV2Repository repo, String pid, String... classifierIds) {
         var query = new TraceV2Repository.TraceQuery(
-                null, null, null, null, null, null, null, null, List.of(classifierIds));
+                null, null, null, null, null, null, null, null, List.of(classifierIds), null, null);
         return repo.list(pid, query, null, 10, null, null, null).stream()
                 .map(TraceV2Repository.Summary::id)
                 .toList();

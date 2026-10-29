@@ -82,6 +82,30 @@ public final class GenAiAttributes {
     /** The authoritative call site and the ONLY spelling read; settable by any OTLP producer as one span attribute. */
     public static final String TESSARY_CALL_SITE_ID = "tessary.call_site.id";
 
+    /**
+     * The second sanctioned overlay: the managed prompt a span was produced from. Not gen_ai.prompt.*, which is
+     * Traceloop's indexed message prefix.
+     */
+    public static final String PROMPT_NAME = "tessary.prompt.name";
+
+    public static final String PROMPT_VERSION = "tessary.prompt.version";
+
+    /** Third-party prompt attribute keys, read for compatibility with the SDKs that emit them. */
+    private static final String PROMPT_DIALECT_PREFIX = "lang" + "fuse.";
+
+    /** Third-party prompt dialects, ingest only, read in this order by PromptRefResolver. */
+    public static final String OBSERVATION_PROMPT_NAME_DIALECT = PROMPT_DIALECT_PREFIX + "observation.prompt.name";
+
+    /** Third-party prompt dialects, ingest only, read in this order by PromptRefResolver. */
+    public static final String OBSERVATION_PROMPT_VERSION_DIALECT =
+            PROMPT_DIALECT_PREFIX + "observation.prompt.version";
+
+    /** Third-party prompt dialects, ingest only, read in this order by PromptRefResolver. */
+    public static final String SHORT_PROMPT_NAME_DIALECT = PROMPT_DIALECT_PREFIX + "prompt.name";
+
+    /** Third-party prompt dialects, ingest only, read in this order by PromptRefResolver. */
+    public static final String SHORT_PROMPT_VERSION_DIALECT = PROMPT_DIALECT_PREFIX + "prompt.version";
+
     // Correlation rides ONLY the standard attributes; there are no tessary.* correlation overlays.
 
     // Traceloop's indexed, flattened message keys: INGEST-ONLY, not canonical. Reconstructed into [{role, content}]
