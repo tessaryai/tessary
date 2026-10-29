@@ -309,6 +309,179 @@ describe("FlaggedList", () => {
     expect(screen.getByText("2 items")).toBeTruthy();
     expect(api.getFrustratedSessions).not.toHaveBeenCalled();
   });
+
+  /** Lists the picked rows' ids, so a test can read what the bar was handed. */
+  const listPicks = (rows: FlaggedRow[]) => <span>Picked {rows.map((r) => r.id).join(", ")}</span>;
+
+  // The open edition passes neither slot, and the list must then look as it always has.
+  it("draws no checkbox, bar or row action when no slot is passed", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    renderRoute(
+      <FlaggedList
+        {...COPY}
+        listKey="list-1"
+        first={{ rows: [row()], nextCursor: null, total: 1 }}
+        loadPage={vi.fn<FlaggedLoader>()}
+        basePath="/orgs/acme/projects/default"
+      />,
+    );
+
+    await screen.findByText("message t-3");
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
+  it("draws the row action for the open row, and for the next row once it is opened", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    renderRoute(
+      <FlaggedList
+        {...COPY}
+        listKey="list-1"
+        first={{
+          rows: [row(), row({ id: "row-2", traceId: "t-9", contextTraceIds: ["t-9"], preview: "second row" })],
+          nextCursor: null,
+          total: 2,
+        }}
+        loadPage={vi.fn<FlaggedLoader>()}
+        basePath="/orgs/acme/projects/default"
+        rowAction={(r) => <button type="button">Act on {r.id}</button>}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Act on row-1" });
+    fireEvent.click(screen.getByRole("button", { name: /second row/ }));
+
+    await screen.findByRole("button", { name: "Act on row-2" });
+    expect(screen.queryByRole("button", { name: "Act on row-1" })).toBeNull();
+  });
+
+  it("picks a row into the bar without opening it, and Clear empties the bar", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    renderRoute(
+      <FlaggedList
+        {...COPY}
+        listKey="list-1"
+        first={{
+          rows: [row(), row({ id: "row-2", traceId: "t-9", contextTraceIds: ["t-9"], preview: "second row" })],
+          nextCursor: null,
+          total: 2,
+        }}
+        loadPage={vi.fn<FlaggedLoader>()}
+        basePath="/orgs/acme/projects/default"
+        selectionActions={listPicks}
+      />,
+    );
+    await screen.findByText("message t-3");
+    expect(screen.queryByRole("toolbar")).toBeNull();
+
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Pick this item" })[1]);
+
+    const bar = screen.getByRole("toolbar", { name: "Selected items" });
+    expect(within(bar).getByText("1 selected")).toBeTruthy();
+    expect(within(bar).getByText("Picked row-2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /row preview/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(api.getTrace).not.toHaveBeenCalledWith("t-9");
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Clear" }));
+
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    expect(screen.getAllByRole("checkbox", { name: "Pick this item" }).every((c) => !(c as HTMLInputElement).checked)).toBe(true);
+  });
+
+  // Picks are kept with their rows: a later page adds to them, and a filter that hides a pick still hands it over.
+  it("keeps picks across Load more and a filter that hides them", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    const loadPage = vi.fn<FlaggedLoader>(async (filter, cursor) =>
+      filter
+        ? { rows: [row({ id: "row-7", traceId: "t-7", contextTraceIds: ["t-7"], preview: "caused row" })], nextCursor: null, total: 1 }
+        : cursor == null
+          ? { rows: [row()], nextCursor: "p2", total: 2 }
+          : { rows: [row({ id: "row-2", traceId: "t-9", contextTraceIds: ["t-9"], preview: "second row" })], nextCursor: null, total: 2 },
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ui = (filter?: { rcaReport: string; index: number }) => (
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <FlaggedList
+            {...COPY}
+            listKey="list-1"
+            loadPage={loadPage}
+            filter={filter}
+            basePath="/orgs/acme/projects/default"
+            selectionActions={listPicks}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui());
+    await screen.findByRole("button", { name: /row preview/ });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Pick this item" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more items" }));
+    await screen.findByRole("button", { name: /second row/ });
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Pick this item" })[1]);
+    expect(screen.getByText("Picked row-1, row-2")).toBeTruthy();
+
+    rerender(ui({ rcaReport: "rca-1", index: 0 }));
+    await screen.findByRole("button", { name: /caused row/ });
+    expect(screen.queryByRole("button", { name: /row preview/ })).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Pick this item" }));
+
+    const bar = screen.getByRole("toolbar", { name: "Selected items" });
+    expect(within(bar).getByText("3 selected")).toBeTruthy();
+    expect(within(bar).getByText("Picked row-1, row-2, row-7")).toBeTruthy();
+  });
+
+  it("stops at 20 picks, says so, and frees a box when one is unpicked", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    const rows = Array.from({ length: 21 }, (_, i) =>
+      row({ id: `row-${i + 1}`, traceId: `t-${i + 1}`, contextTraceIds: [`t-${i + 1}`], preview: `preview ${i + 1}` }),
+    );
+    renderRoute(
+      <FlaggedList
+        {...COPY}
+        listKey="list-1"
+        first={{ rows, nextCursor: null, total: 21 }}
+        loadPage={vi.fn<FlaggedLoader>()}
+        basePath="/orgs/acme/projects/default"
+        selectionActions={listPicks}
+      />,
+    );
+    await screen.findByText("message t-1");
+    const boxes = () => screen.getAllByRole("checkbox", { name: "Pick this item" }) as HTMLInputElement[];
+
+    for (const box of boxes().slice(0, 20)) fireEvent.click(box);
+
+    expect(screen.getByText("20 selected")).toBeTruthy();
+    expect(screen.getByText("You can pick up to 20 items.")).toBeTruthy();
+    expect(boxes()[20].disabled).toBe(true);
+    expect(boxes()[0].disabled).toBe(false);
+
+    fireEvent.click(boxes()[0]);
+
+    expect(screen.getByText("19 selected")).toBeTruthy();
+    expect(screen.queryByText("You can pick up to 20 items.")).toBeNull();
+    expect(boxes()[20].disabled).toBe(false);
+  });
+
+  it("lets a cleared row be picked", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    renderRoute(
+      <FlaggedList
+        {...COPY}
+        listKey="list-1"
+        first={{ rows: [row({ cleared: true })], nextCursor: null, total: 1 }}
+        loadPage={vi.fn<FlaggedLoader>()}
+        basePath="/orgs/acme/projects/default"
+        selectionActions={listPicks}
+      />,
+    );
+    await screen.findByText("message t-3");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Pick this item" }));
+
+    expect(screen.getByText("Picked row-1")).toBeTruthy();
+  });
 });
 
 it("ConversationFilter: presses the chip in effect, and reports the one chosen", () => {
