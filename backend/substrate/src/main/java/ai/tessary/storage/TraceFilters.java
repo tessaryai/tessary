@@ -4,17 +4,23 @@ package ai.tessary.storage;
 import ai.tessary.open.errors.QueryError;
 import ai.tessary.open.errors.TessaryException;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
-/** Shared by the traces and sessions lists so a session matches exactly when one of its traces would show. */
+/**
+ * Shared by the traces and sessions lists. A session matches when, for each picked detection, one of its traces has it
+ * and passes every other filter; with no detection picked, when one of its traces would show.
+ */
 @Component
 public class TraceFilters {
 
     /** Postgres's SQLSTATE for a statement cancelled by {@code statement_timeout}. */
     private static final String QUERY_CANCELED = "57014";
+
+    public static final int MAX_DETECTED_BY = 10;
 
     private final TraceDetectionRepository detections;
 
@@ -38,7 +44,23 @@ public class TraceFilters {
                 || present(query.to())
                 || present(query.status())
                 || present(query.q())
-                || present(query.detectedBy());
+                || !query.detectedBy().isEmpty();
+    }
+
+    /** Up to {@link #MAX_DETECTED_BY} distinct classifier ids, or {@link TraceDetectionRepository#ANY} on its own. */
+    public static List<String> detectedBy(@Nullable List<String> raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        List<String> picks = raw.stream()
+                .map(String::strip)
+                .filter(v -> !v.isEmpty())
+                .distinct()
+                .toList();
+        if (picks.size() > MAX_DETECTED_BY || (picks.contains(TraceDetectionRepository.ANY) && picks.size() > 1)) {
+            throw new TessaryException(QueryError.INVALID_DETECTED_BY, MAX_DETECTED_BY);
+        }
+        return picks;
     }
 
     /**
@@ -49,6 +71,43 @@ public class TraceFilters {
      * {@link TraceSearchProperties#getTimeoutMs()}.
      */
     public void append(
+            String projectId, StringBuilder where, Map<String, Object> params, TraceV2Repository.TraceQuery query) {
+        appendOthers(projectId, where, params, query);
+        for (String arm : arms(projectId, params, query)) {
+            where.append(" AND ").append(arm);
+        }
+    }
+
+    /** The traces of a session that pass the other filters and have any picked detection. */
+    public void appendAnyDetection(
+            String projectId, StringBuilder where, Map<String, Object> params, TraceV2Repository.TraceQuery query) {
+        appendOthers(projectId, where, params, query);
+        List<String> arms = arms(projectId, params, query);
+        if (!arms.isEmpty()) {
+            where.append(" AND (").append(String.join(" OR ", arms)).append(')');
+        }
+    }
+
+    /** One {@code EXISTS} over the session's traces per picked detection, each passing every other filter. */
+    public void appendForSessions(
+            String projectId, StringBuilder where, Map<String, Object> params, TraceV2Repository.TraceQuery query) {
+        var traces = new StringBuilder(" AND EXISTS (SELECT 1 FROM trace t WHERE t.project_id = s.project_id"
+                + " AND t.session_id = s.id AND NOT t.is_deleted");
+        appendOthers(projectId, traces, params, query);
+        List<String> arms = arms(projectId, params, query);
+        if (arms.isEmpty()) {
+            where.append(traces).append(')');
+        }
+        for (String arm : arms) {
+            where.append(traces).append(" AND ").append(arm).append(')');
+        }
+    }
+
+    private List<String> arms(String projectId, Map<String, Object> params, TraceV2Repository.TraceQuery query) {
+        return query.detectedBy().isEmpty() ? List.of() : detections.arms(projectId, params, query.detectedBy());
+    }
+
+    private void appendOthers(
             String projectId, StringBuilder where, Map<String, Object> params, TraceV2Repository.TraceQuery query) {
         addEq(where, params, " AND t.started_at >= :fromTs::timestamptz", "fromTs", query.from());
         addEq(where, params, " AND t.started_at <= :toTs::timestamptz", "toTs", query.to());
@@ -84,11 +143,6 @@ public class TraceFilters {
                 params.put("qWords", words);
             }
             where.append(')');
-        }
-
-        String detectedBy = query.detectedBy();
-        if (present(detectedBy)) {
-            detections.appendFilter(projectId, where, params, detectedBy);
         }
     }
 

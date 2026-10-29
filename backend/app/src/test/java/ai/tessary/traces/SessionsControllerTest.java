@@ -496,7 +496,7 @@ class SessionsControllerTest {
                 null,
                 null,
                 null,
-                frustration.id()));
+                List.of(frustration.id())));
         assertEquals(
                 List.of(sessionB, sessionA),
                 flagged.sessions().stream().map(SessionDtos.SessionListItem::id).toList(),
@@ -522,7 +522,7 @@ class SessionsControllerTest {
                 null,
                 "error",
                 null,
-                frustration.id()));
+                List.of(frustration.id())));
         assertEquals(
                 List.of(sessionA),
                 erroredAndFlagged.sessions().stream()
@@ -552,7 +552,19 @@ class SessionsControllerTest {
         var mark =
                 new TraceDtos.DetectionMark(frustration.id(), frustration.name(), flaggedTrace, "span-scored", "trace");
         var filtered = ok(controller.detail(
-                fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, frustration.id()));
+                fctx,
+                forg,
+                fproj,
+                sessionId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(frustration.id())));
         assertEquals(List.of(flaggedTrace), filtered.matchedTraceIds());
         assertEquals(List.of(mark), filtered.detections());
         assertEquals(2, filtered.traces().size(), "the detail still lists every trace of the session");
@@ -563,12 +575,110 @@ class SessionsControllerTest {
         assertEquals(List.of(mark), unfiltered.detections());
     }
 
+    /**
+     * With two detections picked, a session shows when its traces have them between them, each on a trace that passes
+     * the other filters, and its detail lights every trace that brought one. The bugs: a session that needs one trace
+     * to carry both, a status filter met by one trace while the detection sits on another, and a detail that lights no
+     * trace because none carries both.
+     */
+    @Test
+    @DisplayName("two picked detections list a session whose traces have them between them")
+    void twoPickedDetectionsListASessionWhoseTracesHaveThemBetweenThem() {
+        var fix = TenantFixture.bootstrap(tenants, "sessions-all-of", o -> {
+            capabilities.grant(o.id(), Capability.FRUSTRATION);
+            capabilities.grant(o.id(), Capability.SECRET_LEAK);
+        });
+        var fctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String fpid = fix.project().id();
+        String forg = fix.org().slug();
+        String fproj = fix.project().slug();
+        ClassifierRow frustration = frustrationClassifier(fpid);
+        ClassifierRow secretLeak = classifier(fpid, "secret_leak");
+        List<String> both = List.of(frustration.id(), secretLeak.id());
+        Instant t0 = Instant.parse("2026-08-14T12:00:00Z");
+
+        String together = SubstrateV2Fixtures.sessionId();
+        String frustrated = SubstrateV2Fixtures.traceId();
+        String leaked = SubstrateV2Fixtures.traceId();
+        String quiet = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, frustrated, together, t0);
+        fx.trace(fpid, leaked, together, t0.plusSeconds(60));
+        fx.trace(fpid, quiet, together, t0.plusSeconds(120));
+        flag(fpid, frustration.id(), frustrated, "span-frustrated");
+        leak(fpid, secretLeak.id(), leaked, "span-leaked");
+
+        String frustrationOnly = SubstrateV2Fixtures.sessionId();
+        String alone = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, alone, frustrationOnly, t0.plusSeconds(180));
+        flag(fpid, frustration.id(), alone, "span-alone");
+
+        String bothErrored = SubstrateV2Fixtures.sessionId();
+        String erroredFrustrated = SubstrateV2Fixtures.traceId();
+        String erroredLeaked = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, erroredFrustrated, bothErrored, t0.plusSeconds(240));
+        fx.trace(fpid, erroredLeaked, bothErrored, t0.plusSeconds(300));
+        errors(fpid, erroredFrustrated, 1);
+        errors(fpid, erroredLeaked, 1);
+        flag(fpid, frustration.id(), erroredFrustrated, "span-errored-frustrated");
+        leak(fpid, secretLeak.id(), erroredLeaked, "span-errored-leaked");
+
+        String leakNotErrored = SubstrateV2Fixtures.sessionId();
+        String erroredFrustratedToo = SubstrateV2Fixtures.traceId();
+        String cleanLeaked = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, erroredFrustratedToo, leakNotErrored, t0.plusSeconds(360));
+        fx.trace(fpid, cleanLeaked, leakNotErrored, t0.plusSeconds(420));
+        errors(fpid, erroredFrustratedToo, 1);
+        errors(fpid, cleanLeaked, 0);
+        flag(fpid, frustration.id(), erroredFrustratedToo, "span-errored-frustrated-too");
+        leak(fpid, secretLeak.id(), cleanLeaked, "span-clean-leaked");
+
+        var listed = ok(controller.list(
+                fctx, forg, fproj, 50, null, null, null, null, null, null, null, null, null, null, both));
+        assertEquals(
+                List.of(leakNotErrored, bothErrored, together),
+                listed.sessions().stream().map(SessionDtos.SessionListItem::id).toList(),
+                "newest first; the frustration-only session lacks a leak");
+
+        var erroredOnly = ok(controller.list(
+                fctx, forg, fproj, 50, null, null, null, null, null, null, null, null, "error", null, both));
+        assertEquals(
+                List.of(bothErrored),
+                erroredOnly.sessions().stream()
+                        .map(SessionDtos.SessionListItem::id)
+                        .toList(),
+                "the last session's leak is on a trace that did not error");
+
+        var detail = ok(
+                controller.detail(fctx, forg, fproj, together, null, null, null, null, null, null, null, null, both));
+        assertEquals(List.of(frustrated, leaked), detail.matchedTraceIds());
+    }
+
     private ClassifierRow frustrationClassifier(String projectId) {
         classifierService.seedBuiltIns(projectId);
         return classifierService.list(projectId).stream()
                 .filter(c -> c.classifierKey().equals("frustration"))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    private ClassifierRow classifier(String projectId, String key) {
+        return classifierService.list(projectId).stream()
+                .filter(c -> c.classifierKey().equals(key))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private void leak(String projectId, String classifierId, String traceId, String spanId) {
+        jdbc.sql("INSERT INTO secret_leak_detection"
+                        + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
+                        + " subject_span_id, severity, confidence)"
+                        + " VALUES (:id, :pid, :cid, 'secret_leak', :trace, :trace, :span, 'critical', 'high')")
+                .param("id", Ids.ulid())
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("trace", traceId)
+                .param("span", spanId)
+                .update();
     }
 
     private void errors(String projectId, String traceId, int errorCount) {

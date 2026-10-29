@@ -16,6 +16,7 @@ import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.ToolCallRepository;
 import ai.tessary.storage.ToolCallRow;
 import ai.tessary.storage.TraceDetectionRepository;
+import ai.tessary.storage.TraceFilters;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
@@ -164,14 +165,23 @@ public class TracesController {
             // when (default) | tokens | cost | latency — each an indexed rollup column, NULLS LAST so a
             // trace that has not rolled up sorts to the end rather than to either extreme.
             @RequestParam(required = false) @Nullable String sort,
-            // A classifier id, or "any": keeps a trace a classifier flagged.
-            @RequestParam(required = false) @Nullable String detectedBy) {
+            // Classifier ids, comma-separated: keeps a trace every one of them flagged. "any" alone keeps a
+            // trace any classifier flagged.
+            @RequestParam(required = false) @Nullable List<String> detectedBy) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view traces");
 
         TracePageCodec.Key before = TracePageCodec.decode(cursor);
         var query = new TraceV2Repository.TraceQuery(
-                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
+                model,
+                kind,
+                callSite,
+                hasCallSite,
+                fromTimestamp,
+                toTimestamp,
+                status,
+                q,
+                TraceFilters.detectedBy(detectedBy));
         int pageSize = TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT);
         String projectId = r.project().id();
 

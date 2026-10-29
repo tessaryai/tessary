@@ -329,7 +329,8 @@ export type TraceFilterParams = {
   q?: string;
   callSite?: string;
   hasCallSite?: boolean;
-  detectedBy?: string;
+  /** Classifier ids a trace must all have, or ["any"]. */
+  detectedBy?: string[];
 };
 
 export function projectApi(orgSlug: string, projectSlug: string) {
@@ -462,8 +463,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       q?: string;
       callSite?: string;
       hasCallSite?: boolean;
-      /** A classifier id, or "any". */
-      detectedBy?: string;
+      /** Classifier ids a trace must all have, or ["any"]. */
+      detectedBy?: string[];
       sort?: string;
     }) =>
       http<TracesPageView>(withQuery(`${base}/traces`, params)),

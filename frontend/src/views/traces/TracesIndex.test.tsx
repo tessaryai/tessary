@@ -329,19 +329,123 @@ describe("detected by", () => {
     expect(within(menu).queryByRole("button", { name: /Secret leak/ })).toBeNull();
 
     fireEvent.click(within(menu).getByRole("button", { name: /Frustration/ }));
-    await waitFor(() => expect(lastListCall().detectedBy).toBe("cls-fr"));
+    await waitFor(() => expect(lastListCall().detectedBy).toEqual(["cls-fr"]));
     expect(currentParams().get("detected_by")).toBe("cls-fr");
 
-    fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
     fireEvent.click(
       within(screen.getByRole("group", { name: "Detected by" })).getByRole("button", { name: /Any detection/ }),
     );
-    await waitFor(() => expect(lastListCall().detectedBy).toBe("any"));
+    await waitFor(() => expect(lastListCall().detectedBy).toEqual(["any"]));
 
     // Bug: All traces in the menu leaves the detection filter on.
     fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
     fireEvent.click(within(screen.getByRole("group", { name: "Detected by" })).getByRole("button", { name: /All traces/ }));
     await waitFor(() => expect(lastListCall().detectedBy).toBeUndefined());
+  });
+
+  // Bugs: a tick that replaces the last pick instead of adding to it, a panel that closes on every tick, and a
+  // button that does not say the rule is all of them.
+  it("adds each ticked classifier to the filter, keeps the panel open and names the picks", async () => {
+    api.listClassifiers.mockResolvedValue([
+      classifier(),
+      classifier({ id: "cls-item", classifier_key: "item_check", name: "Item check", detector: "item_check", built_in: false }),
+      classifier({ id: "cls-tone", classifier_key: "tone", name: "Tone", detector: "tone", built_in: false }),
+    ]);
+    renderRoute(<TracesIndex />);
+    await screen.findByText("checkout-agent");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
+    const menu = screen.getByRole("group", { name: "Detected by" });
+    expect(within(menu).getByText("Has all of")).toBeTruthy();
+    expect(within(menu).getByText("A trace shows when every ticked classifier flagged it.")).toBeTruthy();
+    fireEvent.click(within(menu).getByRole("button", { name: /Frustration/ }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Detected by" })).getByRole("button", { name: /Item check/ }));
+
+    await waitFor(() => expect(lastListCall().detectedBy).toEqual(["cls-fr", "cls-item"]));
+    expect(currentParams().get("detected_by")).toBe("cls-fr,cls-item");
+    expect(screen.getByRole("button", { name: /^Detected by:\s*Frustration and Item check$/ })).toBeTruthy();
+
+    fireEvent.click(within(screen.getByRole("group", { name: "Detected by" })).getByRole("button", { name: /Tone/ }));
+    expect(await screen.findByRole("button", { name: /^Detected by:\s*all of 3$/ })).toBeTruthy();
+
+    for (const name of [/Frustration/, /Item check/, /Tone/]) {
+      fireEvent.click(within(screen.getByRole("group", { name: "Detected by" })).getByRole("button", { name }));
+    }
+    await waitFor(() => expect(lastListCall().detectedBy).toBeUndefined());
+    expect(currentParams().get("detected_by")).toBeNull();
+  });
+
+  // Bug: the session view kept the trace rule's wording, though a session needs the picks only across its traces.
+  it("states the session rule when grouped by session", async () => {
+    renderRoute(<TracesIndex />, { route: "/traces?groupBy=session" });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
+    const menu = screen.getByRole("group", { name: "Detected by" });
+    await within(menu).findByRole("button", { name: /Frustration/ });
+    expect(
+      within(menu).getByText(
+        "A session shows when its traces together have every ticked one. One trace need not have them all.",
+      ),
+    ).toBeTruthy();
+  });
+
+  // Bug: a row listed its detections in arrival order, so the ones the reader filtered by could sit behind the cut.
+  it("reads several picks from a link and leads each row with them", async () => {
+    api.listClassifiers.mockResolvedValue([
+      classifier(),
+      classifier({ id: "cls-item", classifier_key: "item_check", name: "Item check", detector: "item_check", built_in: false }),
+    ]);
+    api.listTraces.mockResolvedValue(
+      page([
+        trace({
+          id: "tr-both",
+          name: "both-turn",
+          detected_by: [
+            { classifier_id: "cls-tone", name: "Tone" },
+            { classifier_id: "cls-item", name: "Item check" },
+            { classifier_id: "cls-fr", name: "Frustration" },
+          ],
+        }),
+      ]),
+    );
+    renderRoute(<TracesIndex />, { route: "/traces?detected_by=cls-fr,cls-item" });
+
+    const row = (await screen.findByText("both-turn")).closest("tr")!;
+    expect(api.listTraces).toHaveBeenLastCalledWith(expect.objectContaining({ detectedBy: ["cls-fr", "cls-item"] }));
+    expect(row.textContent).toContain("Flagged by Frustration, Item check, Tone");
+  });
+
+  // Bug: no trace having every pick read as a generic dead end, with no way to the looser session view.
+  it("says no trace has all the picks, and offers the sessions that do", async () => {
+    api.listClassifiers.mockResolvedValue([
+      classifier(),
+      classifier({ id: "cls-item", classifier_key: "item_check", name: "Item check", detector: "item_check", built_in: false }),
+    ]);
+    api.listTraces.mockResolvedValue(page([]));
+    renderRoute(<TracesIndex />, { route: "/traces?detected_by=cls-fr,cls-item" });
+
+    expect(await screen.findByText("No traces have all of these detections")).toBeTruthy();
+    expect(screen.getByText("Frustration and Item check never flagged the same trace in past 30 days.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show matching sessions" }));
+    await waitFor(() => expect(currentParams().get("groupBy")).toBe("session"));
+    expect(currentParams().get("detected_by")).toBe("cls-fr,cls-item");
+  });
+
+  // Bug: an off classifier among several picks could only be fixed by clearing every filter.
+  it("names an off classifier among the picks and removes just that one", async () => {
+    api.listClassifiers.mockResolvedValue([
+      classifier(),
+      classifier({
+        id: "cls-item", classifier_key: "item_check", name: "Item check", detector: "item_check", built_in: false,
+        enabled: false,
+      }),
+    ]);
+    api.listTraces.mockResolvedValue(page([]));
+    renderRoute(<TracesIndex />, { route: "/traces?detected_by=cls-fr,cls-item" });
+
+    expect(await screen.findByText("Item check is off")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Item check" }));
+    await waitFor(() => expect(currentParams().get("detected_by")).toBe("cls-fr"));
   });
 
   it("names the classifier on a flagged row and on no other", async () => {
@@ -387,7 +491,7 @@ describe("detected by", () => {
 
     const row = (await screen.findAllByText("checkout +2"))[0].closest("tr")!;
     expect(api.listSessions).toHaveBeenLastCalledWith(
-      expect.objectContaining({ status: "error", detectedBy: "cls-fr", hasCallSite: true }),
+      expect.objectContaining({ status: "error", detectedBy: ["cls-fr"], hasCallSite: true }),
     );
     expect(within(row).getByText("Frustration")).toBeTruthy();
 
@@ -395,7 +499,7 @@ describe("detected by", () => {
     const calm = (await screen.findByText("calm-turn")).closest("tr")!;
     expect(api.getSession).toHaveBeenLastCalledWith(
       "sess-1",
-      expect.objectContaining({ status: "error", detectedBy: "cls-fr" }),
+      expect.objectContaining({ status: "error", detectedBy: ["cls-fr"] }),
     );
     expect(within(calm).getByText("outside the filters:")).toBeTruthy();
     const sad = screen.getByText("sad-turn").closest("tr")!;
@@ -687,6 +791,10 @@ describe("dropdowns and stored choices", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh options" }));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("group", { name: "Refresh" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "Detected by" })).toBeNull();
 
     fireEvent.click(screen.getByTitle("Time range: Past 30 days"));
     fireEvent.mouseDown(screen.getByRole("group", { name: "Time range" }));

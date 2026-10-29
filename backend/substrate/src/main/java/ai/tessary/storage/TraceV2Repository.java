@@ -370,8 +370,8 @@ public class TraceV2Repository {
 
     /**
      * Optional filters that compose with AND. {@code model}, {@code kind}, {@code callSite} and {@code hasCallSite} are
-     * {@code EXISTS} semi-joins over spans; {@code detectedBy} is a classifier id or {@code any}. {@link TraceFilters}
-     * writes the SQL.
+     * {@code EXISTS} semi-joins over spans; {@code detectedBy} is the classifier ids a trace must all have, or
+     * {@code any}, and empty for no detection filter. {@link TraceFilters} writes the SQL.
      */
     public record TraceQuery(
             @Nullable String model,
@@ -382,9 +382,9 @@ public class TraceV2Repository {
             @Nullable String to,
             @Nullable String status,
             @Nullable String q,
-            @Nullable String detectedBy) {
+            List<String> detectedBy) {
 
-        public static final TraceQuery NONE = new TraceQuery(null, null, null, null, null, null, null, null, null);
+        public static final TraceQuery NONE = new TraceQuery(null, null, null, null, null, null, null, null, List.of());
     }
 
     /**
@@ -539,6 +539,7 @@ public class TraceV2Repository {
                 .list();
     }
 
+    /** Any picked detection, not all: a session matches when its traces together have every pick. */
     @Transactional(readOnly = true)
     public List<String> idsInSessionMatching(String projectId, String sessionId, TraceQuery filter, int limit) {
         var params = new HashMap<String, Object>();
@@ -547,7 +548,7 @@ public class TraceV2Repository {
         params.put("limit", limit);
         var where = new StringBuilder("WHERE t.project_id = :pid AND t.session_id = :sid AND NOT t.is_deleted");
         try {
-            filters.append(projectId, where, params, filter);
+            filters.appendAnyDetection(projectId, where, params, filter);
             return jdbc.sql("SELECT t.id FROM trace t " + where + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
                     .params(params)
                     .query(String.class)

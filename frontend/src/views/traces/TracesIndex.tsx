@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Status is runtime only: grader verdicts never color this table.
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  Fragment,
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { Search, ChevronRight } from "lucide-react";
@@ -32,9 +44,11 @@ import {
 } from "./index-columns";
 import {
   FacetControl,
+  MultiFacetControl,
   RefreshControl,
   STATUS_OPTIONS,
   TimeRangeControl,
+  parseList,
   rangeLabel,
   resolveRange,
   useAutoRefresh,
@@ -74,6 +88,17 @@ const KIND_OPTIONS: FacetOption[] = [
   { value: "rerank", label: "rerank" },
   { value: "guardrail", label: "guardrail" },
 ];
+
+/** The names of the classifiers picked under Detected by, so each row can lead with them. */
+const PickedDetections = createContext<string[]>([]);
+
+/** What the Detected by button shows for the picked classifiers. */
+function pickedLabel(names: string[]): string | undefined {
+  if (names.length === 0) return undefined;
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `all of ${names.length}`;
+}
 
 export function TracesIndex() {
   const api = useProjectApi();
@@ -121,6 +146,11 @@ function TracesList() {
   );
   const colWidths = columnWidths(columns, groupBySession ? SESSION_EXPAND_COLUMN_WIDTH : 0);
 
+  const picked = parseList(facets.detected_by);
+  const anyDetection = picked.length === 1 && picked[0] === ANY_DETECTION;
+  const pickedIds = anyDetection ? [] : picked;
+  const setPicked = (ids: string[]) => setFacet("detected_by", ids.length > 0 ? ids.join(",") : null);
+
   // Server-side: the list is keyset-paginated, so a browser filter would only see the loaded page.
   const filters: TraceFilters = {
     q: submittedQuery || undefined,
@@ -130,7 +160,7 @@ function TracesList() {
     kind: facets.kind ?? undefined,
     from: bounds.from,
     to: bounds.to,
-    detectedBy: facets.detected_by ?? undefined,
+    detectedBy: picked.length > 0 ? picked : undefined,
   };
   const q = useTracesIndex(filters, epoch, !groupBySession);
   const sq = useSessionsIndex(filters, epoch, groupBySession);
@@ -138,7 +168,8 @@ function TracesList() {
   const classifiersQ = useQuery({ queryKey: ["classifiers", api.base], queryFn: api.listClassifiers });
   const detectors = (classifiersQ.data ?? []).filter((c) => c.shown_in_trace_views);
   const detectedByOptions = detectors.map((c) => ({ value: c.id, label: c.name }));
-  const pickedDetector = detectors.find((c) => c.id === facets.detected_by) ?? null;
+  const pickedNames = pickedIds.map((id) => detectors.find((c) => c.id === id)?.name ?? id);
+  const offDetector = detectors.find((c) => pickedIds.includes(c.id) && !c.enabled) ?? null;
 
   const filtered = activeCount > 0 || !!submittedQuery;
   const narrowed =
@@ -188,7 +219,7 @@ function TracesList() {
   const openSession = (row: SessionListItem) => patch({ session: row.id });
   const closeSession = () => patch({ session: null, view: null, span: null });
 
-  return (
+  const page = (
     <div className="pt-9 px-10 pb-14">
       <PageHeader
         kicker="Monitor"
@@ -218,7 +249,7 @@ function TracesList() {
           aria-label="Filter traces"
           placeholder="Filter traces by name, session, or content"
           className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-subtle text-body"
-          
+        
         />
         <span className="shrink-0 font-mono text-subtle text-label">
           ⏎ to search
@@ -252,20 +283,27 @@ function TracesList() {
           ]}
           emptyHint="No call site has been seen in the loaded traces yet."
         />
-        <FacetControl
+        <MultiFacetControl
           label="Detected by"
-          value={facets.detected_by === ANY_DETECTION ? null : facets.detected_by}
+          values={pickedIds}
           options={detectedByOptions}
-          onChange={(v) => setFacet("detected_by", v)}
+          onChange={setPicked}
+          shown={pickedLabel(pickedNames)}
           head={[
-            { label: "All traces", selected: !facets.detected_by, onSelect: () => setFacet("detected_by", null) },
+            { label: "All traces", selected: picked.length === 0, onSelect: () => setPicked([]) },
             {
               label: "Any detection",
               short: "any",
-              selected: facets.detected_by === ANY_DETECTION,
-              onSelect: () => setFacet("detected_by", ANY_DETECTION),
+              selected: anyDetection,
+              onSelect: () => setPicked([ANY_DETECTION]),
             },
           ]}
+          caption="Has all of"
+          footnote={
+            groupBySession
+              ? "A session shows when its traces together have every ticked one. One trace need not have them all."
+              : "A trace shows when every ticked classifier flagged it."
+          }
           emptyHint="No classifier that marks traces is set up yet."
         />
         <button
@@ -335,10 +373,21 @@ function TracesList() {
           onSearchAllTime={() => setRange({ kind: "all" })}
           onShowAll={callSite === "any" ? () => setCallSite("all") : undefined}
           offClassifier={
-            pickedDetector && !pickedDetector.enabled
+            offDetector
               ? {
-                  name: pickedDetector.name,
-                  href: classifierHref(pickedDetector, basePath),
+                  name: offDetector.name,
+                  href: classifierHref(offDetector, basePath),
+                  onRemove:
+                    pickedIds.length > 1 ? () => setPicked(pickedIds.filter((id) => id !== offDetector.id)) : undefined,
+                }
+              : undefined
+          }
+          allOf={
+            !groupBySession && pickedIds.length > 1
+              ? {
+                  names: pickedLabel(pickedNames) ?? "",
+                  onlyFilter: !facets.status && !facets.kind && !submittedQuery && callSite === "any",
+                  onShowSessions: () => setGroupBySession(true),
                 }
               : undefined
           }
@@ -416,6 +465,7 @@ function TracesList() {
       <SessionRail sessionId={openSessionId} onClose={closeSession} />
     </div>
   );
+  return <PickedDetections.Provider value={pickedNames}>{page}</PickedDetections.Provider>;
 }
 
 /**
@@ -695,9 +745,10 @@ function Rollup({
 }
 
 function Detected({ names }: { names: string[] }) {
+  const picked = useContext(PickedDetections);
   return (
     <TD className="truncate text-small" style={{ ...CELL_PAD }}>
-      <DetectionMarker names={names} size="small" />
+      <DetectionMarker names={names} picked={picked} size="small" />
     </TD>
   );
 }
@@ -854,6 +905,8 @@ function Cell({ col, row, outside = false }: { col: ColumnKey; row: TraceListIte
 /**
  * A filter matching nothing and a project with no traces look identical from here. Each way out shows
  * only when it would change the result. The default hides untagged traces, so `onShowAll` is its own way out.
+ * Several picked detections get their own wording and the session view as a way out, since a session
+ * needs them only across its traces.
  */
 function NothingHere({
   filtered,
@@ -863,6 +916,7 @@ function NothingHere({
   onSearchAllTime,
   onShowAll,
   offClassifier,
+  allOf,
 }: {
   filtered: boolean;
   allTime: boolean;
@@ -870,7 +924,8 @@ function NothingHere({
   onClearAll: () => void;
   onSearchAllTime: () => void;
   onShowAll?: () => void;
-  offClassifier?: { name: string; href: string };
+  offClassifier?: { name: string; href: string; onRemove?: () => void };
+  allOf?: { names: string; onlyFilter: boolean; onShowSessions: () => void };
 }) {
   if (offClassifier) {
     return (
@@ -879,13 +934,27 @@ function NothingHere({
           {offClassifier.name} is off
         </p>
         <p className="mx-auto text-muted mt-3 text-body" style={{ maxWidth: 460, textWrap: "pretty" }}>
-          It has no detections to filter by. Turn it on to start scoring.
+          {offClassifier.onRemove
+            ? "It has no detections to filter by, so no trace can have all of the ones you picked. Turn it on, or remove it from the filter."
+            : "It has no detections to filter by. Turn it on to start scoring."}
         </p>
         <p className="text-muted mt-3 text-body">
           <Link to={offClassifier.href} className="text-accent hover:underline">
             Open {offClassifier.name}
           </Link>
           <span className="text-subtle"> · </span>
+          {offClassifier.onRemove && (
+            <>
+              <button
+                type="button"
+                onClick={offClassifier.onRemove}
+                className="text-accent hover:underline cursor-pointer"
+              >
+                Remove {offClassifier.name}
+              </button>
+              <span className="text-subtle"> · </span>
+            </>
+          )}
           <button type="button" onClick={onClearAll} className="text-accent hover:underline cursor-pointer">
             Clear all filters
           </button>
@@ -896,13 +965,16 @@ function NothingHere({
   const ways = [
     !allTime && { label: "Search all time", onClick: onSearchAllTime },
     onShowAll && { label: "Show all traces", onClick: onShowAll },
+    allOf && { label: "Show matching sessions", onClick: allOf.onShowSessions },
     filtered && { label: "Clear all filters", onClick: onClearAll },
   ].filter((w): w is { label: string; onClick: () => void } => !!w);
 
   return (
     <div className="text-center pt-18 px-0 pb-10">
       <p className="text-h1 mx-auto text-fg" style={{ maxWidth: 560 }}>
-        {filtered
+        {allOf
+          ? "No traces have all of these detections"
+          : filtered
           ? "No traces match these filters"
           : onShowAll
             ? allTime
@@ -912,6 +984,12 @@ function NothingHere({
               ? "No traces yet"
               : "No traces in this range"}
       </p>
+
+      {allOf?.onlyFilter && (
+        <p className="mx-auto text-muted mt-3 text-body" style={{ maxWidth: 480, textWrap: "pretty" }}>
+          {allOf.names} never flagged the same trace in {range}.
+        </p>
+      )}
 
       {ways.length > 0 && (
         <p className="text-muted mt-3 text-body">

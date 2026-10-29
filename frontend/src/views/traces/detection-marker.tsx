@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { Fragment } from "react";
 import { cn } from "../../ui";
 import type { TraceDetailView } from "../../api/types";
 
@@ -43,14 +44,18 @@ export function conversationMarks(detections: DetectionMark[]): {
  */
 export function DetectionMarker({
   names,
+  picked = [],
   size = "label",
   className,
 }: {
   names: string[];
+  /** Classifiers the reader filtered by: they lead, in full text color. */
+  picked?: string[];
   size?: "label" | "small";
   className?: string;
 }) {
   if (names.length === 0) return null;
+  const lead = picked.filter((n) => names.includes(n));
   return (
     <span
       className={cn(
@@ -61,7 +66,16 @@ export function DetectionMarker({
     >
       <span aria-hidden="true" className="shrink-0 rounded-pill bg-error" style={{ width: 6, height: 6 }} />
       <span className="sr-only">Flagged by </span>
-      <span className="truncate">{names.join(", ")}</span>
+      <span className="truncate">
+        {lead.length === 0
+          ? names.join(", ")
+          : [...lead, ...names.filter((n) => !picked.includes(n))].map((n, i) => (
+              <Fragment key={n}>
+                {i > 0 && ", "}
+                <span className={picked.includes(n) ? "text-fg" : undefined}>{n}</span>
+              </Fragment>
+            ))}
+      </span>
     </span>
   );
 }

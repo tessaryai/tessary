@@ -702,6 +702,129 @@ export function FacetControl({
   );
 }
 
+/** A list param such as `?detected_by=a,b`, empty when absent. */
+export function parseList(value: string | null): string[] {
+  return value ? value.split(",").filter(Boolean) : [];
+}
+
+/** A multi-select row: the panel stays open so the list behind it updates as the reader ticks. */
+function CheckRow({ label, checked, onClick }: { label: string; checked: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={checked}
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center rounded-control px-2 py-1.5 text-small transition-colors hover:bg-hover gap-2.5",
+        checked ? "text-fg" : "text-muted",
+      )}
+      style={{ transitionDuration: "var(--duration-micro)" }}
+    >
+      <span aria-hidden="true" className="inline-flex shrink-0 justify-center" style={{ minWidth: 30 }}>
+        <span
+          className={cn(
+            "inline-flex size-3.5 items-center justify-center rounded-micro border",
+            checked ? "border-fg bg-fg text-bg" : "border-subtle",
+          )}
+        >
+          {checked && <Check size={11} strokeWidth={3} />}
+        </span>
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+/**
+ * A multi-select filter: head rows that pick one meaning and close the panel, then a captioned list of
+ * values to tick, and a line saying what the ticks mean. `shown` is the button's value while set.
+ */
+export function MultiFacetControl({
+  label,
+  values,
+  options,
+  onChange,
+  head,
+  caption,
+  footnote,
+  shown,
+  emptyHint,
+}: {
+  label: string;
+  values: string[];
+  options: FacetOption[];
+  onChange: (v: string[]) => void;
+  head: FacetFixedRow[];
+  caption: string;
+  footnote: string;
+  shown?: string;
+  emptyHint?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismissOnOutside(
+    open,
+    useCallback(() => setOpen(false), []),
+  );
+  const display = shown ?? head.find((h) => h.selected)?.short;
+  const toggle = (v: string) => onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "inline-flex h-8 items-center rounded-control border bg-surface transition-colors hover:border-border-strong gap-1.5 py-0 px-2",
+          display ? "border-border-strong text-fg" : "border-border text-muted",
+        )}
+        style={{ transitionDuration: "var(--duration-micro)" }}
+      >
+        <span className="text-small">
+          {label}
+          {display && (
+            <>
+              <span className="text-subtle">: </span>
+              <span className="font-mono">{display}</span>
+            </>
+          )}
+        </span>
+        <ChevronDown size={13} strokeWidth={1.5} aria-hidden="true" className="text-subtle" />
+      </button>
+
+      {open && (
+        <Panel label={label} width={300}>
+          {head.map((h) => (
+            <Row
+              key={h.label}
+              label={h.label}
+              selected={h.selected}
+              onClick={() => {
+                h.onSelect();
+                setOpen(false);
+              }}
+            />
+          ))}
+          {options.length === 0 ? (
+            <p className="text-subtle py-2 px-2.5 text-label">{emptyHint ?? "Nothing to filter by yet."}</p>
+          ) : (
+            <>
+              <div className="my-1.5 mx-0.5 border-t border-border" />
+              <p className="font-mono uppercase text-subtle pt-1 px-2 pb-0.5 text-label">{caption}</p>
+              {options.map((o) => (
+                <CheckRow key={o.value} label={o.label} checked={values.includes(o.value)} onClick={() => toggle(o.value)} />
+              ))}
+              <div className="my-1.5 mx-0.5 border-t border-border" />
+              <p className="text-subtle pt-0.5 px-2 pb-1 text-label">{footnote}</p>
+            </>
+          )}
+        </Panel>
+      )}
+    </div>
+  );
+}
+
 export const STATUS_OPTIONS: FacetOption[] = [
   { value: "ok", label: "ok" },
   { value: "error", label: "error" },
