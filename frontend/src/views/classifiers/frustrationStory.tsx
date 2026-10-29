@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // A frustration finding is ruled positive when filed and opens its case in the same step, so the
 // header shows the ruling, never a triage button.
-import type { ProjectApi } from "../../api/client";
+import { useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
+import type { FrustrationSort, ProjectApi } from "../../api/client";
 import type { BehaviorFinding, FrustratedConversation, FrustrationDetail } from "../../api/types";
-import { PageHeader } from "../../ui";
+import { PageHeader, SegmentedControl } from "../../ui";
 import { RulingWithCase } from "./shared";
 import { Pin, PinList, RateChart, formatRate } from "./rateStory";
 import type { FlaggedLoader, FlaggedPage, FlaggedRow } from "./FlaggedList";
@@ -123,10 +125,51 @@ export function frustrationRows(detail: FrustrationDetail): FlaggedPage {
 }
 
 export function frustrationLoader(api: ProjectApi, findingId: string): FlaggedLoader {
-  return async (filter, cursor) => {
-    const page = await api.getFrustratedSessions(findingId, { limit: PAGE_SIZE, cursor, cause: filter });
+  return async (filter, cursor, sort) => {
+    const page = await api.getFrustratedSessions(findingId, {
+      limit: PAGE_SIZE,
+      cursor,
+      cause: filter,
+      sort: sort === "newest" ? "newest" : "score",
+    });
     return { rows: page.rows.map(frustrationRow), nextCursor: page.nextCursor, total: page.total };
   };
+}
+
+/** Highest score unless the URL asks for Newest, so a link keeps the order and the default leaves the URL bare. */
+export function useFrustrationSort(): [FrustrationSort, (sort: FrustrationSort) => void] {
+  const [params, setParams] = useSearchParams();
+  const sort: FrustrationSort = params.get("sort") === "newest" ? "newest" : "score";
+  const setSort = useCallback(
+    (next: FrustrationSort) => {
+      const query = new URLSearchParams(params);
+      if (next === "newest") query.set("sort", next);
+      else query.delete("sort");
+      setParams(query, { replace: true });
+    },
+    [params, setParams],
+  );
+  return [sort, setSort];
+}
+
+export function FrustrationSortControl({
+  value,
+  onChange,
+}: {
+  value: FrustrationSort;
+  onChange: (sort: FrustrationSort) => void;
+}) {
+  return (
+    <SegmentedControl<FrustrationSort>
+      ariaLabel="Sort sessions"
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: "score", label: "Highest score" },
+        { value: "newest", label: "Newest" },
+      ]}
+    />
+  );
 }
 
 /** What the rate measures, said once for the finding and the case page. */

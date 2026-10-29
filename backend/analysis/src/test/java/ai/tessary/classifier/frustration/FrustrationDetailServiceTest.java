@@ -15,6 +15,7 @@ import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.CauseRef;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.ConversationContext;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.FlaggedTurn;
+import ai.tessary.classifier.frustration.FrustrationRateRepository.SessionOrder;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.WitnessPage;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -59,6 +60,7 @@ class FrustrationDetailServiceTest {
                 String callSiteId,
                 String findingId,
                 @Nullable CauseRef cause,
+                SessionOrder order,
                 int limit,
                 int offset) {
             assertEquals(List.of(PROJECT, CLASSIFIER, "fnd_1"), List.of(projectId, classifierId, findingId));
@@ -125,7 +127,7 @@ class FrustrationDetailServiceTest {
                 new Witnesses("tr_1", "tr_2", "tr_3").flagged("tr_1", "conv_1").flagged("tr_2", null);
 
         FrustratedSessionPage page = new FrustrationDetailService(witnesses)
-                .page(finding(FindingRow.Cause.FRUSTRATION_RATE), null, 2, cursor);
+                .page(finding(FindingRow.Cause.FRUSTRATION_RATE), null, SessionOrder.DEFAULT, 2, cursor);
 
         assertEquals(List.of(0), witnesses.offsetsRead);
         assertEquals(

@@ -27,8 +27,10 @@ import {
   FRUSTRATION_LIST_COPY,
   FRUSTRATION_SHARE,
   FrustrationRate,
+  FrustrationSortControl,
   frustrationLoader,
   frustrationRows,
+  useFrustrationSort,
 } from "../classifiers/frustrationStory";
 import { ConversationFilter, FlaggedList } from "../classifiers/FlaggedList";
 import { GroundednessRate } from "../classifiers/groundednessStory";
@@ -883,6 +885,7 @@ function FrustrationList({
   basePath: string;
 }) {
   const { api } = useTenant();
+  const [sort, setSort] = useFrustrationSort();
   const index = filter === "all" ? -1 : Number(filter);
   const cause = index >= 0 ? causes[index] : undefined;
   const options = [
@@ -894,15 +897,21 @@ function FrustrationList({
   return (
     <div id="frustrated-sessions">
       <Block label="Frustrated sessions" note="Each flagged message with the turns before it">
-        {options.length > 1 && (
-          <ConversationFilter options={options} value={cause ? filter : "all"} onChange={onFilter} />
-        )}
+        <div className="flex flex-wrap items-start gap-x-3">
+          {options.length > 1 && (
+            <ConversationFilter options={options} value={cause ? filter : "all"} onChange={onFilter} />
+          )}
+          <span className="ml-auto mb-3">
+            <FrustrationSortControl value={sort} onChange={setSort} />
+          </span>
+        </div>
         <FlaggedList
           {...FRUSTRATION_LIST_COPY}
           listKey={findingId}
-          first={frustrationRows(frustration)}
+          first={sort === "score" ? frustrationRows(frustration) : undefined}
           loadPage={frustrationLoader(api, findingId)}
           filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
+          sort={sort}
           readAhead={
             rcaReportId
               ? options.filter((o) => o.key !== "all").map((o) => ({ rcaReport: rcaReportId, index: Number(o.key) }))

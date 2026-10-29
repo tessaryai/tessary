@@ -6,6 +6,8 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
+import ai.tessary.open.errors.CommonError;
+import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -109,13 +111,16 @@ public class FrustrationRateRepository {
 
     /**
      * With {@code {filter}} set, only one RCA cause's share, read off the stored report so the request carries two
-     * short values rather than every id.
+     * short values rather than every id. A stored score that is not a JSON number reads as no score, so one odd row
+     * cannot fail the page.
      */
     private static final String WITNESS_PAGE = """
             SELECT e.trace_id, COUNT(*) OVER () AS total
               FROM finding_evidence e
               LEFT JOIN LATERAL (
-                SELECT d.subject_session_id, d.subject_started_at
+                SELECT d.subject_session_id, d.subject_started_at,
+                       CASE WHEN jsonb_typeof(d.evidence -> 'score') = 'number'
+                            THEN (d.evidence ->> 'score')::double precision END AS score
                   FROM {detections} d
                  WHERE d.project_id = e.project_id AND d.classifier_id = :cid AND d.subject_trace_id = e.trace_id
                    AND COALESCE(d.evidence ->> 'call_site_id', '') = :callSite
@@ -124,9 +129,34 @@ public class FrustrationRateRepository {
              WHERE e.project_id = :pid AND e.finding_id = :fid AND e.role = 'witness'
                AND e.trace_id IS NOT NULL AND e.span_id IS NULL
                {filter}
-             ORDER BY d.subject_started_at DESC NULLS LAST, e.trace_id DESC
+             ORDER BY {order}
              LIMIT :limit OFFSET :offset
             """;
+
+    /** How a finding's frustrated sessions are ordered. A tie goes to the newer flag, then the trace id. */
+    public enum SessionOrder {
+        SCORE("score", "d.score DESC NULLS LAST, d.subject_started_at DESC NULLS LAST, e.trace_id DESC"),
+        NEWEST("newest", "d.subject_started_at DESC NULLS LAST, e.trace_id DESC");
+
+        public static final SessionOrder DEFAULT = SCORE;
+
+        private final String wire;
+        private final String orderBy;
+
+        SessionOrder(String wire, String orderBy) {
+            this.wire = wire;
+            this.orderBy = orderBy;
+        }
+
+        /** Absent is the default; an unknown value is refused, so a typo never reads as the default. */
+        public static SessionOrder fromWire(@Nullable String value) {
+            if (value == null || value.isBlank()) return DEFAULT;
+            for (SessionOrder o : values()) {
+                if (o.wire.equals(value.strip())) return o;
+            }
+            throw new TessaryException(CommonError.INVALID_PARAMETER, "'sort' must be score or newest");
+        }
+    }
 
     public record WitnessPage(List<String> traceIds, long total) {
 
@@ -272,13 +302,15 @@ public class FrustrationRateRepository {
             String callSiteId,
             String findingId,
             @Nullable CauseRef cause,
+            SessionOrder order,
             int limit,
             int offset) {
         String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
         if (limit <= 0) return new WitnessPage(List.of(), 0);
         JdbcClient.StatementSpec spec = jdbc.sql(WITNESS_PAGE
                         .replace("{detections}", table)
-                        .replace("{filter}", cause == null ? "" : CAUSE_FILTER))
+                        .replace("{filter}", cause == null ? "" : CAUSE_FILTER)
+                        .replace("{order}", order.orderBy))
                 .param("pid", projectId)
                 .param("cid", classifierId)
                 .param("callSite", callSiteId)
@@ -297,7 +329,7 @@ public class FrustrationRateRepository {
         if (ids.isEmpty() && offset > 0) {
             return new WitnessPage(
                     List.of(),
-                    witnessPage(projectId, classifierId, callSiteId, findingId, cause, 1, 0)
+                    witnessPage(projectId, classifierId, callSiteId, findingId, cause, order, 1, 0)
                             .total());
         }
         return new WitnessPage(ids, total[0]);

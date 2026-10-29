@@ -234,6 +234,7 @@ public class FindingService {
             String findingId,
             @Nullable String rcaReport,
             @Nullable Integer cause,
+            FrustrationRateRepository.SessionOrder order,
             int limit,
             @Nullable String cursor) {
         FindingRow finding = requireReachableFinding(projectId, findingId);
@@ -242,7 +243,7 @@ public class FindingService {
         }
         FrustrationRateRepository.CauseRef ref =
                 rcaReport == null || cause == null ? null : new FrustrationRateRepository.CauseRef(rcaReport, cause);
-        return frustrations.page(finding, ref, limit, cursor);
+        return frustrations.page(finding, ref, order, limit, cursor);
     }
 
     /** {@code rcaReport} and {@code cause} narrow to the traces that RCA cause names; both or neither. */
