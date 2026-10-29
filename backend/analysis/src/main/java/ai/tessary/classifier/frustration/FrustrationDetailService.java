@@ -8,6 +8,7 @@ import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.CauseRef;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.ConversationContext;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.FlaggedTurn;
+import ai.tessary.classifier.frustration.FrustrationRateRepository.SessionOrder;
 import ai.tessary.classifier.frustration.FrustrationRateRepository.WitnessPage;
 import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import java.util.ArrayList;
@@ -20,8 +21,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * The finding page's frustration block. Rows come from the finding's witness rows, one per frustrated conversation-hour,
- * so the page lists exactly what the finding cites; they are paged newest flag first. A trace witness is paired with
- * its session through the detection row that flagged it.
+ * so the page lists exactly what the finding cites; they are paged highest score first unless the reader asks for the
+ * newest. A trace witness is paired with its session through the detection row that flagged it.
  */
 @Service
 public class FrustrationDetailService {
@@ -37,20 +38,20 @@ public class FrustrationDetailService {
     /** Null for any finding other than {@code frustration_rate}. */
     public @Nullable FrustrationDetail detail(FindingRow finding) {
         if (!FindingRow.Cause.FRUSTRATION_RATE.equals(finding.causeKind())) return null;
-        FrustratedSessionPage first = page(finding, null, PAGE_SIZE, null);
+        FrustratedSessionPage first = page(finding, null, SessionOrder.DEFAULT, PAGE_SIZE, null);
         return FrustrationEvidence.detail(finding, first.rows(), first.nextCursor());
     }
 
     /**
      * With {@code cause} set, only the sessions that RCA cause names. @param cursor the previous page's
-     * {@code nextCursor}, or null for the first
+     * {@code nextCursor} in the same {@code order}, or null for the first
      */
     public FrustratedSessionPage page(
-            FindingRow finding, @Nullable CauseRef cause, int limit, @Nullable String cursor) {
+            FindingRow finding, @Nullable CauseRef cause, SessionOrder order, int limit, @Nullable String cursor) {
         int offset = decode(cursor);
         String callSite = finding.nativeCauseKey();
         WitnessPage witnesses = rates.witnessPage(
-                finding.projectId(), finding.subjectId(), callSite, finding.id(), cause, limit, offset);
+                finding.projectId(), finding.subjectId(), callSite, finding.id(), cause, order, limit, offset);
         List<String> ids = witnesses.traceIds();
         Map<String, FlaggedTurn> flagged = rates.flaggedTurns(finding.projectId(), finding.subjectId(), callSite, ids);
         Map<String, ConversationContext> context =

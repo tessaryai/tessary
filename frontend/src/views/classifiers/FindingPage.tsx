@@ -33,8 +33,10 @@ import {
   FRUSTRATION_SHARE,
   FrustrationHeader,
   FrustrationRate,
+  FrustrationSortControl,
   frustrationLoader,
   frustrationRows,
+  useFrustrationSort,
 } from "./frustrationStory";
 import { FlaggedList } from "./FlaggedList";
 import { GroundednessHeader, GroundednessRate } from "./groundednessStory";
@@ -53,6 +55,7 @@ export function FindingPage() {
   /* Absolute: React Router resolves `..` against the flat route, which would land on the project root. */
   const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
   const traceLink = traceLinker(basePath);
+  const [sessionSort, setSessionSort] = useFrustrationSort();
 
   const detailQ = useQuery({
     queryKey: ["behavior-finding", api.base, findingId],
@@ -301,12 +304,16 @@ export function FindingPage() {
                   ? "Cleared when the case was resolved as a false alarm. They no longer count toward the rate."
                   : "Each flagged message with the turns before it"}
               </span>
+              <span className="ml-auto self-center">
+                <FrustrationSortControl value={sessionSort} onChange={setSessionSort} />
+              </span>
             </div>
             <FlaggedList
               {...FRUSTRATION_LIST_COPY}
               listKey={findingId}
-              first={frustrationRows(frustration)}
+              first={sessionSort === "score" ? frustrationRows(frustration) : undefined}
               loadPage={frustrationLoader(api, findingId)}
+              sort={sessionSort}
               basePath={basePath}
             />
           </section>

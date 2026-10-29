@@ -5,10 +5,12 @@
  * next page of sessions when asked, and a session whose traces have aged out says so instead of drawing
  * nothing. Switching to a filter whose read is still in flight keeps the last list up, and only a slow read
  * swaps it for the skeleton, which then holds (#109). Then as a general list: it draws the marks a row
- * carries and reads every page through the loader it was given.
+ * carries and reads every page through the loader it was given. Last, frustration's sort: Highest score unless the
+ * URL says Newest, sent with every page it reads.
  */
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { renderRoute } from "../../test/render";
+import { currentParams, renderRoute } from "../../test/render";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -17,7 +19,13 @@ import type {
   FrustratedConversation, FrustratedSessionPage, FrustrationDetail, TraceDetailView,
 } from "../../api/types";
 import { ConversationFilter, FlaggedList, type FlaggedLoader, type FlaggedRow } from "./FlaggedList";
-import { FRUSTRATION_LIST_COPY, frustrationLoader, frustrationRows } from "./frustrationStory";
+import {
+  FRUSTRATION_LIST_COPY,
+  FrustrationSortControl,
+  frustrationLoader,
+  frustrationRows,
+  useFrustrationSort,
+} from "./frustrationStory";
 import { api } from "../../test/api";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
@@ -481,6 +489,116 @@ describe("FlaggedList", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Pick this item" }));
 
     expect(screen.getByText("Picked row-1")).toBeTruthy();
+  });
+});
+
+/** Frustration's list with its sort, wired the way the finding and case pages wire them. */
+function SortedFrustrationList({
+  rows,
+  nextCursor = null,
+  selectionActions,
+}: {
+  rows: FrustratedConversation[];
+  nextCursor?: string | null;
+  selectionActions?: (rows: FlaggedRow[]) => ReactNode;
+}) {
+  const [sort, setSort] = useFrustrationSort();
+  const detail = {
+    conversations: rows,
+    conversationsNextCursor: nextCursor,
+    rate: { failuresCur: 80 },
+  } as unknown as FrustrationDetail;
+  return (
+    <>
+      <FrustrationSortControl value={sort} onChange={setSort} />
+      <FlaggedList
+        {...FRUSTRATION_LIST_COPY}
+        listKey="f-1"
+        first={sort === "score" ? frustrationRows(detail) : undefined}
+        loadPage={frustrationLoader(api as unknown as ProjectApi, "f-1")}
+        sort={sort}
+        basePath="/orgs/acme/projects/default"
+        selectionActions={selectionActions}
+      />
+    </>
+  );
+}
+
+describe("frustration's sort", () => {
+  const newest = conversation({ conversationId: "conv-9", traceId: "t-9", contextTraceIds: ["t-9"], message: "newest one" });
+
+  // Bug: Newest showed the cached score page, or kept the score order, and the link lost the choice.
+  it("opens on Highest score, and Newest reads page one again in that order and keeps it in the URL", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getFrustratedSessions.mockResolvedValue({ rows: [newest], total: 80, nextCursor: null });
+    renderRoute(<SortedFrustrationList rows={[conversation()]} />);
+
+    screen.getByRole("button", { name: /that cant be right/ });
+    expect(screen.getByRole("button", { name: "Highest score" }).getAttribute("aria-pressed")).toBe("true");
+    expect(api.getFrustratedSessions).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Newest" }));
+    await screen.findByRole("button", { name: /newest one/ });
+    expect(api.getFrustratedSessions.mock.calls).toEqual([
+      ["f-1", { limit: 50, cursor: null, cause: undefined, sort: "newest" }],
+    ]);
+    expect(currentParams().get("sort")).toBe("newest");
+
+    fireEvent.click(screen.getByRole("button", { name: "Highest score" }));
+    await screen.findByRole("button", { name: /that cant be right/ });
+    expect(currentParams().has("sort")).toBe(false);
+    expect(api.getFrustratedSessions).toHaveBeenCalledTimes(1);
+  });
+
+  // Bug: a shared Newest link opened in the score order the finding came with.
+  it("opens a ?sort=newest link in Newest, and anything else in Highest score", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getFrustratedSessions.mockResolvedValue({ rows: [newest], total: 80, nextCursor: null });
+    renderRoute(<SortedFrustrationList rows={[conversation()]} />, { route: "/?sort=newest" });
+
+    await screen.findByRole("button", { name: /newest one/ });
+    expect(screen.getByRole("button", { name: "Newest" }).getAttribute("aria-pressed")).toBe("true");
+    expect(api.getFrustratedSessions.mock.calls[0]?.[1]).toMatchObject({ sort: "newest" });
+  });
+
+  it("reads an unknown ?sort as Highest score", () => {
+    renderRoute(<SortedFrustrationList rows={[conversation()]} />, { route: "/?sort=oldest" });
+
+    expect(screen.getByRole("button", { name: "Highest score" }).getAttribute("aria-pressed")).toBe("true");
+    screen.getByRole("button", { name: /that cant be right/ });
+    expect(api.getFrustratedSessions).not.toHaveBeenCalled();
+  });
+
+  // Bug: a sort that joined the list's identity dropped every pick when the reader switched order.
+  it("keeps picks when the sort changes", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getFrustratedSessions.mockResolvedValue({ rows: [newest], total: 80, nextCursor: null });
+    renderRoute(
+      <SortedFrustrationList
+        rows={[conversation()]}
+        selectionActions={(picked) => <span>Picked {picked.map((r) => r.id).join(", ")}</span>}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Pick this session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Newest" }));
+    await screen.findByRole("button", { name: /newest one/ });
+
+    const bar = screen.getByRole("toolbar", { name: "Selected sessions" });
+    expect(within(bar).getByText("Picked conv-1")).toBeTruthy();
+  });
+
+  // Bug: page two read without the sort comes back in the server's default order, and rows repeat or go missing.
+  it("sends the sort with the next page's cursor", async () => {
+    api.getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    api.getFrustratedSessions.mockResolvedValue({ rows: [newest], total: 80, nextCursor: null });
+    renderRoute(<SortedFrustrationList rows={[conversation()]} nextCursor="50" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Load more sessions/ }));
+    await screen.findByRole("button", { name: /newest one/ });
+    expect(api.getFrustratedSessions.mock.calls).toEqual([
+      ["f-1", { limit: 50, cursor: "50", cause: undefined, sort: "score" }],
+    ]);
   });
 });
 

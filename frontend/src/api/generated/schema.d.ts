@@ -6299,6 +6299,7 @@ export interface operations {
                 ctx: components["schemas"]["TenantContext"];
                 rcaReport?: string;
                 cause?: number;
+                sort?: string;
                 limit?: number;
                 cursor?: string;
             };

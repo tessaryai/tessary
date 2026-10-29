@@ -733,8 +733,9 @@ describe("a frustration case", () => {
       limit: expect.any(Number),
       cursor: null,
       cause: { rcaReport: "rca-f", index: 0 },
+      sort: "score",
     });
-    const filter = screen.getByRole("group");
+    const filter = screen.getByRole("group", { name: "Filter sessions" });
     expect(within(filter).getByRole("button", { name: "Cause 1 · 1" }).getAttribute("aria-pressed")).toBe("true");
     expect(within(filter).queryByRole("button", { name: /Cause 2/ })).toBeNull();
     expect(scrolled).toHaveBeenCalled();

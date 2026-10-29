@@ -21,6 +21,7 @@ import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedConversationView;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedSessionPage;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
+import ai.tessary.classifier.frustration.FrustrationRateRepository.SessionOrder;
 import ai.tessary.plan.Capability;
 import ai.tessary.testsupport.RateClassifierFixture;
 import java.time.Instant;
@@ -28,6 +29,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -123,14 +125,15 @@ record FrustrationRateIntegrationTest(
         assertEquals(FrustrationDetailService.PAGE_SIZE, block.conversations().size(), "the first page");
         assertEquals("50", block.conversationsNextCursor());
         FrustratedConversationView row = block.conversations().get(0);
-        assertEquals("conv-cs-chat-45-11", row.conversationId(), "newest flag first");
+        assertEquals("conv-cs-chat-45-11", row.conversationId(), "every score ties at 0.71, so the newest flag first");
         assertEquals(0.71, row.score());
         assertEquals("cs-chat", row.callSiteId());
         assertFalse(row.cleared());
         assertEquals(
                 row.traceId(), row.contextTraceIds().get(row.contextTraceIds().size() - 1), "flagged turn last");
 
-        FrustratedSessionPage rest = frustrationDetail.page(finding, null, FrustrationDetailService.PAGE_SIZE, "50");
+        FrustratedSessionPage rest =
+                frustrationDetail.page(finding, null, SessionOrder.DEFAULT, FrustrationDetailService.PAGE_SIZE, "50");
         assertEquals(22, rest.rows().size(), "the rest, on the next page");
         assertEquals(72, rest.total());
         assertNull(rest.nextCursor(), "nothing after it");
@@ -152,8 +155,8 @@ record FrustrationRateIntegrationTest(
                 "[{\"evidence_session_ids\":[\"conv-cs-chat-45-00\"],\"evidence_trace_ids\":[]},"
                         + "{\"evidence_session_ids\":[\"conv-cs-chat-43-00\"],"
                         + "\"evidence_trace_ids\":[\"cs-chat-44-01\"]}]");
-        FrustratedSessionPage oneCause =
-                frustrationDetail.page(finding, new FrustrationRateRepository.CauseRef(report, 1), 50, null);
+        FrustratedSessionPage oneCause = frustrationDetail.page(
+                finding, new FrustrationRateRepository.CauseRef(report, 1), SessionOrder.DEFAULT, 50, null);
         assertEquals(
                 List.of("cs-chat-44-01", "cs-chat-43-00"),
                 oneCause.rows().stream()
@@ -262,7 +265,7 @@ record FrustrationRateIntegrationTest(
         FindingRow finding = findings.listByProject(pid, null, null, "frustration", false, 10)
                 .get(0);
 
-        FrustratedSessionPage past = frustrationDetail.page(finding, null, 50, "500");
+        FrustratedSessionPage past = frustrationDetail.page(finding, null, SessionOrder.DEFAULT, 50, "500");
         assertEquals(List.of(), past.rows());
         assertEquals(72, past.total(), "the finding still cites every frustrated session-hour");
         assertNull(past.nextCursor());
@@ -279,6 +282,67 @@ record FrustrationRateIntegrationTest(
         assertNotNull(turn);
         assertNull(turn.score());
         assertEquals("cs-chat", turn.callSiteId());
+    }
+
+    /**
+     * Highest score first: a tie goes to the newer flag, and a missing or non-numeric score goes last instead of failing
+     * the page or sorting first; the finding page's first page is in that order too, Newest keeps the old order, and
+     * two pages read in one order never share a session.
+     */
+    @Test
+    void sessionsSortByScoreWithTiesToTheNewerFlagAndNoScoreLast() {
+        String pid = fixture.project("fr-sort", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, "frustration");
+        Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        risenCallSite(pid, signal, start);
+        service.refresh(pid, signal, Instant.now());
+        FindingRow finding = findings.listByProject(pid, null, null, "frustration", false, 10)
+                .get(0);
+        storeEvidence(pid, "cs-chat-40-00", "{\"score\":0.99,\"call_site_id\":\"cs-chat\"}");
+        storeEvidence(pid, "cs-chat-41-03", "{\"score\":0.95,\"call_site_id\":\"cs-chat\"}");
+        storeEvidence(pid, "cs-chat-43-07", "{\"score\":0.95,\"call_site_id\":\"cs-chat\"}");
+        storeEvidence(pid, "cs-chat-44-05", "{\"score\":\"high\",\"call_site_id\":\"cs-chat\"}");
+        storeEvidence(pid, "cs-chat-42-02", "{\"call_site_id\":\"cs-chat\"}");
+
+        FrustratedSessionPage first = frustrationDetail.page(finding, null, SessionOrder.SCORE, 50, null);
+        assertEquals(
+                List.of("cs-chat-40-00", "cs-chat-43-07", "cs-chat-41-03", "cs-chat-45-11"),
+                traces(first).subList(0, 4),
+                "the highest score, then the tie by the newer flag, then the 0.71s newest first");
+        FrustratedSessionPage second =
+                frustrationDetail.page(finding, null, SessionOrder.SCORE, 50, first.nextCursor());
+        List<String> rest = traces(second);
+        assertEquals(
+                List.of("cs-chat-44-05", "cs-chat-42-02"),
+                rest.subList(rest.size() - 2, rest.size()),
+                "no readable score goes last, the newer flag first");
+        assertEquals(72, Set.copyOf(concat(traces(first), rest)).size(), "two pages, every session once");
+
+        FrustrationDetail block =
+                triageSource.detail(pid, finding.id()).orElseThrow().frustration();
+        assertNotNull(block);
+        assertEquals("cs-chat-40-00", block.conversations().get(0).traceId(), "the finding page opens in score order");
+
+        FrustratedSessionPage newest = frustrationDetail.page(finding, null, SessionOrder.NEWEST, 50, null);
+        assertEquals("cs-chat-45-11", traces(newest).get(0), "Newest ignores the score");
+        assertFalse(traces(newest).contains("cs-chat-40-00"), "the top score is on Newest's last page");
+    }
+
+    private void storeEvidence(String pid, String trace, String evidenceJson) {
+        jdbc.sql("UPDATE frustration_detection SET evidence = CAST(:evidence AS jsonb)"
+                        + " WHERE project_id = :pid AND subject_trace_id = :trace")
+                .param("evidence", evidenceJson)
+                .param("pid", pid)
+                .param("trace", trace)
+                .update();
+    }
+
+    private static List<String> traces(FrustratedSessionPage page) {
+        return page.rows().stream().map(FrustratedConversationView::traceId).toList();
+    }
+
+    private static List<String> concat(List<String> a, List<String> b) {
+        return Stream.concat(a.stream(), b.stream()).toList();
     }
 
     /**

@@ -52,16 +52,29 @@ export type FlaggedRow = {
 
 export type FlaggedPage = { rows: FlaggedRow[]; nextCursor: string | null; total: number };
 
-export type FlaggedLoader = (filter: RowFilter | undefined, cursor: string | null) => Promise<FlaggedPage>;
+/** `sort` is the caller's own order key, passed through untouched; absent for a list with one order. */
+export type FlaggedLoader = (
+  filter: RowFilter | undefined,
+  cursor: string | null,
+  sort?: string,
+) => Promise<FlaggedPage>;
 
 const filterKeyOf = (filter: RowFilter | undefined) => (filter ? `${filter.rcaReport}:${filter.index}` : "all");
 
 const rowKey = (row: FlaggedRow) => `${row.id} ${row.traceId}`;
 
-function rowsQuery(base: string, listKey: string, loadPage: FlaggedLoader, filter: RowFilter | undefined) {
+function rowsQuery(
+  base: string,
+  listKey: string,
+  loadPage: FlaggedLoader,
+  filter: RowFilter | undefined,
+  sort: string | undefined,
+) {
   return infiniteQueryOptions({
-    queryKey: ["flagged-rows", base, listKey, filterKeyOf(filter)],
-    queryFn: ({ pageParam }: { pageParam: string | null }) => loadPage(filter, pageParam),
+    queryKey: ["flagged-rows", base, listKey, filterKeyOf(filter), sort ?? null],
+    // A list with one order is read exactly as before, with no third argument.
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      sort === undefined ? loadPage(filter, pageParam) : loadPage(filter, pageParam, sort),
     initialPageParam: null as string | null,
     getNextPageParam: (last: FlaggedPage) => last.nextCursor ?? undefined,
     staleTime: Infinity,
@@ -73,6 +86,7 @@ export function FlaggedList({
   loadPage,
   listKey,
   filter,
+  sort,
   readAhead = [],
   basePath,
   listLabel,
@@ -88,6 +102,8 @@ export function FlaggedList({
   loadPage: FlaggedLoader;
   listKey: string;
   filter?: RowFilter;
+  /** Joins the query and the view key, so a new order starts at page one and scrolls to the top. */
+  sort?: string;
   readAhead?: RowFilter[];
   basePath: string;
   listLabel: string;
@@ -103,9 +119,9 @@ export function FlaggedList({
 }) {
   const { api } = useTenant();
   const [one, many] = unit;
-  const filterKey = filterKeyOf(filter);
+  const filterKey = sort ? `${filterKeyOf(filter)} ${sort}` : filterKeyOf(filter);
   const pages = useInfiniteQuery({
-    ...rowsQuery(api.base, listKey, loadPage, filter),
+    ...rowsQuery(api.base, listKey, loadPage, filter, sort),
     initialData: filter || !first ? undefined : { pages: [first], pageParams: [null] },
     placeholderData: keepPreviousData,
   });
@@ -114,10 +130,10 @@ export function FlaggedList({
   const queryClient = useQueryClient();
   const readAheadKey = readAhead.map(filterKeyOf).join(",");
   useEffect(() => {
-    for (const f of readAhead) void queryClient.prefetchInfiniteQuery(rowsQuery(api.base, listKey, loadPage, f));
+    for (const f of readAhead) void queryClient.prefetchInfiniteQuery(rowsQuery(api.base, listKey, loadPage, f, sort));
     // readAheadKey stands in for readAhead, which is a fresh array on every render, and loadPage is read
     // only for a page not cached yet.
-  }, [queryClient, api.base, listKey, readAheadKey]);
+  }, [queryClient, api.base, listKey, readAheadKey, sort]);
   const shown = pages.data?.pages.flatMap((p) => p.rows) ?? [];
   const total = pages.data?.pages[0]?.total ?? first?.total ?? 0;
 

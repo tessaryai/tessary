@@ -15310,6 +15310,14 @@
           },
           {
             "in" : "query",
+            "name" : "sort",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
             "name" : "limit",
             "required" : false,
             "schema" : {

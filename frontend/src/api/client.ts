@@ -158,6 +158,9 @@ const causePage = (params?: CausePageParams) => ({
   cause: params?.cause?.index,
 });
 
+/** How the frustrated sessions list is ordered; FindingController reads `score` when none is sent. */
+export type FrustrationSort = "score" | "newest";
+
 export interface EntityDiff {
   added: number;
   updated: number;
@@ -426,8 +429,10 @@ export function projectApi(orgSlug: string, projectSlug: string) {
         }),
       ),
 
-    getFrustratedSessions: (id: string, params?: CausePageParams) =>
-      http<FrustratedSessionPage>(withQuery(`${base}/findings/${enc(id)}/frustrated-sessions`, causePage(params))),
+    getFrustratedSessions: (id: string, params?: CausePageParams & { sort?: FrustrationSort }) =>
+      http<FrustratedSessionPage>(
+        withQuery(`${base}/findings/${enc(id)}/frustrated-sessions`, { ...causePage(params), sort: params?.sort }),
+      ),
 
     getFlaggedAnswers: (id: string, params?: CausePageParams) =>
       http<FlaggedAnswerPage>(withQuery(`${base}/findings/${enc(id)}/flagged-answers`, causePage(params))),

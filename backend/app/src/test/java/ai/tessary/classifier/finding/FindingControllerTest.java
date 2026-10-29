@@ -98,7 +98,7 @@ record FindingControllerTest(
         assertEquals(
                 new FrustrationEvidence.FrustratedSessionPage(List.of(), 0, null),
                 controller
-                        .frustratedSessions(owner, org, project, id, null, null, 50, "")
+                        .frustratedSessions(owner, org, project, id, null, null, null, 50, "")
                         .data());
         assertEquals(
                 new GroundednessEvidence.FlaggedAnswerPage(List.of(), 0, null),
@@ -145,10 +145,43 @@ record FindingControllerTest(
         assertEquals(0, sessions(fix, id, "rca-1", 0).total(), "a cause no report holds cites no conversation");
     }
 
+    /** A mistyped sort is refused, so it never reads as the default order with a cursor from another. */
+    @Test
+    void anUnknownSessionSortIsRefused() {
+        var fix = TenantFixture.bootstrap(tenants, "finding-api-frustration-sort");
+        String id = finding(
+                fix,
+                BuiltInDetector.Kind.FRUSTRATION,
+                "{\"cause_kind\":\"frustration_rate\",\"native_cause_key\":\"checkout-agent\"}");
+
+        TessaryException refused = assertThrows(
+                TessaryException.class,
+                () -> controller.frustratedSessions(
+                        owner(fix), fix.org().slug(), fix.project().slug(), id, null, null, "oldest", 50, ""));
+        assertEquals(CommonError.INVALID_PARAMETER, refused.error());
+        assertEquals(
+                0,
+                requireNonNull(controller
+                                .frustratedSessions(
+                                        owner(fix),
+                                        fix.org().slug(),
+                                        fix.project().slug(),
+                                        id,
+                                        null,
+                                        null,
+                                        "newest",
+                                        50,
+                                        "")
+                                .data())
+                        .total(),
+                "newest is a sort the route knows");
+    }
+
     private FrustrationEvidence.FrustratedSessionPage sessions(
             TenantFixture.Setup fix, String id, @Nullable String rcaReport, @Nullable Integer cause) {
         return requireNonNull(controller
-                .frustratedSessions(owner(fix), fix.org().slug(), fix.project().slug(), id, rcaReport, cause, 50, "")
+                .frustratedSessions(
+                        owner(fix), fix.org().slug(), fix.project().slug(), id, rcaReport, cause, null, 50, "")
                 .data());
     }
 

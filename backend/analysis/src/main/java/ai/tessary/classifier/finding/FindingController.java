@@ -11,6 +11,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.frustration.FrustrationEvidence;
+import ai.tessary.classifier.frustration.FrustrationRateRepository;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
@@ -112,8 +113,8 @@ public class FindingController {
     }
 
     /**
-     * Newest flag first. {@code rcaReport} and {@code cause} (0-based position in that report) narrow it to one RCA
-     * cause's sessions.
+     * Highest score first, or newest flag first with {@code sort=newest}; a cursor belongs to the sort it was read in.
+     * {@code rcaReport} and {@code cause} (0-based position in that report) narrow it to one RCA cause's sessions.
      */
     @GetMapping("/{id}/frustrated-sessions")
     public ApiResponse<FrustrationEvidence.FrustratedSessionPage> frustratedSessions(
@@ -123,11 +124,13 @@ public class FindingController {
             @PathVariable String id,
             @RequestParam(required = false) @Nullable String rcaReport,
             @RequestParam(required = false) @Nullable Integer cause,
+            @RequestParam(required = false) @Nullable String sort,
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(required = false) String cursor) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        FrustrationRateRepository.SessionOrder order = FrustrationRateRepository.SessionOrder.fromWire(sort);
         return ApiResponse.ok(service.frustratedSessions(
-                r.project().id(), id, rcaReport, cause, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
+                r.project().id(), id, rcaReport, cause, order, Math.clamp(limit, 1, MAX_EVIDENCE_PAGE), cursor));
     }
 
     /** Newest flag first; {@code rcaReport} and {@code cause} filter as in {@link #frustratedSessions}. */
