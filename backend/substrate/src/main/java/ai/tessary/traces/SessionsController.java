@@ -3,9 +3,11 @@ package ai.tessary.traces;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
+import ai.tessary.storage.TraceFilters;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -54,12 +56,20 @@ public class SessionsController {
             @RequestParam(required = false) @Nullable String toTimestamp,
             @RequestParam(required = false) @Nullable String status,
             @RequestParam(required = false) @Nullable String q,
-            @RequestParam(required = false) @Nullable String detectedBy) {
+            @RequestParam(required = false) @Nullable List<String> detectedBy) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view sessions");
         boolean includeTotals = "totals".equals(include);
         var filter = new TraceV2Repository.TraceQuery(
-                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
+                model,
+                kind,
+                callSite,
+                hasCallSite,
+                fromTimestamp,
+                toTimestamp,
+                status,
+                q,
+                TraceFilters.detectedBy(detectedBy));
         return ApiResponse.ok(sessions.page(
                 r.project().id(),
                 TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT),
@@ -68,7 +78,7 @@ public class SessionsController {
                 filter));
     }
 
-    /** Given the traces list's filters, also names the traces that pass them. */
+    /** Given the traces list's filters, also names the traces that pass them, with any picked detection. */
     @GetMapping("/{sessionId}")
     public ApiResponse<SessionDtos.SessionDetail> detail(
             TenantContext ctx,
@@ -83,11 +93,19 @@ public class SessionsController {
             @RequestParam(required = false) @Nullable String toTimestamp,
             @RequestParam(required = false) @Nullable String status,
             @RequestParam(required = false) @Nullable String q,
-            @RequestParam(required = false) @Nullable String detectedBy) {
+            @RequestParam(required = false) @Nullable List<String> detectedBy) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view a session");
         var filter = new TraceV2Repository.TraceQuery(
-                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
+                model,
+                kind,
+                callSite,
+                hasCallSite,
+                fromTimestamp,
+                toTimestamp,
+                status,
+                q,
+                TraceFilters.detectedBy(detectedBy));
         return ApiResponse.ok(sessions.detail(r.project().id(), sessionId, filter)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found")));
     }

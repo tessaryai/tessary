@@ -17,8 +17,8 @@ export type TraceFilters = {
   /** Absolute ISO-8601 bounds. Resolved by the picker, never a relative token — see index-filters. */
   from?: string | null;
   to?: string | null;
-  /** A classifier id, or "any": traces a classifier flagged. */
-  detectedBy?: string;
+  /** Classifier ids a trace must all have, or ["any"]: traces any classifier flagged. */
+  detectedBy?: string[];
 };
 
 /** The filters as the traces and sessions reads take them. */

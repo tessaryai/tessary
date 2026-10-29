@@ -7417,7 +7417,7 @@ export interface operations {
                 toTimestamp?: string;
                 status?: string;
                 q?: string;
-                detectedBy?: string;
+                detectedBy?: string[];
             };
             header?: never;
             path: {
@@ -7451,7 +7451,7 @@ export interface operations {
                 toTimestamp?: string;
                 status?: string;
                 q?: string;
-                detectedBy?: string;
+                detectedBy?: string[];
             };
             header?: never;
             path: {
@@ -7594,7 +7594,7 @@ export interface operations {
                 status?: string;
                 q?: string;
                 sort?: string;
-                detectedBy?: string;
+                detectedBy?: string[];
             };
             header?: never;
             path: {

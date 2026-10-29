@@ -41,6 +41,7 @@ import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceDetectionRepository;
+import ai.tessary.storage.TraceFilters;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
@@ -411,7 +412,7 @@ public class McpToolRegistry {
                 "List this token's project's traces, newest first — one row per producer trace, carrying the"
                         + " ROLLUP columns (span_count, error_count, typed token buckets, costs, is_settled,"
                         + " unpriced_spans) and the stored input_preview/output_preview, NEVER the full payloads."
-                        + " Filter by model, kind, call_site_id, status and a started_at range, or"
+                        + " Filter by model, kind, call_site_id, status, detected_by and a started_at range, or"
                         + " search names, ids and span inputs and outputs with q. A null token or cost column means"
                         + " one of two different things and the row says which: is_settled=false is 'still"
                         + " receiving spans', settled-with-null is 'no span reported usage', and unpriced_spans >"
@@ -446,6 +447,7 @@ public class McpToolRegistry {
                                                         + " inclusive (ISO-8601).",
                                                 "Optional inclusive lower bound (ISO-8601).",
                                                 "Optional inclusive upper bound (ISO-8601).")),
+                                Map.entry("detected_by", detectedByField()),
                                 Map.entry(
                                         "q",
                                         strField("Optional. Substring of the trace name, session, thread, user"
@@ -1327,7 +1329,7 @@ public class McpToolRegistry {
                 range == null ? null : range.to(),
                 strArg(args, "status"),
                 strArg(args, "q"),
-                null);
+                detectedByArg(args));
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
         TracePageCodec.Key before = TracePageCodec.decode(strArg(args, "cursor"));
         List<TraceV2Repository.Summary> rows;
@@ -1856,6 +1858,18 @@ public class McpToolRegistry {
     }
 
     /** An array, not a boolean, so it can grow into a field-set vocabulary. */
+    private static Map<String, Object> detectedByField() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("type", "array");
+        m.put("items", Map.of("type", "string"));
+        m.put(
+                "description",
+                "Optional. Classifier ids; keeps a trace every one of them flagged (each row's detected_by names"
+                        + " them). [\"" + TraceDetectionRepository.ANY + "\"] alone keeps a trace any classifier"
+                        + " flagged. At most " + TraceFilters.MAX_DETECTED_BY + " ids.");
+        return m;
+    }
+
     private static Map<String, Object> payloadFieldsField() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("type", "array");
@@ -1890,6 +1904,19 @@ public class McpToolRegistry {
             throw new McpTool.ToolException("argument " + key + " must be a string");
         }
         return s.isBlank() ? null : s;
+    }
+
+    private static List<String> detectedByArg(Map<String, Object> args) {
+        Object v = args.get("detected_by");
+        if (v == null) return List.of();
+        if (!(v instanceof List<?> raw) || raw.stream().anyMatch(e -> !(e instanceof String))) {
+            throw new McpTool.ToolException("argument detected_by must be an array of classifier id strings");
+        }
+        try {
+            return TraceFilters.detectedBy(raw.stream().map(String.class::cast).toList());
+        } catch (TessaryException e) {
+            throw toolError(e);
+        }
     }
 
     private static String requireStr(Map<String, Object> args, String key) {

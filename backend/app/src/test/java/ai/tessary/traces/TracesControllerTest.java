@@ -391,13 +391,27 @@ record TracesControllerTest(
                 null,
                 null,
                 null,
-                frustration.id()));
+                List.of(frustration.id())));
         assertEquals(
                 List.of(flagged),
                 byClassifier.traces().stream().map(TraceDtos.TraceListItem::id).toList());
 
         var anyDetection = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, "any"));
+                t.ctx(),
+                t.org(),
+                t.proj(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of("any")));
         assertEquals(
                 List.of(flagged),
                 anyDetection.traces().stream().map(TraceDtos.TraceListItem::id).toList());

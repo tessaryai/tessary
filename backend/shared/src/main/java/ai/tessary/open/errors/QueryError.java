@@ -4,7 +4,7 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 /**
- * Errors for {@code /v1/query/*}. A missing project-scoped token is 403, like {@link IngestError#OTLP_TOKEN_REQUIRED}.
+ * Errors for {@code /v1/query/*} and the traces and sessions filters. A missing project-scoped token is 403, like {@link IngestError#OTLP_TOKEN_REQUIRED}.
  */
 public enum QueryError implements ErrorCode {
     TOKEN_REQUIRED(HttpStatus.FORBIDDEN, "the query API requires a project-scoped token"),
@@ -15,6 +15,7 @@ public enum QueryError implements ErrorCode {
     INVALID_RANGE(HttpStatus.BAD_REQUEST, "an explicit time range (from/to) is required for this operation"),
     UNKNOWN_SEARCH_MODE(HttpStatus.BAD_REQUEST, "unknown search mode '%s'"),
     SEARCH_UNSUPPORTED_FOR_DATASET(HttpStatus.BAD_REQUEST, "search is not supported on dataset '%s'"),
+    INVALID_DETECTED_BY(HttpStatus.BAD_REQUEST, "detectedBy takes 'any' on its own, or up to %d classifier ids"),
     SEARCH_TOO_BROAD(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "too many traces match this search; add a word or use a shorter time range");
