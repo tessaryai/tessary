@@ -64,7 +64,7 @@
              choice here would not be caught automatically; this note is the record that the license
              was checked by hand at introduction time. -->
         <pdfbox.version>3.0.8</pdfbox.version>
-        <opentelemetry-instrumentation.version>2.32.0-alpha</opentelemetry-instrumentation.version>
+        <opentelemetry-instrumentation.version>2.33.1-alpha</opentelemetry-instrumentation.version>
         <protobuf-java.version>4.36.2</protobuf-java.version>
         <!-- Testcontainers 2.x: the artifacts were regrouped, so the modules depend on
              `testcontainers-postgresql` / `testcontainers-junit-jupiter`, NOT the 1.x
