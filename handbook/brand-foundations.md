@@ -2,11 +2,11 @@
 
 ## Who we are
 
-Tessary is an open-source agent reliability platform for engineering teams running AI agents in production.
+Tessary reads every conversation, finds where your agent failed a user, and opens the fix as a pull request. It is open source and self-hostable.
 
 ## Who we are talking to
 
-We write primarily for engineering leaders responsible for agents in production. They understand software systems, but should not need specialized knowledge of evaluation or observability terminology to understand us.
+We write for the founders and product owners of AI products with real users, and for the engineers who set Tessary up. They understand software systems, but should not need specialized knowledge of evaluation or observability terminology to understand us.
 
 Lead with a simple explanation. Add technical depth when it helps substantiate a claim or enables someone to act.
 
@@ -14,13 +14,13 @@ Lead with a simple explanation. Add technical depth when it helps substantiate a
 
 Agents can develop production issues without crashing or returning obvious errors. Teams often do not know that these issues are happening, much less why they are happening.
 
-Tessary helps teams discover these issues and understand their causes.
+Tessary helps teams discover these issues, understand their causes, and fix them.
 
 ## What we want people to believe
 
-Tessary explains why agents fail.
+Tessary explains why agents fail and opens the fix.
 
-Detection matters, but identifying a problem is not enough. Tessary should be associated with investigating failures, connecting them to evidence, and helping engineering teams understand what changed.
+Detection matters, but identifying a problem is not enough. Tessary should be associated with investigating failures, connecting them to evidence, helping teams understand what changed, and opening the fix as a pull request a person reviews.
 
 ## What makes Tessary different
 
@@ -30,7 +30,7 @@ Most evaluation systems inspect a sample of production traffic. This can miss in
 
 ## The role Tessary plays
 
-Tessary should become the default place where engineering teams discover, investigate, and understand production agent failures.
+Tessary should become the default place where teams discover, investigate, and fix production agent failures.
 
 It plays for AI agents the role that systems such as Sentry established for traditional software: making production failures visible and giving engineers the evidence needed to fix them.
 
