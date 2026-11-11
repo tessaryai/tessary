@@ -6,11 +6,11 @@ This guide defines how Tessary writes marketing content across the website, anno
 
 Tell readers what Tessary is before expecting them to understand why it matters.
 
-The primary description should identify Tessary as an open-source agent reliability platform.
+The primary description should say what Tessary does for the reader, then that it is open source.
 
 Use:
 
-> Tessary is an open-source agent reliability platform for engineering teams running AI agents in production.
+> Tessary reads every conversation, finds where your agent failed a user, and opens the fix as a pull request. It is open source and self-hostable.
 
 Do not lead with an abstract promise, category invention, or unexplained problem when the reader does not yet know what Tessary is.
 
@@ -29,9 +29,9 @@ A complete Tessary marketing message should generally answer:
 
 Short formats may answer only the questions relevant to their purpose. Preserve the order of understanding even when the message is compressed.
 
-## Write for engineering leaders
+## Write for founders and the engineers who set Tessary up
 
-Write primarily for engineering leaders responsible for AI agents in production.
+Write for the founders and product owners of AI products with real users, and for the engineers who set Tessary up.
 
 They need to understand:
 
@@ -41,7 +41,7 @@ They need to understand:
 - What adopting Tessary requires
 - What evidence supports its claims
 
-Do not assume that an engineering leader wants executive-level abstraction. Lead simply, then provide enough technical depth to make the explanation credible.
+Do not assume that a founder wants executive-level abstraction. Lead simply, then provide enough technical depth to make the explanation credible.
 
 Other audiences may require different context, but the underlying description and terminology should remain consistent.
 

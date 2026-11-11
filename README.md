@@ -3,7 +3,7 @@
   Tessary
 </h1>
 
-<p align="center">Stop your agents from failing silently in production.</p>
+<p align="center">Find and fix agent issues before your users complain.</p>
 
 <p align="center">
   <a href="https://docs.tessary.ai">Docs</a> ·
@@ -19,7 +19,7 @@
   <a href="https://github.com/tessaryai/tessary/actions/workflows/check.yml"><img src="https://github.com/tessaryai/tessary/actions/workflows/check.yml/badge.svg" alt="CI status"></a>
 </p>
 
-Tessary is an open-source reliability platform for AI agents in production. It monitors every trace, detects issues using cheap classifiers, groups related findings into cases, and investigates their root cause using trace and repository evidence.
+Tessary reads every conversation, finds where your agent failed a user, and opens the fix as a pull request. It's open source and self-hostable. It monitors every trace with cheap classifiers, groups related findings into cases, and investigates their root cause using trace and repository evidence.
 
 <p align="center">
   <a href="https://claude.ai/artifact/QgGwCRCSQoMCm79kJqynDN">
@@ -65,7 +65,7 @@ Connect a GitHub repository under **Settings > Git integration** and both triage
 2. **Filter cheaply.** Classifiers sweep every trace continuously and open a finding when one fires. The per-trace check stays cheap enough to afford at production volume, which is what makes reading all of it possible instead of sampling. Two classifiers are exceptions, and both are off until you turn them on: `frustration` scores eligible user messages with a hosted model on your own OpenRouter or TypeSafe key, and `groundedness` checks answers against their retrieved documents with a public model you run on a Mac with Apple silicon or a GPU instance on AWS, not an LLM call.
 3. **Group into cases.** Related findings collapse into one case, surfaced on **Triage**. An LLM triage step rules whether a finding is a real deviation rather than a legitimate change, and only a finding it rules real becomes a case. Two kinds of finding are ruled when they are filed instead, because their numbers are the claim: a high-confidence secret leak, and a rise in frustrated conversations.
 4. **Explain the case.** RCA runs an agentic session over the failing traces and, when a repo is connected, the code itself. It returns a one-sentence summary, the causes it found with the traces behind each, and the checks it ruled out.
-5. **Route it to a human.** An alert carries the case to whoever owns it. Tessary explains and hands off. It doesn't open the fix.
+5. **Open the fix.** Tessary opens the fix as a pull request, with the cause and the evidence attached, for your team to review. It never merges a change on its own.
 
 ## License
 
