@@ -113,6 +113,48 @@ record LlmUsageAccountantTest(
                 call);
     }
 
+    /**
+     * A playground run spends the org's own key, so it is byo, and it keeps every token bucket the provider reported,
+     * the book that priced it, and the prompt version it ran.
+     */
+    @Test
+    void recordChatCall_booksByoWithEveryBucketAndTheSubject() {
+        String pid = project();
+
+        accountant.recordChatCall(
+                pid,
+                "playground",
+                "gpt-5.5",
+                20,
+                8,
+                100,
+                4,
+                new BigDecimal("0.000124"),
+                "book-v1",
+                1840,
+                new LlmUsageAccountant.Subject("prompt_version", "pv-1"));
+
+        LlmCallRow row = only(pid);
+        assertEquals(
+                new LlmCallRow(
+                        row.id(),
+                        pid,
+                        "playground",
+                        "gpt-5.5",
+                        LlmCallRow.CostFunding.BYO,
+                        20,
+                        8,
+                        100,
+                        4,
+                        new BigDecimal("0.0001240000"),
+                        "book-v1",
+                        1840,
+                        "prompt_version",
+                        "pv-1",
+                        row.createdAt()),
+                row);
+    }
+
     @Test
     void aRunTheLedgerCannotRecordIsDroppedWithoutFailingTheCaller() {
         String lane = "lane-" + UUID.randomUUID();

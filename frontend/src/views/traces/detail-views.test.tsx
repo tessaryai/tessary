@@ -5,10 +5,113 @@
  * each with its label under it, and every other part of that trace is dimmed so the reader sees what was
  * read. A trace with no entry is drawn as it always was.
  */
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { api } from "../../test/api";
 import { span, traceItem } from "../../test/fixtures";
-import { ConversationView, SessionConversationView, type EmphasisBySpan } from "./detail-views";
+import { currentLocation, renderRoute } from "../../test/render";
+import { ConversationView, SessionConversationView, TreeView, type EmphasisBySpan } from "./detail-views";
+
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
+let promptsOn = true;
+vi.mock("../../capabilities/useCapabilities", () => ({
+  useCapabilities: () => ({ isEnabled: (c: string) => c === "prompt_management_enabled" && promptsOn }),
+}));
+
+describe("the prompt chip on a span row", () => {
+  const tree = (over: Parameters<typeof span>[0]) =>
+    renderRoute(<TreeView spans={[span({ name: "summarize", ...over })]} focusId={null} onSelect={() => {}} />);
+
+  // Bug: a span made from a managed prompt gives the reader no way to open that prompt and version.
+  it("links a linked span to its prompt at the version it sent", async () => {
+    promptsOn = true;
+    api.listPrompts.mockResolvedValue({ items: [{ id: "pr_1" }], page: 1, limit: 50, total: 1 });
+    tree({ id: "s1", prompt_name: "p", prompt_version: "3" });
+
+    const link = await screen.findByRole("link", { name: "Open prompt p v3" });
+    expect(link.getAttribute("href")).toBe("/orgs/acme/projects/default/prompts/pr_1?version=3");
+    expect(api.listPrompts).toHaveBeenCalledWith({ name: "p" });
+  });
+
+  // Bug: the chip sits inside the row's select button, so opening the prompt also selects the span.
+  it("opens the prompt without selecting the span", async () => {
+    promptsOn = true;
+    api.listPrompts.mockResolvedValue({ items: [{ id: "pr_1" }], page: 1, limit: 50, total: 1 });
+    const onSelect = vi.fn();
+    renderRoute(
+      <TreeView spans={[span({ id: "s1", prompt_name: "p", prompt_version: "3" })]} focusId={null} onSelect={onSelect} />,
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: "Open prompt p v3" }));
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(currentLocation()).toBe("/orgs/acme/projects/default/prompts/pr_1?version=3");
+  });
+
+  // Bug: the link was nested inside the row's select button, which is invalid markup: assistive tech folds the link
+  // into the button's name and does not offer it as a link of its own.
+  it("puts the link outside the row's select button", async () => {
+    promptsOn = true;
+    api.listPrompts.mockResolvedValue({ items: [{ id: "pr_1" }], page: 1, limit: 50, total: 1 });
+    tree({ id: "s1", prompt_name: "p", prompt_version: "3" });
+
+    const link = await screen.findByRole("link", { name: "Open prompt p v3" });
+    expect(link.closest("button")).toBeNull();
+  });
+
+  // Bug: a span that sent a label linked to ?version=production, which the detail page reads as no version, so it
+  // opened the latest version instead of the one the label is on.
+  it.each([
+    ["production", "/orgs/acme/projects/default/prompts/pr_1?version=2"],
+    ["canary", "/orgs/acme/projects/default/prompts/pr_1"],
+  ])("links a span that sent the label %s to the version that carries it", async (label, href) => {
+    promptsOn = true;
+    api.listPrompts.mockResolvedValue({
+      items: [{ id: "pr_1", labels: [{ label: "production", version: 2 }] }], page: 1, limit: 50, total: 1,
+    });
+    tree({ id: "s1", prompt_name: "p", prompt_version: label });
+
+    const link = await screen.findByRole("link", { name: `Open prompt p (${label})` });
+    expect(link.getAttribute("href")).toBe(href);
+  });
+
+  it("links to the prompt alone when the span sent no version", async () => {
+    promptsOn = true;
+    api.listPrompts.mockResolvedValue({ items: [{ id: "pr_1" }], page: 1, limit: 50, total: 1 });
+    tree({ id: "s1", prompt_name: "p", prompt_version: null });
+
+    const link = await screen.findByRole("link", { name: "Open prompt p" });
+    expect(link.getAttribute("href")).toBe("/orgs/acme/projects/default/prompts/pr_1");
+  });
+
+  // Bug: a name with no prompt in the project renders a link to a page that does not exist.
+  it("shows a plain badge when no prompt in the project has that name", async () => {
+    promptsOn = true;
+    api.listPrompts.mockResolvedValue({ items: [], page: 1, limit: 50, total: 0 });
+    tree({ id: "s1", prompt_name: "p", prompt_version: "prod" });
+
+    expect((await screen.findByTitle("No prompt with this name in the project")).textContent).toBe("p (prod)");
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  // Bug: an org that turned prompt management off still reads the prompts API from every trace.
+  it("shows a plain badge and reads nothing when prompt management is off", () => {
+    promptsOn = false;
+    tree({ id: "s1", prompt_name: "p", prompt_version: "3" });
+
+    expect(screen.getByText("p v3")).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(api.listPrompts).not.toHaveBeenCalled();
+  });
+
+  it("shows no chip on a span made from no prompt", () => {
+    promptsOn = true;
+    tree({ id: "s1", prompt_name: null, prompt_version: null });
+
+    expect(screen.getByText("summarize")).toBeTruthy();
+    expect(screen.queryByText(/^p\b/)).toBeNull();
+    expect(api.listPrompts).not.toHaveBeenCalled();
+  });
+});
 
 const j = (v: unknown) => JSON.stringify(v);
 

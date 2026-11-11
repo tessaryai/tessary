@@ -161,7 +161,7 @@ tasks:
   node:install:
     desc: Install deps for every Node package (pnpm). Run this once after creating a worktree.
     cmds:
-      - for: [frontend, sandbox-runner/launcher, sandbox-runner/agent-sandbox]
+      - for: [frontend, sandbox-runner/launcher, sandbox-runner/agent-sandbox, packages/sdk-ts]
         task: _node:install:one
         vars: { DIR: '{{.ITEM}}' }
 
@@ -226,6 +226,21 @@ tasks:
     desc: Gate for sandbox-runner/launcher (syntax + node:test docker-backend coverage against a fake Docker daemon; no real Docker needed) and sandbox-runner/agent-sandbox (node:test agent-stream.js retry/turn-accumulation coverage). Shared with CI via scripts/check-sandbox-runner-launcher.sh.
     cmds:
       - bash scripts/check-sandbox-runner-launcher.sh
+
+  sdk-python:check:
+    desc: Gate for packages/sdk-python (tessary-prompts) — uv sync from the lockfile, then pytest at 100 percent line and branch coverage. Shared with CI via scripts/check-sdk-python.sh.
+    cmds:
+      - bash scripts/check-sdk-python.sh
+
+  sdk-ts:check:
+    desc: Gate for packages/sdk-ts (@tessaryai/prompts) — pnpm install from the lockfile, tsc, build, node:test at 100 percent coverage. Shared with CI via scripts/check-sdk-ts.sh.
+    cmds:
+      - bash scripts/check-sdk-ts.sh
+
+  check:prompt-regex:
+    desc: "The prompt variable regex is the same in all four copies: PromptNames.VARIABLE, the Prompts page's promptCompile.ts, and both SDKs. Runs in `task check`."
+    cmds:
+      - bash scripts/check-prompt-variable-regex.sh
 
   check:price-book-contract:
     desc: "The vendored price book stays at its pinned path, parses as a LiteLLM-shaped object with a floor of priced models, and every in-repo reader and writer names that path. tessary-home fetches it by raw GitHub URL, so a move breaks every instance's price updates. Runs in `task check` and in price-book-refresh.yml."

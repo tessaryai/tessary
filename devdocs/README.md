@@ -29,6 +29,7 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 | [reference/architecture.md](./reference/architecture.md) | Backend layout, naming conventions, SPI seams, feature slices, and the per-package module inventory. |
 | [modules.md](./modules.md) | The eleven-module Maven reactor: the layering, why each package sits where it does, and the invariants the poms enforce. |
 | [reference/data-model.md](./reference/data-model.md) | The full Postgres schema as a UML/ER diagram + table inventory. |
+| [reference/prompt-management.md](./reference/prompt-management.md) | Managed prompts: the three tables and derived `latest`, label semantics, the `/v1/prompts` routes and key scopes, the camelCase exception, linking spans and usage, the SDK cache and retry contract, and the playground. |
 | [reference/prompt-craft.md](./reference/prompt-craft.md) | Where every prompt the platform sends a model lives, what belongs in markdown vs code, and how to change one without silently changing a lane's behaviour. |
 | [reference/classifier-extension-interface.md](./reference/classifier-extension-interface.md) | The public classifier extension interface: the five ports a classifier attaches through, auto-configuration discovery, packaging, versioning, failure isolation, and where an extension may run. |
 | [reference/trace-schema.md](./reference/trace-schema.md) | How heterogeneous traces normalise into the canonical substrate. |

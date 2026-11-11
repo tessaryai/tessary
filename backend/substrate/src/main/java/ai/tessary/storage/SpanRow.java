@@ -9,6 +9,7 @@ import org.jspecify.annotations.Nullable;
  * resolver partial indexes near-empty. Generated totals are null whenever every input is null: zero would launder "no
  * usage sent" into "free". @param costSource {@code provided}, {@code inferred} (under {@code priceBookVersion}) or
  * {@code unpriced} @param errorType a short class label (facets group by it); the prose is {@code errorMessage}
+ * @param promptName the managed prompt that produced this span, from tessary.prompt.name or a third-party prompt dialect; no FK
  */
 public record SpanRow(
         String projectId,
@@ -54,7 +55,9 @@ public record SpanRow(
         @Nullable Integer depth,
         @Nullable Long totalTokens,
         @Nullable String totalCost,
-        @Nullable String createdAt) {
+        @Nullable String createdAt,
+        @Nullable String promptName,
+        @Nullable String promptVersion) {
 
     public static final class CostSource {
         public static final String PROVIDED = "provided";

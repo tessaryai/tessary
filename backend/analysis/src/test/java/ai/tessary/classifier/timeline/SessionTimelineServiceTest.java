@@ -292,6 +292,8 @@ class SessionTimelineServiceTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 null);
     }
 }

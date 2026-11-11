@@ -3,7 +3,9 @@ package ai.tessary.tenant;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -34,6 +36,15 @@ public class PrincipalRepository {
                 .param("id", id)
                 .query(PrincipalRepository::map)
                 .optional();
+    }
+
+    /** Ids that name no principal are skipped. */
+    public List<Principal> findByIds(Set<String> ids) {
+        if (ids.isEmpty()) return List.of();
+        return jdbc.sql("SELECT * FROM principal WHERE id = ANY(:ids)")
+                .param("ids", ids.toArray(String[]::new))
+                .query(PrincipalRepository::map)
+                .list();
     }
 
     public Optional<Principal> findByWorkosId(String workosUserId) {

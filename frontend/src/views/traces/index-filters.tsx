@@ -56,7 +56,14 @@ function rangeBadge(range: TraceTimeRange): string {
 
 // ---- URL state -------------------------------------------------------------
 
-export type FacetKey = "status" | "kind" | "call_site" | "call_site_scope" | "detected_by";
+export type FacetKey =
+  | "status"
+  | "kind"
+  | "call_site"
+  | "call_site_scope"
+  | "detected_by"
+  | "prompt"
+  | "prompt_version";
 
 /**
  * Which traces the call-site control keeps. `any` is the default and has no param: a trace without a
@@ -74,7 +81,18 @@ export type TraceQueryState = {
   q: string;
 };
 
-const FACET_KEYS: FacetKey[] = ["status", "kind", "call_site", "call_site_scope", "detected_by"];
+const FACET_KEYS: FacetKey[] = [
+  "status",
+  "kind",
+  "call_site",
+  "call_site_scope",
+  "detected_by",
+  "prompt",
+  "prompt_version",
+];
+
+/** A prompt's version narrows the prompt filter, so the pair counts as one filter. */
+const COUNTED_FACET_KEYS = FACET_KEYS.filter((k) => k !== "prompt_version");
 
 function parseCallSite(params: URLSearchParams): CallSiteFilter {
   const id = params.get("call_site");
@@ -99,6 +117,7 @@ export function useTraceQueryState(): {
   state: TraceQueryState;
   setRange: (r: TraceTimeRange) => void;
   setFacet: (key: FacetKey, value: string | null) => void;
+  clearFacets: (keys: FacetKey[]) => void;
   setCallSite: (filter: CallSiteFilter) => void;
   setSearch: (q: string) => void;
   clearAll: () => void;
@@ -149,6 +168,11 @@ export function useTraceQueryState(): {
     [write],
   );
 
+  const clearFacets = useCallback(
+    (keys: FacetKey[]) => write((next) => keys.forEach((k) => next.delete(k))),
+    [write],
+  );
+
   const setCallSite = useCallback(
     (filter: CallSiteFilter) =>
       write((next) => {
@@ -182,9 +206,9 @@ export function useTraceQueryState(): {
   );
 
   const activeCount =
-    FACET_KEYS.filter((k) => state.facets[k]).length + (params.get("range") ? 1 : 0);
+    COUNTED_FACET_KEYS.filter((k) => state.facets[k]).length + (params.get("range") ? 1 : 0);
 
-  return { state, setRange, setFacet, setCallSite, setSearch, clearAll, activeCount };
+  return { state, setRange, setFacet, clearFacets, setCallSite, setSearch, clearAll, activeCount };
 }
 
 // ---- kept for the tab ------------------------------------------------------

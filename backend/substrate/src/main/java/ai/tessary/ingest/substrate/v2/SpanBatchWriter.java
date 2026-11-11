@@ -6,6 +6,8 @@ import ai.tessary.ingest.CallSiteResolver;
 import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.KindNormalizer;
 import ai.tessary.ingest.MediaExternalizer;
+import ai.tessary.ingest.PromptRefResolver;
+import ai.tessary.ingest.PromptRefResolver.PromptRef;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.RedactionStamp;
 import ai.tessary.model.ContentExtractor;
@@ -385,6 +387,7 @@ public class SpanBatchWriter {
         String errorTypeAttr = trimmedAttr(raw, GenAiAttributes.ERROR_TYPE);
 
         IngestPricer.Priced priced = pricer.price(raw, kind);
+        PromptRef prompt = PromptRefResolver.resolve(raw.metadata());
         Long latencyMs =
                 endedAt == null ? null : Duration.between(startedAt, endedAt).toMillis();
 
@@ -438,7 +441,9 @@ public class SpanBatchWriter {
                 null,
                 null,
                 null,
-                null);
+                null,
+                prompt == null ? null : prompt.name(),
+                prompt == null ? null : prompt.version());
 
         SpanPayloadRow payload = new SpanPayloadRow(
                 projectId,

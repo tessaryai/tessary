@@ -12,7 +12,7 @@
 	}
 
 	@backend {
-		path /api/* /auth/* /mcp /mcp/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/* /actuator/health
+		path /api/* /auth/* /mcp /mcp/* /git/github/callback /git/github/manifest/callback /v1/traces /v1/query/* /v1/usage/* /v1/prompts /v1/prompts/* /actuator/health
 	}
 	handle @backend {
 		reverse_proxy {$BACKEND_URL:localhost:8080}

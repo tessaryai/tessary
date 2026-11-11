@@ -33,7 +33,16 @@ These are protobuf fields on the OTLP (OpenTelemetry Protocol) span, not attribu
 | --- | --- | --- | --- |
 | `tessary.call_site.id` | Yes | Binds the span to its call site. The trace takes the root span's call site, else the first tagged span's ([Call sites](/concepts/call-sites#a-trace-takes-the-first-call-site-it-reached)). | The dotted spelling is the only one read. Any producer can set it, including a Collector `attributes` or `transform` rule. An id Tessary has not seen before materializes a new call site. |
 
-This is the only `tessary.*` attribute with a reader. [The call-site tag](/instrument/call-site-tag) covers what a call site is and how to choose an id.
+It is one of the two `tessary.*` overlays with a reader; the other is the prompt pair below. [The call-site tag](/instrument/call-site-tag) covers what a call site is and how to choose an id.
+
+## Prompt
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `tessary.prompt.name` | Optional | The managed prompt the span was produced from. Counts the call on the prompt's usage and lets the traces list filter by prompt. | At most 512 characters. A longer name drops the link, not the span. Usage counts read `llm` spans only. |
+| `tessary.prompt.version` | Optional | The version of that prompt. | Stored as the text sent, so `3` and `prod` both work. Read only with `tessary.prompt.name`. At most 512 characters. |
+
+When the `tessary.prompt.*` pair is absent, Tessary reads two third-party prompt dialects in this order: the observation-scoped prompt name and version keys, then the shorter prompt name and version keys. Some SDKs emit these keys. `gen_ai.prompt.*` is a message family, never a prompt link.
 
 ## Kind
 
@@ -154,7 +163,7 @@ When a span carries both the structured `gen_ai.input.messages` array and the fl
 
 ## Do not emit
 
-`tessary.call_site.id` is the only `tessary.*` name with a reader. Every other `tessary.*` spelling, and every ad-hoc alias of a canonical field such as `sessionId` or `enduser.id`, is carried verbatim and read by nothing. Put the content on the standard field from the tables above instead.
+`tessary.call_site.id` and the `tessary.prompt.*` pair are the only `tessary.*` names with a reader. Every other `tessary.*` spelling, and every ad-hoc alias of a canonical field such as `sessionId` or `enduser.id`, is carried verbatim and read by nothing. Put the content on the standard field from the tables above instead.
 
 [Ingestion contract](/reference/ingestion-contract#attributes-with-no-reader) lists each unread name against the field that replaces it.
 

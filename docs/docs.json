@@ -74,10 +74,19 @@
         ]
       },
       {
+        "group": "Prompts",
+        "pages": [
+          "prompts/overview",
+          "prompts/sdk",
+          "prompts/playground"
+        ]
+      },
+      {
         "group": "Reference",
         "pages": [
           "reference/api-keys",
           "reference/mcp-server",
+          "reference/prompts-api",
           "reference/ingestion-contract"
         ]
       },

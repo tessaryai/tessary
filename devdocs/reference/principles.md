@@ -172,6 +172,9 @@ never really about grading:
   and the other limits of the call.
   A new per-event model call that does not meet every condition of one of these two records is the
   thing this rule forbids.
+  A call that a person starts by hand in the product, on the org's own key, booked in the ledger, and
+  bounded by people rather than by ingest volume, is outside this rule; the prompt playground is the one
+  such call.
 
 ## Signals & subsystems
 
