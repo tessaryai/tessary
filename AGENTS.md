@@ -1,5 +1,7 @@
 # tessary
 
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
+
 An agent-reliability platform: ingest every trace, filter it with cheap classifiers, group the
 survivors into cases, and explain a case with an agentic root-cause run grounded in the customer's
 own repository. The `.tessary/` pipeline bundle authored by the **evals plugin** (a Claude Code
