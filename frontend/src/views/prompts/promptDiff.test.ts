@@ -81,6 +81,22 @@ describe("wordDiff", () => {
     ]);
   });
 
+  // Bug: two changes with unchanged words between them merged into one change, so the shared words read as edited.
+  it("keeps the unchanged words between two changes", () => {
+    expect(wordDiff("a b c d e", "x b c d y")).toEqual([
+      { kind: "removed", text: "a" }, { kind: "added", text: "x" }, { kind: "same", text: " b c d " },
+      { kind: "removed", text: "e" }, { kind: "added", text: "y" },
+    ]);
+  });
+
+  // Bug: more than 1,000 changed lines run the line search without a bound.
+  it("gives two texts with more than 1,000 changed lines as one removed and one added side", () => {
+    const a = Array.from({ length: 1_001 }, (_, i) => `a${i}`).join("\n");
+    const b = Array.from({ length: 1_001 }, (_, i) => `b${i}`).join("\n");
+
+    expect(wordDiff(a, b)).toEqual([{ kind: "removed", text: a }, { kind: "added", text: b }]);
+  });
+
   // Bug: two long texts with nothing in common run the edit search without a bound and hang the tab.
   it("gives two long unrelated texts as one removed and one added side", () => {
     const a = Array.from({ length: 20_000 }, (_, i) => `a${i}`).join(" ");
@@ -93,6 +109,14 @@ describe("wordDiff", () => {
 // Bug: whitespace runs dropped or empty tokens kept, so joined tokens differ from the input.
 it("tokenizes into words and whitespace runs", () => {
   expect(tokenize(" a  b\n")).toEqual([" ", "a", "  ", "b", "\n"]);
+});
+
+// Bug: a full stop glued to its word, so adding a clause after "name." marks "name" as removed.
+it("splits sentence punctuation off a word, but not a decimal point", () => {
+  expect(tokenize("first name. Keep 0.3")).toEqual(["first", " ", "name", ".", " ", "Keep", " ", "0.3"]);
+  expect(wordDiff("Greet by first name.", "Greet by first name and plan.")).toEqual([
+    { kind: "same", text: "Greet by first name" }, { kind: "added", text: " and plan" }, { kind: "same", text: "." },
+  ]);
 });
 
 describe("canonicalJson", () => {
@@ -152,6 +176,25 @@ describe("diffChat", () => {
       },
       { kind: "same", left: history, right: history },
     ]);
+  });
+
+  // Bug: a removed message, or a placeholder swapped for a message, drawn as an edit of one into the other.
+  it("gives a removed message its own row, and never pairs a placeholder with a message", () => {
+    expect(diffChat([sys("a"), user("b")], [sys("a")])).toEqual([
+      { kind: "same", left: sys("a"), right: sys("a") }, { kind: "removed", left: user("b") },
+    ]);
+    expect(diffChat([history], [user("hi")])).toEqual([{ kind: "removed", left: history }, { kind: "added", right: user("hi") }]);
+  });
+
+  // Bug: a long chat prompt with every message rewritten runs the message search without a bound.
+  it("pairs every message when more than 1,000 messages changed", () => {
+    const a = Array.from({ length: 501 }, (_, i) => sys(`a${i}`));
+    const b = Array.from({ length: 501 }, (_, i) => sys(`b${i}`));
+
+    const rows = diffChat(a, b);
+
+    expect(rows).toHaveLength(501);
+    expect(rows.every((r) => r.kind === "changed")).toBe(true);
   });
 
   // Bug: a role change on unchanged content reads as no change.

@@ -134,6 +134,17 @@ describe("adding a label", () => {
   });
 });
 
+// Bug: Enter in the new-label box submits nothing, or submits the surrounding form.
+it("adds a label on Enter", () => {
+  open();
+  const input = screen.getByRole("textbox", { name: "New deployment label" });
+  fireEvent.change(input, { target: { value: "beta" } });
+
+  fireEvent.keyDown(input, { key: "Enter" });
+
+  expect(box("beta").checked).toBe(true);
+});
+
 describe("saving", () => {
   // Bug: a rollback that sends latest, sends the old set, or forgets the list and detail reads.
   it("promotes an older version to production and refreshes the prompt's reads", async () => {

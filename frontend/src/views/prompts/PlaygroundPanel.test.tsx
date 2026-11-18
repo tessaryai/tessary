@@ -3,11 +3,11 @@
  * The playground runs one version, as edited, on one of the org's own provider keys. The bugs worth catching are a
  * provider offered that cannot run it, a decision model offered as a chat model, a request that sends the stored
  * template instead of the edit or forwards config keys the server refuses, a placeholder sent with no messages, a
- * result whose cost or price source is misread, a missing key with no way to add one, and a saved version that loses
- * the edit.
+ * result whose cost or price source is misread, a missing key with no way to add one, a saved version that loses
+ * the edit, and a version select that does not reach the page.
  */
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError, type CatalogEntry, type PlatformDescriptor, type PlaygroundRunView, type PromptBody, type PromptConfig,
   type PromptType, type ProviderCredentialView, type ModelProvider,
@@ -59,10 +59,27 @@ function serve(credentials: ProviderCredentialView[] = CREDENTIALS) {
   api.getPrompt.mockResolvedValue(promptDetail());
 }
 
+const onSaveAsVersion = vi.fn();
+const onVersion = vi.fn();
+beforeEach(() => {
+  onSaveAsVersion.mockReset();
+  onVersion.mockReset();
+});
+
 function renderPanel({ type = "chat", body = BODY, config = CONFIG }: { type?: PromptType; body?: PromptBody; config?: PromptConfig } = {}) {
-  return renderRoute(<PlaygroundPanel promptId="p-1" version={2} type={type} body={body} config={config} />, {
-    route: "/orgs/acme/projects/default/prompts/p-1?tab=playground",
-  });
+  return renderRoute(
+    <PlaygroundPanel
+      promptId="p-1"
+      version={2}
+      versions={promptDetail().versions}
+      onVersion={onVersion}
+      type={type}
+      body={body}
+      config={config}
+      onSaveAsVersion={onSaveAsVersion}
+    />,
+    { route: "/orgs/acme/projects/default/prompts/p-1?section=playground" },
+  );
 }
 
 function result(over: Partial<PlaygroundRunView> = {}): PlaygroundRunView {
@@ -251,10 +268,7 @@ describe("running", () => {
     expect(sent().config).toEqual({ stop });
 
     fireEvent.click(screen.getByRole("button", { name: "Save as new version" }));
-    expect(await screen.findByText("New version of support/greeting")).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "Config JSON" }) as HTMLTextAreaElement).value).toBe(
-      JSON.stringify({ stop }, null, 2),
-    );
+    expect(onSaveAsVersion).toHaveBeenCalledWith({ body: "Hi", config: { stop } });
   });
 
   // Bug: a text prompt sent as a bare string, or empty settings sent as keys the server then validates.
@@ -294,13 +308,18 @@ describe("running", () => {
 describe("the result", () => {
   // Bug: the cost printed in cents and rounded to $0.00, or the price source misnamed.
   it.each([
-    [result(), "stop · 118 in · 41 out · 1.8 s · $0.0003 · OpenRouter"],
-    [result({ cost_usd: 2.5, price_source: "book", latency_ms: 400 }), "stop · 118 in · 41 out · 0.4 s · $2.50 · Price book"],
+    [result(), "finish: stop", "1.8 s · 118 input tokens · 41 output tokens · $0.0003 from OpenRouter"],
+    [
+      result({ cost_usd: 2.5, price_source: "book", latency_ms: 400, input_tokens: 1204 }),
+      "finish: stop",
+      "0.4 s · 1,204 input tokens · 41 output tokens · $2.50 from the price book",
+    ],
     [
       result({ finish_reason: null, input_tokens: null, output_tokens: null, cost_usd: null, price_source: "unpriced", latency_ms: 400 }),
+      null,
       "0.4 s · Unpriced",
     ],
-  ])("shows the answer and its meta row", async (view, meta) => {
+  ])("shows the answer and its meta row", async (view, finish, meta) => {
     serve();
     api.runPlayground.mockResolvedValue(view);
     renderPanel();
@@ -310,6 +329,7 @@ describe("the result", () => {
 
     expect(await screen.findByText("Hello there.")).toBeTruthy();
     expect(screen.getByText(meta)).toBeTruthy();
+    expect(screen.queryByText(/^finish:/)?.textContent ?? null).toBe(finish);
   });
 
   // Bug: a provider refusal shown as a generic failure, or sent to the providers page it has nothing to do with.
@@ -348,7 +368,7 @@ describe("the result", () => {
 });
 
 // Bug: the saved version drops the edit, keeps a camelCase key beside its snake_case twin, or loses unforwarded keys.
-it("saves the edited template and settings as a new version", async () => {
+it("hands the edited template and settings to Save as new version", async () => {
   serve();
   renderPanel();
   await screen.findByRole("button", { name: "Run" });
@@ -358,24 +378,32 @@ it("saves the edited template and settings as a new version", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "Save as new version" }));
 
-  expect(await screen.findByText("New version of support/greeting")).toBeTruthy();
-  const contents = screen.getAllByRole("textbox", { name: "Content of message 1" }) as HTMLTextAreaElement[];
-  expect(contents.map((c) => c.value)).toEqual(["You are {{tone}} today.", "You are {{tone}} today."]);
-  expect((screen.getByRole("textbox", { name: "Config JSON" }) as HTMLTextAreaElement).value).toBe(
-    JSON.stringify({ response_format: { type: "json" }, seed: 7, temperature: 0.5, max_tokens: 100, stop: ["END"] }, null, 2),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(screen.queryByText("New version of support/greeting")).toBeNull();
+  expect(onSaveAsVersion).toHaveBeenCalledWith({
+    body: [{ role: "system", content: "You are {{tone}} today." }, { type: "placeholder", name: "history" }],
+    config: { response_format: { type: "json" }, seed: 7, temperature: 0.5, max_tokens: 100, stop: ["END"] },
+  });
 });
 
-// Bug: the footer promises the run is traced, or hides that it spends the org's money.
+// Bug: picking another version in the playground does nothing.
+it("hands the picked version to the page", async () => {
+  serve();
+  renderPanel();
+  await screen.findByRole("button", { name: "Run" });
+
+  fireEvent.change(screen.getByRole("combobox", { name: "Version" }), { target: { value: "1" } });
+
+  expect(onVersion).toHaveBeenCalledWith(1);
+});
+
+// Bug: the page promises the run is traced, or hides that it spends the org's money.
 it("says where the run is billed and that it is not recorded", async () => {
   serve();
   renderPanel();
 
   expect(
     await screen.findByText(
-      "Runs use this organization's provider key and count toward its model spend. They are not recorded as traces and do not count in usage.",
+      "The settings start from the version's config. A run uses your organization's provider key and counts toward its model spend.",
     ),
   ).toBeTruthy();
+  expect(screen.getByText("A run is not recorded as a trace and does not count in Metrics.")).toBeTruthy();
 });

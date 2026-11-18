@@ -9,9 +9,9 @@ The playground runs one prompt version once against a model, so you can read the
 
 <Steps>
   <Step title="Open the playground">
-    On the **Prompts** page, open a prompt, select a version, and select **Playground** at the top of the page. **Back to versions** returns to the version list.
+    On the **Prompts** page, open a prompt, select a version, and select **Playground** at the top of the page. To run another version, pick it in **Version**. The prompt's name in the breadcrumb returns to the version list.
 
-    The template, the settings, and one field for each variable start from the selected version.
+    The template, the settings, and one field for each variable start from the selected version. Edits in the playground do not change the version.
   </Step>
   <Step title="Pick a provider and model">
     **Provider** lists the providers your organization has a key for that can run the playground. **Model** lists that provider's chat models.
@@ -65,7 +65,9 @@ A run is not recorded as a trace and does not count on the prompt's **Metrics** 
 
 ## Save an edit as a new version
 
-Select **Save as new version** to open the new version editor with the template as you edited it. Its config is the version's config with the four settings written over it in the snake_case spelling; other keys stay as they were. Choose deployment labels and a commit message there, then select **Create version**.
+Select **Save as new version** to open the **New version** screen with the template as you edited it. Its config is the version's config with the four settings written over it in the snake_case spelling; other keys stay as they were. The screen shows every change from the version you ran. Choose deployment labels and a commit message there, then select **Create version**.
+
+On the **New version** screen, **Test in playground** goes the other way: it opens the playground with the edit you have not saved yet.
 
 ## Errors
 

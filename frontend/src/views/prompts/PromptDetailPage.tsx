@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Trash } from "lucide-react";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Play, Plus, Trash } from "lucide-react";
 import type { ApiError, PromptDetail, PromptVersionView, VersionSummary } from "../../api/types";
 import { relativeTime } from "../../lib/relativeTime";
 import { searchPatch } from "../../lib/searchPatch";
@@ -12,6 +12,7 @@ import {
 } from "../../ui";
 import { joinAnd, LabelEditor } from "./LabelEditor";
 import { LinkedTracesPanel } from "./LinkedTracesPanel";
+import { NewVersionPanel, type VersionDraft } from "./NewVersionPanel";
 import { PlaygroundPanel } from "./PlaygroundPanel";
 import { LabelBadge } from "./promptBits";
 import { PromptBodyView } from "./PromptBodyView";
@@ -21,11 +22,13 @@ import { invalidatePromptReads, promptKeys, useOlderVersions, usePrompt, useProm
 import { TagsEditor } from "./TagsEditor";
 import { UsagePanel } from "./UsagePanel";
 import { UsePromptPanel } from "./UsePromptPanel";
-import { defaultPair, VersionDiffModal } from "./VersionDiffModal";
-import { VersionEditorModal } from "./VersionEditorModal";
+import { defaultPair, VersionCompare } from "./VersionCompare";
 import { VersionList } from "./VersionList";
 
-/** The page's sections; the playground has no tab, it opens from the header. */
+/**
+ * The page's tabs. Compare is a view inside Versions; New version and the playground are focused editors with no
+ * tabs, opened from the header.
+ */
 const SECTIONS = [
   { value: "versions", label: "Versions" },
   { value: "metrics", label: "Metrics" },
@@ -96,17 +99,22 @@ function PromptView({ detail, promptsPath }: { detail: PromptDetail; promptsPath
   const versions = [...detail.versions, ...olderPages.flatMap((p) => p.versions)];
   const hasOlder = olderPages.length > 0 ? olderPages[olderPages.length - 1].has_older_versions : detail.has_older_versions;
   const selected = selectedVersion(detail, versions, !hasOlder, params.get("version"));
-  const version = usePromptVersion(detail.id, selected, true);
-  const [editing, setEditing] = useState(false);
-  const [comparing, setComparing] = useState(false);
+  const location = useLocation();
+  const rawSection = params.get("section");
+  const section = (["metrics", "compare", "playground", "new"] as const).find((s) => s === rawSection) ?? "versions";
+  const focused = section === "playground" || section === "new";
+  /** The version New version starts from, which `?from=` names. */
+  const rawFrom = Number(params.get("from"));
+  const from = Number.isInteger(rawFrom) && rawFrom > 0 ? rawFrom : selected;
+  const version = usePromptVersion(detail.id, section === "new" ? from : selected, section !== "compare");
+  /** An edit handed over from the playground or New version, kept only for the version it started from. */
+  const handed = (location.state as { draft?: VersionDraft } | null)?.draft;
+  const draft = handed && handed.version === (section === "new" ? from : selected) ? handed : undefined;
   const [deleting, setDeleting] = useState(false);
   const closeDelete = () => setDeleting(false);
-  const rawSection = params.get("section");
-  const section = rawSection === "metrics" || rawSection === "playground" ? rawSection : "versions";
   const rawTab = params.get("tab");
   const tab = TABS.some((t) => t.value === rawTab) ? (rawTab as string) : "prompt";
   const folder = folderOf(detail.name);
-  const v = version.data;
 
   /** A link to this page with `kv` set (or removed when null) and every other parameter kept. */
   const hrefWith = (kv: Record<string, string | null>) => {
@@ -118,6 +126,8 @@ function PromptView({ detail, promptsPath }: { detail: PromptDetail; promptsPath
     const qs = next.toString();
     return `${promptsPath}/${encodeURIComponent(detail.id)}${qs ? `?${qs}` : ""}`;
   };
+  /** The versions view, leaving any editor or compare. */
+  const versionsHref = (kv: Record<string, string | null> = {}) => hrefWith({ section: null, from: null, to: null, ...kv });
 
   const deletePrompt = useMutation({
     mutationFn: () => api.deletePrompt(detail.id),
@@ -176,30 +186,59 @@ function PromptView({ detail, promptsPath }: { detail: PromptDetail; promptsPath
         />
       );
     }
-    if (section === "playground") {
+    if (section === "compare") {
+      const pair = defaultPair(versions, selected);
+      const pick = (key: "from" | "to", fallback: number) => {
+        const n = Number(params.get(key));
+        return Number.isInteger(n) && n > 0 ? n : fallback;
+      };
       return (
-        <div className="flex flex-col gap-4">
-          <Link
-            to={hrefWith({ section: null })}
-            className="inline-flex items-center gap-1.5 self-start text-small text-muted hover:text-fg"
-          >
-            <ArrowLeft size={13} strokeWidth={1.75} aria-hidden="true" />
-            Back to versions
-          </Link>
-          {version.isPending ? (
-            <LoadingRow label="Loading version…" />
-          ) : version.isError ? (
-            <ErrorNote error={version.error} />
-          ) : (
-            <PlaygroundPanel
-              promptId={detail.id}
-              version={version.data.version}
-              type={detail.type}
-              body={version.data.body}
-              config={version.data.config}
-            />
-          )}
-        </div>
+        <VersionCompare
+          detail={detail}
+          versions={versions}
+          from={pick("from", pair.left)}
+          to={pick("to", pair.right)}
+          onPick={(a, b) => patch({ from: String(a), to: String(b) })}
+          backHref={versionsHref()}
+          metricsHref={versionsHref({ section: "metrics" })}
+        />
+      );
+    }
+    if (section === "playground" || section === "new") {
+      if (version.isPending) return <LoadingRow label="Loading version…" />;
+      if (version.isError) return <ErrorNote error={version.error} />;
+      const view = version.data;
+      if (section === "new") {
+        return (
+          <NewVersionPanel
+            key={`${view.version}:${draft ? "draft" : "version"}`}
+            detail={detail}
+            versions={versions}
+            from={view}
+            onFrom={(n) => patch({ from: String(n) })}
+            draft={draft}
+            cancelHref={versionsHref()}
+            playgroundHref={hrefWith({ section: "playground", from: null, version: String(view.version) })}
+            onCreated={(v) => navigate(versionsHref({ version: String(v.version), tab: null }))}
+          />
+        );
+      }
+      return (
+        <PlaygroundPanel
+          key={`${view.version}:${draft ? "draft" : "version"}`}
+          promptId={detail.id}
+          version={view.version}
+          versions={versions}
+          onVersion={(n) => patch({ version: String(n) })}
+          type={detail.type}
+          body={draft?.body ?? view.body}
+          config={draft?.config ?? view.config}
+          onSaveAsVersion={(d) =>
+            navigate(hrefWith({ section: "new", from: String(view.version) }), {
+              state: { draft: { version: view.version, ...d } satisfies VersionDraft },
+            })
+          }
+        />
       );
     }
     return (
@@ -217,15 +256,34 @@ function PromptView({ detail, promptsPath }: { detail: PromptDetail; promptsPath
     );
   };
 
+  const crumbs = [
+    { label: "Prompts", to: promptsPath },
+    ...folderCrumbs(folder).map((c) => ({ label: c.label, to: `${promptsPath}?folder=${encodeURIComponent(c.folder)}` })),
+  ];
+
+  if (focused) {
+    return (
+      <PageBody>
+        <PageHeader
+          className="mb-4"
+          breadcrumb={[
+            ...crumbs,
+            { label: leafName(detail.name), to: versionsHref() },
+            { label: section === "new" ? "New version" : "Playground" },
+          ]}
+          title={<span className="font-mono">{detail.name}</span>}
+          titleAside={<Badge>{detail.type}</Badge>}
+        />
+        {body()}
+      </PageBody>
+    );
+  }
+
   return (
     <PageBody>
       <PageHeader
         className="mb-4"
-        breadcrumb={[
-          { label: "Prompts", to: promptsPath },
-          ...folderCrumbs(folder).map((c) => ({ label: c.label, to: `${promptsPath}?folder=${encodeURIComponent(c.folder)}` })),
-          { label: leafName(detail.name) },
-        ]}
+        breadcrumb={[...crumbs, { label: leafName(detail.name) }]}
         title={<span className="font-mono">{detail.name}</span>}
         titleAside={
           <span className="flex flex-wrap items-center gap-1.5">
@@ -235,20 +293,25 @@ function PromptView({ detail, promptsPath }: { detail: PromptDetail; promptsPath
         }
         actions={
           <>
-            <Button disabled={versions.length < 2} onClick={() => setComparing(true)}>
+            <Button
+              disabled={versions.length < 2}
+              onClick={() => {
+                const pair = defaultPair(versions, selected);
+                patch({ section: "compare", from: String(pair.left), to: String(pair.right) });
+              }}
+            >
               Compare versions
             </Button>
             <Button
               leadingIcon={<Play size={13} strokeWidth={1.75} aria-hidden="true" />}
-              onClick={() => patch({ section: "playground" })}
+              onClick={() => patch({ section: "playground", from: null, to: null })}
             >
               Playground
             </Button>
             <Button
               variant="primary"
-              disabled={!v}
               leadingIcon={<Plus size={14} strokeWidth={1.75} aria-hidden="true" />}
-              onClick={() => setEditing(true)}
+              onClick={() => patch({ section: "new", from: String(selected), to: null })}
             >
               New version
             </Button>
@@ -270,27 +333,9 @@ function PromptView({ detail, promptsPath }: { detail: PromptDetail; promptsPath
         label="Prompt sections"
         className="mb-4"
         value={section === "metrics" ? "metrics" : "versions"}
-        items={SECTIONS.map((s) => ({ ...s, to: hrefWith({ section: s.value === "versions" ? null : s.value }) }))}
+        items={SECTIONS.map((s) => ({ ...s, to: versionsHref({ section: s.value === "versions" ? null : s.value }) }))}
       />
       {body()}
-      {v && (
-        <VersionEditorModal
-          open={editing}
-          promptId={detail.id}
-          name={detail.name}
-          type={detail.type}
-          initialBody={v.body}
-          initialConfig={v.config}
-          onClose={() => setEditing(false)}
-        />
-      )}
-      {comparing && (
-        <VersionDiffModal
-          prompt={{ ...detail, versions }}
-          {...defaultPair(versions, selected)}
-          onClose={() => setComparing(false)}
-        />
-      )}
       {deleting && (
         <Modal
           open

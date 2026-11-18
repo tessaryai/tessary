@@ -15,7 +15,7 @@ const WINDOWS = [
 ];
 
 /** Milliseconds under a second, else seconds to one decimal: model calls sit on that boundary. */
-function formatMs(ms: number | null): string {
+export function formatMs(ms: number | null): string {
   if (ms === null) return "—";
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
@@ -33,7 +33,7 @@ const HEADERS = [
 /** Calls through Cost are numbers, right-aligned. */
 const isNumberColumn = (i: number) => i >= 2 && i <= 8;
 
-function errorRate(errors: number, calls: number): string {
+export function errorRate(errors: number, calls: number): string {
   if (errors === 0) return "0%";
   const pct = (errors / calls) * 100;
   return pct < 0.1 ? "<0.1%" : `${pct.toFixed(1)}%`;

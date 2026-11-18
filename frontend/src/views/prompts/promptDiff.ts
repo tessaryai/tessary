@@ -61,30 +61,34 @@ function shortestEdits<T>(a: T[], b: T[]): Edit<T>[] | null {
   const out: Edit<T>[] = [];
   let x = n;
   let y = m;
-  for (let d = found; d > 0; d--) {
-    const prev = trace[d - 1];
-    const at = (k: number) => prev[k + d - 1];
-    const k = x - y;
-    const down = k === -d || (k !== d && at(k - 1) < at(k + 1));
-    const prevK = down ? k + 1 : k - 1;
-    const prevX = at(prevK);
-    const prevY = prevX - prevK;
+  // Walk back from the end; before the first edit the path is one snake from (0, 0).
+  for (let d = found; d >= 0; d--) {
+    let prevX = 0;
+    let prevY = 0;
+    let down = false;
+    if (d > 0) {
+      const prev = trace[d - 1];
+      const at = (k: number) => prev[k + d - 1];
+      const k = x - y;
+      down = k === -d || (k !== d && at(k - 1) < at(k + 1));
+      const prevK = down ? k + 1 : k - 1;
+      prevX = at(prevK);
+      prevY = prevX - prevK;
+    }
     while (x > prevX && y > prevY) {
       out.push({ kind: "same", item: a[--x] });
       y--;
     }
+    if (d === 0) break;
     if (down) out.push({ kind: "added", item: b[--y] });
     else out.push({ kind: "removed", item: a[--x] });
-  }
-  while (x > 0 && y > 0) {
-    out.push({ kind: "same", item: a[--x] });
-    y--;
   }
   return out.reverse();
 }
 
+/** Words, whitespace runs, and sentence punctuation before a space or the end, so "name." and "name" share a word. */
 export function tokenize(text: string): string[] {
-  return text.split(/(\s+)/).filter(Boolean);
+  return text.split(/(\s+|[.,;:!?](?=\s|$))/).filter(Boolean);
 }
 
 /** Lines with their line break kept, so joining them gives the text back. */

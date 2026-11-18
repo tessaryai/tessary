@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { ApiError, CreatePromptRequest, PromptBody, PromptSummary, PromptType } from "../../api/types";
@@ -7,7 +7,7 @@ import { useProjectApi, useTenant } from "../../tenant/TenantContext";
 import { Button, Card, ErrorNote, Field, Input, PageBody, PageHeader, SegmentedControl, Textarea, useToast } from "../../ui";
 import { parseConfig } from "./ConfigEditor";
 import { LabelChecklist } from "./LabelEditor";
-import { Note } from "./promptBits";
+import { Note, Panel, VariableChips } from "./promptBits";
 import { hasBodyErrors, NO_BODY_ERRORS, PromptBodyEditor, validateBody } from "./PromptBodyEditor";
 import { extractVariables } from "./promptCompile";
 import { invalidatePromptReads } from "./promptReads";
@@ -27,18 +27,6 @@ const TYPES = [
   { value: "text" as const, label: "Text" },
   { value: "chat" as const, label: "Chat" },
 ];
-
-function Panel({ title, aside, children }: { title: ReactNode; aside?: ReactNode; children: ReactNode }) {
-  return (
-    <Card className="flex flex-col gap-3 border border-border p-5">
-      <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-h3 text-fg">{title}</h2>
-        {aside && <p className="text-small text-muted">{aside}</p>}
-      </div>
-      {children}
-    </Card>
-  );
-}
 
 const Optional = () => <span className="text-muted"> (optional)</span>;
 
@@ -146,18 +134,7 @@ export function NewPromptPage() {
           </Card>
           <Panel title="Prompt">
             <PromptBodyEditor type={type} value={body} onChange={(b) => setBodies({ ...bodies, [type]: b })} errors={errors.body} />
-            <div className="flex flex-wrap items-center gap-1.5 text-small text-muted">
-              Variables
-              {variables.length === 0 ? (
-                <span className="text-subtle">None yet</span>
-              ) : (
-                variables.map((v) => (
-                  <code key={v} className="rounded-micro border border-border bg-raised px-1.5 font-mono text-code text-fg-secondary">
-                    {v}
-                  </code>
-                ))
-              )}
-            </div>
+            <VariableChips names={variables} />
           </Panel>
           <Panel title="Config" aside="Optional. A JSON object that Tessary returns with the prompt, for example the model and its settings.">
             <Textarea

@@ -10,7 +10,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type PromptDetail, type PromptVersionView } from "../../api/types";
 import { api, orgApi } from "../../test/api";
-import { promptDetail, promptVersion } from "../../test/fixtures";
+import { promptDetail, promptVersion, versionUsage } from "../../test/fixtures";
 import { currentLocation, currentParams, pending, renderRoute } from "../../test/render";
 import { PromptDetailPage } from "./PromptDetailPage";
 
@@ -84,7 +84,6 @@ describe("loading the prompt", () => {
     api.getPromptVersion.mockReturnValue(pending());
     renderPage();
     expect(await screen.findByText("Loading version…")).toBeTruthy();
-    expect(button("New version").disabled).toBe(true);
   });
 
   it("shows the error when the version read fails", async () => {
@@ -122,18 +121,21 @@ describe("the header", () => {
   });
 
   // Bug: Compare opens on the selected version against itself, or is offered with nothing to compare against.
-  it("compares the selected version with the next older one", async () => {
+  it("compares the selected version with the next older one, inside Versions, and goes back", async () => {
     serve();
+    api.getPromptUsage.mockReturnValue(pending());
     renderPage();
     await screen.findByRole("heading", { level: 2, name: "Version 2" });
 
     fireEvent.click(button("Compare versions"));
 
-    const dialog = screen.getByRole("dialog");
-    expect((within(dialog).getByRole("combobox", { name: "Left version" }) as HTMLSelectElement).value).toBe("1");
-    expect((within(dialog).getByRole("combobox", { name: "Right version" }) as HTMLSelectElement).value).toBe("2");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(currentParams().get("section")).toBe("compare"));
+    expect((screen.getByRole("combobox", { name: "From" }) as HTMLSelectElement).value).toBe("1");
+    expect((screen.getByRole("combobox", { name: "To" }) as HTMLSelectElement).value).toBe("2");
+    expect(current("Prompt sections")).toBe("Versions");
+    fireEvent.click(screen.getByRole("link", { name: "Back to versions" }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Version 2" })).toBeTruthy();
+    expect(currentParams().get("from")).toBeNull();
   });
 
   it("disables Compare versions when the prompt has one version", async () => {
@@ -145,39 +147,113 @@ describe("the header", () => {
   });
 
   // Bug: the playground keeps the first version's template after the person selects another version, or cannot be left.
-  it("opens the playground on the selected version and goes back to the versions", async () => {
+  it("opens the playground on the selected version as a focused editor and goes back to the versions", async () => {
     serve();
-    orgApi.listProviderCatalog.mockResolvedValue({
-      platforms: [{ id: "OPENAI", label: "OpenAI", auth: "api_key", default_base_url: "", detail: null, supports_base_url: false, used_by: [] }],
-      models: [],
-    });
-    orgApi.listProviderCredentials.mockResolvedValue({ credentials: [{ provider: "OPENAI", has_api_key: true }] });
+    serveProviders();
     renderPage("?version=1");
     await screen.findByRole("heading", { level: 2, name: "Version 1" });
 
     fireEvent.click(button("Playground"));
     await waitFor(() => expect(currentParams().get("section")).toBe("playground"));
     expect(((await screen.findByRole("textbox", { name: "Content of message 1" })) as HTMLTextAreaElement).value).toBe("You are kind.");
+    expect(screen.queryByRole("navigation", { name: "Prompt sections" })).toBeNull();
+    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByText("Playground")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("link", { name: "Back to versions" }));
-    expect(await screen.findByRole("heading", { level: 2, name: "Version 1" })).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Version" }), { target: { value: "2" } });
+    await waitFor(() => expect(currentParams().get("version")).toBe("2"));
+    expect(((await screen.findByRole("textbox", { name: "Content of message 1" })) as HTMLTextAreaElement).value).toBe("You are {{tone}}.");
+
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "greeting" }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Version 2" })).toBeTruthy();
     expect(currentParams().get("section")).toBeNull();
   });
 
   // Bug: New version opens blank, so the new version drops the selected one's body.
-  it("opens the version editor prefilled from the selected version", async () => {
+  it("opens New version as a focused editor that starts from the selected version", async () => {
     serve();
     renderPage("?version=1");
     await screen.findByText("You are kind.");
 
     fireEvent.click(button("New version"));
 
-    expect(screen.getByText("New version of support/greeting")).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "Content of message 1" }) as HTMLTextAreaElement).value).toBe("You are kind.");
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText("New version of support/greeting")).toBeNull();
+    await waitFor(() => expect(currentParams().get("section")).toBe("new"));
+    expect(currentParams().get("from")).toBe("1");
+    expect(((await screen.findByRole("textbox", { name: "Content of message 1" })) as HTMLTextAreaElement).value).toBe("You are kind.");
+    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByText("New version")).toBeTruthy();
+    fireEvent.click(button("Cancel"));
+    expect(await screen.findByRole("heading", { level: 2, name: "Version 1" })).toBeTruthy();
+    expect(currentParams().get("section")).toBeNull();
+  });
+
+  // Bug: the pickers on Compare and New version change nothing the URL keeps, so a reload loses the choice.
+  it("writes the compared pair to the URL", async () => {
+    serve();
+    api.getPromptUsage.mockReturnValue(pending());
+    renderPage("?section=compare&from=1&to=2");
+    fireEvent.change(await screen.findByRole("combobox", { name: "To" }), { target: { value: "1" } });
+    await waitFor(() => expect(currentParams().get("to")).toBe("1"));
+    expect(screen.getByText("Pick two different versions.")).toBeTruthy();
+  });
+
+  it("writes the start version to the URL", async () => {
+    serve();
+    renderPage("?section=new&from=2");
+    fireEvent.change(await screen.findByRole("combobox", { name: "Starts from" }), { target: { value: "1" } });
+    await waitFor(() => expect(currentParams().get("from")).toBe("1"));
+  });
+
+  // Bug: the editor's version fails to load and the page goes blank.
+  it("shows the error when the version an editor starts from fails to load", async () => {
+    api.getPrompt.mockResolvedValue(promptDetail());
+    api.getPromptVersion.mockRejectedValue(new ApiError(404, { code: "PROMPTS.VERSION_NOT_FOUND", message: "Prompt p-1 has no version 1" }));
+    renderPage("?section=new&from=1");
+
+    expect((await screen.findByRole("alert")).textContent).toBe("PROMPTS.VERSION_NOT_FOUND: Prompt p-1 has no version 1");
+  });
+
+  // Bug: a reload of New version, with no edit handed over, opens blank or on the wrong version.
+  it("opens New version from a direct link and lands on the created version", async () => {
+    serve();
+    api.createPromptVersion.mockResolvedValue(promptVersion({ version: 3 }));
+    renderPage("?section=new&from=1");
+
+    expect(((await screen.findByRole("textbox", { name: "Content of message 1" })) as HTMLTextAreaElement).value).toBe("You are kind.");
+    fireEvent.click(button("Create version"));
+
+    await waitFor(() => expect(currentParams().get("version")).toBe("3"));
+    expect(currentParams().get("section")).toBeNull();
+    expect(api.createPromptVersion).toHaveBeenCalledWith("p-1", expect.objectContaining({ body: V1.body }));
+  });
+
+  // Bug: the edit is lost between the playground and New version, in either direction.
+  it("carries the edit from the playground to New version and back", async () => {
+    serve();
+    serveProviders();
+    renderPage("?section=playground&version=1");
+    const content = async () => (await screen.findByRole("textbox", { name: "Content of message 1" })) as HTMLTextAreaElement;
+    fireEvent.change(await content(), { target: { value: "You are kind. Be brief." } });
+
+    fireEvent.click(button("Save as new version"));
+
+    await waitFor(() => expect(currentParams().get("section")).toBe("new"));
+    expect((await content()).value).toBe("You are kind. Be brief.");
+    expect(screen.getByText("Be brief.").tagName).toBe("INS");
+    fireEvent.change(await content(), { target: { value: "You are kind. Be very brief." } });
+
+    fireEvent.click(screen.getByRole("link", { name: "Test in playground" }));
+
+    await waitFor(() => expect(currentParams().get("section")).toBe("playground"));
+    expect((await content()).value).toBe("You are kind. Be very brief.");
   });
 });
+
+function serveProviders() {
+  orgApi.listProviderCatalog.mockResolvedValue({
+    platforms: [{ id: "OPENAI", label: "OpenAI", auth: "api_key", default_base_url: "", detail: null, supports_base_url: false, used_by: [] }],
+    models: [],
+  });
+  orgApi.listProviderCredentials.mockResolvedValue({ credentials: [{ provider: "OPENAI", has_api_key: true }] });
+}
 
 describe("deleting the prompt", () => {
   // Bug: the page stays on a deleted prompt, or lands at the root instead of the prompt's folder.
@@ -300,6 +376,19 @@ describe("selecting a version and a section", () => {
     fireEvent.click(tabLink("Prompt sections", "Metrics"));
     expect(await screen.findByText("No calls in the last 7 days")).toBeTruthy();
     expect(current("Prompt sections")).toBe("Metrics");
+  });
+
+  // Bug: a Metrics row links to the metrics page itself, or to the version without leaving Metrics.
+  it("links a Metrics row to its version, its linked traces, and the fetch code", async () => {
+    serve();
+    api.getPromptUsage.mockResolvedValue({ days: 7, versions: [versionUsage({ version: "1", calls: 3 })], unknown_versions: [] });
+    renderPage("?section=metrics");
+
+    const row = (await screen.findByRole("link", { name: "v1" })).closest("tr")!;
+    const base = "/orgs/acme/projects/default/prompts/p-1";
+    expect(within(row).getByRole("link", { name: "v1" }).getAttribute("href")).toBe(`${base}?version=1`);
+    expect(within(row).getByRole("link", { name: "View traces" }).getAttribute("href")).toBe(`${base}?version=1&tab=traces`);
+    expect(screen.getByRole("link", { name: "View the code to use this prompt" }).getAttribute("href")).toBe(`${base}?tab=use`);
   });
 
   it.each([
