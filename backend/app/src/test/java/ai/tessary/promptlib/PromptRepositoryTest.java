@@ -403,8 +403,12 @@ record PromptRepositoryTest(PromptRepository repo, TenantService tenants) {
         assertEquals(List.of("support", "tier-1"), repo.tagNames(pid));
     }
 
+    /**
+     * The bug: every list page, level read and search gathers every version number of each prompt, which only the
+     * public list returns, so a prompt with many versions makes each page read all of them into an array.
+     */
     @Test
-    void list_carriesVersionsAndLastConfig() {
+    void list_countsVersionsAndListsTheirNumbersOnlyWhenAsked() {
         String pid = project("prompt-repo-last");
         PromptRow p = prompt(pid, "p", List.of());
         version(p, 1, "{\"a\": 1}");
@@ -412,10 +416,15 @@ record PromptRepositoryTest(PromptRepository repo, TenantService tenants) {
         version(p, 2, "{\"a\": 2}");
 
         PromptListRow row = repo.list(pid, query(null, null, null, null), 0, 50).getFirst();
-        assertEquals(List.of(1, 2, 3), row.versions());
+        assertEquals(List.of(), row.versions());
         assertEquals("{\"a\": 3}", row.lastConfigJson());
         assertEquals(3, row.latestVersion());
         assertEquals(3, row.versionCount());
+
+        PromptListRow numbered = repo.list(pid, query(null, null, null, null).withVersionNumbers(), 0, 50)
+                .getFirst();
+        assertEquals(List.of(1, 2, 3), numbered.versions());
+        assertEquals(3, numbered.versionCount());
     }
 
     /**

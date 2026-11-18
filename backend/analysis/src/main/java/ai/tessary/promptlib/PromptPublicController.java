@@ -116,7 +116,7 @@ public class PromptPublicController {
                         PromptListQuery.Order.NAME,
                         pageNumber,
                         pageSize));
-        return ApiResponse.ok(PromptList.from(service.list(projectId, query)));
+        return ApiResponse.ok(PromptList.from(service.list(projectId, query.withVersionNumbers())));
     }
 
     /**

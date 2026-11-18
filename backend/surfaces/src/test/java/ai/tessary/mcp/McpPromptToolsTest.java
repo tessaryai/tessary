@@ -206,7 +206,7 @@ class McpPromptToolsTest {
     }
 
     private static PromptService.PromptPage page() {
-        PromptListRow row = new PromptListRow(prompt(PromptType.TEXT), List.of(1, 2), "{}", 2);
+        PromptListRow row = new PromptListRow(prompt(PromptType.TEXT), List.of(), 2, "{}", 2);
         PromptLabelRow label = new PromptLabelRow(PROJECT_ID, "pr-1", "production", "v-2", 2, "user-1", AT);
         return new PromptService.PromptPage(
                 List.of(row), Map.of("pr-1", List.of(label)), Map.of("pr-1", Map.of()), 1, 100, 1);

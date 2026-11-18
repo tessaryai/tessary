@@ -83,7 +83,8 @@ public class PromptService {
             int page,
             int limit,
             @Nullable List<PromptListFilter.Condition> filter,
-            boolean direct) {
+            boolean direct,
+            boolean versionNumbers) {
         public enum Order {
             UPDATED,
             NAME
@@ -102,7 +103,7 @@ public class PromptService {
                 Order order,
                 int page,
                 int limit) {
-            this(name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, null, false);
+            this(name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, null, false, false);
         }
 
         public PromptListQuery withFilter(List<PromptListFilter.Condition> conditions) {
@@ -119,13 +120,49 @@ public class PromptService {
                     page,
                     limit,
                     conditions,
-                    direct);
+                    direct,
+                    versionNumbers);
         }
 
         /** Only the prompts directly in {@code folder}, or at the root when it is null, not those in its subfolders. */
         public PromptListQuery directOnly() {
             return new PromptListQuery(
-                    name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, filter, true);
+                    name,
+                    folder,
+                    q,
+                    label,
+                    tag,
+                    type,
+                    fromUpdatedAt,
+                    toUpdatedAt,
+                    order,
+                    page,
+                    limit,
+                    filter,
+                    true,
+                    versionNumbers);
+        }
+
+        /**
+         * Each listed prompt's version numbers too, which only the public list returns. Without it a row carries the
+         * count alone, unless a JSON filter is set, which needs the numbers to keep only the matching versions' labels.
+         */
+        public PromptListQuery withVersionNumbers() {
+            return new PromptListQuery(
+                    name,
+                    folder,
+                    q,
+                    label,
+                    tag,
+                    type,
+                    fromUpdatedAt,
+                    toUpdatedAt,
+                    order,
+                    page,
+                    limit,
+                    filter,
+                    direct,
+                    true);
         }
 
         /** MCP: page 1, limit 100, order UPDATED ("when each last changed"). */

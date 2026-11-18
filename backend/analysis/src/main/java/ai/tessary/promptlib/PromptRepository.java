@@ -320,17 +320,24 @@ public class PromptRepository {
     }
 
     /**
-     * With a JSON filter, a prompt is listed when one of its versions meets every condition, and {@code versions} and
-     * the last config come from the matching versions only; {@code highest_version} is always the prompt's own.
+     * With a JSON filter, a prompt is listed when one of its versions meets every condition, and the version count,
+     * {@code versions} and the last config come from the matching versions only; {@code highest_version} is always the
+     * prompt's own. {@code versions} is gathered only when the query asks for the numbers or sets a filter, and is
+     * empty otherwise: the UI pages show the count alone.
      */
     public List<PromptListRow> list(String projectId, PromptListQuery q, int offset, int limit) {
         Map<String, Object> params = new HashMap<>();
         String matches = versionFilter(q.filter(), params);
         String order = q.order() == PromptListQuery.Order.NAME ? "p.name" : "p.updated_at DESC, p.name";
-        String sql = "SELECT " + PROMPT_COLS + ", s.versions, s.highest_version,"
+        String numbers = q.versionNumbers() || q.filter() != null
+                ? "COALESCE(array_agg(v.version ORDER BY v.version) FILTER (WHERE " + matches + "), '{}')"
+                : "'{}'::int[]";
+        String sql = "SELECT " + PROMPT_COLS + ", s.versions, s.version_count, s.highest_version,"
                 + " COALESCE(lc.config, '{}'::jsonb) AS last_config FROM prompt p"
-                + " JOIN LATERAL (SELECT COALESCE(array_agg(v.version ORDER BY v.version) FILTER (WHERE " + matches
-                + "), '{}') AS versions, COALESCE(MAX(v.version), 0) AS highest_version FROM prompt_version v"
+                // count(v.version), not count(*): a filter on prompt columns alone would make count(*) an aggregate
+                // of the outer query, which Postgres refuses inside FROM.
+                + " JOIN LATERAL (SELECT " + numbers + " AS versions, count(v.version) FILTER (WHERE " + matches
+                + ") AS version_count, COALESCE(MAX(v.version), 0) AS highest_version FROM prompt_version v"
                 + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id) s ON true"
                 + " LEFT JOIN LATERAL (SELECT v.config FROM prompt_version v"
                 + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id AND " + matches
@@ -343,6 +350,7 @@ public class PromptRepository {
                 .query((rs, n) -> new PromptListRow(
                         prompt(rs),
                         versions(rs.getArray("versions")),
+                        rs.getInt("version_count"),
                         rs.getString("last_config"),
                         rs.getInt("highest_version")))
                 .list();

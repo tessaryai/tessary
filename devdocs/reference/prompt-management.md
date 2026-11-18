@@ -71,7 +71,9 @@ deadlocking.
   `last_version + 1`, the number the next version takes unless another write takes it first; after the
   top version is deleted it is more than `latest_version + 1`, so the New version screen names it.
 - The list reads each prompt's newest config with a `LIMIT 1` lateral read on `ix_prompt_version_lookup`,
-  not by gathering every version's config.
+  not by gathering every version's config. It gathers each prompt's version numbers into an array only
+  for the public list, which returns them, and when a JSON filter is set; the UI list, the folder level
+  and search read only the count. The count still reads one index entry per version.
 
 ## Fetch cache
 
