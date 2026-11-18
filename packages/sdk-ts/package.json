@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./otel": {
+      "types": "./dist/otel.d.ts",
+      "default": "./dist/otel.js"
     }
   },
   "files": [
@@ -23,7 +27,19 @@
   "engines": {
     "node": ">=18"
   },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/context-async-hooks": "2.12.0",
+    "@opentelemetry/sdk-trace": "2.12.0",
+    "@opentelemetry/sdk-trace-base-oldest": "npm:@opentelemetry/sdk-trace-base@1.30.1",
     "@types/node": "^24.0.0",
     "typescript": "^6.0.3"
   },

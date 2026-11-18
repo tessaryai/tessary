@@ -17,7 +17,7 @@ Neither package is on PyPI or npm yet. Install it from a checkout of the [Tessar
     pip install ./packages/sdk-python
     ```
 
-    With uv, run `uv add ./packages/sdk-python` instead. Add the `otel` extra (`./packages/sdk-python[otel]`) if you want `opentelemetry-api` installed for linking spans; the package itself never imports it.
+    With uv, run `uv add ./packages/sdk-python` instead. Add the `otel` extra (`./packages/sdk-python[otel]`) to install `opentelemetry-api` for [linking spans automatically](#link-automatically). The main package never imports it.
   </Tab>
   <Tab title="TypeScript">
     Needs Node 18 or later, for the global `fetch`.
@@ -78,7 +78,51 @@ In TypeScript, `get` returns `TextPrompt | ChatPrompt`. Check `prompt.type` befo
 
 With no version and no label, the SDK fetches the version that carries the `production` deployment label. Pass `version=3` (`{ version: 3 }`) for one version or `label="staging"` (`{ label: "staging" }`) for another label. Giving both is an error raised before any request.
 
-`link` sets two span attributes, `tessary.prompt.name` and `tessary.prompt.version`, the version as a string. It works on any object with a `set_attribute` (Python) or `setAttribute` (TypeScript) method and returns the span. `span_attributes()` (`spanAttributes()`) returns the same two attributes when you set them yourself.
+`link` sets two span attributes, `tessary.prompt.name` and `tessary.prompt.version`, the version as a string. It works on any object with a `set_attribute` (Python) or `setAttribute` (TypeScript) method and returns the span. In Python, `prompt.link()` with no argument links the active OpenTelemetry span, and does nothing when OpenTelemetry is not installed. `span_attributes()` (`spanAttributes()`) returns the same two attributes when you set them yourself.
+
+### Link automatically
+
+Prompt usage counts only model-call spans. When an instrumentation library starts those spans for you, you cannot call `link` on them. Instead, add the prompt link span processor to your tracer provider once, and run the model call inside a linked block. Every span started inside the block gets the two attributes, including spans that a child function or an instrumented client starts.
+
+<Tabs>
+  <Tab title="Python">
+    Needs `opentelemetry-api`, which the `otel` extra installs.
+
+    ```python
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from tessary_prompts.otel import PromptLinkSpanProcessor
+
+    provider = TracerProvider()
+    provider.add_span_processor(PromptLinkSpanProcessor())
+    trace.set_tracer_provider(provider)
+
+    prompt = prompts.get_prompt("support/greeting")
+    with prompt.linked():
+        response = client.messages.create(model=MODEL, messages=[{"role": "user", "content": prompt.compile(customer="Ada")}])
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    Needs `@opentelemetry/api` and a registered context manager, which the OpenTelemetry Node SDK sets up.
+
+    ```typescript
+    import { NodeSDK } from "@opentelemetry/sdk-node";
+    import { PromptLinkSpanProcessor, withPrompt } from "@tessaryai/prompts/otel";
+
+    new NodeSDK({ spanProcessors: [new PromptLinkSpanProcessor() /* , your exporter's processor */] }).start();
+
+    const prompt = await prompts.get("support/greeting");
+    if (prompt.type !== "text") throw new Error("support/greeting is not a text prompt");
+    const response = await withPrompt(prompt, () =>
+      client.messages.create({ model: MODEL, messages: [{ role: "user", content: prompt.compile({ customer: "Ada" }) }] }),
+    );
+    ```
+
+    `linkActiveSpan(prompt)` links the active span and returns it, or returns `undefined` when no span is active.
+  </Tab>
+</Tabs>
+
+The link travels in a private OpenTelemetry context key, not in baggage, so it is never sent to other services. A span started after the block ends carries no link. In nested blocks, the inner prompt wins. A fallback prompt links nothing, even inside another prompt's block. The processor sets the attributes on every span started in the block, not only model calls; usage still counts only `llm` spans.
 
 ### How variables are filled
 
@@ -150,7 +194,7 @@ A fallback keeps your agent running when Tessary cannot answer and nothing is ca
   </Tab>
 </Tabs>
 
-A string fallback is a text prompt and a list of messages is a chat prompt. The SDK returns it on any failure, a 404 included, and also when the server answers without a usable name, version, type, or prompt. A fallback prompt has `is_fallback` (`isFallback`) set to true and version 0. It is never cached, and `link` sets nothing on the span, so fallback traffic never counts against a prompt version.
+A string fallback is a text prompt and a list of messages is a chat prompt. The SDK returns it on any failure, a 404 included, and also when the server answers without a usable name, version, type, or prompt. A fallback prompt has `is_fallback` (`isFallback`) set to true and version 0. It is never cached, and `link` and linked blocks set nothing on the span, so fallback traffic never counts against a prompt version.
 
 ### Fetch at startup
 

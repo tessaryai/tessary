@@ -19,7 +19,9 @@ pnpm install --frozen-lockfile
 node_modules/.bin/tsc -p tsconfig.json --noEmit
 out="$(mktemp -d)"; trap 'rm -rf "$out"' EXIT
 node_modules/.bin/tsc -p tsconfig.build.json --outDir "$out"
-[ -f "$out/index.js" ] && [ -f "$out/index.d.ts" ] || { echo "$P: build emitted no dist/index.js or index.d.ts" >&2; exit 1; }
+for f in index.js index.d.ts otel.js otel.d.ts; do
+  [ -f "$out/$f" ] || { echo "$P: build emitted no dist/$f" >&2; exit 1; }
+done
 node --experimental-test-coverage --test-coverage-include='src/**/*.ts' \
   --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 \
   --test 'test/**/*.test.ts'

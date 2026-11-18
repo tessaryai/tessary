@@ -42,6 +42,8 @@ It is one of the two `tessary.*` overlays with a reader; the other is the prompt
 | `tessary.prompt.name` | Optional | The managed prompt the span was produced from. Counts the call on the prompt's usage and lets the traces list filter by prompt. | At most 512 characters. A longer name drops the link, not the span. Usage counts read `llm` spans only. |
 | `tessary.prompt.version` | Optional | The version of that prompt. | Stored as the text sent, so `3` and `prod` both work. Read only with `tessary.prompt.name`. At most 512 characters. |
 
+The [prompt SDKs](/prompts/sdk#link-automatically) set this pair for you on every span started inside a linked block.
+
 When the `tessary.prompt.*` pair is absent, Tessary reads two third-party prompt dialects in this order: the observation-scoped prompt name and version keys, then the shorter prompt name and version keys. Some SDKs emit these keys. `gen_ai.prompt.*` is a message family, never a prompt link.
 
 ## Kind

@@ -42,8 +42,26 @@ prompt.link(trace.getActiveSpan()!); // sets tessary.prompt.name and tessary.pro
 deployment label; giving both rejects with a `TypeError`. A variable is `{{name}}` with optional
 inner spaces. `null` renders as an empty string, a variable you do not pass (or pass as `undefined`)
 stays in the text, and text in braces that is not a name (such as JSON) is left alone.
-`prompt.variables()` lists the names. `link` works on any object with `setAttribute`; the package
+`prompt.variables()` lists the names. `link` works on any object with `setAttribute`; the main entry
 never imports OpenTelemetry.
+
+## Link automatically
+
+Usage counts model-call spans, which an instrumented client usually starts for you. The
+`@tessaryai/prompts/otel` entry needs the optional peer `@opentelemetry/api` and a registered context
+manager (the Node SDK sets one up). Add the span processor once, then run the call inside
+`withPrompt`: every span started in it, also after an `await`, gets the two attributes. The link is
+a private context key, not baggage. A span started after the block has no link, an inner block wins
+over an outer one, and a fallback links nothing.
+
+```typescript
+import { PromptLinkSpanProcessor, linkActiveSpan, withPrompt } from "@tessaryai/prompts/otel";
+
+new NodeSDK({ spanProcessors: [new PromptLinkSpanProcessor() /* , your exporter's processor */] }).start();
+
+await withPrompt(prompt, () => callModel(prompt.compile({ customer: "Ada" })));
+linkActiveSpan(prompt); // links the active span, if any, and returns it
+```
 
 ## Chat prompts
 

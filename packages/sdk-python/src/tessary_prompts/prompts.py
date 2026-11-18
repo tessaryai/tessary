@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Iterator
 
 from .errors import PromptTransportError
 
@@ -59,13 +60,34 @@ class BasePrompt:
             return {}
         return {"tessary.prompt.name": self.name, "tessary.prompt.version": str(self.version)}
 
-    def link(self, span: Any) -> Any:
-        """Set the link attributes on any object with ``set_attribute``; return the span."""
+    def link(self, span: Any = None) -> Any:
+        """Set the link attributes on any object with ``set_attribute`` and return it. With no span,
+        link the active OpenTelemetry span; without OpenTelemetry installed that does nothing and
+        returns None."""
+        if span is None:
+            try:
+                from .otel import current_span
+            except ImportError:
+                return None
+            span = current_span()
         setter = getattr(span, "set_attribute", None)
         if callable(setter):
             for key, value in self.span_attributes().items():
                 setter(key, value)
         return span
+
+    @contextmanager
+    def linked(self) -> Iterator[None]:
+        """Link every span started inside the block to this version, through ``PromptLinkSpanProcessor``
+        in ``tessary_prompts.otel``. A fallback links nothing, even inside another prompt's block.
+        Without OpenTelemetry installed the block runs unchanged."""
+        try:
+            from .otel import linked_context
+        except ImportError:
+            yield
+            return
+        with linked_context(self.span_attributes()):
+            yield
 
     def to_dict(self) -> dict[str, Any]:
         return {

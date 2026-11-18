@@ -16,8 +16,8 @@ The package is not on PyPI yet. From a checkout of the repository:
 pip install ./packages/sdk-python          # or: uv add ./packages/sdk-python
 ```
 
-The `otel` extra (`./packages/sdk-python[otel]`) installs `opentelemetry-api` for linking spans.
-The SDK itself never imports OpenTelemetry.
+The `otel` extra (`./packages/sdk-python[otel]`) installs `opentelemetry-api` for automatic span
+linking. `import tessary_prompts` never imports OpenTelemetry.
 
 ## Quick start
 
@@ -37,6 +37,25 @@ text = prompt.compile(customer="Ada")
 with trace.get_tracer(__name__).start_as_current_span("support.greeting") as span:
     prompt.link(span)   # sets tessary.prompt.name and tessary.prompt.version
     ...                 # call your model with `text`
+```
+
+`prompt.link()` with no argument links the active OpenTelemetry span (a no-op without OpenTelemetry).
+
+## Link automatically
+
+Usage counts model-call spans, which an instrumented client usually starts for you. Add the span
+processor to your tracer provider once, then run the call inside `prompt.linked()`: every span
+started in the block gets the two attributes. The link is a private context key, not baggage. A
+span started after the block has no link, an inner block wins over an outer one, and a fallback
+links nothing.
+
+```python
+from tessary_prompts.otel import PromptLinkSpanProcessor
+
+provider.add_span_processor(PromptLinkSpanProcessor())   # your SDK TracerProvider
+
+with prompts.get_prompt("support/greeting").linked():
+    ...   # spans started here, also by an instrumented model client, carry the link
 ```
 
 `get_prompt(name, version=3)` reads one version and `get_prompt(name, label="staging")` another

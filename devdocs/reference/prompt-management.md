@@ -234,8 +234,22 @@ placeholder is replaced by a supplied list of `{role, content}` objects, each co
 stays in place.
 
 Linking. `span_attributes()` and `spanAttributes()` return the canonical pair with the version as a
-string, and `{}` for a fallback. `link(span)` duck-types `set_attribute` or `setAttribute`. Neither SDK
-imports OpenTelemetry.
+string, and `{}` for a fallback. `link(span)` duck-types `set_attribute` or `setAttribute`. Neither main
+entry imports OpenTelemetry; the automatic paths live in `tessary_prompts.otel` and the
+`@tessaryai/prompts/otel` subpath, which need only the OpenTelemetry API (Python `otel` extra, TypeScript
+optional peer `@opentelemetry/api`).
+
+- Python `prompt.link()` with no span links `trace.get_current_span()`, and returns `None` without
+  OpenTelemetry installed. TypeScript `linkActiveSpan(prompt)` does the same through `trace.getSpan`.
+- `with prompt.linked():` and `withPrompt(prompt, fn)` put the prompt's span attributes under a private
+  context key (not baggage, so nothing propagates to other services). A fallback stores `{}`, which masks
+  an outer prompt. Python's `linked()` runs the block unchanged without OpenTelemetry.
+- `PromptLinkSpanProcessor` copies that value onto each span at start, from the parent context the SDK
+  passes (or the current one when Python's SDK passes `None`). It is duck-typed to the SDK's processor
+  (`_on_ending` included, which newer Python SDKs call), so a user adds it with
+  `add_span_processor` or `spanProcessors`. The gates run it on the newest SDK and the oldest supported
+  one (Python `opentelemetry-sdk` 1.20.0; TypeScript `@opentelemetry/sdk-trace-base` 1.30.1).
+- It stamps every span started in the block, not only model calls; usage reads `llm` spans only.
 
 Cache, in process. The key is `name|version:N` when a version is given, else
 `name|label:<label or production>`; names cannot hold `|`, so evicting a name never hits a longer one.

@@ -21,7 +21,14 @@ requires = ["uv_build>=0.8,<0.11"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["pytest>=8,<10", "pytest-cov>=6,<8"]
+test = ["pytest>=8,<10", "pytest-cov>=6,<8"]
+# The span processor is duck-typed, so the gate runs it against the newest OpenTelemetry SDK (dev)
+# and the oldest one the otel extra allows (otel-oldest).
+dev = [{ include-group = "test" }, "opentelemetry-sdk>=1.20"]
+otel-oldest = [{ include-group = "test" }, "opentelemetry-api==1.20.0", "opentelemetry-sdk==1.20.0"]
+
+[tool.uv]
+conflicts = [[{ group = "dev" }, { group = "otel-oldest" }]]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
