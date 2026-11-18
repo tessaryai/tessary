@@ -146,8 +146,8 @@ record PromptControllerMvcTest(MockMvc mvc, TenantService tenants, ApiKeyService
     @Test
     void chunkedBodyOverTheCapIs400() throws Exception {
         // Bug: the cap read only Content-Length, so a chunked body declared -1 and Jackson buffered all of it. Each
-        // character here is a six-byte JSON escape on the wire, so the body is over 1 MiB yet under the
-        // 200,000-character body cap that would otherwise refuse it.
+        // character here is a six-byte JSON escape on the wire, so the body is over 1 MiB while its text is
+        // far shorter.
         Caller me = admin("prompt-mvc-chunked");
         String big = "{\"name\":\"big\",\"type\":\"text\",\"body\":\"" + "\\u0041".repeat(190_000) + "\"}";
 

@@ -9,10 +9,13 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -313,24 +316,32 @@ public class PromptRepository {
                 .update();
     }
 
+    /**
+     * With a JSON filter, a prompt is listed when one of its versions meets every condition, and {@code versions} and
+     * the last config come from the matching versions only; {@code highest_version} is always the prompt's own.
+     */
     public List<PromptListRow> list(String projectId, PromptListQuery q, int offset, int limit) {
         Map<String, Object> params = new HashMap<>();
+        String matches = versionFilter(q.filter(), params);
         String order = q.order() == PromptListQuery.Order.NAME ? "p.name" : "p.updated_at DESC, p.name";
-        String sql = "SELECT " + PROMPT_COLS + ", s.versions, COALESCE(lc.config, '{}'::jsonb) AS last_config"
-                + " FROM prompt p"
-                + " JOIN LATERAL (SELECT COALESCE(array_agg(v.version ORDER BY v.version), '{}') AS versions"
-                + " FROM prompt_version v"
+        String sql = "SELECT " + PROMPT_COLS + ", s.versions, s.highest_version,"
+                + " COALESCE(lc.config, '{}'::jsonb) AS last_config FROM prompt p"
+                + " JOIN LATERAL (SELECT COALESCE(array_agg(v.version ORDER BY v.version) FILTER (WHERE " + matches
+                + "), '{}') AS versions, COALESCE(MAX(v.version), 0) AS highest_version FROM prompt_version v"
                 + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id) s ON true"
                 + " LEFT JOIN LATERAL (SELECT v.config FROM prompt_version v"
-                + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id ORDER BY v.version DESC LIMIT 1) lc"
-                + " ON true"
+                + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id AND " + matches
+                + " ORDER BY v.version DESC LIMIT 1) lc ON true"
                 + where(projectId, q, params) + " ORDER BY " + order + " LIMIT :limit OFFSET :offset";
         params.put("limit", limit);
         params.put("offset", offset);
         return jdbc.sql(sql)
                 .params(params)
-                .query((rs, n) ->
-                        new PromptListRow(prompt(rs), versions(rs.getArray("versions")), rs.getString("last_config")))
+                .query((rs, n) -> new PromptListRow(
+                        prompt(rs),
+                        versions(rs.getArray("versions")),
+                        rs.getString("last_config"),
+                        rs.getInt("highest_version")))
                 .list();
     }
 
@@ -348,12 +359,12 @@ public class PromptRepository {
         String name = q.name();
         if (name != null) {
             sql.append(" AND p.name = :name");
-            params.put("name", name);
+            params.put("name", PromptNames.lookupName(name));
         }
         String folder = q.folder();
         if (folder != null) {
             sql.append(" AND starts_with(p.name, :folderPrefix)");
-            params.put("folderPrefix", folder + "/");
+            params.put("folderPrefix", PromptNames.lookupName(folder) + "/");
         }
         String search = q.q();
         if (search != null) {
@@ -386,7 +397,124 @@ public class PromptRepository {
             sql.append(" AND p.updated_at <= :toUpdatedAt");
             params.put("toUpdatedAt", ts(to));
         }
+        List<PromptListFilter.Condition> filter = q.filter();
+        if (filter != null) {
+            sql.append(" AND EXISTS (SELECT 1 FROM prompt_version v WHERE v.project_id = p.project_id"
+                            + " AND v.prompt_id = p.id AND ")
+                    .append(versionFilter(filter, params))
+                    .append(")");
+        }
         return sql.toString();
+    }
+
+    /**
+     * The JSON filter as one predicate over a version {@code v} of prompt {@code p}. Every column and operator was
+     * checked against a fixed set by {@link PromptListFilter}, so each maps to a fixed fragment; every value is bound.
+     */
+    private static String versionFilter(@Nullable List<PromptListFilter.Condition> filter, Map<String, Object> params) {
+        if (filter == null || filter.isEmpty()) return "true";
+        List<String> parts = new ArrayList<>(filter.size());
+        for (int i = 0; i < filter.size(); i++) parts.add(condition(filter.get(i), "f" + i, params));
+        return "(" + String.join(" AND ", parts) + ")";
+    }
+
+    private static String condition(PromptListFilter.Condition c, String key, Map<String, Object> params) {
+        return switch (c) {
+            case PromptListFilter.TextMatch t -> text(textColumn(t.column()), t.operator(), t.value(), key, params);
+            case PromptListFilter.OptionsMatch o -> {
+                params.put(key, o.values().toArray(String[]::new));
+                String in = textColumn(o.column()) + " = ANY(:" + key + ")";
+                yield "any of".equals(o.operator()) ? in : "NOT (" + in + ")";
+            }
+            case PromptListFilter.NumberMatch m -> {
+                params.put(key, m.value());
+                yield "v.version " + m.operator() + " :" + key;
+            }
+            case PromptListFilter.TimeMatch t -> {
+                params.put(key, ts(t.value()));
+                yield ("createdAt".equals(t.column()) ? "v.created_at" : "p.updated_at") + " " + t.operator() + " :"
+                        + key;
+            }
+            case PromptListFilter.ArrayMatch a when "labels".equals(a.column()) -> labels(a, key, params);
+            case PromptListFilter.ArrayMatch a -> {
+                params.put(key, a.values().toArray(String[]::new));
+                yield switch (a.operator()) {
+                    case "all of" -> "jsonb_exists_all(p.tags, :" + key + ")";
+                    case "any of" -> "jsonb_exists_any(p.tags, :" + key + ")";
+                    default -> "NOT jsonb_exists_any(p.tags, :" + key + ")";
+                };
+            }
+            case PromptListFilter.ConfigMatch m -> {
+                params.put(key + "k", m.key());
+                yield switch (m.operator()) {
+                    case "is set" -> "jsonb_exists(v.config, :" + key + "k)";
+                    case "is not set" -> "NOT jsonb_exists(v.config, :" + key + "k)";
+                    default -> text("(v.config ->> :" + key + "k)", m.operator(), m.value(), key, params);
+                };
+            }
+        };
+    }
+
+    private static String textColumn(String column) {
+        return switch (column) {
+            case "id" -> "v.id";
+            case "name" -> "p.name";
+            default -> "p.type";
+        };
+    }
+
+    /** Substring operators are a case-insensitive {@code ILIKE} on the escaped value, as in another prompt tool. */
+    private static String text(String column, String operator, String value, String key, Map<String, Object> params) {
+        String like = " ILIKE :" + key + " ESCAPE '\\'";
+        return switch (operator) {
+            case "is not empty" -> "(" + column + " IS NOT NULL AND " + column + " <> '')";
+            case "=" -> {
+                params.put(key, value);
+                yield column + " = :" + key;
+            }
+            case "contains" -> {
+                params.put(key, "%" + escapeLike(value) + "%");
+                yield column + like;
+            }
+            case "does not contain" -> {
+                params.put(key, "%" + escapeLike(value) + "%");
+                yield "NOT (" + column + like + ")";
+            }
+            case "starts with" -> {
+                params.put(key, escapeLike(value) + "%");
+                yield column + like;
+            }
+            default -> {
+                params.put(key, "%" + escapeLike(value));
+                yield column + like;
+            }
+        };
+    }
+
+    /** A version's labels are its stored labels plus {@code latest} when it is the highest, which is never stored. */
+    private static String labels(PromptListFilter.ArrayMatch a, String key, Map<String, Object> params) {
+        Set<String> stored = new LinkedHashSet<>(a.values());
+        boolean latest = stored.remove(PromptNames.LATEST);
+        String isLatest = "v.version = (SELECT MAX(x.version) FROM prompt_version x"
+                + " WHERE x.project_id = v.project_id AND x.prompt_id = v.prompt_id)";
+        params.put(key, stored.toArray(String[]::new));
+        params.put(key + "n", stored.size());
+        List<String> parts = new ArrayList<>(2);
+        if ("all of".equals(a.operator())) {
+            if (!stored.isEmpty()) {
+                parts.add("(SELECT count(*) FROM prompt_label l WHERE l.version_id = v.id AND l.label = ANY(:" + key
+                        + ")) = :" + key + "n");
+            }
+            if (latest) parts.add(isLatest);
+            return "(" + String.join(" AND ", parts) + ")";
+        }
+        if (!stored.isEmpty()) {
+            parts.add(
+                    "EXISTS (SELECT 1 FROM prompt_label l WHERE l.version_id = v.id AND l.label = ANY(:" + key + "))");
+        }
+        if (latest) parts.add(isLatest);
+        String any = "(" + String.join(" OR ", parts) + ")";
+        return "any of".equals(a.operator()) ? any : "NOT " + any;
     }
 
     private static String escapeLike(String s) {

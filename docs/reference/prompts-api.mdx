@@ -23,15 +23,15 @@ When an owner or admin turns prompt management off for the organization, every r
 
 ## Routes
 
-Every route answers `200` on success, inside the envelope `{"meta": {"status": 200, "success": true}, "data": ...}`. `name` is always a query parameter or a body field, never a path segment, so a name with `/` in it needs no encoding.
+A create answers `201` and every other route answers `200` on success, inside the envelope `{"meta": {"status": 200, "success": true}, "data": ...}`, whose `status` matches the HTTP status. `name` is always a query parameter or a body field, never a path segment, so a name with `/` in it needs no encoding. A looked-up name is trimmed, as a stored name is.
 
 | Method and path | Scope | Returns | Error codes |
 | --- | --- | --- | --- |
 | `GET /v1/prompts/fetch?name=&version=&label=` | Query | One prompt version | `NAME_REQUIRED`, `BOTH_VERSION_AND_LABEL`, `NOT_FOUND`, `VERSION_NOT_FOUND`, `LABEL_NOT_FOUND` |
-| `GET /v1/prompts?name=&label=&tag=&page=&limit=&fromUpdatedAt=&toUpdatedAt=` | Query | A page of prompts, ordered by name | `COMMON.INVALID_PARAMETER` |
-| `POST /v1/prompts` | Admin | The created version | `TYPE_MISMATCH`, `INVALID_NAME`, `INVALID_LABEL`, `LATEST_RESERVED`, `INVALID_BODY`, `INVALID_CONFIG`, `INVALID_TAG`, `CONCURRENT_WRITE` |
-| `PATCH /v1/prompts/labels` | Admin | The labeled version | `NOT_FOUND`, `VERSION_NOT_FOUND`, `INVALID_LABEL`, `LATEST_RESERVED` |
-| `DELETE /v1/prompts?name=&version=&label=` | Admin | `{"deleted": true}` | `NAME_REQUIRED`, `BOTH_VERSION_AND_LABEL`, `NOT_FOUND`, `VERSION_NOT_FOUND`, `VERSION_LABELED`, `LAST_VERSION`, `INVALID_LABEL`, `LATEST_RESERVED` |
+| `GET /v1/prompts?name=&label=&tag=&page=&limit=&fromUpdatedAt=&toUpdatedAt=&filter=` | Query | A page of prompts, ordered by name | `COMMON.INVALID_PARAMETER` |
+| `POST /v1/prompts` | Admin | The created version, status `201` | `TYPE_MISMATCH`, `INVALID_NAME`, `INVALID_LABEL`, `LATEST_RESERVED`, `INVALID_BODY`, `INVALID_TAG`, `CONCURRENT_WRITE` |
+| `PATCH /v1/prompts/labels` | Admin | The labeled version | `NOT_FOUND`, `VERSION_NOT_FOUND`, `INVALID_LABEL`, `LATEST_RESERVED`, `COMMON.INVALID_PARAMETER` |
+| `DELETE /v1/prompts?name=&version=&label=` | Admin | `{"deleted": true}` | `NAME_REQUIRED`, `BOTH_VERSION_AND_LABEL`, `NOT_FOUND`, `VERSION_NOT_FOUND`, `LABEL_NOT_FOUND`, `INVALID_LABEL`, `LATEST_RESERVED` |
 
 Error codes without a domain are in the `PROMPTS` domain, for example `PROMPTS.NOT_FOUND`. A malformed body or a field that fails validation answers `400` with `COMMON.INVALID_BODY` or `COMMON.VALIDATION_FAILED`.
 
@@ -113,6 +113,29 @@ curl -H "Authorization: Bearer $TESSARY_API_KEY" \
 
 `versions` is ascending. `labels` holds every label on the prompt, sorted, with `latest` appended. `lastConfig` is the highest version's config.
 
+#### Filter
+
+`filter` is a JSON list of conditions, in the grammar another prompt tool uses. Percent-encode it in the query string: a raw `[`, `{` or `"` is refused before it reaches the route. When `filter` is sent, `name`, `label`, `tag`, `fromUpdatedAt` and `toUpdatedAt` are ignored; `page` and `limit` still apply.
+
+Each condition is true or false of one prompt version. A prompt is listed when one of its versions meets every condition, and then `versions`, `labels` and `lastConfig` describe the matching versions only. `latest` is in `labels` only when the highest version matched.
+
+| `type` | `column` | `operator` | `value` |
+| --- | --- | --- | --- |
+| `string` | `id` (the version id), `name`, `type` | `=`, `contains`, `does not contain`, `starts with`, `ends with`, `is not empty` | A string; none for `is not empty` |
+| `stringOptions` | `id`, `name`, `type` | `any of`, `none of` | A list of at least one string |
+| `number` | `version` | `=`, `>`, `<`, `>=`, `<=` | A number |
+| `datetime` | `createdAt` (the version's), `updatedAt` (the prompt's) | `>`, `<`, `>=`, `<=` | An ISO-8601 time with an offset, or epoch milliseconds |
+| `arrayOptions` | `labels` (the version's, `latest` included), `tags` | `any of`, `none of`, `all of` | A list of at least one string |
+| `stringObject` | `config`, with `key` naming a top-level key | `=`, `contains`, `does not contain`, `starts with`, `ends with`, `is set`, `is not set` | A string; none for `is set` and `is not set` |
+
+`contains`, `does not contain`, `starts with` and `ends with` ignore case. On `config`, one of these with an empty value means `is set`. A condition outside this table, or JSON that does not parse, answers `400` with `COMMON.INVALID_PARAMETER`.
+
+```bash
+curl -G -H "Authorization: Bearer $TESSARY_API_KEY" \
+  --data-urlencode 'filter=[{"type":"stringObject","column":"config","key":"model","operator":"starts with","value":"gpt"}]' \
+  https://tessary.example.com/v1/prompts
+```
+
 ### Create a prompt or a version
 
 `POST /v1/prompts` creates version 1 of a new name, or the next version of an existing name.
@@ -124,7 +147,7 @@ curl -H "Authorization: Bearer $TESSARY_API_KEY" \
 | `prompt` | Yes | The body: a string for `text`, an array for `chat`. |
 | `config` | No | A JSON object. Omitted is `{}`. |
 | `labels` | No | Up to 50 labels to move to the new version. |
-| `tags` | No | Up to 50 tags. Applied only when the request creates the prompt. |
+| `tags` | No | Up to 50 tags. On a new prompt they are its tags. On an existing prompt they replace its tags; omit `tags` to keep them. |
 | `commitMessage` | No | Up to 500 characters. |
 
 ```bash
@@ -133,17 +156,17 @@ curl -X POST -H "Authorization: Bearer $TESSARY_API_KEY" -H "Content-Type: appli
   https://tessary.example.com/v1/prompts
 ```
 
-The response is the new version, in the same shape as a fetch.
+The name is trimmed, and a name that already exists after the trim gets its next version. The response is the new version, in the same shape as a fetch, with status `201`.
 
 ### Move labels
 
-`PATCH /v1/prompts/labels` moves labels to a version and keeps the version's other labels.
+`PATCH /v1/prompts/labels` moves labels to a version and takes labels off it. Both lists are optional.
 
 ```json
-{"name": "support/greeting", "version": 3, "newLabels": ["production"]}
+{"name": "support/greeting", "version": 3, "newLabels": ["production"], "removeLabels": ["staging"]}
 ```
 
-Each label in `newLabels` leaves the version it was on. The response is the labeled version, in the same shape as a fetch.
+Each label in `newLabels` leaves the version it was on and moves here; the version's other labels stay. Then each label in `removeLabels` comes off this version. A label in `removeLabels` that is on another version stays there. A label in both lists answers `400` with `COMMON.INVALID_PARAMETER`, and `latest` in either answers `LATEST_RESERVED`. The response is the labeled version, in the same shape as a fetch.
 
 ### Delete
 
@@ -151,9 +174,11 @@ Each label in `newLabels` leaves the version it was on. The response is the labe
 
 | Parameters | Effect |
 | --- | --- |
-| `name` and `version` | Deletes that version. A labeled version fails with `VERSION_LABELED`; the only version fails with `LAST_VERSION`. |
-| `name` and `label` | Removes that label. `deleted` is `false` when the prompt did not carry it. |
+| `name` and `version` | Deletes that version, with any labels it carries. |
+| `name` and `label` | Deletes the version the label points at, with its labels. A label no version carries answers `LABEL_NOT_FOUND`. |
 | `name` alone | Deletes the prompt with every version and label. |
+
+Deleting the last version of a prompt deletes the prompt. Deleting the version that carries `production` makes a fetch with no version or label answer `404` until `production` is on another version, so an app without a fallback fails.
 
 ## Shape differences
 
@@ -161,9 +186,9 @@ The JSON field names match a common prompt API shape. The routes and the envelop
 
 - **The name is a query parameter.** Fetch is `GET /v1/prompts/fetch?name=...`, not a path ending in the name.
 - **Bearer authentication, not Basic.** A client that sends a public and secret key pair as Basic credentials cannot call this API without changes.
-- **Removing a label is a delete.** `DELETE /v1/prompts?name=...&label=...` removes one label.
-- **Labels move through `PATCH /v1/prompts/labels`** with `name`, `version`, and `newLabels` in the body.
-- **Every success is `200`.** No route answers `201` or `204`.
+- **Labels move through `PATCH /v1/prompts/labels`** with `name`, `version`, `newLabels` and `removeLabels` in the body.
+- **A delete answers `200`** with `{"deleted": true}` in the envelope, not `204`. A create answers `201`.
+- **Version numbers are never reused.** After the highest version is deleted, the next version gets a new number.
 - **Every response is wrapped** in `meta` and `data`. An error carries its code in `meta.error.code`. A `429` from the rate limiter, which answers before the route runs, has the shape `{"ok": false, "error": {"code": "rate.limited", ...}}`.
 - **`type: "chatmessage"` is accepted** on a chat message, as is `type: "message"`, and the message is stored without a `type`.
 - **No composition tags.** A body that contains a tag that references another prompt is stored as plain text.
@@ -182,16 +207,13 @@ The JSON field names match a common prompt API shape. The routes and the envelop
 | `400` | `PROMPTS.INVALID_LABEL` | A label is not 1 to 36 characters from `a-z`, `0-9`, `_`, `.`, and `-` |
 | `400` | `PROMPTS.LATEST_RESERVED` | A write named `latest` |
 | `400` | `PROMPTS.INVALID_BODY` | The body does not fit the prompt's type; the message names the first problem |
-| `400` | `PROMPTS.INVALID_CONFIG` | `config` is larger than 65,536 characters |
 | `400` | `PROMPTS.INVALID_TAG` | A tag holds whitespace or is longer than 64 characters, or there are more than 50 |
 | `400` | `PROMPTS.TYPE_MISMATCH` | A new version names a different type than the prompt has |
 | `400` | `COMMON.INVALID_BODY` | Malformed JSON, or a request body larger than 1 MiB |
-| `400` | `COMMON.INVALID_PARAMETER` | `fromUpdatedAt` or `toUpdatedAt` is not an ISO-8601 instant |
+| `400` | `COMMON.INVALID_PARAMETER` | `fromUpdatedAt` or `toUpdatedAt` is not an ISO-8601 instant, `filter` breaks the filter grammar, or a label is in both `newLabels` and `removeLabels` |
 | `404` | `PROMPTS.NOT_FOUND` | No prompt with that name in the key's project |
 | `404` | `PROMPTS.VERSION_NOT_FOUND` | The prompt has no such version |
 | `404` | `PROMPTS.LABEL_NOT_FOUND` | No version carries the label; a fetch with neither `version` nor `label` reads `production` |
-| `409` | `PROMPTS.VERSION_LABELED` | The version to delete carries a label |
-| `409` | `PROMPTS.LAST_VERSION` | The version to delete is the prompt's only version |
 | `409` | `PROMPTS.CONCURRENT_WRITE` | Another write took the same version number at the same moment; retry |
 | `429` | `rate.limited` | Too many writes; wait for the seconds in `Retry-After` |
 

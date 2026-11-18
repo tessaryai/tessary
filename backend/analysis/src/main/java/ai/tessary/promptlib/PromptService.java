@@ -40,7 +40,6 @@ public class PromptService {
 
     private static final Logger log = LoggerFactory.getLogger(PromptService.class);
 
-    static final int MAX_CONFIG_CHARS = 65_536;
     static final int DEFAULT_VERSION_PAGE = 100;
 
     public enum LabelMode {
@@ -82,10 +81,32 @@ public class PromptService {
             @Nullable Instant toUpdatedAt,
             Order order,
             int page,
-            int limit) {
+            int limit,
+            @Nullable List<PromptListFilter.Condition> filter) {
         public enum Order {
             UPDATED,
             NAME
+        }
+
+        /** No JSON filter. */
+        public PromptListQuery(
+                @Nullable String name,
+                @Nullable String folder,
+                @Nullable String q,
+                @Nullable String label,
+                @Nullable String tag,
+                @Nullable PromptType type,
+                @Nullable Instant fromUpdatedAt,
+                @Nullable Instant toUpdatedAt,
+                Order order,
+                int page,
+                int limit) {
+            this(name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, null);
+        }
+
+        public PromptListQuery withFilter(List<PromptListFilter.Condition> conditions) {
+            return new PromptListQuery(
+                    name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, conditions);
         }
 
         /** MCP: page 1, limit 100, order UPDATED ("when each last changed"). */
@@ -107,7 +128,8 @@ public class PromptService {
             @Nullable Object body,
             @Nullable Map<String, Object> config,
             List<String> labels,
-            @Nullable String commitMessage) {}
+            @Nullable String commitMessage,
+            @Nullable List<String> tags) {}
 
     /** {@code labels} is sorted, with {@code latest} appended when {@code isLatest}. */
     public record ResolvedVersion(
@@ -162,28 +184,30 @@ public class PromptService {
         this.clock = clock;
     }
 
+    /** Stores the trimmed name. */
     @Transactional
     public PromptDetail create(String projectId, String principalId, CreateVia via, CreatePromptCommand cmd) {
-        PromptNames.requireName(cmd.name());
+        String name = PromptNames.requireName(cmd.name());
         PromptBody body = PromptBody.parse(cmd.type(), cmd.body());
         String configJson = configJson(cmd.config());
         requireCommitMessage(cmd.commitMessage());
         cmd.labels().forEach(PromptNames::requireLabel);
         List<String> tags = PromptNames.normalizeTags(cmd.tags());
         Instant now = now();
-        PromptRow row = new PromptRow(Ids.ulid(), projectId, cmd.name(), cmd.type(), tags, 1, principalId, now, now);
+        PromptRow row = new PromptRow(Ids.ulid(), projectId, name, cmd.type(), tags, 1, principalId, now, now);
         try {
             repo.insertPrompt(row);
         } catch (DuplicateKeyException e) {
-            throw new TessaryException(PromptsError.NAME_EXISTS, cmd.name());
+            throw new TessaryException(PromptsError.NAME_EXISTS, name);
         } catch (DataIntegrityViolationException e) {
-            throw new TessaryException(PromptsError.INVALID_NAME, cmd.name());
+            throw new TessaryException(PromptsError.INVALID_NAME, name);
         }
         writeVersion(
                 row, row.lastVersion(), principalId, via, body, configJson, cmd.labels(), cmd.commitMessage(), now);
         return get(projectId, row.id());
     }
 
+    /** Non-null {@code tags} replace the prompt's tags in the same transaction; null keeps them. */
     @Transactional
     public ResolvedVersion createVersion(
             String projectId, String promptId, String principalId, CreateVia via, CreateVersionCommand cmd) {
@@ -192,9 +216,24 @@ public class PromptService {
         String configJson = configJson(cmd.config());
         requireCommitMessage(cmd.commitMessage());
         cmd.labels().forEach(PromptNames::requireLabel);
+        List<String> tags = cmd.tags() == null ? null : PromptNames.normalizeTags(cmd.tags());
         int version = repo.claimVersion(projectId, promptId);
-        PromptVersionRow written = writeVersion(
-                row, version, principalId, via, body, configJson, cmd.labels(), cmd.commitMessage(), now());
+        Instant now = now();
+        PromptVersionRow written =
+                writeVersion(row, version, principalId, via, body, configJson, cmd.labels(), cmd.commitMessage(), now);
+        if (tags != null) {
+            writeTags(row, tags, via, now);
+            row = new PromptRow(
+                    row.id(),
+                    row.projectId(),
+                    row.name(),
+                    row.type(),
+                    tags,
+                    row.lastVersion(),
+                    row.createdBy(),
+                    row.createdAt(),
+                    row.updatedAt());
+        }
         List<String> labels = new ArrayList<>(new TreeSet<>(cmd.labels()));
         labels.add(PromptNames.LATEST);
         return new ResolvedVersion(row, written, body, PromptJson.readObject(configJson), List.copyOf(labels), true);
@@ -203,7 +242,32 @@ public class PromptService {
     @Transactional
     public ResolvedVersion setLabels(
             String projectId, String promptId, int version, String principalId, Set<String> labels, LabelMode mode) {
+        return setLabels(projectId, promptId, version, principalId, labels, Set.of(), mode);
+    }
+
+    /**
+     * The public PATCH. {@code labels} move to the version first, then each of {@code removeLabels} that is on this
+     * version is deleted; one on another version stays. A label in both lists is refused, and {@code latest} in either
+     * is {@code LATEST_RESERVED}. Locks the prompt row before any label row, the order every label write takes, so two
+     * label writes on one prompt queue instead of deadlocking.
+     */
+    @Transactional
+    public ResolvedVersion setLabels(
+            String projectId,
+            String promptId,
+            int version,
+            String principalId,
+            Set<String> labels,
+            Set<String> removeLabels,
+            LabelMode mode) {
         labels.forEach(PromptNames::requireLabel);
+        removeLabels.forEach(PromptNames::requireLabel);
+        Set<String> both = new TreeSet<>(labels);
+        both.retainAll(removeLabels);
+        if (!both.isEmpty()) {
+            throw new TessaryException(
+                    CommonError.INVALID_PARAMETER, "newLabels and removeLabels both name " + String.join(", ", both));
+        }
         PromptRow row = lock(projectId, promptId);
         PromptVersionRow target = requireVersion(row, version);
         Set<String> onVersion = new TreeSet<>();
@@ -220,27 +284,37 @@ public class PromptService {
         } else {
             result.addAll(onVersion);
         }
+        for (String gone : new TreeSet<>(removeLabels)) {
+            if (onVersion.contains(gone)) {
+                repo.deleteLabel(projectId, promptId, gone);
+                result.remove(gone);
+            }
+        }
         repo.touchPrompt(projectId, promptId, now);
         return resolved(row, target, result);
     }
 
     /**
-     * {@code latest} is {@code LATEST_RESERVED}; true when the label existed. Locks the prompt row before the label row,
-     * the order every label write takes, so two label writes on one prompt queue instead of deadlocking.
+     * Deletes the version {@code label} points at, read under the prompt lock so a concurrent move cannot send the
+     * delete to another version. An unknown label is {@code LABEL_NOT_FOUND}; {@code latest} is never stored, so it is
+     * {@code LATEST_RESERVED}.
      */
     @Transactional
-    public boolean removeLabel(String projectId, String promptId, String label) {
+    public boolean deleteVersionByLabel(String projectId, String promptId, String label) {
         PromptNames.requireLabel(label);
-        lock(projectId, promptId);
-        boolean removed = repo.deleteLabel(projectId, promptId, label);
-        if (removed) repo.touchPrompt(projectId, promptId, now());
-        return removed;
+        PromptRow row = lock(projectId, promptId);
+        int version = repo.labelVersion(projectId, promptId, label)
+                .orElseThrow(() -> new TessaryException(PromptsError.LABEL_NOT_FOUND, row.name(), label));
+        return deleteLocked(row, version);
     }
 
-    /** A name holding U+0000 can never be stored, and the driver refuses it as a parameter, so it names no prompt. */
+    /**
+     * Trimmed like a stored name. A name holding U+0000 can never be stored, and the driver refuses it as a parameter,
+     * so it names no prompt.
+     */
     public Optional<PromptRow> findByName(String projectId, String name) {
         if (PromptBody.holdsNul(name)) return Optional.empty();
-        return repo.findByName(projectId, name);
+        return repo.findByName(projectId, PromptNames.lookupName(name));
     }
 
     /**
@@ -254,7 +328,7 @@ public class PromptService {
         PromptSelector selector = version != null
                 ? new PromptSelector.Version(version)
                 : PromptNames.LATEST.equals(wanted) ? new PromptSelector.Latest() : new PromptSelector.Label(wanted);
-        PromptResolveRow found = repo.resolve(projectId, name, selector)
+        PromptResolveRow found = repo.resolve(projectId, PromptNames.lookupName(name), selector)
                 .orElseThrow(() -> new TessaryException(PromptsError.NOT_FOUND, name));
         PromptVersionRow v = found.version();
         if (v == null) {
@@ -296,8 +370,13 @@ public class PromptService {
         long total = repo.count(projectId, q);
         List<PromptListRow> items = repo.list(projectId, q, (int) offset, q.limit());
         List<String> ids = items.stream().map(i -> i.prompt().id()).toList();
+        Map<String, Set<Integer>> listed = new HashMap<>();
+        for (PromptListRow i : items) listed.put(i.prompt().id(), Set.copyOf(i.versions()));
         Map<String, List<PromptLabelRow>> labels = new HashMap<>();
         for (PromptLabelRow l : repo.labelsOf(projectId, ids)) {
+            // With a JSON filter only the matching versions are listed, so only their labels are.
+            if (q.filter() != null
+                    && !listed.getOrDefault(l.promptId(), Set.of()).contains(l.version())) continue;
             labels.computeIfAbsent(l.promptId(), k -> new ArrayList<>()).add(l);
         }
         Map<String, Map<String, Object>> configs = new HashMap<>();
@@ -321,13 +400,24 @@ public class PromptService {
 
     public PromptDetail updateTags(String projectId, String promptId, List<String> tags) {
         List<String> normalized = PromptNames.normalizeTags(tags);
-        requirePrompt(projectId, promptId);
+        PromptRow row = requirePrompt(projectId, promptId);
+        writeTags(row, normalized, CreateVia.UI, now());
+        return get(projectId, promptId);
+    }
+
+    private void writeTags(PromptRow row, List<String> tags, CreateVia via, Instant now) {
         try {
-            repo.updateTags(projectId, promptId, normalized, now());
+            repo.updateTags(row.projectId(), row.id(), tags, now);
         } catch (DataIntegrityViolationException e) {
             throw new TessaryException(CommonError.INVALID_BODY, "the tags hold a value that cannot be stored");
         }
-        return get(projectId, promptId);
+        StructuredLog.info(log, Markers.OPS, "prompt.tags.updated")
+                .message("set %d tags on prompt %s via %s", tags.size(), row.id(), via.wire())
+                .field("projectId", row.projectId())
+                .field("promptId", row.id())
+                .field("tagCount", tags.size())
+                .field("via", via.wire())
+                .log();
     }
 
     /** False when the id names no prompt of this project. */
@@ -348,8 +438,8 @@ public class PromptService {
 
     /** Deletes every prompt whose name starts with {@code folderPath + "/"}; the count deleted. */
     public int deleteFolder(String projectId, String folderPath) {
-        PromptNames.requireFolder(folderPath);
-        int count = repo.deleteFolder(projectId, folderPath + "/");
+        String path = PromptNames.requireFolder(folderPath);
+        int count = repo.deleteFolder(projectId, path + "/");
         StructuredLog.info(log, Markers.OPS, "prompt.folder.deleted")
                 .message("deleted %d prompts in a folder", count)
                 .field("projectId", projectId)
@@ -358,26 +448,36 @@ public class PromptService {
         return count;
     }
 
-    /** A labeled version and a prompt's only version cannot be deleted. */
+    /**
+     * A labeled version is deleted with its labels (the FK cascades). Deleting the last version deletes the prompt in
+     * the same transaction, so no prompt is left without a version.
+     */
     @Transactional
     public boolean deleteVersion(String projectId, String promptId, int version) {
-        PromptRow row = lock(projectId, promptId);
+        return deleteLocked(lock(projectId, promptId), version);
+    }
+
+    private boolean deleteLocked(PromptRow row, int version) {
+        String projectId = row.projectId();
+        String promptId = row.id();
         PromptVersionRow target = requireVersion(row, version);
-        for (PromptLabelRow l : repo.labelsOf(projectId, List.of(promptId))) {
-            if (l.versionId().equals(target.id())) {
-                throw new TessaryException(PromptsError.VERSION_LABELED, version, l.label());
-            }
-        }
-        if (repo.countVersions(projectId, promptId) == 1) {
-            throw new TessaryException(PromptsError.LAST_VERSION, version, row.name());
-        }
+        long labelCount = repo.labelsOf(projectId, List.of(promptId)).stream()
+                .filter(l -> l.versionId().equals(target.id()))
+                .count();
         boolean deleted = repo.deleteVersion(projectId, promptId, version);
-        repo.touchPrompt(projectId, promptId, now());
+        boolean promptDeleted = repo.maxVersion(projectId, promptId) == 0;
+        if (promptDeleted) {
+            repo.deletePrompt(projectId, promptId);
+        } else {
+            repo.touchPrompt(projectId, promptId, now());
+        }
         StructuredLog.info(log, Markers.OPS, "prompt.version.deleted")
-                .message("deleted version %d of prompt %s", version, promptId)
+                .message("deleted version %d of prompt %s with %d labels", version, promptId, labelCount)
                 .field("projectId", projectId)
                 .field("promptId", promptId)
                 .field("version", version)
+                .field("labelCount", labelCount)
+                .field("promptDeleted", promptDeleted)
                 .log();
         return deleted;
     }
@@ -486,14 +586,12 @@ public class PromptService {
                 isLatest);
     }
 
-    /** Null is {@code {}}; anything larger than the cap, or holding U+0000 anywhere, is refused. */
+    /** Null is {@code {}}; U+0000 anywhere is refused. No size cap of its own: the 1 MiB request cap bounds it. */
     private static String configJson(@Nullable Map<String, Object> config) {
         if (holdsNul(config)) {
             throw new TessaryException(CommonError.INVALID_PARAMETER, "config " + PromptBody.NUL);
         }
-        String json = PromptJson.write(config == null ? Map.of() : config);
-        if (json.length() > MAX_CONFIG_CHARS) throw new TessaryException(PromptsError.INVALID_CONFIG);
-        return json;
+        return PromptJson.write(config == null ? Map.of() : config);
     }
 
     /** Walks the parsed JSON (keys too), not its serialized text, where an escaped backslash would look alike. */

@@ -30,11 +30,15 @@ public final class PromptPublicDtos {
             @Nullable @Size(max = 50) List<@NotBlank String> tags,
             @Nullable @Size(max = 500) String commitMessage) {}
 
-    /** Add semantics: the listed labels move to the version, its other labels stay. */
+    /**
+     * {@code newLabels} move to the version and its other labels stay; then each of {@code removeLabels} that is on
+     * this version comes off. A label in both lists is refused.
+     */
     public record UpdateLabelsRequest(
             @NotBlank String name,
             @NotNull Integer version,
-            @NotNull @Size(max = 50) List<@NotBlank String> newLabels) {}
+            @Nullable @Size(max = 50) List<@NotBlank String> newLabels,
+            @Nullable @Size(max = 50) List<@NotBlank String> removeLabels) {}
 
     /** {@code labels} includes {@code latest} on the highest version; {@code isActive} is "carries production". */
     public record PublicPrompt(
@@ -68,7 +72,10 @@ public final class PromptPublicDtos {
         }
     }
 
-    /** {@code versions} ascending; {@code labels} distinct and sorted, with {@code latest} appended. */
+    /**
+     * {@code versions} ascending; {@code labels} distinct and sorted, with {@code latest} appended when the highest
+     * version is listed, which a JSON filter can leave out.
+     */
     public record PromptMeta(
             String name,
             PromptType type,
@@ -90,7 +97,7 @@ public final class PromptPublicDtos {
                             stored.add(l.label());
                         }
                         List<String> labels = new ArrayList<>(stored);
-                        labels.add(PromptNames.LATEST);
+                        if (i.versions().contains(i.highestVersion())) labels.add(PromptNames.LATEST);
                         return new PromptMeta(
                                 i.prompt().name(),
                                 i.prompt().type(),

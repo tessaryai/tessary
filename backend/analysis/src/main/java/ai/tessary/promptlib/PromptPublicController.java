@@ -27,6 +27,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -34,6 +35,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -69,7 +71,10 @@ public class PromptPublicController {
         return ApiResponse.ok(PublicPrompt.from(service.resolve(projectId, requireName(name), version, label)));
     }
 
-    /** Ordered by name. */
+    /**
+     * Ordered by name. {@code filter} is a JSON list of conditions (see {@link PromptListFilter}); when it is sent, the
+     * simple parameters other than {@code page} and {@code limit} are ignored, as in another prompt tool.
+     */
     @GetMapping
     public ApiResponse<PromptList> list(
             TenantContext ctx,
@@ -79,29 +84,51 @@ public class PromptPublicController {
             @RequestParam(required = false) @Nullable Integer page,
             @RequestParam(required = false) @Nullable Integer limit,
             @RequestParam(required = false) @Nullable String fromUpdatedAt,
-            @RequestParam(required = false) @Nullable String toUpdatedAt) {
+            @RequestParam(required = false) @Nullable String toUpdatedAt,
+            @RequestParam(required = false) @Nullable String filter) {
         String projectId = project(ctx, KeyScope.QUERY, "read");
-        PromptListQuery query = new PromptListQuery(
-                blankToNull(name),
-                null,
-                null,
-                blankToNull(label),
-                blankToNull(tag),
-                null,
-                instant("fromUpdatedAt", fromUpdatedAt),
-                instant("toUpdatedAt", toUpdatedAt),
-                PromptListQuery.Order.NAME,
-                page == null ? 1 : page,
-                TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT));
+        int pageNumber = page == null ? 1 : page;
+        int pageSize = TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT);
+        Optional<List<PromptListFilter.Condition>> conditions = PromptListFilter.parse(filter);
+        PromptListQuery query = conditions
+                .map(c -> new PromptListQuery(
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                PromptListQuery.Order.NAME,
+                                pageNumber,
+                                pageSize)
+                        .withFilter(c))
+                .orElseGet(() -> new PromptListQuery(
+                        blankToNull(name),
+                        null,
+                        null,
+                        blankToNull(label),
+                        blankToNull(tag),
+                        null,
+                        instant("fromUpdatedAt", fromUpdatedAt),
+                        instant("toUpdatedAt", toUpdatedAt),
+                        PromptListQuery.Order.NAME,
+                        pageNumber,
+                        pageSize));
         return ApiResponse.ok(PromptList.from(service.list(projectId, query)));
     }
 
-    /** A new name creates version 1; an existing name creates its next version, of the same type. */
+    /**
+     * A new name creates version 1; an existing name creates its next version, of the same type, and {@code tags}, when
+     * sent, replace the prompt's tags. Both answer 201. The name is trimmed before the lookup and the insert.
+     */
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<PublicPrompt> create(TenantContext ctx, @Valid @RequestBody PublicCreatePromptRequest req) {
         String projectId = project(ctx, KeyScope.ADMIN, "change");
         Optional<PromptRow> existing = service.findByName(projectId, req.name());
-        if (existing.isPresent()) return ApiResponse.ok(nextVersion(ctx, projectId, existing.get(), req));
+        if (existing.isPresent()) return ApiResponse.created(nextVersion(ctx, projectId, existing.get(), req));
         PromptType type = req.type() == null ? PromptType.TEXT : req.type();
         CreatePromptCommand cmd = new CreatePromptCommand(
                 req.name(),
@@ -113,16 +140,17 @@ public class PromptPublicController {
                 req.commitMessage());
         try {
             PromptService.PromptDetail created = service.create(projectId, ctx.userId(), CreateVia.API, cmd);
-            return ApiResponse.ok(PublicPrompt.from(
+            return ApiResponse.created(PublicPrompt.from(
                     service.getVersion(projectId, created.prompt().id(), 1)));
         } catch (TessaryException e) {
             // Another writer created the name between the read and the insert: write the next version once.
             if (e.error() != PromptsError.NAME_EXISTS) throw e;
             PromptRow raced = service.findByName(projectId, req.name()).orElseThrow(() -> e);
-            return ApiResponse.ok(nextVersion(ctx, projectId, raced, req));
+            return ApiResponse.created(nextVersion(ctx, projectId, raced, req));
         }
     }
 
+    /** {@code newLabels} move to the version, then {@code removeLabels} come off it; both are optional. */
     @PatchMapping("/labels")
     public ApiResponse<PublicPrompt> updateLabels(TenantContext ctx, @Valid @RequestBody UpdateLabelsRequest req) {
         String projectId = project(ctx, KeyScope.ADMIN, "change");
@@ -132,11 +160,15 @@ public class PromptPublicController {
                 row.id(),
                 req.version(),
                 ctx.userId(),
-                new LinkedHashSet<>(req.newLabels()),
+                new LinkedHashSet<>(orEmpty(req.newLabels())),
+                new LinkedHashSet<>(orEmpty(req.removeLabels())),
                 LabelMode.ADD)));
     }
 
-    /** {@code version} deletes that version, {@code label} removes that label, neither deletes the prompt. */
+    /**
+     * {@code version} deletes that version, {@code label} deletes the version the label points at, neither deletes the
+     * prompt. Deleting the last version deletes the prompt too.
+     */
     @DeleteMapping
     public ApiResponse<DeleteResponse> delete(
             TenantContext ctx,
@@ -151,7 +183,7 @@ public class PromptPublicController {
         if (version != null) {
             deleted = service.deleteVersion(projectId, row.id(), version);
         } else if (label != null) {
-            deleted = service.removeLabel(projectId, row.id(), label);
+            deleted = service.deleteVersionByLabel(projectId, row.id(), label);
         } else {
             deleted = service.delete(projectId, row.id());
         }
@@ -164,8 +196,8 @@ public class PromptPublicController {
             throw new TessaryException(
                     PromptsError.TYPE_MISMATCH, row.name(), row.type().wire());
         }
-        CreateVersionCommand cmd =
-                new CreateVersionCommand(req.prompt(), req.config(), orEmpty(req.labels()), req.commitMessage());
+        CreateVersionCommand cmd = new CreateVersionCommand(
+                req.prompt(), req.config(), orEmpty(req.labels()), req.commitMessage(), req.tags());
         return PublicPrompt.from(service.createVersion(projectId, row.id(), ctx.userId(), CreateVia.API, cmd));
     }
 

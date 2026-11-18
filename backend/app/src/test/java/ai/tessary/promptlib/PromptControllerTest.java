@@ -208,9 +208,17 @@ record PromptControllerTest(PromptController controller, TenantService tenants, 
                                 .updateTags(me, org, proj, id, new UpdateTagsRequest(List.of("x", "y", "x")))
                                 .data())
                         .tags());
-        assertError(PromptsError.LAST_VERSION, () -> controller.deleteVersion(me, org, proj, id, 1));
         controller.createVersion(me, org, proj, id, new CreateVersionRequest("v2", null, List.of("production"), null));
-        assertError(PromptsError.VERSION_LABELED, () -> controller.deleteVersion(me, org, proj, id, 2));
+        controller.createVersion(me, org, proj, id, new CreateVersionRequest("v3", null, null, null));
+        // Bug: the UI delete answered 409 for a labeled version, which another prompt tool deletes with its labels.
+        assertEquals(
+                true,
+                requireNonNull(controller.deleteVersion(me, org, proj, id, 2).data())
+                        .deleted());
+        assertEquals(
+                List.of(),
+                requireNonNull(controller.get(me, org, proj, id, null, null).data())
+                        .labels());
         assertEquals(
                 true,
                 requireNonNull(controller.deleteVersion(me, org, proj, id, 1).data())
@@ -225,6 +233,26 @@ record PromptControllerTest(PromptController controller, TenantService tenants, 
         assertEquals(
                 false,
                 requireNonNull(controller.delete(me, org, proj, id).data()).deleted());
+        assertError(PromptsError.NOT_FOUND, () -> controller.get(me, org, proj, id, null, null));
+    }
+
+    /** The bug: deleting a prompt's only version answered 409, or left an empty prompt row behind. */
+    @Test
+    void deletingTheOnlyVersionDeletesThePrompt() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-ctl-delete-last");
+        TenantContext me = owner(fix);
+        String org = fix.org().slug();
+        String proj = fix.project().slug();
+        String id = requireNonNull(controller
+                        .create(me, org, proj, text("solo", List.of("production")))
+                        .data())
+                .id();
+
+        assertEquals(
+                true,
+                requireNonNull(controller.deleteVersion(me, org, proj, id, 1).data())
+                        .deleted());
+
         assertError(PromptsError.NOT_FOUND, () -> controller.get(me, org, proj, id, null, null));
     }
 

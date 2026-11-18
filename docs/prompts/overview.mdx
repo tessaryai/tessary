@@ -13,21 +13,23 @@ A prompt is one of two types, fixed when you create it:
 
 | Type | Body |
 | --- | --- |
-| `text` | One string, 1 to 200,000 characters. |
-| `chat` | A list of 1 to 200 entries. Each entry is a message, `{"role": "system", "content": "..."}`, or a placeholder, `{"type": "placeholder", "name": "history"}`. |
+| `text` | One non-empty string. |
+| `chat` | A non-empty list of entries. Each entry is a message, `{"role": "system", "content": "..."}`, or a placeholder, `{"type": "placeholder", "name": "history"}`. Other keys on a message are dropped. |
+
+A body has no size limit of its own. A request to save a version is at most 1 MiB, body, config and the rest together.
 
 Write a variable as `{{name}}`. A variable name starts with a letter or an underscore and holds only letters, digits, and underscores. Spaces inside the braces are allowed, so `{{ name }}` is the same variable. A dotted name such as `{{user.name}}` is not a variable and stays in the text as written.
 
 A placeholder stands for a list of messages that your code supplies when it compiles the prompt, such as the conversation so far. A placeholder holds no variables.
 
-A prompt name is 1 to 255 characters with no whitespace and no `|`. A `/` in the name puts the prompt in a folder: `support/greeting` sits in the folder `support`. A name cannot start or end with `/` or contain `//`. Tags group prompts for search, up to 50 per prompt, and change nothing an agent fetches.
+A prompt name is 1 to 255 characters with no `|` and no HTML tag, such as `<b>`. Spaces inside a name are allowed, so `Support Agent` is a name; spaces at either end are trimmed. A `/` in the name puts the prompt in a folder: `support/greeting` sits in the folder `support`. A name cannot start or end with `/` or contain `//`. Tags group prompts for search, up to 50 per prompt, and change nothing an agent fetches.
 
 ## Prompt versions
 
 Each save creates a new version, numbered one higher than the highest number the prompt has ever had, so a deleted version's number is never used again. A version never changes after it is created. Each version carries:
 
 - The body.
-- A config: a JSON object of free-form keys, such as the model and its temperature, up to 65,536 characters. Tessary stores it as given and returns it with the body.
+- A config: a JSON object of free-form keys, such as the model and its temperature. Tessary stores it as given and returns it with the body.
 - An optional commit message, up to 500 characters.
 
 A prompt has no limit on how many versions it holds.
@@ -47,7 +49,7 @@ To promote a version, move the `production` label to it. Every agent that fetche
 
 To roll back, move `production` back to the older version. The older version is still there, unchanged, because versions are never edited.
 
-A version that carries a label cannot be deleted: move the label first. The only version of a prompt cannot be deleted either; delete the prompt instead.
+Deleting a version deletes the labels it carries. Deleting the version that carries `production` makes every default fetch answer `404` until you move `production` to another version. Deleting the only version of a prompt deletes the prompt.
 
 ## Ways to create and fetch prompts
 

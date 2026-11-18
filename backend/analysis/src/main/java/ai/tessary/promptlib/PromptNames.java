@@ -11,14 +11,17 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Name, label, tag and variable rules. {@link #NAME} is at least as strict as the {@code ck_prompt_name} CHECK: under
- * UNICODE_CHARACTER_CLASS {@code \s} also matches U+00A0, U+2003 and U+3000. {@link #VARIABLE} has three copies (the
- * frontend and both SDKs) that a parity gate compares with this literal.
+ * Name, label, tag and variable rules. A name is trimmed, then checked: inner whitespace is allowed, as in another
+ * prompt tool. The trim takes every character Java or Postgres counts as a space, so a trimmed name always passes the
+ * {@code ck_prompt_name} CHECK's edge rule. {@link #VARIABLE} has three copies (the frontend and both SDKs) that a
+ * parity gate compares with this literal.
  */
 public final class PromptNames {
 
-    public static final Pattern NAME =
-            Pattern.compile("^(?!/)(?!.*//)(?!.*/$)[^|\\s]{1,255}$", Pattern.UNICODE_CHARACTER_CLASS);
+    public static final Pattern NAME = Pattern.compile("^(?!/)(?!.*//)(?!.*/$)[^|]{1,255}$", Pattern.DOTALL);
+    /** Text of the form {@code <...>}, the HTML-tag test another prompt tool applies to names. */
+    public static final Pattern HTML_TAG = Pattern.compile("<[^<>]*>");
+
     public static final Pattern LABEL = Pattern.compile("^[a-z0-9_.-]{1,36}$");
     public static final Pattern TAG = Pattern.compile("^\\S{1,64}$", Pattern.UNICODE_CHARACTER_CLASS);
     public static final Pattern VARIABLE = Pattern.compile("\\{\\{\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\}\\}");
@@ -31,11 +34,30 @@ public final class PromptNames {
 
     private PromptNames() {}
 
-    /** {@code \s} does not cover U+0000, which Postgres refuses in text, so it is checked on its own. */
-    public static void requireName(String name) {
-        if (!NAME.matcher(name).matches() || PromptBody.holdsNul(name)) {
+    /** The trimmed name, which is what is stored; U+0000, which Postgres refuses in text, is checked on its own. */
+    public static String requireName(String name) {
+        String trimmed = lookupName(name);
+        if (!NAME.matcher(trimmed).matches() || HTML_TAG.matcher(trimmed).find() || PromptBody.holdsNul(trimmed)) {
             throw new TessaryException(PromptsError.INVALID_NAME, name);
         }
+        return trimmed;
+    }
+
+    /** A name as stored: trimmed of edge whitespace, unchecked, so a lookup by an untrimmed name finds the prompt. */
+    public static String lookupName(String name) {
+        int start = 0;
+        int end = name.length();
+        while (start < end && isSpace(name.charAt(start))) start++;
+        while (end > start && isSpace(name.charAt(end - 1))) end--;
+        return name.substring(start, end);
+    }
+
+    /**
+     * Java's whitespace (which covers U+001C to U+001F, as glibc's {@code [[:space:]]} does) plus the Unicode space
+     * separators (U+00A0, U+2007, U+202F), so no edge character the CHECK refuses survives the trim.
+     */
+    private static boolean isSpace(char c) {
+        return Character.isWhitespace(c) || Character.isSpaceChar(c);
     }
 
     /** {@code latest} is derived from the newest version, so no write may name it. */
@@ -64,9 +86,9 @@ public final class PromptNames {
         return slash < 0 ? "" : name.substring(0, slash);
     }
 
-    /** A folder path is a name prefix, so the name rule applies to it. */
-    public static void requireFolder(String path) {
-        requireName(path);
+    /** A folder path is a name prefix, so the name rule, trim included, applies to it. */
+    public static String requireFolder(String path) {
+        return requireName(path);
     }
 
     /** In first-appearance order, each name once. */

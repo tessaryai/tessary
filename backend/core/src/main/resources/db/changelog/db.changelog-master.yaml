@@ -193,3 +193,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0055-span-prompt-link.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0056-prompt-name-spaces.sql
+      relativeToChangelogFile: false

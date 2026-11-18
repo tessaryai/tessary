@@ -4829,7 +4829,8 @@ export interface components {
         };
         UpdateLabelsRequest: {
             name: string;
-            newLabels: string[];
+            newLabels?: string[] | null;
+            removeLabels?: string[] | null;
             /** Format: int32 */
             version: number;
         };
@@ -9079,6 +9080,7 @@ export interface operations {
                 limit?: number;
                 fromUpdatedAt?: string;
                 toUpdatedAt?: string;
+                filter?: string;
             };
             header?: never;
             path?: never;
@@ -9112,8 +9114,8 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Created */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

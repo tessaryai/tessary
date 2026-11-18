@@ -14,14 +14,11 @@ import org.jspecify.annotations.Nullable;
 /**
  * A prompt version's template. Text is one string; chat is a list of messages and placeholders, where a placeholder
  * takes a list of messages at compile time and holds no variables. Input accepts a {@code type} of {@code "chatmessage"}
- * or {@code "message"}, as other prompt tools send; storage and the wire never carry a {@code type} on a message.
+ * or {@code "message"}, as other prompt tools send; storage and the wire never carry a {@code type} on a message. Other
+ * keys on a message are dropped, as another prompt tool does. No size cap of its own: the 1 MiB request cap bounds it.
  */
 public sealed interface PromptBody permits PromptBody.Text, PromptBody.Chat {
 
-    int MAX_CHARS = 200_000;
-    int MAX_MESSAGES = 200;
-    /** A text body counts its characters; a chat body counts its serialized JSON. */
-    String TOO_LONG = "body exceeds 200000 characters";
     /** Postgres refuses U+0000 in text and jsonb, and its error would quote the value, so validation stops it first. */
     String NUL = "holds a NUL character (U+0000)";
 
@@ -43,11 +40,7 @@ public sealed interface PromptBody permits PromptBody.Text, PromptBody.Chat {
         if (raw == null) throw invalid("body is required");
         return switch (type) {
             case TEXT -> parseText(raw);
-            case CHAT -> {
-                Chat chat = parseChat(raw);
-                if (chat.toJson().length() > MAX_CHARS) throw invalid(TOO_LONG);
-                yield chat;
-            }
+            case CHAT -> parseChat(raw);
         };
     }
 
@@ -105,7 +98,6 @@ public sealed interface PromptBody permits PromptBody.Text, PromptBody.Chat {
     private static Text parseText(Object raw) {
         if (!(raw instanceof String s)) throw invalid("a text prompt body is a string");
         if (s.isEmpty()) throw invalid("body is empty");
-        if (s.length() > MAX_CHARS) throw invalid(TOO_LONG);
         if (holdsNul(s)) throw invalid("body " + NUL);
         return new Text(s);
     }
@@ -113,7 +105,6 @@ public sealed interface PromptBody permits PromptBody.Text, PromptBody.Chat {
     private static Chat parseChat(Object raw) {
         if (!(raw instanceof List<?> list)) throw invalid("a chat prompt body is an array of messages");
         if (list.isEmpty()) throw invalid("body is empty");
-        if (list.size() > MAX_MESSAGES) throw invalid("body has more than 200 messages");
         List<Entry> entries = new ArrayList<>(list.size());
         for (int i = 0; i < list.size(); i++) {
             entries.add(parseEntry(i + 1, list.get(i)));
@@ -125,7 +116,6 @@ public sealed interface PromptBody permits PromptBody.Text, PromptBody.Chat {
         if (!(raw instanceof Map<?, ?> m)) throw invalid("message " + n + " is not an object");
         Object type = m.get("type");
         if (type == null || "message".equals(type) || "chatmessage".equals(type)) {
-            requireKeys(n, m, Set.of("type", "role", "content"));
             if (!(m.get("role") instanceof String role) || role.isBlank()) {
                 throw invalid("message " + n + " role must be a non-blank string");
             }

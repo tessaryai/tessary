@@ -113,7 +113,7 @@ class PromptServiceTest {
     }
 
     private static CreateVersionCommand textVersion(List<String> labels) {
-        return new CreateVersionCommand("hello {{name}}", null, labels, null);
+        return new CreateVersionCommand("hello {{name}}", null, labels, null, null);
     }
 
     @Test
@@ -175,20 +175,52 @@ class PromptServiceTest {
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
 
         CreateVersionCommand chatBody =
-                new CreateVersionCommand(List.of(Map.of("role", "user", "content", "x")), null, List.of(), null);
+                new CreateVersionCommand(List.of(Map.of("role", "user", "content", "x")), null, List.of(), null, null);
         assertError(PromptsError.INVALID_BODY, () -> service().createVersion(PID, ID, BY, CreateVia.UI, chatBody));
         verify(repo, never()).insertVersion(any());
     }
 
-    /** A config is a JSON object of bounded size; a 70000-character value is refused before any write. */
+    /**
+     * The 1 MiB request cap is the only bound on a config, as in another prompt tool. The bug: a 70,000-character
+     * config, under that cap, is refused by a cap of its own.
+     */
     @Test
-    void createVersion_oversizeConfigIsInvalidConfig() {
+    void createVersion_configOverTheOldCapIsStored() {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
+        when(repo.claimVersion(PID, ID)).thenReturn(2);
 
-        CreateVersionCommand big = new CreateVersionCommand("x", Map.of("k", "v".repeat(70_000)), List.of(), null);
-        assertError(PromptsError.INVALID_CONFIG, () -> service().createVersion(PID, ID, BY, CreateVia.UI, big));
-        verify(repo, never()).insertVersion(any());
+        CreateVersionCommand big =
+                new CreateVersionCommand("x", Map.of("k", "v".repeat(70_000)), List.of(), null, null);
+        assertEquals(
+                Map.of("k", "v".repeat(70_000)),
+                service().createVersion(PID, ID, BY, CreateVia.UI, big).config());
+    }
+
+    /**
+     * Tags sent with a next version replace the prompt's tags; no tags keeps them. The bugs: the tags are dropped with
+     * no error, and the returned version still shows the tags read before the update.
+     */
+    @Test
+    void createVersion_tagsReplaceThePromptsTags_nullKeepsThem() {
+        PromptRow tagged = new PromptRow(ID, PID, "p", PromptType.TEXT, List.of("old"), 1, BY, NOW, NOW);
+        when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
+        when(repo.findById(PID, ID)).thenReturn(Optional.of(tagged));
+        when(repo.claimVersion(PID, ID)).thenReturn(2, 3);
+
+        ResolvedVersion replaced = service()
+                .createVersion(
+                        PID,
+                        ID,
+                        BY,
+                        CreateVia.API,
+                        new CreateVersionCommand("x", null, List.of(), null, List.of("b", "a", "b")));
+        ResolvedVersion kept = service()
+                .createVersion(PID, ID, BY, CreateVia.API, new CreateVersionCommand("x", null, List.of(), null, null));
+
+        verify(repo).updateTags(PID, ID, List.of("b", "a"), NOW);
+        assertEquals(List.of("b", "a"), replaced.prompt().tags());
+        assertEquals(List.of("old"), kept.prompt().tags());
     }
 
     @Test
@@ -261,22 +293,42 @@ class PromptServiceTest {
     }
 
     /**
-     * Every other label write locks the prompt row before a label row. The bug: removeLabel deletes the label row first
+     * Every label write locks the prompt row before a label row. The bug: removing a label deletes the label row first
      * and touches the prompt row after, so a concurrent label move on the same prompt deadlocks (40P01) and one of the
-     * two requests is a 500.
+     * two requests is a 500. A label in {@code removeLabels} that sits on another version stays there.
      */
     @Test
-    void removeLabel_locksThePromptBeforeTheLabelRow() {
+    void setLabels_removeLabelsLocksThePromptBeforeTheLabelRow() {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.deleteLabel(PID, ID, "staging")).thenReturn(true);
+        when(repo.findVersion(PID, ID, 2)).thenReturn(Optional.of(version(2)));
+        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of(label("dev", 3), label("staging", 2)));
+        when(repo.maxVersion(PID, ID)).thenReturn(3);
 
-        assertTrue(service().removeLabel(PID, ID, "staging"));
+        ResolvedVersion v = service().setLabels(PID, ID, 2, BY, Set.of(), Set.of("staging", "dev"), LabelMode.ADD);
 
         InOrder order = inOrder(repo);
         order.verify(repo).lockPrompt(PID, ID);
         order.verify(repo).deleteLabel(PID, ID, "staging");
         order.verify(repo).touchPrompt(PID, ID, NOW);
+        verify(repo, never()).deleteLabel(PID, ID, "dev");
+        assertEquals(List.of(), v.labels());
+    }
+
+    /**
+     * {@code removeLabels} runs after {@code newLabels}, so a label in both lists would depend on processing order;
+     * {@code latest} is never stored. The bugs: either list is half applied before the refusal, or {@code latest}
+     * reaches the label table.
+     */
+    @Test
+    void setLabels_refusesALabelInBothListsAndLatestInRemove() {
+        assertError(
+                CommonError.INVALID_PARAMETER,
+                () -> service().setLabels(PID, ID, 2, BY, Set.of("staging"), Set.of("staging"), LabelMode.ADD));
+        assertError(
+                PromptsError.LATEST_RESERVED,
+                () -> service().setLabels(PID, ID, 2, BY, Set.of(), Set.of("latest"), LabelMode.ADD));
+        verifyNoInteractions(repo);
     }
 
     static Stream<Arguments> configsWithNul() {
@@ -296,7 +348,7 @@ class PromptServiceTest {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
 
-        CreateVersionCommand cmd = new CreateVersionCommand("x", config, List.of(), null);
+        CreateVersionCommand cmd = new CreateVersionCommand("x", config, List.of(), null, null);
         TessaryException e =
                 assertThrows(TessaryException.class, () -> service().createVersion(PID, ID, BY, CreateVia.UI, cmd));
         assertEquals(CommonError.INVALID_PARAMETER, e.error());
@@ -314,7 +366,8 @@ class PromptServiceTest {
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
         when(repo.claimVersion(PID, ID)).thenReturn(2);
 
-        CreateVersionCommand cmd = new CreateVersionCommand("x", Map.of("note", "\\u0000", "n", 5), List.of(), null);
+        CreateVersionCommand cmd =
+                new CreateVersionCommand("x", Map.of("note", "\\u0000", "n", 5), List.of(), null, null);
         assertEquals(
                 Map.of("note", "\\u0000", "n", 5),
                 service().createVersion(PID, ID, BY, CreateVia.UI, cmd).config());
@@ -326,7 +379,7 @@ class PromptServiceTest {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
 
-        CreateVersionCommand version = new CreateVersionCommand("x", null, List.of(), "fix\u0000");
+        CreateVersionCommand version = new CreateVersionCommand("x", null, List.of(), "fix\u0000", null);
         assertError(CommonError.INVALID_PARAMETER, () -> service().createVersion(PID, ID, BY, CreateVia.UI, version));
         CreatePromptCommand prompt =
                 new CreatePromptCommand("p", PromptType.TEXT, "hi", null, List.of(), List.of(), "fix\u0000");
@@ -453,24 +506,65 @@ class PromptServiceTest {
         assertEquals("Prompt p has no version 9", e.getMessage());
     }
 
+    /**
+     * Another prompt tool deletes a version that carries labels; its labels go with it by the FK cascade. The bug: a
+     * delete that tool allows answers 409 here.
+     */
     @Test
-    void deleteVersion_rules() {
+    void deleteVersion_removesALabeledVersionAndItsLabels() {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
         when(repo.findVersion(PID, ID, 2)).thenReturn(Optional.of(version(2)));
-
         when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of(label("production", 2)));
-        assertError(PromptsError.VERSION_LABELED, () -> service().deleteVersion(PID, ID, 2));
-
-        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of(label("production", 1)));
-        when(repo.countVersions(PID, ID)).thenReturn(1);
-        assertError(PromptsError.LAST_VERSION, () -> service().deleteVersion(PID, ID, 2));
-        verify(repo, never()).deleteVersion(anyString(), anyString(), eq(2));
-
-        when(repo.countVersions(PID, ID)).thenReturn(2);
         when(repo.deleteVersion(PID, ID, 2)).thenReturn(true);
+        when(repo.maxVersion(PID, ID)).thenReturn(1);
+
         assertTrue(service().deleteVersion(PID, ID, 2));
+
         verify(repo).touchPrompt(PID, ID, NOW);
+        verify(repo, never()).deletePrompt(any(), any());
+    }
+
+    /** The bug: deleting the only version leaves an empty prompt row that no fetch can read. */
+    @Test
+    void deleteVersion_lastVersionRemovesThePrompt() {
+        when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
+        when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
+        when(repo.findVersion(PID, ID, 1)).thenReturn(Optional.of(version(1)));
+        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of());
+        when(repo.deleteVersion(PID, ID, 1)).thenReturn(true);
+        when(repo.maxVersion(PID, ID)).thenReturn(0);
+
+        assertTrue(service().deleteVersion(PID, ID, 1));
+
+        verify(repo).deletePrompt(PID, ID);
+    }
+
+    /**
+     * Delete by label deletes the version the label points at, read under the prompt lock so a concurrent move cannot
+     * send the delete to the wrong version. The bugs: the label alone is removed and the version stays, and an unknown
+     * label answers 200.
+     */
+    @Test
+    void deleteVersionByLabel_deletesTheVersionItPointsAt_unknownIsLabelNotFound() {
+        when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
+        when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
+        when(repo.labelVersion(PID, ID, "staging")).thenReturn(Optional.of(2));
+        when(repo.findVersion(PID, ID, 2)).thenReturn(Optional.of(version(2)));
+        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of(label("staging", 2)));
+        when(repo.deleteVersion(PID, ID, 2)).thenReturn(true);
+        when(repo.maxVersion(PID, ID)).thenReturn(3);
+
+        assertTrue(service().deleteVersionByLabel(PID, ID, "staging"));
+        InOrder order = inOrder(repo);
+        order.verify(repo).lockPrompt(PID, ID);
+        order.verify(repo).labelVersion(PID, ID, "staging");
+        order.verify(repo).deleteVersion(PID, ID, 2);
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> service().deleteVersionByLabel(PID, ID, "canary"));
+        assertEquals(PromptsError.LABEL_NOT_FOUND, e.error());
+        assertEquals("Prompt p has no label canary", e.getMessage());
     }
 
     private static PromptVersionSummaryRow summary(int n) {
@@ -503,7 +597,7 @@ class PromptServiceTest {
     @Test
     void deleteFolder_validatesPath() {
         assertError(PromptsError.INVALID_NAME, () -> service().deleteFolder(PID, "team/"));
-        assertError(PromptsError.INVALID_NAME, () -> service().deleteFolder(PID, "a b"));
+        assertError(PromptsError.INVALID_NAME, () -> service().deleteFolder(PID, "a|b"));
         verifyNoInteractions(repo);
 
         when(repo.deleteFolder(PID, "team/x/")).thenReturn(2);
@@ -518,7 +612,7 @@ class PromptServiceTest {
                         s -> s.deleteVersion(PID, ID, 1),
                         s -> s.createVersion(PID, ID, BY, CreateVia.UI, textVersion(List.of())),
                         s -> s.updateTags(PID, ID, List.of("a")),
-                        s -> s.removeLabel(PID, ID, "staging"))
+                        s -> s.deleteVersionByLabel(PID, ID, "staging"))
                 .map(Arguments::of);
     }
 

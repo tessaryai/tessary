@@ -39,14 +39,21 @@ deadlocking.
   gets the old top number plus one. A reader pinned to a version number, the SDK cache key and the usage
   counts never see a different body under the same number. `ux_prompt_version` is the backstop: a
   `DuplicateKeyException` is 409 `PROMPTS.CONCURRENT_WRITE`.
-- `create` inserts the prompt with `last_version` 1 (`DuplicateKeyException` is `NAME_EXISTS`, any
-  other integrity error `INVALID_NAME`) and writes version 1 in the same transaction.
+- `create` inserts the prompt, under its trimmed name, with `last_version` 1 (`DuplicateKeyException` is
+  `NAME_EXISTS`, any other integrity error `INVALID_NAME`) and writes version 1 in the same transaction.
+- `createVersion` with non-null `tags` (the public POST to an existing name that sends `tags`) replaces the
+  prompt's tags in the same transaction, under the prompt lock; null keeps them. The response carries the new
+  tags.
 - A label move reads the label's current version with `SELECT ... FOR UPDATE OF l`, then upserts
   `ON CONFLICT (prompt_id, label)`. `LabelMode.REPLACE` (the UI's PUT) leaves the version with exactly
-  the listed labels and deletes its others. `LabelMode.ADD` (the public PATCH) only moves the listed
-  labels.
-- A labeled version cannot be deleted (409 `VERSION_LABELED`), nor can a prompt's only version (409
-  `LAST_VERSION`). A prompt has no version cap, and a create does not count the versions.
+  the listed labels and deletes its others. `LabelMode.ADD` (the public PATCH) moves `newLabels`, then
+  deletes each of `removeLabels` that is on this version; one on another version stays. A label in both
+  lists is 400 `COMMON.INVALID_PARAMETER`, and `latest` in either is `LATEST_RESERVED`, both before the lock.
+- A version that carries labels is deleted with them (the `prompt_label` FK cascades). Deleting the last
+  version deletes the prompt row in the same transaction. Delete by label reads the label's version with
+  `labelVersion` under the prompt lock, so a concurrent move cannot send the delete to another version; an
+  unknown label is 404 `LABEL_NOT_FOUND`, and `latest`, which is never stored, is `LATEST_RESERVED`.
+- A prompt has no version cap, and a create does not count the versions.
 - Every statement is keyed on `project_id`, so another project's id reads as `NOT_FOUND`. Folder and
   search filters use `starts_with` and an escaped `ILIKE`, never a bare `LIKE`, because `_` and `%`
   are legal in names.
@@ -68,17 +75,17 @@ deadlocking.
 
 | Rule | Value |
 |---|---|
-| Name | `^(?!/)(?!.*//)(?!.*/$)[^\|\s]{1,255}$` with `UNICODE_CHARACTER_CLASS`. The Java rule is the real guard; the SQL CHECK is a backstop. A `/` makes a folder, and a folder path follows the name rule. |
+| Name | Trimmed first (`PromptNames.lookupName`: every character `Character.isWhitespace` or `Character.isSpaceChar` accepts, which covers what Postgres `[[:space:]]` matches), then `^(?!/)(?!.*//)(?!.*/$)[^\|]{1,255}$` with `DOTALL`, no `<[^<>]*>` (an HTML tag), no NUL. Inner whitespace is allowed. The trimmed name is stored, and every lookup by name trims the same way. The Java rule is the real guard; the SQL CHECK (`0056`) is a backstop that refuses edge whitespace. A `/` makes a folder, and a folder path follows the name rule. No name is reserved: pages route by prompt id. |
 | Label | `^[a-z0-9_.-]{1,36}$`. `latest` is reserved (`LATEST_RESERVED`). `production` is the label a read with neither version nor label resolves. No trimming, no lowercasing. |
 | Tag | `^\S{1,64}$`, at most 50 per prompt, order kept, duplicates dropped. |
 | Variable | `\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`: no dot, no `{{#each}}`, first-appearance order, deduplicated. Placeholders hold none. |
 | Placeholder name | `^[A-Za-z_][A-Za-z0-9_]*$` |
-| Body | Text: a string of 1 to 200000 characters. Chat: 1 to 200 entries, at most 200000 characters serialized. A message is `{role, content}` and accepts `type` `message` or `chatmessage` on input, stored without `type`. A placeholder is exactly `{type: "placeholder", name}`. |
-| Config | A JSON object, at most 65536 characters serialized; `null` means `{}`. |
+| Body | Text: a non-empty string. Chat: a non-empty list. A message needs string `role` and `content`, accepts `type` `message` or `chatmessage` on input, and any other key is dropped; it is stored as `{role, content}`. A placeholder is exactly `{type: "placeholder", name}`. No size cap of its own. |
+| Config | A JSON object; `null` means `{}`. No size cap of its own. |
 | Commit message | At most 500 characters. |
 | NUL | U+0000 is refused in a name, folder, tag, body, config (keys and nested strings too) and commit message, because Postgres stores it in neither text nor jsonb, and a looked-up name holding it names no prompt. An integrity error from the version insert or the tag update is still a 400 `COMMON.INVALID_BODY`, with no SQL cause attached, because the database's error context would quote the stored JSON. |
-| Request lists | `labels`, `tags`, `newLabels`: at most 50 non-blank strings. |
-| Request body | A declared `Content-Length` over 1048576 bytes on `/api/orgs/*/projects/*/prompts/**` and `/v1/prompts/**` is 400 `COMMON.INVALID_BODY` from `PromptBodyLimitInterceptor`, before binding. A chunked body declares no length, so `PromptBodyLimitAdvice` reads at most 1048577 bytes of it before Jackson runs and answers the same 400 past 1048576. |
+| Request lists | `labels`, `tags`, `newLabels`, `removeLabels`: at most 50 non-blank strings. |
+| Request body | The only size bound on a body or config. A declared `Content-Length` over 1048576 bytes on `/api/orgs/*/projects/*/prompts/**` and `/v1/prompts/**` is 400 `COMMON.INVALID_BODY` from `PromptBodyLimitInterceptor`, before binding. A chunked body declares no length, so `PromptBodyLimitAdvice` reads at most 1048577 bytes of it before Jackson runs and answers the same 400 past 1048576. |
 | Pages | 1-based. UI default 50, max 200; public default 10, max 100. A page whose offset would overflow is 400 `COMMON.INVALID_PARAMETER`. |
 
 The variable regex has four copies: `PromptNames.VARIABLE`, `VARIABLE_PATTERN` in the frontend's
@@ -100,19 +107,32 @@ Headless routes:
 | Route | Key | Does |
 |---|---|---|
 | `GET /v1/prompts/fetch?name&version&label` | query | One version; neither selector reads `production`. |
-| `GET /v1/prompts?name&label&tag&page&limit&fromUpdatedAt&toUpdatedAt` | query | Prompt metadata, ordered by name. |
-| `POST /v1/prompts` | admin | A new name makes version 1, an existing name its next version; a different type is `TYPE_MISMATCH`. |
-| `PATCH /v1/prompts/labels` | admin | Moves labels (`ADD`). |
-| `DELETE /v1/prompts?name&version&label` | admin | `version` deletes it, `label` removes it, neither deletes the prompt. |
+| `GET /v1/prompts?name&label&tag&page&limit&fromUpdatedAt&toUpdatedAt&filter` | query | Prompt metadata, ordered by name. `filter` (below) replaces the other narrowing parameters. |
+| `POST /v1/prompts` | admin | 201. A new name makes version 1, an existing name its next version, and its `tags`, when sent, replace the prompt's; a different type is `TYPE_MISMATCH`. |
+| `PATCH /v1/prompts/labels` | admin | Moves `newLabels` and removes `removeLabels` (`ADD`). |
+| `DELETE /v1/prompts?name&version&label` | admin | `version` deletes it, `label` deletes the version it points at, neither deletes the prompt. |
 
 `name` is always a query parameter or a body field, because Tomcat rejects `%2F` in a path. The key
 scope rule is in [auth-and-mcp.md](./auth-and-mcp.md) § *One key store*: a bearer read needs a query or
 admin key, a write an admin key, and a write (ingest) key gets nothing. On `/v1/prompts`, no credential
 is 401 and a cookie session is 403 `PROMPTS.TOKEN_REQUIRED`. A POST that loses a create race to the same
 name re-reads the name and writes the next version once, in the controller, outside the failed
-transaction. Every success is HTTP 200 inside `ApiResponse`, both POSTs included. Mutating
+transaction. The public POST answers HTTP 201 through `@ResponseStatus`, with `ApiResponse.created`, so
+`meta.status` is 201 too; every other success is 200, and the UI's POSTs stay 200. Mutating
 `/v1/prompts` requests are throttled per principal by `RateLimitFilter` (429 with `Retry-After`); reads
 are not.
+
+The list's `filter` is a JSON list of conditions in the grammar another prompt tool uses, parsed and
+checked by `PromptListFilter`: types `string`, `stringOptions`, `number`, `datetime`, `arrayOptions` and
+`stringObject`, each with a fixed set of columns and operators (the user page lists them). Each condition
+is a predicate on one version `v` of prompt `p`: `id` is the version id, `createdAt` the version's,
+`updatedAt` the prompt's, `labels` the version's stored labels plus `latest` when it is the highest, `tags`
+and `name` the prompt's, `config` a top-level key of the version's config. `PromptRepository` maps each
+column and operator to a fixed fragment and binds every value; substring operators are an escaped `ILIKE`.
+A prompt is listed when a version meets every condition (an `EXISTS` in the WHERE), and `versions`,
+`lastConfig` and `labels` come from the matching versions only; `latest` is listed only when the highest
+version matched. With `filter`, `name`, `label`, `tag`, `fromUpdatedAt` and `toUpdatedAt` are ignored, as
+the other tool does.
 
 MCP: `list_prompts(folder?, label?)` and `get_prompt(name, version?, label?)`, read-only, listed for
 every token, each checking the capability on the call ([auth-and-mcp.md](./auth-and-mcp.md) § *MCP
@@ -255,6 +275,7 @@ Which keys can run it: [`../guides/provider-keys.md`](../guides/provider-keys.md
 
 `StructuredLog` with `Markers.OPS`, never a body: `prompt.version.created` (`projectId`, `promptId`,
 `version`, `createdVia`, `labelCount`, `bodyChars`), `prompt.label.moved` (`projectId`, `promptId`,
-`label`, `fromVersion`, `toVersion`), `prompt.version.deleted`, `prompt.deleted` (with `versions`),
+`label`, `fromVersion`, `toVersion`), `prompt.version.deleted` (with `labelCount` and `promptDeleted`),
+`prompt.tags.updated` (`projectId`, `promptId`, `tagCount`, `via`; no tag text), `prompt.deleted` (with `versions`),
 `prompt.folder.deleted` (with `count`), and `playground.run.completed` (provider, model, duration,
 tokens, cost, price source, prompt version id).

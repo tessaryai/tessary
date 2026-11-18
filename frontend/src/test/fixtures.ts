@@ -92,6 +92,7 @@ export function promptDetail(over: Partial<PromptDetail> = {}): PromptDetail {
         created_by_label: "ci@example.com", created_via: "api", created_at: "2026-09-01T00:00:00Z",
       },
     ],
+    has_older_versions: false,
     ...over,
   };
 }

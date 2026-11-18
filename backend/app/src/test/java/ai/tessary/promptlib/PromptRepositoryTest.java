@@ -349,10 +349,169 @@ record PromptRepositoryTest(PromptRepository repo, TenantService tenants) {
         assertEquals(3, row.versionCount());
     }
 
-    /** The CHECK is the backstop under the Java name rule, which must reject this name before it reaches SQL. */
+    /**
+     * 0056 widens the CHECK to inner whitespace and still refuses it at either edge, which the Java rule trims. The
+     * bugs: the SQL backstop still refuses {@code Support Agent}, or stores an untrimmed name.
+     */
     @Test
-    void unicodeSpaceNameFailsTheCheck() {
-        String pid = project("prompt-repo-unicode");
-        assertThrows(DataIntegrityViolationException.class, () -> prompt(pid, "a　b", List.of()));
+    void nameWithInnerSpaceIsStored_outerSpaceFailsTheCheck() {
+        String pid = project("prompt-repo-spaces");
+        assertEquals("Support Agent", prompt(pid, "Support Agent", List.of()).name());
+        assertEquals("a\u3000b", prompt(pid, "a\u3000b", List.of()).name());
+        assertThrows(DataIntegrityViolationException.class, () -> prompt(pid, " a", List.of()));
+        assertThrows(DataIntegrityViolationException.class, () -> prompt(pid, "a\u3000", List.of()));
+        assertThrows(DataIntegrityViolationException.class, () -> prompt(pid, "a|b", List.of()));
+    }
+
+    private List<String> filtered(String pid, String json) {
+        PromptListQuery q = query(null, null, null, null)
+                .withFilter(PromptListFilter.parse(json).orElseThrow());
+        return repo.list(pid, q, 0, 50).stream()
+                .map(r -> r.prompt().name() + r.versions() + r.lastConfigJson())
+                .toList();
+    }
+
+    private PromptVersionRow versionAt(PromptRow p, int n, String configJson, Instant created) {
+        PromptVersionRow row = new PromptVersionRow(
+                Ids.ulid(),
+                p.projectId(),
+                p.id(),
+                n,
+                "\"v" + n + "\"",
+                configJson,
+                null,
+                "user-1",
+                CreateVia.UI,
+                created);
+        repo.insertVersion(row);
+        return row;
+    }
+
+    /**
+     * The filter is true of versions: a prompt is listed when one version matches, with only the matching versions and
+     * the newest matching config. The bugs: a condition on one version lists every version, the last config comes from
+     * a version that did not match, {@code _} works as a wildcard, and {@code latest} is not treated as a label.
+     */
+    @Test
+    void list_filterKeepsPromptsWithAMatchingVersionAndOnlyThoseVersions() {
+        String pid = project("prompt-repo-filter-versions");
+        PromptRow bot = prompt(pid, "support_bot", List.of("a", "b"));
+        PromptVersionRow v1 = versionAt(bot, 1, "{\"model\": \"small\"}", T1);
+        PromptVersionRow v2 = versionAt(bot, 2, "{\"model\": \"big-1\"}", T1);
+        versionAt(bot, 3, "{\"model\": \"big-2\", \"tools\": []}", T3);
+        repo.upsertLabel(pid, bot.id(), "production", v1.id(), "user-1", T1);
+        repo.upsertLabel(pid, bot.id(), "staging", v2.id(), "user-1", T1);
+        PromptRow other = prompt(pid, "supportxbot", List.of("a"));
+        versionAt(other, 1, "{\"model\": \"small\"}", T1);
+
+        String small = "{\"model\": \"small\"}";
+        // jsonb returns keys shortest first, then in byte order.
+        String big2 = "{\"model\": \"big-2\", \"tools\": []}";
+        assertEquals(List.of("support_bot[2, 3]" + big2), filtered(pid, cfg("starts with", "big")));
+        assertEquals(List.of("support_bot[3]" + big2), filtered(pid, cfg("ends with", "-2")));
+        assertEquals(
+                List.of("support_bot[1]" + small, "supportxbot[1]" + small),
+                filtered(pid, cfg("does not contain", "BIG")));
+        assertEquals(List.of("support_bot[1]" + small, "supportxbot[1]" + small), filtered(pid, cfg("=", "small")));
+        assertEquals(
+                List.of("support_bot[3]" + big2),
+                filtered(
+                        pid,
+                        "[{\"type\":\"stringObject\",\"column\":\"config\",\"key\":\"tools\",\"operator\":\"is set\"}]"));
+        assertEquals(
+                List.of(),
+                filtered(
+                        pid,
+                        "[{\"type\":\"stringObject\",\"column\":\"config\",\"key\":\"model\",\"operator\":\"is not set\"}]"));
+        assertEquals(
+                List.of("support_bot[2, 3]" + big2),
+                filtered(pid, "[{\"type\":\"number\",\"column\":\"version\",\"operator\":\">=\",\"value\":2}]"));
+        assertEquals(
+                List.of("support_bot[2]{\"model\": \"big-1\"}"),
+                filtered(
+                        pid,
+                        "[{\"type\":\"string\",\"column\":\"id\",\"operator\":\"=\",\"value\":\"" + v2.id() + "\"}]"));
+        assertEquals(
+                List.of("support_bot[3]" + big2),
+                filtered(
+                        pid,
+                        "[{\"type\":\"datetime\",\"column\":\"createdAt\",\"operator\":\">\",\"value\":\"2026-10-18T10:00:00Z\"}]"));
+        assertEquals(List.of("support_bot[1]" + small), filtered(pid, labels("any of", "production")));
+        assertEquals(
+                List.of("support_bot[3]" + big2, "supportxbot[1]" + small), filtered(pid, labels("any of", "latest")));
+        assertEquals(List.of("support_bot[1, 2]{\"model\": \"big-1\"}"), filtered(pid, labels("none of", "latest")));
+        assertEquals(List.of(), filtered(pid, labels("all of", "production\",\"latest")));
+        assertEquals(List.of("support_bot[2]{\"model\": \"big-1\"}"), filtered(pid, labels("all of", "staging")));
+        assertEquals(
+                1,
+                repo.count(
+                        pid,
+                        query(null, null, null, null)
+                                .withFilter(PromptListFilter.parse(cfg("starts with", "big"))
+                                        .orElseThrow())));
+    }
+
+    /** Conditions on the prompt itself: name, type, tags and when it last changed. */
+    @Test
+    void list_filterOnPromptColumns() {
+        String pid = project("prompt-repo-filter-prompts");
+        version(prompt(pid, "support_bot", List.of("a", "b")), 1, "{}");
+        PromptRow other = prompt(pid, "supportxbot", List.of("a"));
+        version(other, 1, "{}");
+        repo.touchPrompt(pid, other.id(), T3);
+
+        assertEquals(List.of("support_bot[1]{}"), filtered(pid, text("contains", "t_b")));
+        assertEquals(List.of("supportxbot[1]{}"), filtered(pid, text("=", "supportxbot")));
+        assertEquals(List.of("support_bot[1]{}"), filtered(pid, text("does not contain", "X")));
+        assertEquals(List.of("support_bot[1]{}", "supportxbot[1]{}"), filtered(pid, text("starts with", "SUPPORT")));
+        assertEquals(List.of("supportxbot[1]{}"), filtered(pid, text("ends with", "xbot")));
+        assertEquals(
+                List.of("support_bot[1]{}", "supportxbot[1]{}"),
+                filtered(pid, "[{\"type\":\"string\",\"column\":\"name\",\"operator\":\"is not empty\"}]"));
+        assertEquals(
+                List.of("support_bot[1]{}", "supportxbot[1]{}"),
+                filtered(
+                        pid,
+                        "[{\"type\":\"stringOptions\",\"column\":\"type\",\"operator\":\"any of\",\"value\":[\"text\"]}]"));
+        assertEquals(
+                List.of(),
+                filtered(
+                        pid,
+                        "[{\"type\":\"stringOptions\",\"column\":\"type\",\"operator\":\"none of\",\"value\":[\"text\"]}]"));
+        assertEquals(List.of("support_bot[1]{}"), filtered(pid, tags("all of", "a\",\"b")));
+        assertEquals(List.of("support_bot[1]{}"), filtered(pid, tags("any of", "b")));
+        assertEquals(List.of("supportxbot[1]{}"), filtered(pid, tags("none of", "b")));
+        assertEquals(
+                List.of("support_bot[1]{}"),
+                filtered(
+                        pid,
+                        "[{\"type\":\"datetime\",\"column\":\"updatedAt\",\"operator\":\"<=\",\"value\":\"2026-10-18T09:12:44.118Z\"}]"));
+        assertEquals(
+                List.of("supportxbot[1]{}"),
+                filtered(
+                        pid,
+                        text("starts with", "support").replace("]", ",")
+                                + "{\"type\":\"datetime\",\"column\":\"updatedAt\",\"operator\":\">=\",\"value\":\"2026-10-18T11:00:00Z\"}]"));
+        assertEquals(List.of("support_bot[1]{}", "supportxbot[1]{}"), filtered(pid, "[]"));
+    }
+
+    private static String cfg(String operator, String value) {
+        return "[{\"type\":\"stringObject\",\"column\":\"config\",\"key\":\"model\",\"operator\":\"" + operator
+                + "\",\"value\":\"" + value + "\"}]";
+    }
+
+    private static String labels(String operator, String values) {
+        return "[{\"type\":\"arrayOptions\",\"column\":\"labels\",\"operator\":\"" + operator + "\",\"value\":[\""
+                + values + "\"]}]";
+    }
+
+    private static String tags(String operator, String values) {
+        return "[{\"type\":\"arrayOptions\",\"column\":\"tags\",\"operator\":\"" + operator + "\",\"value\":[\""
+                + values + "\"]}]";
+    }
+
+    private static String text(String operator, String value) {
+        return "[{\"type\":\"string\",\"column\":\"name\",\"operator\":\"" + operator + "\",\"value\":\"" + value
+                + "\"}]";
     }
 }

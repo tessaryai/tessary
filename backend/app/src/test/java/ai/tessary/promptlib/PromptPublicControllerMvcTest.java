@@ -54,7 +54,7 @@ record PromptPublicControllerMvcTest(
     private void create(Caller who, String json) throws Exception {
         MockHttpServletResponse r = send(
                 who, post("/v1/prompts").contentType(MediaType.APPLICATION_JSON).content(json));
-        assertEquals(200, r.getStatus(), r.getContentAsString());
+        assertEquals(201, r.getStatus(), r.getContentAsString());
     }
 
     private static JsonNode json(MockHttpServletResponse response) throws Exception {
@@ -64,7 +64,7 @@ record PromptPublicControllerMvcTest(
     @Test
     void chunkedBodyOverTheCapIs400() throws Exception {
         // Bug: the cap read only Content-Length, so a chunked SDK push declared -1 and Jackson buffered all of it.
-        // Each character is a six-byte JSON escape, so the body is over 1 MiB yet under the body's character cap.
+        // Each character is a six-byte JSON escape, so the body is over 1 MiB while its text is far shorter.
         Caller me = admin("prompt-public-chunked");
         String big = "{\"name\":\"big\",\"prompt\":\"" + "\\u0041".repeat(190_000) + "\"}";
 
@@ -77,6 +77,44 @@ record PromptPublicControllerMvcTest(
         assertEquals(
                 "COMMON.INVALID_BODY",
                 json(response).path("meta").path("error").path("code").asText());
+    }
+
+    /**
+     * Another prompt tool answers 201 to a create, for a new name and for a next version alike, and so does the
+     * envelope's status. The bug: a client that checks for 201 treats every create as failed.
+     */
+    @Test
+    void createAnswers201() throws Exception {
+        Caller me = admin("prompt-pub-mvc-201");
+
+        for (String body : new String[] {"one", "two"}) {
+            MockHttpServletResponse response = send(
+                    me,
+                    post("/v1/prompts")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"p\",\"prompt\":\"" + body + "\"}"));
+            assertEquals(201, response.getStatus(), response.getContentAsString());
+            assertEquals(201, json(response).path("meta").path("status").asInt());
+        }
+    }
+
+    /** The filter is JSON in a query parameter; it must arrive whole through the servlet's decoding. */
+    @Test
+    void listFilterArrivesDecoded() throws Exception {
+        Caller me = admin("prompt-pub-mvc-filter");
+        create(me, "{\"name\":\"a b\",\"prompt\":\"x\"}");
+        create(me, "{\"name\":\"c\",\"prompt\":\"x\"}");
+
+        JsonNode body = json(send(
+                        me,
+                        get("/v1/prompts")
+                                .param(
+                                        "filter",
+                                        "[{\"type\":\"string\",\"column\":\"name\",\"operator\":\"=\",\"value\":\"a b\"}]")))
+                .path("data");
+
+        assertEquals(1, body.path("meta").path("totalItems").asInt());
+        assertEquals("a b", body.path("data").path(0).path("name").asText());
     }
 
     @Test

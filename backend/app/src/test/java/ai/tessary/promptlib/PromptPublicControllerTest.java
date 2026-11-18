@@ -59,7 +59,7 @@ record PromptPublicControllerTest(PromptPublicController controller, TenantServi
         assertError(PromptsError.WRONG_KEY_SCOPE, () -> controller.create(query, post("p", null, "x", null)));
 
         ApiResponse<PublicPrompt> created = controller.create(admin, post("p", null, "x", List.of("production")));
-        assertEquals(200, created.meta().status());
+        assertEquals(201, created.meta().status());
         assertEquals(1, data(created).version());
         assertEquals(PromptType.TEXT, data(created).type());
         assertEquals(1, data(controller.fetch(query, "p", null, null)).version());
@@ -112,14 +112,15 @@ record PromptPublicControllerTest(PromptPublicController controller, TenantServi
         controller.create(admin, post("p", null, "one", List.of("production")));
         controller.create(admin, post("p", null, "two", null));
 
-        PublicPrompt moved = data(controller.updateLabels(admin, new UpdateLabelsRequest("p", 1, List.of("staging"))));
+        PublicPrompt moved =
+                data(controller.updateLabels(admin, new UpdateLabelsRequest("p", 1, List.of("staging"), null)));
         assertEquals(List.of("production", "staging"), moved.labels());
         assertError(
                 PromptsError.LATEST_RESERVED,
-                () -> controller.updateLabels(admin, new UpdateLabelsRequest("p", 2, List.of("latest"))));
+                () -> controller.updateLabels(admin, new UpdateLabelsRequest("p", 2, List.of("latest"), null)));
         assertError(
                 PromptsError.NOT_FOUND,
-                () -> controller.updateLabels(admin, new UpdateLabelsRequest("nope", 1, List.of("staging"))));
+                () -> controller.updateLabels(admin, new UpdateLabelsRequest("nope", 1, List.of("staging"), null)));
     }
 
     @Test
@@ -128,16 +129,210 @@ record PromptPublicControllerTest(PromptPublicController controller, TenantServi
         TenantContext admin = key(fix, KeyScope.ADMIN);
         controller.create(admin, post("p", null, "one", List.of("production", "staging")));
         controller.create(admin, post("p", null, "two", null));
+        controller.create(admin, post("p", null, "three", null));
 
         assertError(PromptsError.BOTH_VERSION_AND_LABEL, () -> controller.delete(admin, "p", 1, "staging"));
-        assertEquals(true, data(controller.delete(admin, "p", null, "staging")).deleted());
-        assertEquals(false, data(controller.delete(admin, "p", null, "staging")).deleted());
         assertError(PromptsError.LATEST_RESERVED, () -> controller.delete(admin, "p", null, "latest"));
-        assertError(PromptsError.VERSION_LABELED, () -> controller.delete(admin, "p", 1, null));
-        assertEquals(true, data(controller.delete(admin, "p", 2, null)).deleted());
+        assertError(PromptsError.VERSION_NOT_FOUND, () -> controller.delete(admin, "p", 9, null));
+        assertEquals(true, data(controller.delete(admin, "p", 3, null)).deleted());
+        assertEquals(2, data(controller.fetch(admin, "p", null, "latest")).version());
         assertEquals(true, data(controller.delete(admin, "p", null, null)).deleted());
         assertError(PromptsError.NOT_FOUND, () -> controller.fetch(admin, "p", null, null));
         assertError(PromptsError.NAME_REQUIRED, () -> controller.delete(admin, null, null, null));
+    }
+
+    /**
+     * Another prompt tool's delete by label deletes the version that carries the label, labeled or not. The bug: a
+     * migration script that deletes by label leaves the version in place, moves only the label, and reports success.
+     */
+    @Test
+    void deleteByLabelDeletesTheVersionThatCarriesIt() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-delete-label");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+        controller.create(admin, post("p", null, "two", List.of("staging", "canary")));
+        controller.create(admin, post("p", null, "three", null));
+
+        assertEquals(true, data(controller.delete(admin, "p", null, "staging")).deleted());
+
+        assertError(PromptsError.VERSION_NOT_FOUND, () -> controller.fetch(admin, "p", 2, null));
+        assertError(PromptsError.LABEL_NOT_FOUND, () -> controller.fetch(admin, "p", null, "canary"));
+        assertEquals(1, data(controller.fetch(admin, "p", null, null)).version());
+        assertEquals(true, data(controller.delete(admin, "p", 1, null)).deleted());
+        assertError(PromptsError.LABEL_NOT_FOUND, () -> controller.fetch(admin, "p", null, null));
+    }
+
+    /** The bug: a typo in the label answers 200 and deletes nothing, so the script thinks it worked. */
+    @Test
+    void deleteByUnknownLabelIs404() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-delete-unknown");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+
+        assertError(PromptsError.LABEL_NOT_FOUND, () -> controller.delete(admin, "p", null, "prodution"));
+        assertEquals(1, data(controller.fetch(admin, "p", null, null)).version());
+    }
+
+    /** The bug: deleting the last version leaves an empty prompt that every fetch answers 404 for by version. */
+    @Test
+    void deletingTheLastVersionDeletesThePrompt() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-delete-last");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+
+        assertEquals(
+                true, data(controller.delete(admin, "p", null, "production")).deleted());
+
+        assertError(PromptsError.NOT_FOUND, () -> controller.fetch(admin, "p", null, "latest"));
+        assertEquals(
+                1,
+                data(controller.create(admin, post("p", null, "again", null))).version());
+    }
+
+    /**
+     * Tags sent with a POST to an existing name replace the prompt's tags; no {@code tags} keeps them. The bug: the
+     * tags of a new version are dropped with no error, so a script that tags on publish never tags anything.
+     */
+    @Test
+    void postToExistingNameWithTagsReplacesTags_withoutTagsKeepsThem() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-tags");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, new PublicCreatePromptRequest("p", null, "one", null, null, List.of("a"), null));
+
+        PublicPrompt replaced = data(controller.create(
+                admin, new PublicCreatePromptRequest("p", null, "two", null, null, List.of("b", "c"), null)));
+        PublicPrompt kept = data(controller.create(admin, post("p", null, "three", null)));
+        PublicPrompt cleared = data(controller.create(
+                admin, new PublicCreatePromptRequest("p", null, "four", null, null, List.of(), null)));
+
+        assertEquals(List.of("b", "c"), replaced.tags());
+        assertEquals(List.of("b", "c"), kept.tags());
+        assertEquals(List.of(), cleared.tags());
+        assertEquals(List.of(), data(controller.fetch(admin, "p", 2, null)).tags());
+    }
+
+    /**
+     * {@code removeLabels} takes labels off the named version only, after {@code newLabels} moved. The bug: removing
+     * {@code staging} from version 2 removes it from version 3, which holds it.
+     */
+    @Test
+    void patchRemoveLabelsDropsOnlyFromThatVersion() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-remove-labels");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+        controller.create(admin, post("p", null, "two", null));
+        controller.create(admin, post("p", null, "three", List.of("staging")));
+
+        PublicPrompt v2 =
+                data(controller.updateLabels(admin, new UpdateLabelsRequest("p", 2, null, List.of("staging"))));
+        assertEquals(List.of(), v2.labels());
+        assertEquals(
+                List.of("staging", "latest"),
+                data(controller.fetch(admin, "p", 3, null)).labels());
+
+        PublicPrompt v1 = data(
+                controller.updateLabels(admin, new UpdateLabelsRequest("p", 1, List.of("dev"), List.of("production"))));
+        assertEquals(List.of("dev"), v1.labels());
+        assertError(PromptsError.LABEL_NOT_FOUND, () -> controller.fetch(admin, "p", null, null));
+    }
+
+    /** The bug: a label in both lists ends up on or off the version depending on processing order. */
+    @Test
+    void patchRefusesALabelInBothLists() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-both-lists");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+
+        assertError(
+                CommonError.INVALID_PARAMETER,
+                () -> controller.updateLabels(
+                        admin, new UpdateLabelsRequest("p", 1, List.of("staging"), List.of("staging"))));
+        assertError(
+                PromptsError.LATEST_RESERVED,
+                () -> controller.updateLabels(admin, new UpdateLabelsRequest("p", 1, null, List.of("latest"))));
+        assertEquals(
+                List.of("production", "latest"),
+                data(controller.fetch(admin, "p", null, null)).labels());
+    }
+
+    /**
+     * A name may hold spaces and is trimmed, on writes and on lookups alike. The bugs: {@code Support Agent} cannot be
+     * created, and a second POST of {@code " Support Agent "} misses the stored name, tries to create it again and
+     * fails instead of writing version 2.
+     */
+    @Test
+    void postTrimsTheNameAndASpacedLookupFindsIt() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-spaces");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+
+        PublicPrompt v1 = data(controller.create(admin, post(" Support Agent ", null, "one", List.of("production"))));
+        PublicPrompt v2 = data(controller.create(admin, post("Support Agent\t", null, "two", null)));
+
+        assertEquals("Support Agent", v1.name());
+        assertEquals(2, v2.version());
+        assertEquals(
+                1, data(controller.fetch(admin, "  Support Agent", null, null)).version());
+        assertEquals(
+                List.of("Support Agent"),
+                data(controller.list(admin, null, null, null, null, null, null, null, null)).data().stream()
+                        .map(m -> m.name())
+                        .toList());
+        assertError(PromptsError.INVALID_NAME, () -> controller.create(admin, post("<b>x</b>", null, "x", null)));
+    }
+
+    /**
+     * The JSON {@code filter} replaces the simple parameters, as in another prompt tool, and lists only the versions
+     * that match. The bugs: the simple parameters still narrow the result, a prompt's other versions and their labels
+     * show up, and {@code latest} is listed for a prompt whose highest version did not match.
+     */
+    @Test
+    void listFilterReplacesTheSimpleParamsAndNarrowsVersions() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-filter");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(
+                admin,
+                new PublicCreatePromptRequest(
+                        "p", null, "one", Map.of("model", "small"), List.of("production"), null, null));
+        controller.create(
+                admin,
+                new PublicCreatePromptRequest(
+                        "p", null, "two", Map.of("model", "big"), List.of("staging"), null, null));
+        controller.create(
+                admin, new PublicCreatePromptRequest("q", null, "x", Map.of("model", "big"), null, null, null));
+
+        PromptList small = data(
+                controller.list(
+                        admin,
+                        "zzz",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "[{\"type\":\"stringObject\",\"column\":\"config\",\"key\":\"model\",\"operator\":\"=\",\"value\":\"small\"}]"));
+
+        assertEquals(1, small.meta().totalItems());
+        PromptPublicDtos.PromptMeta p = small.data().getFirst();
+        assertEquals("p", p.name());
+        assertEquals(List.of(1), p.versions());
+        assertEquals(List.of("production"), p.labels());
+        assertEquals(Map.of("model", "small"), p.lastConfig());
+        PromptList big = data(controller.list(
+                admin,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "[{\"type\":\"number\",\"column\":\"version\",\"operator\":\">=\",\"value\":2}]"));
+        assertEquals(List.of("p"), big.data().stream().map(m -> m.name()).toList());
+        assertEquals(List.of("staging", "latest"), big.data().getFirst().labels());
+        assertError(
+                CommonError.INVALID_PARAMETER,
+                () -> controller.list(admin, null, null, null, null, null, null, null, "[{\"type\":\"x\"}]"));
     }
 
     @Test
@@ -150,13 +345,13 @@ record PromptPublicControllerTest(PromptPublicController controller, TenantServi
         controller.create(admin, post("a", null, "x", null));
 
         PromptList labeled =
-                data(controller.list(query, null, "production", "t1", null, null, "2000-01-01T00:00:00Z", null));
+                data(controller.list(query, null, "production", "t1", null, null, "2000-01-01T00:00:00Z", null, null));
         assertEquals(List.of("b"), labeled.data().stream().map(m -> m.name()).toList());
-        PromptList none = data(controller.list(query, "zzz", null, null, null, null, null, " "));
+        PromptList none = data(controller.list(query, "zzz", null, null, null, null, null, " ", null));
         assertEquals(0, none.meta().totalPages());
         assertError(
                 CommonError.INVALID_PARAMETER,
-                () -> controller.list(query, null, null, null, null, null, "yesterday", null));
+                () -> controller.list(query, null, null, null, null, null, "yesterday", null, null));
     }
 
     private static void assertError(ErrorCode expected, Executable call) {

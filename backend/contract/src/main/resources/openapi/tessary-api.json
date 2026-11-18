@@ -12341,7 +12341,22 @@
             },
             "maxItems" : 50,
             "minItems" : 0,
-            "type" : "array"
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
+          "removeLabels" : {
+            "items" : {
+              "minLength" : 1,
+              "type" : "string"
+            },
+            "maxItems" : 50,
+            "minItems" : 0,
+            "type" : [
+              "array",
+              "null"
+            ]
           },
           "version" : {
             "format" : "int32",
@@ -12350,7 +12365,6 @@
         },
         "required" : [
           "name",
-          "newLabels",
           "version"
         ],
         "type" : "object"
@@ -21382,6 +21396,14 @@
             "schema" : {
               "type" : "string"
             }
+          },
+          {
+            "in" : "query",
+            "name" : "filter",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
           }
         ],
         "responses" : {
@@ -21423,7 +21445,7 @@
           "required" : true
         },
         "responses" : {
-          "200" : {
+          "201" : {
             "content" : {
               "*/*" : {
                 "schema" : {
@@ -21431,7 +21453,7 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "Created"
           }
         },
         "tags" : [

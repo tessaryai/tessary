@@ -177,12 +177,12 @@ public class PromptController {
             @Valid @RequestBody CreateVersionRequest req) {
         Resolved r = manage(ctx, orgSlug, projectSlug);
         CreateVersionCommand cmd =
-                new CreateVersionCommand(req.body(), req.config(), orEmpty(req.labels()), req.commitMessage());
+                new CreateVersionCommand(req.body(), req.config(), orEmpty(req.labels()), req.commitMessage(), null);
         return ApiResponse.ok(
                 version(service.createVersion(r.project().id(), promptId, ctx.userId(), CreateVia.UI, cmd)));
     }
 
-    /** 409 {@code VERSION_LABELED} while a label points here; 409 {@code LAST_VERSION} for the only one. */
+    /** A labeled version goes with its labels; the last version takes the prompt with it. */
     @DeleteMapping("/{promptId}/versions/{version}")
     public ApiResponse<DeleteResponse> deleteVersion(
             TenantContext ctx,

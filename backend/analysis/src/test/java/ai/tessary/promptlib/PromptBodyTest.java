@@ -32,11 +32,22 @@ class PromptBodyTest {
     }
 
     @Test
-    void text_rejectsMissingEmptyAndOversize() {
+    void text_rejectsMissingAndEmpty() {
         assertReason("body is required", PromptType.TEXT, null);
         assertReason("body is empty", PromptType.TEXT, "");
-        assertReason("body exceeds 200000 characters", PromptType.TEXT, "x".repeat(200_001));
-        assertEquals(new Text("x".repeat(200_000)), PromptBody.parse(PromptType.TEXT, "x".repeat(200_000)));
+    }
+
+    /**
+     * The 1 MiB request cap is the only size bound, as in another prompt tool. The bug: a 300,000-character text body
+     * or a chat of 250 messages, both well under 1 MiB, is refused by a cap of its own.
+     */
+    @Test
+    void bodies_haveNoCapBelowTheRequestCap() {
+        assertEquals(new Text("x".repeat(300_000)), PromptBody.parse(PromptType.TEXT, "x".repeat(300_000)));
+        List<Object> many = new ArrayList<>();
+        for (int i = 0; i < 250; i++) many.add(map("role", "user", "content", "x".repeat(1_000)));
+        assertEquals(
+                250, ((Chat) PromptBody.parse(PromptType.CHAT, many)).entries().size());
     }
 
     @Test
@@ -74,25 +85,36 @@ class PromptBodyTest {
     }
 
     @Test
-    void chat_rejectsUnknownKeyNonStringContentAndBadType() {
+    void chat_rejectsNonStringContentAndBadType() {
         assertReason(
                 "message 1 content must be a string",
                 PromptType.CHAT,
                 List.of(map("role", "user", "content", List.of("a"))));
-        assertReason(
-                "message 1 has unknown key foo",
-                PromptType.CHAT,
-                List.of(map("role", "user", "content", "a", "foo", "b")));
         assertReason("message 1 has unknown type tool", PromptType.CHAT, List.of(map("type", "tool", "content", "a")));
     }
 
+    /**
+     * Another prompt tool drops keys it does not know on a message. The bug: an exported chat prompt whose messages
+     * carry a {@code name} or other extra key answers 400 here. The extra keys are not stored or returned.
+     */
+    @Test
+    void chat_dropsUnknownMessageKeys() {
+        PromptBody body = PromptBody.parse(
+                PromptType.CHAT,
+                List.of(
+                        map("role", "user", "content", "a", "name", "bob", "foo", List.of(1)),
+                        map("type", "chatmessage", "role", "assistant", "content", "b", "id", 7)));
+
+        assertEquals(new Chat(List.of(new Message("user", "a"), new Message("assistant", "b"))), body);
+        assertEquals(
+                List.of(Map.of("role", "user", "content", "a"), Map.of("role", "assistant", "content", "b")),
+                body.toWire());
+    }
+
     static List<Object[]> badChatBodies() {
-        List<Object> twoHundredOne = new ArrayList<>();
-        for (int i = 0; i < 201; i++) twoHundredOne.add(map("role", "user", "content", "a"));
         return List.of(
                 new Object[] {"a chat prompt body is an array of messages", "hello"},
                 new Object[] {"body is empty", List.of()},
-                new Object[] {"body has more than 200 messages", twoHundredOne},
                 new Object[] {"message 2 is not an object", List.of(map("role", "user", "content", "a"), "x")},
                 new Object[] {"message 1 role must be a non-blank string", List.of(map("role", " ", "content", "a"))},
                 new Object[] {"message 1 role must be a non-blank string", List.of(map("content", "a"))},
@@ -102,12 +124,6 @@ class PromptBodyTest {
                 new Object[] {"message 1 placeholder name is invalid", List.of(map("type", "placeholder"))},
                 new Object[] {
                     "message 1 has unknown key role", List.of(map("type", "placeholder", "name", "h", "role", "user"))
-                },
-                new Object[] {
-                    "body exceeds 200000 characters",
-                    List.of(
-                            map("role", "user", "content", "x".repeat(100_000)),
-                            map("role", "user", "content", "x".repeat(100_000)))
                 });
     }
 
