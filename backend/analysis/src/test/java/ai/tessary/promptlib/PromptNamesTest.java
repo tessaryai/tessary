@@ -4,10 +4,12 @@ package ai.tessary.promptlib;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.PromptsError;
 import ai.tessary.open.errors.TessaryException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -21,7 +23,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 /**
  * The name, label, tag and variable rules every prompt write and every compile copy depends on. A rule looser than the
  * SQL CHECK turns a bad name into a 500; a looser label lets {@code latest} be stored; a variable scan that keeps
- * duplicates or dotted names disagrees with the SDKs.
+ * duplicates or reads a name another copy does not disagrees with the SDKs.
  */
 class PromptNamesTest {
 
@@ -114,7 +116,35 @@ class PromptNamesTest {
 
     @Test
     void variables_areOrderedAndDeduplicated() {
-        assertEquals(List.of("b", "a"), PromptNames.variables("{{b}} {{ a }} {{b}} {{1x}} {{a.b}}"));
+        assertEquals(List.of("b", "a", "1x", "a.b"), PromptNames.variables("{{b}} {{ a }} {{b}} {{1x}} {{a.b}}"));
+    }
+
+    /**
+     * The rule all four copies share: any trimmed, non-blank text with no brace between double braces. Bug: a dotted,
+     * hyphenated or spaced name is not listed, so the Variables panel and the SDK compile skip it with no error.
+     */
+    static Stream<Arguments> variableRule() {
+        return Stream.of(
+                Arguments.of("{{user.name}}", List.of("user.name")),
+                Arguments.of("{{first-name}} {{ first name }}", List.of("first-name", "first name")),
+                Arguments.of("{{}} {{   }}", List.of()),
+                Arguments.of("{{{name}}}", List.of("name")),
+                Arguments.of("{{a{b}}", List.of()),
+                Arguments.of("{{\"a\":1}}", List.of("\"a\":1")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("variableRule")
+    void variables_takeAnyNonBlankInnerText(String text, List<String> expected) {
+        assertEquals(expected, PromptNames.variables(text));
+    }
+
+    @Test
+    void variables_anUnclosedOpeningOverALongBodyReturnsQuickly() {
+        // Bug: the scan backtracks quadratically, and a long body with an unclosed {{ holds a request thread for
+        // minutes now that the body has no size cap below the 1 MiB request bound.
+        String body = "{{" + " ".repeat(200_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> assertEquals(List.of(), PromptNames.variables(body)));
     }
 
     @Test

@@ -38,11 +38,47 @@ test("inherited object keys are not variables", () => {
   assert.equal(text("{{ constructor }}").compile({}), "{{ constructor }}");
 });
 
-test("non-identifier inner text is left literal", () => {
-  // Bug: JSON or prose inside braces is eaten as a variable.
-  const prompt = text('{{"a":1}} {{a b}} {{}}');
-  assert.equal(prompt.compile({ a: 1, b: 2 }), '{{"a":1}} {{a b}} {{}}');
+test("dotted, hyphenated and spaced names are filled", () => {
+  // Bug: a name with a dot, a hyphen or a space stays uncompiled with no error.
+  assert.equal(text("Hi {{user.name}}").compile({ "user.name": "Ada" }), "Hi Ada");
+  assert.equal(text("{{first-name}} {{ first name }}").compile({ "first-name": "A", "first name": "B" }), "A B");
+});
+
+test("a dotted name not supplied stays literal", () => {
+  // Bug: a missing value becomes an empty string and the model gets a broken prompt.
+  assert.equal(text("Hi {{user.name}}").compile(), "Hi {{user.name}}");
+});
+
+test("blank inner text is not a variable", () => {
+  // Bug: an empty name matches and is listed.
+  const prompt = text("{{}} {{   }}");
   assert.deepEqual(prompt.variables(), []);
+  assert.equal(prompt.compile({ "": "x" }), "{{}} {{   }}");
+});
+
+test("a brace around a variable stays literal", () => {
+  // Bug: the brace handling eats a literal brace, or the four copies disagree on it.
+  assert.equal(text("{{{name}}}").compile({ name: "v" }), "{v}");
+});
+
+test("inner text with a brace is not a variable", () => {
+  // Bug: a name with a brace is accepted in one language and not in another.
+  const prompt = text("{{a{b}}");
+  assert.deepEqual(prompt.variables(), []);
+  assert.equal(prompt.compile({ a: 1, b: 2, "a{b": 3 }), "{{a{b}}");
+});
+
+test("JSON inner text without a brace is a variable", () => {
+  // Bug: the four copies disagree on text that is not an identifier, so the Variables panel lists what compile skips.
+  assert.deepEqual(text('{{"a":1}}').variables(), ['"a":1']);
+});
+
+test("an unclosed opening over a long body returns quickly", () => {
+  // Bug: the scan backtracks quadratically, and a long template with an unclosed {{ stalls the caller.
+  const prompt = text("{{" + " ".repeat(200_000));
+  const started = performance.now();
+  assert.deepEqual(prompt.variables(), []);
+  assert.ok(performance.now() - started < 500);
 });
 
 test("number becomes string", () => {

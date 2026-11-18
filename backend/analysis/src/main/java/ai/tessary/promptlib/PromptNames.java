@@ -13,8 +13,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * Name, label, tag and variable rules. A name is trimmed, then checked: inner whitespace is allowed, as in another
  * prompt tool. The trim takes every character Java or Postgres counts as a space, so a trimmed name always passes the
- * {@code ck_prompt_name} CHECK's edge rule. {@link #VARIABLE} has three copies (the frontend and both SDKs) that a
- * parity gate compares with this literal.
+ * {@code ck_prompt_name} CHECK's edge rule. A {@link #VARIABLE} name is any trimmed, non-blank text with no brace; it
+ * starts and ends on a non-space so a long body with an unclosed opening pair of braces scans in linear time. It has three copies (the frontend
+ * and both SDKs) that a parity gate compares with this literal.
  */
 public final class PromptNames {
 
@@ -24,7 +25,7 @@ public final class PromptNames {
 
     public static final Pattern LABEL = Pattern.compile("^[a-z0-9_.-]{1,36}$");
     public static final Pattern TAG = Pattern.compile("^\\S{1,64}$", Pattern.UNICODE_CHARACTER_CLASS);
-    public static final Pattern VARIABLE = Pattern.compile("\\{\\{\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\}\\}");
+    public static final Pattern VARIABLE = Pattern.compile("\\{\\{\\s*([^{}\\s](?:[^{}]*[^{}\\s])?)\\s*\\}\\}");
     public static final Pattern PLACEHOLDER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
 
     public static final String LATEST = "latest";

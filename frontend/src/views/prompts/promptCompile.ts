@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { PromptBody, PromptChatBody, PromptChatMessage, PromptPlaceholder } from "../../api/types";
 
-/** The server's PromptNames.VARIABLE and both SDKs carry the same pattern; a parity gate compares the four. */
-export const VARIABLE_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+/**
+ * Any trimmed, non-blank text with no brace between double braces. The server's PromptNames.VARIABLE and both SDKs
+ * carry the same pattern; a parity gate compares the four. The name starts and ends on a non-space so a long unclosed
+ * {{ scans in linear time.
+ */
+export const VARIABLE_PATTERN = /\{\{\s*([^{}\s](?:[^{}]*[^{}\s])?)\s*\}\}/g;
 export const PLACEHOLDER_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export type BodyToken = { kind: "text"; text: string } | { kind: "variable"; text: string; name: string };

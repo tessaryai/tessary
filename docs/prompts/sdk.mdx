@@ -82,7 +82,7 @@ With no version and no label, the SDK fetches the version that carries the `prod
 
 ### How variables are filled
 
-A variable is written `{{name}}`, with optional spaces inside the braces. A name starts with a letter or underscore and holds only letters, digits, and underscores.
+A variable is written `{{name}}`, with optional spaces inside the braces. A name is any text that is not blank and holds no brace, so `{{user.name}}`, `{{first-name}}` and `{{ first name }}` are variables too. Spaces at the start and end of the name are dropped.
 
 | You pass | Result |
 | --- | --- |
@@ -90,7 +90,7 @@ A variable is written `{{name}}`, with optional spaces inside the braces. A name
 | `None` or `null` | An empty string |
 | Nothing, or `undefined` in TypeScript | The variable is left in the text unchanged |
 
-Text in braces that is not a name, such as JSON, is left unchanged and is not a variable. `variables()` lists the variable names of a prompt in the order they first appear.
+Empty braces, and text in braces that holds a brace of its own, are left unchanged and are not variables. `variables()` lists the variable names of a prompt in the order they first appear. Because any other text in double braces is a variable, `variables()` also lists text such as `"a":1` from `{{"a":1}}`. It stays in the text unless you pass a value for it.
 
 ## Chat prompts
 

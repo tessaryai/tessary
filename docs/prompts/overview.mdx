@@ -18,7 +18,7 @@ A prompt is one of two types, fixed when you create it:
 
 A body has no size limit of its own. A request to save a version is at most 1 MiB, body, config and the rest together.
 
-Write a variable as `{{name}}`. A variable name starts with a letter or an underscore and holds only letters, digits, and underscores. Spaces inside the braces are allowed, so `{{ name }}` is the same variable. A dotted name such as `{{user.name}}` is not a variable and stays in the text as written.
+Write a variable as `{{name}}`. A variable name is any text that is not blank and holds no brace, so `{{user.name}}` and `{{first-name}}` are variables. Spaces at the start and end of the name are dropped, so `{{ name }}` is the same variable as `{{name}}`. A variable you do not fill stays in the text as written.
 
 A placeholder stands for a list of messages that your code supplies when it compiles the prompt, such as the conversation so far. A placeholder holds no variables.
 

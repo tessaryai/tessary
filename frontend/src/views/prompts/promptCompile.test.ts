@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The variable syntax is shared with the server and both SDKs: {{name}}, a name that starts with a letter or _ and
- * holds only letters, digits and _, with optional spaces inside the braces. The bugs worth catching are a variable
- * missed in a chat message, one listed twice, a dotted name accepted here that the SDKs never fill, and compile
- * dropping a value, an unknown variable, or a placeholder.
+ * The variable syntax is shared with the server and both SDKs: {{name}}, where the name is any non-blank text with no
+ * brace in it, trimmed. The bugs worth catching are a variable missed in a chat message, one listed twice, a name read
+ * here that the server or the SDKs read differently, and compile dropping a value, an unknown variable, or a
+ * placeholder.
  */
 import { describe, expect, it } from "vitest";
 import type { PromptChatBody } from "../../api/types";
@@ -21,9 +21,27 @@ describe("extractVariables", () => {
     expect(extractVariables(CHAT)).toEqual(["tone", "brand"]);
   });
 
-  // Bug: a dotted or digit-first name accepted here, which the server and the SDKs never fill.
-  it("matches spaced names and rejects dotted and digit-first names", () => {
-    expect(extractVariables("{{ spaced }} {{a.b}} {{1bad}} {{_ok2}}")).toEqual(["spaced", "_ok2"]);
+  // Bug: a dotted, hyphenated or spaced name is not listed, so the Variables panel offers no field for it.
+  it("lists dotted, hyphenated, spaced and digit-first names", () => {
+    expect(extractVariables("{{ spaced }} {{a.b}} {{1st}} {{first-name}} {{ first name }}")).toEqual([
+      "spaced",
+      "a.b",
+      "1st",
+      "first-name",
+      "first name",
+    ]);
+  });
+
+  // Bug: an empty name, or a name holding a brace, listed here and not by the other three copies.
+  it("skips blank inner text and inner text that holds a brace", () => {
+    expect(extractVariables("{{}} {{   }} {{a{b}} {{{name}}}")).toEqual(["name"]);
+  });
+
+  // Bug: the scan backtracks quadratically, and pasting a long body with an unclosed {{ freezes the page.
+  it("returns quickly on an unclosed opening over a long body", () => {
+    const started = performance.now();
+    expect(extractVariables("{{" + " ".repeat(200_000))).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });
 
@@ -57,6 +75,17 @@ describe("compile", () => {
       { role: "assistant", content: "Hello" },
       { type: "placeholder", name: "examples" },
     ]);
+  });
+
+  // Bug: a dotted name stays uncompiled when supplied, or becomes empty when not.
+  it("fills a dotted name when supplied and keeps it literal when not", () => {
+    expect(compile("Hi {{user.name}}", { "user.name": "Ada" })).toBe("Hi Ada");
+    expect(compile("Hi {{user.name}}", {})).toBe("Hi {{user.name}}");
+  });
+
+  // Bug: the brace handling eats a literal brace around a variable.
+  it("keeps a literal brace around a variable", () => {
+    expect(compile("{{{name}}}", { name: "v" })).toBe("{v}");
   });
 
   // Bug: a value that names an Object.prototype key read as a filled variable.

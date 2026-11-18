@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+import time
+
 import pytest
 from conftest import envelope
 
@@ -37,11 +39,47 @@ def test_missing_variable_is_left_literal():
     assert text("Hi {{ name }}").compile() == "Hi {{ name }}"
 
 
-def test_non_identifier_inner_text_is_left_literal():
-    # Bug: JSON or prose inside braces is eaten as a variable.
-    prompt = text('{{"a":1}} {{a b}} {{}}')
-    assert prompt.compile(a=1, b=2) == '{{"a":1}} {{a b}} {{}}'
+def test_dotted_hyphenated_and_spaced_names_are_filled():
+    # Bug: a name with a dot, a hyphen or a space stays uncompiled with no error.
+    assert text("Hi {{user.name}}").compile(**{"user.name": "Ada"}) == "Hi Ada"
+    assert text("{{first-name}} {{ first name }}").compile(**{"first-name": "A", "first name": "B"}) == "A B"
+
+
+def test_a_dotted_name_not_supplied_stays_literal():
+    # Bug: a missing value becomes an empty string and the model gets a broken prompt.
+    assert text("Hi {{user.name}}").compile() == "Hi {{user.name}}"
+
+
+def test_blank_inner_text_is_not_a_variable():
+    # Bug: an empty name matches and is listed.
+    prompt = text("{{}} {{   }}")
     assert prompt.variables() == []
+    assert prompt.compile(**{"": "x"}) == "{{}} {{   }}"
+
+
+def test_a_brace_around_a_variable_stays_literal():
+    # Bug: the brace handling eats a literal brace, or the four copies disagree on it.
+    assert text("{{{name}}}").compile(name="v") == "{v}"
+
+
+def test_inner_text_with_a_brace_is_not_a_variable():
+    # Bug: a name with a brace is accepted in one language and not in another.
+    prompt = text("{{a{b}}")
+    assert prompt.variables() == []
+    assert prompt.compile(a=1, b=2, **{"a{b": 3}) == "{{a{b}}"
+
+
+def test_json_inner_text_without_a_brace_is_a_variable():
+    # Bug: the four copies disagree on text that is not an identifier, so the Variables panel lists what compile skips.
+    assert text('{{"a":1}}').variables() == ['"a":1']
+
+
+def test_an_unclosed_opening_over_a_long_body_returns_quickly():
+    # Bug: the scan backtracks quadratically, and a long template with an unclosed {{ stalls the caller.
+    prompt = text("{{" + " " * 30_000)
+    started = time.perf_counter()
+    assert prompt.variables() == []
+    assert time.perf_counter() - started < 0.5
 
 
 def test_number_becomes_string():

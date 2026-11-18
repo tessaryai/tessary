@@ -78,7 +78,7 @@ deadlocking.
 | Name | Trimmed first (`PromptNames.lookupName`: every character `Character.isWhitespace` or `Character.isSpaceChar` accepts, which covers what Postgres `[[:space:]]` matches), then `^(?!/)(?!.*//)(?!.*/$)[^\|]{1,255}$` with `DOTALL`, no `<[^<>]*>` (an HTML tag), no NUL. Inner whitespace is allowed. The trimmed name is stored, and every lookup by name trims the same way. The Java rule is the real guard; the SQL CHECK (`0056`) is a backstop that refuses edge whitespace. A `/` makes a folder, and a folder path follows the name rule but is not trimmed, because `team /a` sits in the folder `team ` (with the space). No name is reserved: pages route by prompt id. |
 | Label | `^[a-z0-9_.-]{1,36}$`. `latest` is reserved (`LATEST_RESERVED`). `production` is the label a read with neither version nor label resolves. No trimming, no lowercasing. |
 | Tag | `^\S{1,64}$`, at most 50 per prompt, order kept, duplicates dropped. |
-| Variable | `\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`: no dot, no `{{#each}}`, first-appearance order, deduplicated. Placeholders hold none. |
+| Variable | `\{\{\s*([^{}\s](?:[^{}]*[^{}\s])?)\s*\}\}`: any trimmed, non-blank text with no brace, so dots, hyphens and inner spaces are allowed; first-appearance order, deduplicated. The name starts and ends on a non-space so a long unclosed `{{` scans in linear time. Java's `\s` is ASCII only and JavaScript's and Python's are Unicode, so a non-breaking space at a name's edge is trimmed by the SDKs and the page but kept by the server's list. Placeholders hold none. |
 | Placeholder name | `^[A-Za-z_][A-Za-z0-9_]*$` |
 | Body | Text: a non-empty string. Chat: a non-empty list. A message needs string `role` and `content`, accepts `type` `message` or `chatmessage` on input, and any other key is dropped; it is stored as `{role, content}`. A placeholder is exactly `{type: "placeholder", name}`. No size cap of its own. |
 | Config | A JSON object; `null` means `{}`. No size cap of its own. |
@@ -192,8 +192,8 @@ dependencies. Python uses only `urllib.request` and needs 3.10 or later; TypeScr
 `sdk-ts` in [test-suite.md](./test-suite.md).
 
 Compile. A supplied value becomes `str(value)` or `String(value)`; `None` or `null` becomes an empty
-string; `undefined`, or a name not supplied, stays literal. Inner text that is not an identifier
-(`{{"a":1}}`, `{{a b}}`, `{{}}`) stays literal and is not a variable. TypeScript reads only own keys, so
+string; `undefined`, or a name not supplied, stays literal. `{{}}`, `{{   }}` and inner text that holds a
+brace (`{{a{b}}`) are not variables; `{{{name}}}` fills to `{value}`. TypeScript reads only own keys, so
 `{{constructor}}` stays literal. A chat message compiles to `{role, content}` with other keys kept. A
 placeholder is replaced by a supplied list of `{role, content}` objects, each compiled; an unfilled one
 stays in place.
