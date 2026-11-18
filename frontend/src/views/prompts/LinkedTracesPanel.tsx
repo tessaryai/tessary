@@ -77,6 +77,10 @@ export function LinkedTracesPanel({ name, version }: { name: string; version: nu
         </Link>
       </div>
       {body()}
+      <p className="text-small text-muted">
+        A trace links to a version when one of its spans names the prompt and the version. The SDK adds both with
+        prompt.link(span).
+      </p>
     </div>
   );
 }

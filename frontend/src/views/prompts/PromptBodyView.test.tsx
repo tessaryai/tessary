@@ -14,7 +14,8 @@ it("marks every variable of a text body", () => {
   expect(screen.getByText("{{ team }}").getAttribute("data-variable")).toBe("team");
 });
 
-it("draws each chat message under its role and a placeholder as a badge", () => {
+// Bug: a placeholder drawn as an empty message, or with no word on what fills it.
+it("draws each chat message under its role and a placeholder with what fills it", () => {
   render(
     <PromptBodyView
       type="chat"
@@ -27,7 +28,9 @@ it("draws each chat message under its role and a placeholder as a badge", () => 
 
   expect(screen.getByText("system")).toBeTruthy();
   expect(screen.getByText("{{tone}}").getAttribute("data-variable")).toBe("tone");
-  expect(screen.getByText("placeholder: history")).toBeTruthy();
+  expect(screen.getByText("placeholder")).toBeTruthy();
+  expect(screen.getByText("history")).toBeTruthy();
+  expect(screen.getByText("Your code passes a list of messages here when it compiles the prompt.")).toBeTruthy();
 });
 
 it("says when a text body is empty", () => {

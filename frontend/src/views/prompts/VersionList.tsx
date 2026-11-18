@@ -9,23 +9,27 @@ export function VersionList({
   versions,
   selected,
   onSelect,
-  onCompare,
+  hasOlder,
+  onShowOlder,
+  loadingOlder,
 }: {
   versions: VersionSummary[];
   selected: number;
   onSelect: (version: number) => void;
-  onCompare: () => void;
+  /** Versions older than the last one listed exist and are not read yet. */
+  hasOlder: boolean;
+  onShowOlder: () => void;
+  loadingOlder: boolean;
 }) {
-  const single = versions.length < 2;
+  const n = versions.length;
   return (
     <div className="flex flex-col gap-1 rounded-card border border-border bg-surface p-2">
-      <div className="flex items-center justify-between px-1.5 py-1">
-        <h2 className="text-small text-fg">Versions</h2>
-        <Button size="sm" disabled={single} onClick={onCompare}>
-          Compare
-        </Button>
+      <div className="flex items-center justify-between px-1.5 py-1.5">
+        <h2 className="text-body font-medium text-fg">
+          {hasOlder ? `Newest ${n} versions` : `${n} ${n === 1 ? "version" : "versions"}`}
+        </h2>
+        <span className="text-small text-muted">Newest first</span>
       </div>
-      {single && <p className="px-1.5 text-small text-subtle">Add a second version to compare.</p>}
       <nav aria-label="Versions" className="flex flex-col gap-0.5">
         {versions.map((v) => (
           <button
@@ -49,12 +53,17 @@ export function VersionList({
             <span className={cn("truncate text-small", v.commit_message ? "text-fg-secondary" : "text-subtle")}>
               {v.commit_message ?? "No commit message"}
             </span>
-            <span className="text-label text-muted">
+            <span className="text-small text-muted">
               {v.created_by_label} · {relativeTime(v.created_at)}
             </span>
           </button>
         ))}
       </nav>
+      {hasOlder && (
+        <Button variant="ghost" size="sm" loading={loadingOlder} onClick={onShowOlder}>
+          Show older versions
+        </Button>
+      )}
     </div>
   );
 }

@@ -35,8 +35,10 @@ export function PromptBodyView({ type, body }: { type: PromptType; body: PromptB
     <div className="flex flex-col gap-2">
       {(body as PromptChatBody).map((entry, i) =>
         isPlaceholder(entry) ? (
-          <div key={i} className={BLOCK}>
-            <Badge>placeholder: {entry.name}</Badge>
+          <div key={i} className="flex flex-wrap items-center gap-2 rounded-card border border-dashed border-border p-3">
+            <Badge>placeholder</Badge>
+            <span className="font-mono text-code text-fg">{entry.name}</span>
+            <span className="text-small text-muted">Your code passes a list of messages here when it compiles the prompt.</span>
           </div>
         ) : (
           <div key={i} className={`${BLOCK} flex flex-col gap-1.5`}>

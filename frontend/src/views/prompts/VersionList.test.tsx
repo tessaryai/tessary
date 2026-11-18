@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * The version column. The bugs worth catching are the wrong version marked selected, a click that selects another,
- * and a Compare that opens with nothing to compare against no visible reason.
+ * a count that claims every version when only the first page is loaded, and no way to the older versions.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
@@ -12,8 +12,7 @@ const VERSIONS = promptDetail().versions;
 
 it("marks the selected version, selects on click, and shows each version's labels and commit", () => {
   const onSelect = vi.fn();
-  const onCompare = vi.fn();
-  render(<VersionList versions={VERSIONS} selected={2} onSelect={onSelect} onCompare={onCompare} />);
+  render(<VersionList versions={VERSIONS} selected={2} onSelect={onSelect} hasOlder={false} onShowOlder={vi.fn()} loadingOlder={false} />);
 
   expect(screen.getByRole("button", { name: "Version 2" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByRole("button", { name: "Version 1" }).getAttribute("aria-pressed")).toBe("false");
@@ -24,17 +23,19 @@ it("marks the selected version, selects on click, and shows each version's label
   expect(screen.getByText(/^Ana Lima · /)).toBeTruthy();
   expect(screen.getByText(/^ci@example\.com · /)).toBeTruthy();
   expect(screen.queryByText(/01M57WWYFWWDDFP8ZKS2MZKW7/)).toBeNull();
+  expect(screen.getByText("2 versions")).toBeTruthy();
+  expect(screen.getByText("Newest first")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Show older versions" })).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "Version 1" }));
   expect(onSelect).toHaveBeenCalledWith(1);
-  fireEvent.click(screen.getByRole("button", { name: "Compare" }));
-  expect(onCompare).toHaveBeenCalled();
-  expect(screen.queryByText("Add a second version to compare.")).toBeNull();
 });
 
-it("disables Compare with a visible reason when there is one version", () => {
-  render(<VersionList versions={VERSIONS.slice(1)} selected={1} onSelect={vi.fn()} onCompare={vi.fn()} />);
+it("does not claim a total while older versions are unread, and asks for them", () => {
+  const onShowOlder = vi.fn();
+  render(<VersionList versions={VERSIONS} selected={2} onSelect={vi.fn()} hasOlder onShowOlder={onShowOlder} loadingOlder={false} />);
 
-  expect((screen.getByRole("button", { name: "Compare" }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText("Add a second version to compare.")).toBeTruthy();
+  expect(screen.getByText("Newest 2 versions")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show older versions" }));
+  expect(onShowOlder).toHaveBeenCalled();
 });

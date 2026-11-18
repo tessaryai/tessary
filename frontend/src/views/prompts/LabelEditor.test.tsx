@@ -28,7 +28,7 @@ function open(version = 2, labels = ["production", "latest"]) {
       <LabelEditor promptId="p-1" version={version} labels={labels} allLabels={ALL} />
     </div>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Labels" }));
+  fireEvent.click(screen.getByRole("button", { name: "Deployment labels" }));
   return { queryClient, panel: screen.getByRole("dialog", { name: `Deployment labels for version ${version}` }) };
 }
 
@@ -154,7 +154,7 @@ describe("closing", () => {
     ["Escape", () => fireEvent.keyDown(document, { key: "Escape" })],
     ["an outside click", () => fireEvent.mouseDown(screen.getByText("outside"))],
     ["Cancel", () => fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }))],
-    ["the Labels button", () => fireEvent.click(screen.getByRole("button", { name: "Labels" }))],
+    ["the Deployment labels button", () => fireEvent.click(screen.getByRole("button", { name: "Deployment labels" }))],
   ])("closes on %s without saving", async (_, close) => {
     open();
     fireEvent.click(sw("staging"));
@@ -171,7 +171,7 @@ describe("closing", () => {
     fireEvent.click(sw("staging"));
     fireEvent.keyDown(document, { key: "Escape" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Labels" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deployment labels" }));
 
     expect(sw("staging").getAttribute("aria-checked")).toBe("false");
   });

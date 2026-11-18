@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Tag } from "lucide-react";
 import type { ApiError, LabelRef } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { Button, Input, Toggle, useToast } from "../../ui";
@@ -82,8 +82,11 @@ const PANEL =
 
 type Props = { promptId: string; version: number; labels: string[]; allLabels: LabelRef[] };
 
-/** The Labels button and its panel. `labels` may carry `latest`; it is never shown, set or sent. */
-export function LabelEditor(props: Props) {
+/**
+ * The Deployment labels button and its panel. `labels` may carry `latest`; it is never shown, set or sent. With
+ * `promote`, the button is Promote to production and the panel opens with production switched on.
+ */
+export function LabelEditor({ promote = false, ...props }: Props & { promote?: boolean }) {
   const { open, setOpen, ref } = useDropdown();
   return (
     <div ref={ref} className="relative">
@@ -91,22 +94,30 @@ export function LabelEditor(props: Props) {
         size="sm"
         aria-haspopup="dialog"
         aria-expanded={open}
-        trailingIcon={<ChevronDown size={13} strokeWidth={1.75} aria-hidden="true" />}
+        leadingIcon={promote ? undefined : <Tag size={13} strokeWidth={1.75} aria-hidden="true" />}
+        trailingIcon={promote ? undefined : <ChevronDown size={13} strokeWidth={1.75} aria-hidden="true" />}
         onClick={() => setOpen(!open)}
       >
-        Labels
+        {promote ? "Promote to production" : "Deployment labels"}
       </Button>
-      {open && <LabelPanel {...props} onClose={() => setOpen(false)} />}
+      {open && <LabelPanel {...props} promote={promote} onClose={() => setOpen(false)} />}
     </div>
   );
 }
 
-function LabelPanel({ promptId, version, labels, allLabels, onClose }: Props & { onClose: () => void }) {
+function LabelPanel({
+  promptId,
+  version,
+  labels,
+  allLabels,
+  promote,
+  onClose,
+}: Props & { promote: boolean; onClose: () => void }) {
   const api = useProjectApi();
   const qc = useQueryClient();
   const toast = useToast();
   const own = labelsWithoutLatest(labels);
-  const [value, setValue] = useState(own);
+  const [value, setValue] = useState(promote && !own.includes("production") ? [...own, "production"] : own);
   const promoting = value.includes("production") && !own.includes("production");
   const unchanged = [...value].sort().join("\n") === [...own].sort().join("\n");
 
