@@ -183,6 +183,8 @@ Four things constrain these tools:
 
 The fields are snake_case, like every other tool. The [prompts API](/reference/prompts-api) returns the same prompts with camelCase field names instead.
 
+No tool creates, labels, or deletes a prompt. Those writes are on the [prompts API](/reference/prompts-api) and the Prompts page.
+
 While prompt management is off for the organization, both tools return a tool error saying the `prompt_management_enabled` capability is not available.
 
 ## Client configuration

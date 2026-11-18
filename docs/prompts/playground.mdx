@@ -34,6 +34,8 @@ The playground fills the variables into the template as it appears in the editor
 - A chat prompt keeps its messages in order, and each placeholder is replaced by the messages you entered for it. A placeholder left empty, or holding anything other than a JSON array, is left out of the run, and the playground says so under the variables.
 - A variable you never fill stays in the text as written, for example `{{tone}}`.
 
+A run sends at most 64 messages, each at most 200,000 characters. A saved prompt can be larger than that, and a run of it answers `400` with `COMMON.VALIDATION_FAILED`.
+
 A run forwards four settings, prefilled from the version's config, where either `max_tokens` or `maxTokens` and either `top_p` or `topP` is read:
 
 | Setting | Config key sent | Accepted values |

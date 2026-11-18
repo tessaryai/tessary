@@ -49,7 +49,7 @@ To promote a version, move the `production` label to it. Every agent that fetche
 
 To roll back, move `production` back to the older version. The older version is still there, unchanged, because versions are never edited.
 
-Agents that fetch through an SDK can keep the old version for up to 60 seconds, the SDK cache time, after you move a label.
+Agents that fetch through an SDK can keep the old version for up to 60 seconds, the SDK cache time, after you move a label. If your install runs more than one backend, a fetch that reaches another backend can return the old version for up to 60 seconds more, the server cache time.
 
 Deleting a version deletes the labels it carries. Deleting the version that carries `production` makes every default fetch answer `404` until you move `production` to another version. Deleting the only version of a prompt deletes the prompt.
 
@@ -63,15 +63,18 @@ A span that records the name and version of the prompt it was produced from link
 
 ## Not supported yet
 
-- **Composition tags.** A body that contains a tag that pulls in another prompt by name is stored as plain text and is not expanded. Expanding it needs dependency tracking between prompts, cycle checks, and guards on removing a label another prompt depends on.
+- **Composition tags.** A body that contains a tag that pulls in another prompt by name is stored as plain text and is not expanded, and a fetch has no `resolve` parameter. Expanding it needs dependency tracking between prompts, cycle checks, and guards on removing a label another prompt depends on.
 - **Protected labels.** Any member with permission to change prompts can move `production`. Protecting a label needs roles scoped to one project, which Tessary does not have.
 - **Import from another prompt tool.** Tessary does not read other vendors' APIs. Create prompts on the Prompts page, through `/v1/prompts`, or with the SDKs.
+- **Change history and webhooks.** Tessary records who saved each version and when, but not who moved a label or deleted a version, and it sends no event when a prompt changes.
+- **Scores per version.** Tessary does not score prompt versions. The **Metrics** tab shows calls, errors, latency, tokens, and cost per version.
+- **Prompt writes over MCP.** The [MCP server](/reference/mcp-server) can list and fetch prompts but not create, label, or delete them, because every tool on it is read-only. Use the Prompts page, `/v1/prompts`, or the SDKs.
 
 ## Related pages
 
 <CardGroup cols={2}>
   <Card title="Prompts API" icon="code" href="/reference/prompts-api">
-    Every `/v1/prompts` route, the key scope each one needs, and how the JSON differs from a common prompt API shape.
+    Every `/v1/prompts` route, the key scope each one needs, its limits, and what differs from another prompt tool.
   </Card>
   <Card title="API keys" icon="key" href="/reference/api-keys">
     The three key scopes and the errors a wrongly scoped key returns.

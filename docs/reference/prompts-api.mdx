@@ -1,9 +1,9 @@
 ---
 title: "Prompts API"
-description: "Look up every /v1/prompts route, the API key scope each one needs, the request and response fields, the error codes, and how the JSON differs from a common prompt API shape."
+description: "Look up every /v1/prompts route, the API key scope each one needs, the request and response fields, the error codes, the limits, and what differs from another prompt tool."
 ---
 
-The prompts API fetches, lists, creates, labels, and deletes [prompts](/prompts/overview) with a project API key. It returns the JSON field names of a common prompt API shape, so code written against that shape reads its responses unchanged.
+The prompts API fetches, lists, creates, labels, and deletes [prompts](/prompts/overview) with a project API key. It uses the JSON field names of another common prompt tool, so code written against that tool reads its responses unchanged. [Coming from another prompt tool](#coming-from-another-prompt-tool) lists what is the same and what differs.
 
 ## Authentication and scopes
 
@@ -182,18 +182,46 @@ Each label in `newLabels` leaves the version it was on and moves here; the versi
 
 Deleting the last version of a prompt deletes the prompt. Deleting the version that carries `production` makes a fetch with no version or label answer `404` until `production` is on another version, so an app without a fallback fails.
 
-## Shape differences
+## Limits
 
-The JSON field names match a common prompt API shape. The routes and the envelope do not:
+| Item | Limit |
+| --- | --- |
+| Request body | At most 1 MiB (1,048,576 bytes), the prompt body, config, and every other field together. A larger request answers `400` with `COMMON.INVALID_BODY`. |
+| Prompt body | No limit of its own, for a text body or for the number of messages in a chat body. |
+| Config | No limit of its own. |
+| Versions per prompt | No limit. |
+| Name | From 1 to 255 characters. |
+| Label | From 1 to 36 characters. |
+| `labels`, `newLabels`, `removeLabels` | Up to 50 each per request. |
+| Tags | Up to 50 per prompt, each 1 to 64 characters. |
+| Commit message | Up to 500 characters. |
+| List page | `limit` defaults to 10, up to 100. |
 
-- **The name is a query parameter.** Fetch is `GET /v1/prompts/fetch?name=...`, not a path ending in the name.
-- **Bearer authentication, not Basic.** A client that sends a public and secret key pair as Basic credentials cannot call this API without changes.
-- **Labels move through `PATCH /v1/prompts/labels`** with `name`, `version`, `newLabels` and `removeLabels` in the body.
-- **A delete answers `200`** with `{"deleted": true}` in the envelope, not `204`. A create answers `201`.
-- **Version numbers are never reused.** After the highest version is deleted, the next version gets a new number.
+## Coming from another prompt tool
+
+The prompts API follows the field names and rules of another common prompt tool, so code written against that tool needs few changes. The size bounds are in [Limits](#limits).
+
+These work the same way:
+
+- **Field names.** `prompt`, `type`, `config`, `labels`, `tags`, `commitMessage`, `createdAt`, `updatedAt`, and `isActive` on a version, and `versions`, `lastUpdatedAt`, and `lastConfig` in a list.
+- **Label rules.** A label is 1 to 36 characters from `a-z`, `0-9`, `_`, `.`, and `-`, sits on one version at a time, and `latest` is derived, never set.
+- **The default label.** A fetch with no version and no label reads `production`.
+- **List parameters.** `name`, `label`, `tag`, `page`, `limit`, `fromUpdatedAt`, `toUpdatedAt`, and the JSON `filter`.
+- **Create or next version.** A `POST` to a new name creates version 1, and to an existing name creates its next version.
+- **Delete by label.** `label` on a delete deletes the version the label points at.
+- **`removeLabels`** on a label change takes labels off the version.
+- **Tags on create.** `tags` on a `POST` set the prompt's tags.
+
+These differ:
+
+- **The name is a query parameter.** Fetch is `GET /v1/prompts/fetch?name=...`, not a path ending in the name, and labels move through `PATCH /v1/prompts/labels` with `name`, `version`, `newLabels`, and `removeLabels` in the body.
+- **Bearer authentication, not Basic.** Send one project API key as a bearer token. A client that sends a public and secret key pair as Basic credentials cannot call this API without changes.
 - **Every response is wrapped** in `meta` and `data`. An error carries its code in `meta.error.code`. A `429` from the rate limiter, which answers before the route runs, has the shape `{"ok": false, "error": {"code": "rate.limited", ...}}`.
+- **A delete answers `200`** with `{"deleted": true}` in the envelope, not `204`.
+- **Version numbers are never reused.** After the highest version is deleted, the next version gets a new number.
+- **No name is reserved**, because the Prompts page opens a prompt by its id, not its name. A name that holds the NUL character, U+0000, is refused, because the database cannot store it.
 - **`type: "chatmessage"` is accepted** on a chat message, as is `type: "message"`, and the message is stored without a `type`.
-- **No composition tags.** A body that contains a tag that references another prompt is stored as plain text.
+- **No composition.** A body that contains a tag that references another prompt is stored as plain text, and the fetch has no `resolve` parameter.
 
 ## Errors
 
