@@ -40,7 +40,6 @@ public class PromptService {
 
     private static final Logger log = LoggerFactory.getLogger(PromptService.class);
 
-    static final int MAX_VERSIONS = 1000;
     static final int MAX_CONFIG_CHARS = 65_536;
     static final int DEFAULT_VERSION_PAGE = 100;
 
@@ -193,9 +192,6 @@ public class PromptService {
         String configJson = configJson(cmd.config());
         requireCommitMessage(cmd.commitMessage());
         cmd.labels().forEach(PromptNames::requireLabel);
-        if (repo.countVersions(projectId, promptId) >= MAX_VERSIONS) {
-            throw new TessaryException(PromptsError.VERSION_LIMIT, row.name(), MAX_VERSIONS);
-        }
         int version = repo.claimVersion(projectId, promptId);
         PromptVersionRow written = writeVersion(
                 row, version, principalId, via, body, configJson, cmd.labels(), cmd.commitMessage(), now());

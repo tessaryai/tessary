@@ -29,7 +29,7 @@ Every route answers `200` on success, inside the envelope `{"meta": {"status": 2
 | --- | --- | --- | --- |
 | `GET /v1/prompts/fetch?name=&version=&label=` | Query | One prompt version | `NAME_REQUIRED`, `BOTH_VERSION_AND_LABEL`, `NOT_FOUND`, `VERSION_NOT_FOUND`, `LABEL_NOT_FOUND` |
 | `GET /v1/prompts?name=&label=&tag=&page=&limit=&fromUpdatedAt=&toUpdatedAt=` | Query | A page of prompts, ordered by name | `COMMON.INVALID_PARAMETER` |
-| `POST /v1/prompts` | Admin | The created version | `TYPE_MISMATCH`, `INVALID_NAME`, `INVALID_LABEL`, `LATEST_RESERVED`, `INVALID_BODY`, `INVALID_CONFIG`, `INVALID_TAG`, `VERSION_LIMIT`, `CONCURRENT_WRITE` |
+| `POST /v1/prompts` | Admin | The created version | `TYPE_MISMATCH`, `INVALID_NAME`, `INVALID_LABEL`, `LATEST_RESERVED`, `INVALID_BODY`, `INVALID_CONFIG`, `INVALID_TAG`, `CONCURRENT_WRITE` |
 | `PATCH /v1/prompts/labels` | Admin | The labeled version | `NOT_FOUND`, `VERSION_NOT_FOUND`, `INVALID_LABEL`, `LATEST_RESERVED` |
 | `DELETE /v1/prompts?name=&version=&label=` | Admin | `{"deleted": true}` | `NAME_REQUIRED`, `BOTH_VERSION_AND_LABEL`, `NOT_FOUND`, `VERSION_NOT_FOUND`, `VERSION_LABELED`, `LAST_VERSION`, `INVALID_LABEL`, `LATEST_RESERVED` |
 
@@ -192,7 +192,6 @@ The JSON field names match a common prompt API shape. The routes and the envelop
 | `404` | `PROMPTS.LABEL_NOT_FOUND` | No version carries the label; a fetch with neither `version` nor `label` reads `production` |
 | `409` | `PROMPTS.VERSION_LABELED` | The version to delete carries a label |
 | `409` | `PROMPTS.LAST_VERSION` | The version to delete is the prompt's only version |
-| `409` | `PROMPTS.VERSION_LIMIT` | The prompt already has 1,000 versions |
 | `409` | `PROMPTS.CONCURRENT_WRITE` | Another write took the same version number at the same moment; retry |
 | `429` | `rate.limited` | Too many writes; wait for the seconds in `Retry-After` |
 

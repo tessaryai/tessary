@@ -22,7 +22,6 @@ public enum PromptsError implements ErrorCode {
     INVALID_TAG(HttpStatus.BAD_REQUEST, "Invalid tag %s: use 1 to 64 characters with no whitespace, at most 50 tags"),
     VERSION_LABELED(HttpStatus.CONFLICT, "Version %s carries label %s; move the label first"),
     LAST_VERSION(HttpStatus.CONFLICT, "Version %s is the only version of %s; delete the prompt instead"),
-    VERSION_LIMIT(HttpStatus.CONFLICT, "Prompt %s already has %s versions; delete old versions first"),
     CONCURRENT_WRITE(HttpStatus.CONFLICT, "Another write changed prompt %s; retry"),
     BOTH_VERSION_AND_LABEL(HttpStatus.BAD_REQUEST, "Give version or label, not both"),
     NAME_REQUIRED(HttpStatus.BAD_REQUEST, "name is required"),

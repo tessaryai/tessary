@@ -46,7 +46,7 @@ deadlocking.
   the listed labels and deletes its others. `LabelMode.ADD` (the public PATCH) only moves the listed
   labels.
 - A labeled version cannot be deleted (409 `VERSION_LABELED`), nor can a prompt's only version (409
-  `LAST_VERSION`). A prompt holds at most 1000 versions (409 `VERSION_LIMIT`).
+  `LAST_VERSION`). A prompt has no version cap, and a create does not count the versions.
 - Every statement is keyed on `project_id`, so another project's id reads as `NOT_FOUND`. Folder and
   search filters use `starts_with` and an escaped `ILIKE`, never a bare `LIKE`, because `_` and `%`
   are legal in names.

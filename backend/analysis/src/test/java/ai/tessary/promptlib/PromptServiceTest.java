@@ -120,7 +120,6 @@ class PromptServiceTest {
     void createVersion_numbersFromTheClaimedVersion() {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.countVersions(PID, ID)).thenReturn(3);
         when(repo.claimVersion(PID, ID)).thenReturn(4);
         when(repo.labelVersion(PID, ID, "staging")).thenReturn(Optional.empty());
 
@@ -145,7 +144,6 @@ class PromptServiceTest {
     void createVersion_duplicateKeyIsConcurrentWrite() {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.countVersions(PID, ID)).thenReturn(1);
         when(repo.claimVersion(PID, ID)).thenReturn(2);
         doThrow(new DuplicateKeyException("ux_prompt_version")).when(repo).insertVersion(any());
 
@@ -154,16 +152,21 @@ class PromptServiceTest {
                 () -> service().createVersion(PID, ID, BY, CreateVia.UI, textVersion(List.of())));
     }
 
+    /**
+     * A prompt has no version cap. The bugs: a CI job that publishes one version per deploy stops at 1,000, and every
+     * create counts the prompt's versions first, a read whose cost grows with the prompt. The skipped count is the
+     * outcome, so it is verified.
+     */
     @Test
-    void createVersion_thousandthVersionIsTheLimit() {
+    void createVersion_afterAThousandVersionsCreatesTheNextWithoutCounting() {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.countVersions(PID, ID)).thenReturn(1000);
+        when(repo.claimVersion(PID, ID)).thenReturn(1001);
 
-        assertError(
-                PromptsError.VERSION_LIMIT,
-                () -> service().createVersion(PID, ID, BY, CreateVia.UI, textVersion(List.of())));
-        verify(repo, never()).insertVersion(any());
+        ResolvedVersion v = service().createVersion(PID, ID, BY, CreateVia.UI, textVersion(List.of()));
+
+        assertEquals(1001, v.version().version());
+        verify(repo, never()).countVersions(any(), any());
     }
 
     @Test
@@ -309,7 +312,6 @@ class PromptServiceTest {
     void createVersion_configMentioningTheEscapeIsStored() {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.countVersions(PID, ID)).thenReturn(1);
         when(repo.claimVersion(PID, ID)).thenReturn(2);
 
         CreateVersionCommand cmd = new CreateVersionCommand("x", Map.of("note", "\\u0000", "n", 5), List.of(), null);
@@ -341,7 +343,6 @@ class PromptServiceTest {
     void writeVersion_integrityViolationIsA400WithoutTheSqlCause() {
         when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
         when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.countVersions(PID, ID)).thenReturn(1);
         when(repo.claimVersion(PID, ID)).thenReturn(2);
         doThrow(new DataIntegrityViolationException("JSON data, line 1: \"secret system text"))
                 .when(repo)

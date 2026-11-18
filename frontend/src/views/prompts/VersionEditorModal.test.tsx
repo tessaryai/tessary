@@ -89,13 +89,13 @@ describe("creating", () => {
 
   // Bug: a refusal closes the editor and loses the edit, or says nothing.
   it("says why the version was not created and keeps the editor open", async () => {
-    api.createPromptVersion.mockRejectedValue(new Error("PROMPTS.VERSION_LIMIT: Prompt p-1 already has 1000 versions"));
+    api.createPromptVersion.mockRejectedValue(new Error("PROMPTS.INVALID_BODY: Invalid prompt body: body is empty"));
     const { onClose } = renderEditor();
 
     save();
 
     expect(await screen.findByText("Could not create version")).toBeTruthy();
-    expect(screen.getByText("PROMPTS.VERSION_LIMIT: Prompt p-1 already has 1000 versions")).toBeTruthy();
+    expect(screen.getByText("PROMPTS.INVALID_BODY: Invalid prompt body: body is empty")).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
   });
 
