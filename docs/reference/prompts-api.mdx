@@ -3,7 +3,7 @@ title: "Prompts API"
 description: "Look up every /v1/prompts route, the API key scope each one needs, the request and response fields, the error codes, the limits, and what differs from another prompt tool."
 ---
 
-The prompts API fetches, lists, creates, labels, and deletes [prompts](/prompts/overview) with a project API key. It uses the JSON field names of another common prompt tool, so code written against that tool reads its responses unchanged. [Coming from another prompt tool](#coming-from-another-prompt-tool) lists what is the same and what differs.
+The prompts API fetches, lists, creates, labels, and deletes [prompts](/prompts/overview) with a project API key. Inside the response envelope, it uses the JSON field names of another common prompt tool, so code written against that tool reads the fields unchanged. [Coming from another prompt tool](#coming-from-another-prompt-tool) lists what is the same and what differs.
 
 ## Authentication and scopes
 
@@ -204,7 +204,7 @@ The prompts API follows the field names and rules of another common prompt tool,
 These work the same way:
 
 - **Field names.** `prompt`, `type`, `config`, `labels`, `tags`, `commitMessage`, `createdAt`, `updatedAt`, and `isActive` on a version, and `versions`, `lastUpdatedAt`, and `lastConfig` in a list.
-- **Label rules.** A label is 1 to 36 characters from `a-z`, `0-9`, `_`, `.`, and `-`, sits on one version at a time, and `latest` is derived, never set.
+- **Label rules.** A label sits on one version at a time, and `latest` always points at the highest version and cannot be set.
 - **The default label.** A fetch with no version and no label reads `production`.
 - **List parameters.** `name`, `label`, `tag`, `page`, `limit`, `fromUpdatedAt`, `toUpdatedAt`, and the JSON `filter`.
 - **Create or next version.** A `POST` to a new name creates version 1, and to an existing name creates its next version.
