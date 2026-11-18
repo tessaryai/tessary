@@ -236,6 +236,8 @@ describe("states", () => {
 
     expect(await screen.findByText("No prompts yet")).toBeTruthy();
     expect(screen.getByText("Create a prompt on this page. You can also create prompts with the prompts API or the SDKs.")).toBeTruthy();
+    // Bug: search and filter controls offered over a project with nothing to search.
+    expect(screen.queryByRole("textbox", { name: "Search prompts by name" })).toBeNull();
     expect(screen.getByRole("link", { name: "Read the prompts API reference" }).getAttribute("href")).toBe(
       "https://docs.tessary.ai/reference/prompts-api",
     );

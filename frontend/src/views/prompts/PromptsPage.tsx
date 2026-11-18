@@ -222,6 +222,9 @@ export function PromptsPage() {
     );
   };
 
+  /** No filter can help a project with no prompt at all, so the empty state stands alone. */
+  const projectEmpty =
+    !folder && !q && !label && !tag && level.isSuccess && level.data.pages[0].folders.length === 0 && level.data.pages[0].total === 0;
   const labelOptions = orderLabels([...(facets.data?.labels ?? []), label].filter(Boolean));
   const tagOptions = [...new Set([...(facets.data?.tags ?? []), tag].filter(Boolean))].sort();
 
@@ -260,38 +263,42 @@ export function PromptsPage() {
           </>
         }
       />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Input
-          key={q}
-          aria-label="Search prompts by name"
-          placeholder="Search by name"
-          className="w-[320px]"
-          defaultValue={q}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") patch({ q: e.currentTarget.value.trim() || null });
-          }}
-        />
-        <div className="w-[160px]">
-          <Select aria-label="Deployment label" value={label} onChange={(e) => patch({ label: e.target.value || null })}>
-            <option value="">Any label</option>
-            {labelOptions.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </Select>
+      {!projectEmpty && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {/* The primitives carry w-full, and cn() does not merge classes, so width lives on a wrapper. */}
+          <div className="w-[320px]">
+            <Input
+              key={q}
+              aria-label="Search prompts by name"
+              placeholder="Search by name"
+              defaultValue={q}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") patch({ q: e.currentTarget.value.trim() || null });
+              }}
+            />
+          </div>
+          <div className="w-[160px]">
+            <Select aria-label="Deployment label" value={label} onChange={(e) => patch({ label: e.target.value || null })}>
+              <option value="">Any label</option>
+              {labelOptions.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="w-[140px]">
+            <Select aria-label="Tag" value={tag} onChange={(e) => patch({ tag: e.target.value || null })}>
+              <option value="">Any tag</option>
+              {tagOptions.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
-        <div className="w-[140px]">
-          <Select aria-label="Tag" value={tag} onChange={(e) => patch({ tag: e.target.value || null })}>
-            <option value="">Any tag</option>
-            {tagOptions.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
+      )}
       {content()}
       {confirmingDelete && (
         <Modal

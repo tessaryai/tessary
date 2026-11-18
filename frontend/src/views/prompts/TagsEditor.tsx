@@ -23,7 +23,7 @@ export function TagsEditor({ tags, onSave }: { tags: string[]; onSave: (tags: st
         {tags.map((t) => (
           <Badge key={t}>{t}</Badge>
         ))}
-        <Button size="sm" variant="ghost" onClick={() => setDraft(tags.join(", "))}>
+        <Button size="sm" onClick={() => setDraft(tags.join(", "))}>
           Edit tags
         </Button>
       </div>
