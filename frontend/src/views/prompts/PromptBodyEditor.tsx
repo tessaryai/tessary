@@ -74,20 +74,23 @@ export function PromptBodyEditor({
               </div>
             ) : (
               <div className="flex flex-1 items-start gap-2">
-                <Select
-                  aria-label={`Role of message ${i + 1}`}
-                  className="w-[120px] shrink-0"
-                  value={entry.role}
-                  onChange={(e) => set(i, { role: e.target.value, content: entry.content })}
-                >
-                  {[...new Set([...ROLES, entry.role])].map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </Select>
+                {/* The primitives carry w-full, and cn() does not merge classes, so width lives on a wrapper. */}
+                <div className="w-[120px] shrink-0">
+                  <Select
+                    aria-label={`Role of message ${i + 1}`}
+                    value={entry.role}
+                    onChange={(e) => set(i, { role: e.target.value, content: entry.content })}
+                  >
+                    {[...new Set([...ROLES, entry.role])].map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
                 <Textarea
                   aria-label={`Content of message ${i + 1}`}
+                  className="min-w-0 flex-1"
                   rows={3}
                   value={entry.content}
                   onChange={(e) => set(i, { role: entry.role, content: e.target.value })}

@@ -240,19 +240,20 @@ export function PromptsPage() {
           onChange={(v) => patch({ type: v === "all" ? null : v })}
           options={TYPES}
         />
-        <Select
-          aria-label="Deployment label"
-          className="w-[160px]"
-          value={label}
-          onChange={(e) => patch({ label: e.target.value || null })}
-        >
-          <option value="">Any label</option>
-          {orderLabels([...seenLabels, label].filter(Boolean)).map((l) => (
-            <option key={l} value={l}>
-              {l}
-            </option>
-          ))}
-        </Select>
+        <div className="w-[160px]">
+          <Select
+            aria-label="Deployment label"
+            value={label}
+            onChange={(e) => patch({ label: e.target.value || null })}
+          >
+            <option value="">Any label</option>
+            {orderLabels([...seenLabels, label].filter(Boolean)).map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
       {content()}
       {creating && <NewPromptModal onClose={() => setCreating(false)} />}
