@@ -41,6 +41,8 @@ const E2B_API_KEY = process.env.E2B_API_KEY;
 // namespaced. Held equal to docker-compose.yml's default by scripts/check-version-consistency.sh.
 const ANALYZER_TEMPLATE = process.env.E2B_ANALYZER_TEMPLATE || 'tessary/tessary-agent-sandbox:latest';
 const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS || 60000);
+// A run timeout_ms above this is refused: it would hold a docker slot for hours, and Node fires a timer over 2^31-1 ms at once.
+const RUN_MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 // The Engine API's log stream has no maxBuffer, so this cap keeps a runaway agent from OOMing us.
 const MAX_STDOUT_BYTES = 16 * 1024 * 1024;
@@ -871,7 +873,7 @@ async function runScriptInDockerInner(lane, payload, timeoutMs, posture, credent
     });
 
     const waitPromise = dockerJson('POST', `/containers/${containerId}/wait`);
-    timer = setTimeout(() => { killedForTimeout = true; killContainer(); }, timeoutMs);
+    timer = setTimeout(() => { killedForTimeout = true; killContainer(); }, Math.min(timeoutMs, RUN_MAX_TIMEOUT_MS));
     const result = await waitPromise;
     clearTimeout(timer);
     // `wait` resolving does not mean the demuxer has seen every byte yet.
@@ -950,12 +952,22 @@ async function logSandboxDiagnostics(sandboxId) {
   }
 }
 
+function runTimeoutMs(lane, raw) {
+  if (raw === undefined || raw === null) return SANDBOX_TIMEOUT_MS;
+  if (!Number.isSafeInteger(raw) || raw <= 0 || raw > RUN_MAX_TIMEOUT_MS) {
+    const e = new Error(`${lane}: timeout_ms must be a positive integer of at most ${RUN_MAX_TIMEOUT_MS} ms`);
+    e.launcherKind = 'bad_request';
+    throw e;
+  }
+  return raw;
+}
+
 async function runAgenticScript(lane, rawPayload) {
-  const timeoutMs = Number(rawPayload.timeout_ms || SANDBOX_TIMEOUT_MS);
   // `credential` never rejoins `payload`, which is written to input.json on the sandbox's disk; it
   // reaches the agent through env vars only.
   const { credential, ...rest } = rawPayload;
   requireCredential(credential, lane);
+  const timeoutMs = runTimeoutMs(lane, rawPayload.timeout_ms);
   const payload = { ...rest, model: toProviderModel(rest.model, credential) };
   console.log(`${lane}: model ${rest.model} -> ${payload.model} (provider ${credential.provider})`);
   if (credential.egress_secret && BACKEND !== 'e2b') {
