@@ -59,7 +59,6 @@ class PromptNamesTest {
     @MethodSource("spacedNames")
     void requireName_acceptsInnerSpacesAndTrimsOuter(String given, String stored) {
         assertEquals(stored, PromptNames.requireName(given));
-        assertEquals(stored, PromptNames.requireFolder(given));
     }
 
     /** The bug: the relaxed rule lets a pipe or a NUL through, which breaks the SDK cache key or the insert. */

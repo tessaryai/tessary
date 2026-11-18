@@ -363,6 +363,20 @@ record PromptRepositoryTest(PromptRepository repo, TenantService tenants) {
         assertThrows(DataIntegrityViolationException.class, () -> prompt(pid, "a|b", List.of()));
     }
 
+    /**
+     * A folder path is used as given: {@code team /a} sits in {@code "team "}, not in {@code team}. The bug: the path
+     * is trimmed like a name, so listing {@code "team "} lists {@code team}'s prompts.
+     */
+    @Test
+    void list_folderWithATrailingSpaceIsItsOwnFolder() {
+        String pid = project("prompt-repo-folder-space");
+        version(prompt(pid, "team /a", List.of()), 1, "{}");
+        version(prompt(pid, "team/b", List.of()), 1, "{}");
+
+        assertEquals(List.of("team /a"), names(pid, query("team ", null, null, null)));
+        assertEquals(List.of("team/b"), names(pid, query("team", null, null, null)));
+    }
+
     private List<String> filtered(String pid, String json) {
         PromptListQuery q = query(null, null, null, null)
                 .withFilter(PromptListFilter.parse(json).orElseThrow());

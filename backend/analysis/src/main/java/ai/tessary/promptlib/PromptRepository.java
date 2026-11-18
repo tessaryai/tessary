@@ -364,7 +364,7 @@ public class PromptRepository {
         String folder = q.folder();
         if (folder != null) {
             sql.append(" AND starts_with(p.name, :folderPrefix)");
-            params.put("folderPrefix", PromptNames.lookupName(folder) + "/");
+            params.put("folderPrefix", folder + "/");
         }
         String search = q.q();
         if (search != null) {

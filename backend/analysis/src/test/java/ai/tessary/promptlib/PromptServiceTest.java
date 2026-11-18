@@ -604,6 +604,18 @@ class PromptServiceTest {
         assertEquals(2, service().deleteFolder(PID, "team/x"));
     }
 
+    /**
+     * A name may hold a space before a slash, so {@code My Team /a} sits in the folder {@code "My Team "}. The bug: the
+     * folder path is trimmed like a name, and deleting {@code "My Team "} deletes the prompts of {@code My Team}.
+     */
+    @Test
+    void deleteFolder_keepsTheFolderPathAsGiven() {
+        when(repo.deleteFolder(PID, "My Team /")).thenReturn(1);
+
+        assertEquals(1, service().deleteFolder(PID, "My Team "));
+        assertError(PromptsError.INVALID_NAME, () -> service().deleteFolder(PID, "  "));
+    }
+
     static Stream<Arguments> writesAndReadsById() {
         return Stream.<Consumer<PromptService>>of(
                         s -> s.get(PID, ID),

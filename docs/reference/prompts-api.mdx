@@ -115,7 +115,7 @@ curl -H "Authorization: Bearer $TESSARY_API_KEY" \
 
 #### Filter
 
-`filter` is a JSON list of conditions, in the grammar another prompt tool uses. Percent-encode it in the query string: a raw `[`, `{` or `"` is refused before it reaches the route. When `filter` is sent, `name`, `label`, `tag`, `fromUpdatedAt` and `toUpdatedAt` are ignored; `page` and `limit` still apply.
+`filter` is a JSON list of conditions, in the grammar another prompt tool uses. Percent-encode it in the query string, as `curl --data-urlencode` does below. When `filter` is sent, `name`, `label`, `tag`, `fromUpdatedAt` and `toUpdatedAt` are ignored; `page` and `limit` still apply.
 
 Each condition is true or false of one prompt version. A prompt is listed when one of its versions meets every condition, and then `versions`, `labels` and `lastConfig` describe the matching versions only. `latest` is in `labels` only when the highest version matched.
 

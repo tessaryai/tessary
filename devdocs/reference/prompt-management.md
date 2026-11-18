@@ -75,7 +75,7 @@ deadlocking.
 
 | Rule | Value |
 |---|---|
-| Name | Trimmed first (`PromptNames.lookupName`: every character `Character.isWhitespace` or `Character.isSpaceChar` accepts, which covers what Postgres `[[:space:]]` matches), then `^(?!/)(?!.*//)(?!.*/$)[^\|]{1,255}$` with `DOTALL`, no `<[^<>]*>` (an HTML tag), no NUL. Inner whitespace is allowed. The trimmed name is stored, and every lookup by name trims the same way. The Java rule is the real guard; the SQL CHECK (`0056`) is a backstop that refuses edge whitespace. A `/` makes a folder, and a folder path follows the name rule. No name is reserved: pages route by prompt id. |
+| Name | Trimmed first (`PromptNames.lookupName`: every character `Character.isWhitespace` or `Character.isSpaceChar` accepts, which covers what Postgres `[[:space:]]` matches), then `^(?!/)(?!.*//)(?!.*/$)[^\|]{1,255}$` with `DOTALL`, no `<[^<>]*>` (an HTML tag), no NUL. Inner whitespace is allowed. The trimmed name is stored, and every lookup by name trims the same way. The Java rule is the real guard; the SQL CHECK (`0056`) is a backstop that refuses edge whitespace. A `/` makes a folder, and a folder path follows the name rule but is not trimmed, because `team /a` sits in the folder `team ` (with the space). No name is reserved: pages route by prompt id. |
 | Label | `^[a-z0-9_.-]{1,36}$`. `latest` is reserved (`LATEST_RESERVED`). `production` is the label a read with neither version nor label resolves. No trimming, no lowercasing. |
 | Tag | `^\S{1,64}$`, at most 50 per prompt, order kept, duplicates dropped. |
 | Variable | `\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`: no dot, no `{{#each}}`, first-appearance order, deduplicated. Placeholders hold none. |

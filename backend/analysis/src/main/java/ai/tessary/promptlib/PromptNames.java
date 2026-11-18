@@ -86,9 +86,18 @@ public final class PromptNames {
         return slash < 0 ? "" : name.substring(0, slash);
     }
 
-    /** A folder path is a name prefix, so the name rule, trim included, applies to it. */
+    /**
+     * A folder path is a name prefix, so the name rule applies to it, but it is used as given: {@code team /a} sits in
+     * {@code "team "}, and a trim would point at the folder {@code team} instead. A blank path names no folder.
+     */
     public static String requireFolder(String path) {
-        return requireName(path);
+        if (path.isBlank()
+                || !NAME.matcher(path).matches()
+                || HTML_TAG.matcher(path).find()
+                || PromptBody.holdsNul(path)) {
+            throw new TessaryException(PromptsError.INVALID_NAME, path);
+        }
+        return path;
     }
 
     /** In first-appearance order, each name once. */
