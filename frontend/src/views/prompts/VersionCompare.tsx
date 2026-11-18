@@ -13,11 +13,14 @@ import { labelsWithoutLatest } from "./promptFolders";
 import { usePromptUsage, usePromptVersion } from "./promptReads";
 import { errorRate, formatMs } from "./UsagePanel";
 
-/** `versions` is newest first; the selected version on the right, the next older one (or newer, for the oldest) on the left. */
+/**
+ * `versions` is newest first; the selected version on the right, the next older one (or newer, for the oldest) on the
+ * left. A prompt with one version pairs it with itself, which Compare answers by asking for two different versions.
+ */
 export function defaultPair(versions: VersionSummary[], selected: number): { left: number; right: number } {
   const i = versions.findIndex((v) => v.version === selected);
-  const partner = i + 1 < versions.length ? versions[i + 1] : versions[i - 1];
-  return { left: partner.version, right: selected };
+  const partner = versions[i + 1] ?? versions[i - 1];
+  return { left: partner?.version ?? selected, right: selected };
 }
 
 const SIDES = "Removed text is marked on the left, added text on the right.";

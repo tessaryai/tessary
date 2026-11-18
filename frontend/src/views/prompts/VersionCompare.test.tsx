@@ -83,7 +83,7 @@ describe("the diff", () => {
     );
     renderCompare(1, 2, chat);
 
-    expect(await screen.findByText("1 added, 2 unchanged. Removed text is marked on the left, added text on the right.")).toBeTruthy();
+    expect(await screen.findByText("1 message added, 2 unchanged. Removed text is marked on the left, added text on the right.")).toBeTruthy();
     expect(screen.getByText("Hi").tagName).toBe("INS");
     expect(screen.getAllByText("system · version 1")).toHaveLength(1);
   });
@@ -155,6 +155,7 @@ describe("around the diff", () => {
     expect(screen.queryByRole("button", { name: "Promote version 2 to production" })).toBeNull();
   });
 
+  // Bug: Promote from Compare opens a dialog that does not promote, or that cannot be left.
   it("opens the promotion dialog with production ticked, and Cancel closes it", async () => {
     serve({});
     renderCompare(2, 3);
@@ -167,6 +168,7 @@ describe("around the diff", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // Bug: a failed usage read leaves an empty table that reads as no calls.
   it("shows the error when the week's calls fail to load", async () => {
     serve({});
     api.getPromptUsage.mockRejectedValue(new Error("COMMON.INVALID_PARAMETER: days"));
@@ -181,5 +183,6 @@ describe("defaultPair", () => {
   it("pairs the selected version with the next older one, or the next newer one when it is the oldest", () => {
     expect(defaultPair(TEXT.versions, 3)).toEqual({ left: 2, right: 3 });
     expect(defaultPair(TEXT.versions, 1)).toEqual({ left: 2, right: 1 });
+    expect(defaultPair(TEXT.versions.slice(0, 1), 3)).toEqual({ left: 3, right: 3 });
   });
 });

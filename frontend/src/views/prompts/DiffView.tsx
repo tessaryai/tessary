@@ -73,13 +73,13 @@ function plural(n: number, one: string, many: string) {
 /** "1 message changed, 1 unchanged". */
 export function chatSummary(rows: ChatRow[]): string {
   const count = (kind: ChatRow["kind"]) => rows.filter((r) => r.kind === kind).length;
-  const parts = [
-    count("changed") && `${plural(count("changed"), "message", "messages")} changed`,
-    count("added") && `${count("added")} added`,
-    count("removed") && `${count("removed")} removed`,
-    count("same") && `${count("same")} unchanged`,
-  ].filter(Boolean);
-  return parts.join(", ");
+  const parts = (["changed", "added", "removed", "same"] as const)
+    .filter((k) => count(k) > 0)
+    .map((k) => `${count(k)} ${k === "same" ? "unchanged" : k}`);
+  // The first part carries the noun: "1 message changed, 2 unchanged", "2 messages added, 1 unchanged".
+  const [head = "0 unchanged", ...rest] = parts;
+  const [n, ...words] = head.split(" ");
+  return [`${n} ${Number(n) === 1 ? "message" : "messages"} ${words.join(" ")}`, ...rest].join(", ");
 }
 
 /** "1 key changed, 1 key added", or null when nothing changed. */

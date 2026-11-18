@@ -138,6 +138,15 @@ describe("the header", () => {
     expect(currentParams().get("from")).toBeNull();
   });
 
+  // Bug: a shared Compare link to a prompt with one version crashed the page looking for a second version.
+  it("opens a Compare link on a one-version prompt without crashing", async () => {
+    serve(promptDetail({ versions: promptDetail().versions.slice(1), latest_version: 1 }), { 1: V1 });
+    api.getPromptUsage.mockReturnValue(pending());
+    renderPage("?section=compare");
+
+    expect(await screen.findByText("Pick two different versions.")).toBeTruthy();
+  });
+
   it("disables Compare versions when the prompt has one version", async () => {
     serve(promptDetail({ versions: promptDetail().versions.slice(1), latest_version: 1 }), { 1: V1 });
     renderPage();
@@ -195,6 +204,7 @@ describe("the header", () => {
     expect(screen.getByText("Pick two different versions.")).toBeTruthy();
   });
 
+  // Bug: picking another start version on New version is lost on a reload.
   it("writes the start version to the URL", async () => {
     serve();
     renderPage("?section=new&from=2");

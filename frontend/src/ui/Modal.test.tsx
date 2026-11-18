@@ -37,6 +37,7 @@ describe("Modal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // Bug: a screen reader announces the dialog with no name.
   it("is named by its title", () => {
     render(
       <Modal open onClose={() => {}} title="Delete version 3?">
