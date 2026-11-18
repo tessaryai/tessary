@@ -240,6 +240,7 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
                 "0.000600000000", // totalCost (generated)
                 started.plusSeconds(2).toString(),
                 null,
+                null,
                 null);
     }
 

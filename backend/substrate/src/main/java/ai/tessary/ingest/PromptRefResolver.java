@@ -14,7 +14,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * Resolves the managed prompt a span was produced from: {@code tessary.prompt.name}/{@code .version}, then the two
  * third-party prompt dialects in that order. The version is read only from the dialect that named the prompt, so a span is never
- * linked to a version of a prompt it did not use. No lookup against the prompt tables: the link is producer text.
+ * linked to a version of a prompt it did not use. This reads attributes only; {@link PromptLinkIds} resolves the name to
+ * a prompt id once per batch, and the producer's text is kept either way.
  */
 public final class PromptRefResolver {
 

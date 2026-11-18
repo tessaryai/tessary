@@ -156,6 +156,15 @@ version may be a label such as `prod`. A name or version over 512 characters dro
 span. Attribute rows: [ingestion-contract](./ingestion-contract/README.md) and
 [trace-schema.md](./trace-schema.md).
 
+Ingest also resolves the name to the project's prompt and stores its id in `span.prompt_id` (`0057`).
+`SpanBatchWriter` collects the distinct names of one batch and asks `ingest/PromptLinkIds` once, before
+the batch transaction, so a linked span adds no read of its own. `PromptLinkIds` keeps found names for
+60 seconds in a bounded in-process map (10,000 entries) and reads the rest in one statement. A name that
+names no prompt is not cached, so a prompt created after its first linked span is linked from the next
+batch on. Ingest sits below the prompt feature, so a prompt write cannot evict this map: a prompt deleted
+and created again under its name keeps the old id on new spans for up to 60 seconds. The id has no foreign
+key, and the text columns stay, so a link to a deleted prompt still shows its name.
+
 `GET .../traces` and the two `GET .../sessions` routes take `promptName` and `promptVersion` (ignored
 without `promptName`); the Traces page's facet keys are `prompt` and `prompt_version`.
 

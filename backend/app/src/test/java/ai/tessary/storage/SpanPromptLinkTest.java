@@ -2,11 +2,14 @@
 package ai.tessary.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.KindNormalizer;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.substrate.v2.SpanBatchWriter;
+import ai.tessary.promptlib.PromptService;
+import ai.tessary.promptlib.PromptType;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
@@ -20,10 +23,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 /**
  * The span's prompt link through the real schema: the upsert stores it, a later write replaces it as every other
- * producer field is replaced, the fixture copy keeps it, and ingest writes it from the span's attributes.
+ * producer field is replaced, the fixture copy keeps it, and ingest writes it from the span's attributes and resolves
+ * the name to the project's prompt id.
  */
 @SpringBootTest
-record SpanPromptLinkTest(SubstrateV2Fixtures fx, SpanRepository spans, SpanBatchWriter writer, TenantService tenants) {
+record SpanPromptLinkTest(
+        SubstrateV2Fixtures fx,
+        SpanRepository spans,
+        SpanBatchWriter writer,
+        TenantService tenants,
+        PromptService prompts) {
 
     private static final Instant T0 = Instant.parse("2026-10-01T12:00:00Z");
 
@@ -88,6 +97,82 @@ record SpanPromptLinkTest(SubstrateV2Fixtures fx, SpanRepository spans, SpanBatc
                 pid, List.of(llm("tr-prompt-long", "sp-long", Map.of(GenAiAttributes.PROMPT_NAME, new String(name)))));
 
         assertEquals(new Link(null, null), link(pid, "tr-prompt-long", "sp-long"));
+    }
+
+    @Test
+    void upsertStoresAndReadsThePromptId() {
+        // Bug: the upsert drops prompt_id, or the read maps it from the wrong column.
+        String pid = project("span-prompt-id-store");
+        SpanRow row = SubstrateV2Fixtures.copyOf(fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), T0))
+                .prompt("p", "1")
+                .promptId("prompt-1")
+                .build();
+        spans.upsertAll(List.of(row));
+
+        assertEquals("prompt-1", promptId(pid, row.traceId(), row.id()));
+    }
+
+    @Test
+    void ingestStoresTheIdOfTheManagedPromptTheSpanNames() {
+        // Bug: ingest keeps only the producer's text, so a link cannot be told from a link to an older prompt of the
+        // same name that was deleted and created again.
+        var fix = TenantFixture.bootstrap(tenants, "span-prompt-id-ingest");
+        String pid = fix.project().id();
+        String promptId = createPrompt(pid, fix.user().id(), "summarize");
+        writer.write(
+                pid,
+                List.of(
+                        llm("tr-prompt-id", "sp-a", Map.of(GenAiAttributes.PROMPT_NAME, "summarize")),
+                        llm("tr-prompt-id", "sp-b", Map.of(GenAiAttributes.PROMPT_NAME, "summarize"))));
+
+        assertEquals(promptId, promptId(pid, "tr-prompt-id", "sp-a"));
+        assertEquals(promptId, promptId(pid, "tr-prompt-id", "sp-b"));
+    }
+
+    @Test
+    void ingestKeepsTheTextOfAnUnknownPromptWithNoId() {
+        // Bug: a link to a prompt this project does not have drops the text, so a link to a deleted prompt vanishes.
+        String pid = project("span-prompt-id-unknown");
+        writer.write(
+                pid,
+                List.of(llm(
+                        "tr-prompt-unknown",
+                        "sp-unknown",
+                        Map.of(GenAiAttributes.PROMPT_NAME, "gone", GenAiAttributes.PROMPT_VERSION, "3"))));
+
+        assertEquals(new Link("gone", "3"), link(pid, "tr-prompt-unknown", "sp-unknown"));
+        assertNull(promptId(pid, "tr-prompt-unknown", "sp-unknown"));
+    }
+
+    @Test
+    void aPromptOfAnotherProjectIsNotLinked() {
+        // Bug: the lookup is not keyed on the project, so a span is linked to another tenant's prompt of that name.
+        var other = TenantFixture.bootstrap(tenants, "span-prompt-id-other");
+        createPrompt(other.project().id(), other.user().id(), "shared-name");
+        String pid = project("span-prompt-id-mine");
+        writer.write(
+                pid, List.of(llm("tr-prompt-other", "sp-other", Map.of(GenAiAttributes.PROMPT_NAME, "shared-name"))));
+
+        assertNull(promptId(pid, "tr-prompt-other", "sp-other"));
+    }
+
+    private String createPrompt(String pid, String principalId, String name) {
+        return prompts.create(
+                        pid,
+                        principalId,
+                        PromptService.CreateVia.API,
+                        new PromptService.CreatePromptCommand(
+                                name, PromptType.TEXT, "hello", null, List.of(), List.of(), null))
+                .prompt()
+                .id();
+    }
+
+    private @Nullable String promptId(String pid, String traceId, String spanId) {
+        return spans.listByTrace(pid, traceId).stream()
+                .filter(s -> s.id().equals(spanId))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("span " + spanId + " was not written"))
+                .promptId();
     }
 
     private String project(String slug) {

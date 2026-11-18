@@ -160,6 +160,7 @@ public final class SubstrateV2Fixtures {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -337,6 +338,7 @@ public final class SubstrateV2Fixtures {
         private @Nullable String outputPreview;
         private @Nullable String promptName;
         private @Nullable String promptVersion;
+        private @Nullable String promptId;
 
         private SpanRowCopy(SpanRow row) {
             this.row = row;
@@ -358,11 +360,17 @@ public final class SubstrateV2Fixtures {
             this.outputPreview = row.outputPreview();
             this.promptName = row.promptName();
             this.promptVersion = row.promptVersion();
+            this.promptId = row.promptId();
         }
 
         public SpanRowCopy prompt(@Nullable String promptName, @Nullable String promptVersion) {
             this.promptName = promptName;
             this.promptVersion = promptVersion;
+            return this;
+        }
+
+        public SpanRowCopy promptId(@Nullable String promptId) {
+            this.promptId = promptId;
             return this;
         }
 
@@ -460,7 +468,8 @@ public final class SubstrateV2Fixtures {
                     null,
                     null,
                     promptName,
-                    promptVersion);
+                    promptVersion,
+                    promptId);
         }
     }
 
@@ -1011,7 +1020,8 @@ public final class SubstrateV2Fixtures {
                     null,
                     null,
                     promptName,
-                    promptVersion);
+                    promptVersion,
+                    null);
         }
 
         public SpanRef writeRef() {

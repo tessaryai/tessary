@@ -12,6 +12,7 @@ import ai.tessary.ingest.CallSiteRegistry;
 import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.KindNormalizer;
 import ai.tessary.ingest.MediaExternalizer;
+import ai.tessary.ingest.PromptLinkIds;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.storage.MediaRefRepository;
 import ai.tessary.storage.RetrievedDocRepository;
@@ -102,6 +103,9 @@ class SpanBatchWriterIntegrationTest {
 
     @Autowired
     SpanLateness lateness;
+
+    @Autowired
+    PromptLinkIds promptLinks;
 
     @Autowired
     ObjectMapper mapper;
@@ -347,6 +351,7 @@ class SpanBatchWriterIntegrationTest {
                 mediaRefs,
                 callSites,
                 own,
+                promptLinks,
                 mapper,
                 transactionManager);
 
@@ -622,6 +627,7 @@ class SpanBatchWriterIntegrationTest {
                 mediaRefs,
                 callSites,
                 lateness,
+                promptLinks,
                 mapper,
                 transactionManager);
     }
