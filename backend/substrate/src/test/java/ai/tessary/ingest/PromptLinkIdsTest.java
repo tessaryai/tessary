@@ -103,16 +103,31 @@ class PromptLinkIdsTest {
     }
 
     @Test
-    void anUnknownNameIsAskedAgainSoAPromptCreatedLaterLinks() {
-        // Bug: a miss is remembered, so spans of a prompt created after its first linked span stay unlinked.
+    void anUnknownNameIsNotAskedAgainWithinTheMissTtl() {
+        // Bug: a name that names no prompt, such as one kept in another prompt tool, costs a read on every batch.
         FakeLookup lookup = new FakeLookup();
-        PromptLinkIds ids = new PromptLinkIds(lookup, new MutableClock());
+        MutableClock clock = new MutableClock();
+        PromptLinkIds ids = new PromptLinkIds(lookup, clock);
+        ids.resolve("p1", Set.of("a"));
+        clock.now = T0.plus(PromptLinkIds.MISS_TTL).minusSeconds(1);
+
+        assertEquals(Map.of(), ids.resolve("p1", Set.of("a")));
+        assertEquals(List.of("p1 [a]"), lookup.calls);
+    }
+
+    @Test
+    void anUnknownNameIsAskedAgainAtTheMissTtlSoAPromptCreatedLaterLinks() {
+        // Bug: a miss is remembered for good, or for the full TTL, so a prompt created after its first linked span
+        // stays unlinked for longer than the miss TTL.
+        FakeLookup lookup = new FakeLookup();
+        MutableClock clock = new MutableClock();
+        PromptLinkIds ids = new PromptLinkIds(lookup, clock);
         ids.resolve("p1", Set.of("a"));
         lookup.with("p1", "a", "id-a");
+        clock.now = T0.plus(PromptLinkIds.MISS_TTL);
 
-        Map<String, String> resolved = ids.resolve("p1", Set.of("a"));
-
-        assertEquals(Map.of("a", "id-a"), resolved);
+        assertEquals(Map.of("a", "id-a"), ids.resolve("p1", Set.of("a")));
+        assertEquals(List.of("p1 [a]", "p1 [a]"), lookup.calls);
     }
 
     @Test

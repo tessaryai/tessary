@@ -183,8 +183,10 @@ Ingest also resolves the name to the project's prompt and stores its id in `span
 `SpanBatchWriter` collects the distinct names of one batch and asks `ingest/PromptLinkIds` once, before
 the batch transaction, so a linked span adds no read of its own. `PromptLinkIds` keeps found names for
 60 seconds in a bounded in-process map (10,000 entries) and reads the rest in one statement. A name that
-names no prompt is not cached, so a prompt created after its first linked span is linked from the next
-batch on. Ingest sits below the prompt feature, so a prompt write cannot evict this map: a prompt deleted
+names no prompt, such as one kept in another prompt tool, is kept as a miss for 10 seconds, so it costs
+one read per name in that time, not one per batch, and a prompt created after its first linked span is
+linked within 10 seconds. The lookup runs before the batch transaction, and if it fails the batch
+write fails with it. Ingest sits below the prompt feature, so a prompt write cannot evict this map: a prompt deleted
 and created again under its name keeps the old id on new spans for up to 60 seconds. The id has no foreign
 key, and the text columns stay, so a link to a deleted prompt still shows its name.
 
