@@ -1,55 +1,137 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { PromptBody, PromptConfig, PromptType } from "../../api/types";
+import type { PromptBody, PromptChatBody, PromptConfig, PromptType } from "../../api/types";
+import { isPlaceholder } from "./promptCompile";
 
 export type DiffOp = { kind: "same" | "added" | "removed"; text: string };
 
-/** Above this many tokens on either side the diff is the two whole sides: the LCS table is quadratic. */
-export const DIFF_TOKEN_CAP = 4000;
+/**
+ * The most edits one diff pass looks for. Past it the pass gives the two sides whole: time grows with the input
+ * length times the edits found, and a block that changed this much reads better whole anyway.
+ */
+const MAX_EDITS = 1000;
+
+type Edit<T> = { kind: DiffOp["kind"]; item: T };
+
+/**
+ * The shortest edit script from `a` to `b` (Myers, "An O(ND) difference algorithm"), removals before additions in a
+ * change, or null when it needs more than `MAX_EDITS` edits. The common prefix and suffix are cut first, so a long
+ * text with one edit costs a linear scan.
+ */
+function editScript<T>(a: T[], b: T[]): Edit<T>[] | null {
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start++;
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--;
+    endB--;
+  }
+  const middle = shortestEdits(a.slice(start, endA), b.slice(start, endB));
+  if (middle === null) return null;
+  const same = (items: T[]) => items.map((item) => ({ kind: "same" as const, item }));
+  return [...same(a.slice(0, start)), ...middle, ...same(a.slice(endA))];
+}
+
+function shortestEdits<T>(a: T[], b: T[]): Edit<T>[] | null {
+  const n = a.length;
+  const m = b.length;
+  const limit = Math.min(n + m, MAX_EDITS);
+  const offset = limit + 1;
+  // v[offset + k] is the furthest x reached on diagonal k = x - y.
+  const v = new Int32Array(2 * limit + 3);
+  // trace[d][k + d] is v after d edits, kept only for the diagonals d edits can reach.
+  const trace: Int32Array[] = [];
+  let found = -1;
+  for (let d = 0; d <= limit && found < 0; d++) {
+    for (let k = -d; k <= d; k += 2) {
+      const down = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1]);
+      let x = down ? v[offset + k + 1] : v[offset + k - 1] + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+      v[offset + k] = x;
+      if (x >= n && y >= m) found = d;
+    }
+    trace.push(v.slice(offset - d, offset + d + 1));
+  }
+  if (found < 0) return null;
+
+  const out: Edit<T>[] = [];
+  let x = n;
+  let y = m;
+  for (let d = found; d > 0; d--) {
+    const prev = trace[d - 1];
+    const at = (k: number) => prev[k + d - 1];
+    const k = x - y;
+    const down = k === -d || (k !== d && at(k - 1) < at(k + 1));
+    const prevK = down ? k + 1 : k - 1;
+    const prevX = at(prevK);
+    const prevY = prevX - prevK;
+    while (x > prevX && y > prevY) {
+      out.push({ kind: "same", item: a[--x] });
+      y--;
+    }
+    if (down) out.push({ kind: "added", item: b[--y] });
+    else out.push({ kind: "removed", item: a[--x] });
+  }
+  while (x > 0 && y > 0) {
+    out.push({ kind: "same", item: a[--x] });
+    y--;
+  }
+  return out.reverse();
+}
 
 export function tokenize(text: string): string[] {
   return text.split(/(\s+)/).filter(Boolean);
 }
 
-export function wordDiff(a: string, b: string): DiffOp[] {
-  const x = tokenize(a);
-  const y = tokenize(b);
-  if (x.length > DIFF_TOKEN_CAP || y.length > DIFF_TOKEN_CAP) {
-    return [
-      { kind: "removed", text: a },
-      { kind: "added", text: b },
-    ];
-  }
-  const n = x.length;
-  const m = y.length;
-  const w = m + 1;
-  // lcs[i * w + j] is the LCS length of x[i..] and y[j..].
-  const lcs = new Uint32Array((n + 1) * w);
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      lcs[i * w + j] = x[i] === y[j] ? lcs[(i + 1) * w + j + 1] + 1 : Math.max(lcs[(i + 1) * w + j], lcs[i * w + j + 1]);
-    }
-  }
+/** Lines with their line break kept, so joining them gives the text back. */
+function splitLines(text: string): string[] {
+  return text.split(/(?<=\n)/).filter(Boolean);
+}
+
+function opList() {
   const ops: DiffOp[] = [];
   const push = (kind: DiffOp["kind"], text: string) => {
+    if (!text) return;
     const prev = ops[ops.length - 1];
     if (prev?.kind === kind) prev.text += text;
     else ops.push({ kind, text });
   };
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (x[i] === y[j]) {
-      push("same", x[i]);
-      i++;
-      j++;
-    } else if (lcs[(i + 1) * w + j] >= lcs[i * w + j + 1]) {
-      push("removed", x[i++]);
-    } else {
-      push("added", y[j++]);
+  return { ops, push };
+}
+
+/** Removed words on the left of a change, added words on the right: lines first, then words inside each changed block. */
+export function wordDiff(a: string, b: string): DiffOp[] {
+  const { ops, push } = opList();
+  const changeBlock = (removed: string, added: string) => {
+    const words = removed && added ? editScript(tokenize(removed), tokenize(added)) : null;
+    if (words === null) {
+      push("removed", removed);
+      push("added", added);
+      return;
+    }
+    for (const w of words) push(w.kind, w.item);
+  };
+  const lines = editScript(splitLines(a), splitLines(b));
+  if (lines === null) {
+    changeBlock(a, b);
+    return ops;
+  }
+  let removed = "";
+  let added = "";
+  for (const line of lines) {
+    if (line.kind === "removed") removed += line.item;
+    else if (line.kind === "added") added += line.item;
+    else {
+      changeBlock(removed, added);
+      removed = added = "";
+      push("same", line.item);
     }
   }
-  while (i < n) push("removed", x[i++]);
-  while (j < m) push("added", y[j++]);
+  changeBlock(removed, added);
   return ops;
 }
 
@@ -73,4 +155,75 @@ export function diffBody(type: PromptType, a: PromptBody, b: PromptBody): DiffOp
 
 export function diffConfig(a: PromptConfig, b: PromptConfig): DiffOp[] {
   return wordDiff(canonicalJson(a), canonicalJson(b));
+}
+
+type ChatEntry = PromptChatBody[number];
+
+/** One message or placeholder in a compare; a `changed` row pairs an edited message with a word diff of its content. */
+export type ChatRow =
+  | { kind: "same"; left: ChatEntry; right: ChatEntry }
+  | { kind: "changed"; left: ChatEntry; right: ChatEntry; ops: DiffOp[] }
+  | { kind: "removed"; left: ChatEntry }
+  | { kind: "added"; right: ChatEntry };
+
+/**
+ * Messages are matched whole first, so one inserted message does not shift the rest into the change. Inside each run of
+ * changes, removed and added messages pair up in order; a pair of two messages is one changed row.
+ */
+export function diffChat(a: PromptChatBody, b: PromptChatBody): ChatRow[] {
+  const keys = (body: PromptChatBody) => body.map((e) => canonicalJson(e));
+  const ka = keys(a);
+  const kb = keys(b);
+  const script = editScript(ka, kb) ?? [
+    ...ka.map((item) => ({ kind: "removed" as const, item })),
+    ...kb.map((item) => ({ kind: "added" as const, item })),
+  ];
+  const rows: ChatRow[] = [];
+  let i = 0;
+  let j = 0;
+  let removed: ChatEntry[] = [];
+  let added: ChatEntry[] = [];
+  const flush = () => {
+    for (let p = 0; p < Math.max(removed.length, added.length); p++) {
+      const left = removed[p];
+      const right = added[p];
+      if (left && right && !isPlaceholder(left) && !isPlaceholder(right)) {
+        rows.push({ kind: "changed", left, right, ops: wordDiff(left.content, right.content) });
+      } else {
+        if (left) rows.push({ kind: "removed", left });
+        if (right) rows.push({ kind: "added", right });
+      }
+    }
+    removed = [];
+    added = [];
+  };
+  for (const step of script) {
+    if (step.kind === "removed") removed.push(a[i++]);
+    else if (step.kind === "added") added.push(b[j++]);
+    else {
+      flush();
+      rows.push({ kind: "same", left: a[i++], right: b[j++] });
+    }
+  }
+  flush();
+  return rows;
+}
+
+export type ConfigRow =
+  | { key: string; kind: "same"; left: string; right: string }
+  | { key: string; kind: "changed"; left: string; right: string; ops: DiffOp[] }
+  | { key: string; kind: "removed"; left: string }
+  | { key: string; kind: "added"; right: string };
+
+/** One row per top-level key, in the old config's order with new keys last; values compare as canonical JSON. */
+export function diffConfigKeys(a: PromptConfig, b: PromptConfig): ConfigRow[] {
+  const keys = [...Object.keys(a), ...Object.keys(b).filter((k) => !(k in a))];
+  return keys.map((key): ConfigRow => {
+    const left = key in a ? canonicalJson(a[key]) : null;
+    const right = key in b ? canonicalJson(b[key]) : null;
+    if (left === null) return { key, kind: "added", right: right as string };
+    if (right === null) return { key, kind: "removed", left };
+    if (left === right) return { key, kind: "same", left, right };
+    return { key, kind: "changed", left, right, ops: wordDiff(left, right) };
+  });
 }
