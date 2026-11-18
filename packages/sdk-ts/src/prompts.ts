@@ -36,7 +36,7 @@ export interface PromptInit<P> {
 // The one variable syntax: any trimmed, non-blank text with no brace between double braces. The
 // backend, the frontend, and the Python SDK hold the same literal, and a repo gate compares the
 // copies. The name starts and ends on a non-space so a long unclosed {{ scans in linear time.
-export const VARIABLE_PATTERN = /\{\{\s*([^{}\s](?:[^{}]*[^{}\s])?)\s*\}\}/g;
+export const VARIABLE_PATTERN = /\{\{\s*([^{}\s][^{}]*[^{}\s]|[^{}\s])\s*\}\}/g;
 
 function own(record: Record<string, unknown>, key: string): unknown {
   return Object.hasOwn(record, key) ? record[key] : undefined;

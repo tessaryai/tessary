@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 # The one variable syntax: any trimmed, non-blank text with no brace between double braces. The
 # backend, the frontend, and the TypeScript SDK hold the same literal, and a repo gate compares the
 # copies. The name starts and ends on a non-space so a long unclosed {{ scans in linear time.
-VARIABLE_PATTERN = re.compile(r"\{\{\s*([^{}\s](?:[^{}]*[^{}\s])?)\s*\}\}")
+VARIABLE_PATTERN = re.compile(r"\{\{\s*([^{}\s][^{}]*[^{}\s]|[^{}\s])\s*\}\}")
 
 
 def _render(template: str, variables: dict[str, Any]) -> str:

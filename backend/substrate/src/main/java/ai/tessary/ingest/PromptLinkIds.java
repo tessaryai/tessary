@@ -57,10 +57,14 @@ public class PromptLinkIds {
     PromptLinkIds(Lookup lookup, Clock clock, int maxEntries) {
         this.lookup = lookup;
         this.clock = clock;
-        this.entries = new LinkedHashMap<>(Math.min(maxEntries, 256), 0.75f, true) {
+        this.entries = boundedLru(maxEntries);
+    }
+
+    private static Map<Key, Cached> boundedLru(int max) {
+        return new LinkedHashMap<>(Math.min(max, 256), 0.75f, true) {
             @Override
             protected boolean removeEldestEntry(Map.Entry<Key, Cached> eldest) {
-                return size() > maxEntries;
+                return size() > max;
             }
         };
     }

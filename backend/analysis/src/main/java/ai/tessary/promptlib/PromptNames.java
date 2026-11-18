@@ -25,7 +25,7 @@ public final class PromptNames {
 
     public static final Pattern LABEL = Pattern.compile("^[a-z0-9_.-]{1,36}$");
     public static final Pattern TAG = Pattern.compile("^\\S{1,64}$", Pattern.UNICODE_CHARACTER_CLASS);
-    public static final Pattern VARIABLE = Pattern.compile("\\{\\{\\s*([^{}\\s](?:[^{}]*[^{}\\s])?)\\s*\\}\\}");
+    public static final Pattern VARIABLE = Pattern.compile("\\{\\{\\s*([^{}\\s][^{}]*[^{}\\s]|[^{}\\s])\\s*\\}\\}");
     public static final Pattern PLACEHOLDER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
 
     public static final String LATEST = "latest";

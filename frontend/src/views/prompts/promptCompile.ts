@@ -6,7 +6,7 @@ import type { PromptBody, PromptChatBody, PromptChatMessage, PromptPlaceholder }
  * carry the same pattern; a parity gate compares the four. The name starts and ends on a non-space so a long unclosed
  * {{ scans in linear time.
  */
-export const VARIABLE_PATTERN = /\{\{\s*([^{}\s](?:[^{}]*[^{}\s])?)\s*\}\}/g;
+export const VARIABLE_PATTERN = /\{\{\s*([^{}\s][^{}]*[^{}\s]|[^{}\s])\s*\}\}/g;
 export const PLACEHOLDER_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export type BodyToken = { kind: "text"; text: string } | { kind: "variable"; text: string; name: string };
