@@ -79,6 +79,8 @@ import {
   type PlaygroundRunRequest,
   type PlaygroundRunView,
   type PromptDetail,
+  type PromptFacets,
+  type PromptLevel,
   type PromptPage,
   type PromptType,
   type PromptUsage,
@@ -349,6 +351,15 @@ export type TraceFilterParams = {
   promptName?: string;
   /** Sent only with promptName; the server ignores it alone. */
   promptVersion?: string;
+};
+
+/** One folder level: `folder` absent is the root; `label` and `tag` narrow the folders and the prompts. */
+export type PromptLevelParams = {
+  folder?: string;
+  label?: string;
+  tag?: string;
+  page?: number;
+  limit?: number;
 };
 
 /** `name` is an exact match (at most one item); `folder` keeps the names under that prefix. */
@@ -623,11 +634,17 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     // Prompts. Routes take the prompt id, so a name with a / never meets a path segment.
     listPrompts: (params?: PromptListParams) => http<PromptPage>(withQuery(`${base}/prompts`, params)),
     /** Every prompt name with at least one call in the window; the list page joins it by name. */
+    /** The child folders of one folder, each with its prompt count, and a page of the prompts directly in it, by name. */
+    listPromptLevel: (params?: PromptLevelParams) => http<PromptLevel>(withQuery(`${base}/prompts/level`, params)),
+    /** Every deployment label and tag in the project, for the list's filter pickers. */
+    getPromptFacets: () => http<PromptFacets>(`${base}/prompts/facets`),
     getPromptUsageSummary: (days?: number) =>
       http<PromptUsageSummary>(withQuery(`${base}/prompts/usage/summary`, { days })),
     /** 409 PROMPTS.NAME_EXISTS when the name is taken. */
     createPrompt: (body: CreatePromptRequest) => send<PromptDetail>("POST", `${base}/prompts`, body),
-    getPrompt: (id: string) => http<PromptDetail>(`${base}/prompts/${enc(id)}`),
+    /** `limit` versions newest first (the server's default is 100); `beforeVersion` pages to older ones. */
+    getPrompt: (id: string, page?: { limit?: number; beforeVersion?: number }) =>
+      http<PromptDetail>(withQuery(`${base}/prompts/${enc(id)}`, page)),
     updatePromptTags: (id: string, tags: string[]) =>
       send<PromptDetail>("PATCH", `${base}/prompts/${enc(id)}`, { tags }),
     deletePrompt: (id: string) => send<DeleteResponse>("DELETE", `${base}/prompts/${enc(id)}`),

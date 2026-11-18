@@ -100,6 +100,11 @@
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/prompts"
   },
   {
+    "path": "prompts/new",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/prompts/new"
+  },
+  {
     "path": "prompts/:promptId",
     "kind": "view",
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/prompts/:promptId"

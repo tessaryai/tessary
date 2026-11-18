@@ -22,3 +22,7 @@ export { PageHeader, PageBody, Section } from "./Page";
 export { ConceptPopover } from "./ConceptPopover";
 export { Toggle } from "./Toggle";
 export { SegmentedControl } from "./SegmentedControl";
+export { ActionMenu } from "./ActionMenu";
+export type { ActionMenuItem } from "./ActionMenu";
+export { TabNav } from "./Tabs";
+export type { TabItem } from "./Tabs";

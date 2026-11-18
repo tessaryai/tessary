@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Creating a prompt. The client copies the server's rules so the reader learns what is wrong before anything is sent.
- * The bugs worth catching are a request the server refuses sent anyway, a field missing from or added to the
- * request, a taken name that only says "conflict", and a created prompt that leaves the reader on the list.
+ * The New prompt screen. The client copies the server's rules so the reader learns what is wrong before anything is
+ * sent. The bugs worth catching are a request the server refuses sent anyway, a name the server accepts refused here,
+ * a field missing from or added to the request, a taken name that only says "conflict", a created prompt that leaves
+ * the reader on the form, and a screen opened from a folder that forgets it.
  */
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -11,18 +12,17 @@ import { api } from "../../test/api";
 import { promptDetail, promptSummary } from "../../test/fixtures";
 import { promptReadsStale, seedPromptReads } from "../../test/promptReads";
 import { currentLocation, renderRoute } from "../../test/render";
-import { NewPromptModal } from "./NewPromptModal";
+import { NewPromptPage } from "./NewPromptPage";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
-function renderModal() {
-  const onClose = vi.fn();
-  const { queryClient } = renderRoute(<NewPromptModal onClose={onClose} />, {
-    route: "/orgs/acme/projects/default/prompts",
+function renderModal(search = "") {
+  const { queryClient } = renderRoute(<NewPromptPage />, {
+    route: `/orgs/acme/projects/default/prompts/new${search}`,
     parent: "/orgs/:orgSlug/projects/:projectSlug",
-    path: "prompts",
+    path: "prompts/new",
   });
-  return { onClose, queryClient };
+  return { queryClient };
 }
 
 const type = (name: string, value: string) => fireEvent.change(screen.getByRole("textbox", { name }), { target: { value } });
@@ -41,8 +41,9 @@ describe("validation", () => {
   it.each([
     ["an empty name", () => type("Name", ""), "Enter a name."],
     ["a name over 255 characters", () => type("Name", "a".repeat(256)), "Use at most 255 characters."],
-    ["a name with a space", () => type("Name", "support greeting"), "A name cannot contain spaces or |."],
-    ["a name with a pipe", () => type("Name", "a|b"), "A name cannot contain spaces or |."],
+    ["a blank name", () => type("Name", "   "), "Enter a name."],
+    ["a name with a pipe", () => type("Name", "a|b"), "A name cannot contain |."],
+    ["a name with an HTML tag", () => type("Name", "a<b>c"), "A name cannot contain an HTML tag."],
     ["a leading /", () => type("Name", "/a"), "Folders are separated by one /, with a name on both sides."],
     ["a trailing /", () => type("Name", "a/"), "Folders are separated by one /, with a name on both sides."],
     ["a double /", () => type("Name", "a//b"), "Folders are separated by one /, with a name on both sides."],
@@ -186,12 +187,34 @@ describe("creating", () => {
     expect(api.listPrompts).not.toHaveBeenCalled();
   });
 
-  it("closes on Cancel without sending", () => {
-    const { onClose } = renderModal();
+  // Bug: the form refuses a name the API accepts. Another prompt tool allows inner spaces, so an imported name has them.
+  it("accepts a name with a space and sends it trimmed", async () => {
+    api.createPrompt.mockResolvedValue(promptDetail());
+    renderModal();
+    type("Name", "  Support Agent/first reply  ");
+    type("Prompt text", "Hi");
+
+    create();
+
+    await waitFor(() => expect(api.createPrompt).toHaveBeenCalledWith(expect.objectContaining({ name: "Support Agent/first reply" })));
+  });
+
+  // Bug: the screen opened from a folder makes the reader type the folder again, and Cancel loses the folder.
+  it("starts the name in the folder it was opened from, and Cancel returns there without sending", async () => {
+    renderModal("?folder=support");
+
+    expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("support/");
+    click("Cancel");
+
+    await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default/prompts?folder=support"));
+    expect(api.createPrompt).not.toHaveBeenCalled();
+  });
+
+  it("returns to the list root on Cancel when opened there", async () => {
+    renderModal();
 
     click("Cancel");
 
-    expect(onClose).toHaveBeenCalled();
-    expect(api.createPrompt).not.toHaveBeenCalled();
+    await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default/prompts"));
   });
 });

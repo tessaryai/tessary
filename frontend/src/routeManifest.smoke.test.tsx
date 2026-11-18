@@ -270,7 +270,7 @@ const EMPTY_MODEL_SETTINGS = { groups: [] as unknown[], lanes: [] as unknown[], 
 const EMPTY_REDACTION_RULES = { rules: [] as unknown[] };
 const EMPTY_SESSION_SPANS = { spans: [] as unknown[], spans_truncated: false };
 const EMPTY_CHART_SCOPES = { days: 28, call_sites: [] as unknown[], tools: [] as unknown[], classifiers: [] as unknown[] };
-const EMPTY_PROMPT_PAGE = { items: [] as unknown[], page: 1, limit: 200, total: 0 };
+const EMPTY_PROMPT_LEVEL = { folder: null, folders: [] as unknown[], items: [] as unknown[], page: 1, limit: 50, total: 0 };
 const EMPTY_PROMPT_USAGE_SUMMARY = { days: 7, items: [] as unknown[] };
 
 /**
@@ -341,9 +341,12 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     queryMetrics: () => Promise.resolve(EMPTY_METRICS_RESULT),
   },
   prompts: {
-    listPrompts: () => Promise.resolve(EMPTY_PROMPT_PAGE),
+    listPromptLevel: () => Promise.resolve(EMPTY_PROMPT_LEVEL),
+    getPromptFacets: () => Promise.resolve({ labels: [], tags: [] }),
     getPromptUsageSummary: () => Promise.resolve(EMPTY_PROMPT_USAGE_SUMMARY),
   },
+  // The create form reads nothing until it is sent.
+  "prompts/new": {},
   // Every read below the prompt waits for it, so the not-found path fires no other.
   "prompts/:promptId": {
     getPrompt: NOT_FOUND("prompt"),
@@ -959,16 +962,16 @@ describe("route manifest render smoke test", () => {
 
   // Bug: the Prompts page reachable by URL while prompt management is off, where every one of its reads is refused.
   it("does not open the prompts page while prompt management is off", async () => {
-    const listPrompts = vi.fn(() => Promise.resolve(EMPTY_PROMPT_PAGE));
+    const listPromptLevel = vi.fn(() => Promise.resolve(EMPTY_PROMPT_LEVEL));
     vi.mocked(mockedAuth.getCapabilities).mockResolvedValueOnce({
       capabilities: { ...OPEN_EDITION_CAPABILITIES, prompt_management_enabled: false },
     });
-    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...VIEW_OVERRIDES.prompts, listPrompts };
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...VIEW_OVERRIDES.prompts, listPromptLevel };
 
     const container = await mountAndSettle(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/prompts"));
 
     within(container).getByRole("heading", { level: 1, name: "Triage" });
-    expect(listPrompts).not.toHaveBeenCalled();
+    expect(listPromptLevel).not.toHaveBeenCalled();
   });
 });
 

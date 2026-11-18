@@ -62,6 +62,7 @@ const FindingPage = named(() => import("./views/classifiers/FindingPage"), "Find
 const MetricsPage = named(() => import("./views/metrics/MetricsPage"), "MetricsPage", "metrics");
 const PromptsPage = named(() => import("./views/prompts/PromptsPage"), "PromptsPage", "prompts");
 const PromptDetailPage = named(() => import("./views/prompts/PromptDetailPage"), "PromptDetailPage");
+const NewPromptPage = named(() => import("./views/prompts/NewPromptPage"), "NewPromptPage");
 
 const Sources = named(() => import("./views/Sources"), "Sources");
 const Concepts = named(() => import("./views/Concepts"), "Concepts");
@@ -223,6 +224,10 @@ function ProjectShell() {
         <Route
           path="prompts"
           element={<CapabilityGate capability="prompt_management_enabled"><PromptsPage /></CapabilityGate>}
+        />
+        <Route
+          path="prompts/new"
+          element={<CapabilityGate capability="prompt_management_enabled"><NewPromptPage /></CapabilityGate>}
         />
         <Route
           path="prompts/:promptId"

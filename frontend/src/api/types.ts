@@ -393,6 +393,11 @@ export type PromptConfig = Record<string, unknown>;
 export type LabelRef = S["LabelRef"];
 export type PromptSummary = S["PromptSummary"];
 export type PromptPage = S["PromptPage"];
+/** `name` is the folder's last segment, `path` the whole path. */
+export type FolderSummary = S["FolderSummary"];
+/** `folders` is every child folder on every page; `items` and `total` are the prompts directly in the folder. */
+export type PromptLevel = S["PromptLevel"];
+export type PromptFacets = S["PromptFacets"];
 /** `labels` includes `latest` on the highest version. */
 export type VersionSummary = S["VersionSummary"];
 /** `versions` is newest first. */
