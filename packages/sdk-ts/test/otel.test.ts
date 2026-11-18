@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Automatic linking through OpenTelemetry context, on real tracer providers: the newest SDK and the
-// last release of the 1.x line, whose processor interface has no onEnding.
+// Automatic linking through OpenTelemetry context, on real tracer providers: @opentelemetry/sdk-trace
+// 2.12.0, the newest release that accepts @opentelemetry/api 1.9, and sdk-trace-base 1.30.1, the last
+// 1.x release, whose processor interface has no onEnding. The 3.x line needs api 1.10, which those two
+// refuse, so one install cannot hold all three.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { after, before, test } from "node:test";
@@ -131,7 +133,7 @@ test("processor works on a real tracer provider", async () => {
 });
 
 test("processor works on the oldest supported tracer provider", async () => {
-  // Bug: a processor method or signature that only the newest SDK accepts breaks users on an older SDK.
+  // Bug: a processor method or signature that only a newer SDK accepts breaks users on the 1.x line.
   const exporter = new oldest.InMemorySpanExporter();
   const provider = new oldest.BasicTracerProvider();
   provider.addSpanProcessor(new PromptLinkSpanProcessor());

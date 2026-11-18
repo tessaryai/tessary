@@ -253,8 +253,11 @@ optional peer `@opentelemetry/api`).
 - `PromptLinkSpanProcessor` copies that value onto each span at start, from the parent context the SDK
   passes (or the current one when Python's SDK passes `None`). It is duck-typed to the SDK's processor
   (`_on_ending` included, which newer Python SDKs call), so a user adds it with
-  `add_span_processor` or `spanProcessors`. The gates run it on the newest SDK and the oldest supported
-  one (Python `opentelemetry-sdk` 1.20.0; TypeScript `@opentelemetry/sdk-trace-base` 1.30.1).
+  `add_span_processor` or `spanProcessors`. The gates run it on two SDK versions: Python
+  `opentelemetry-sdk` at the newest locked release and at 1.20.0, the `otel` extra's floor; TypeScript
+  `@opentelemetry/sdk-trace` 2.12.0 and `@opentelemetry/sdk-trace-base` 1.30.1. The TypeScript 3.x line
+  needs `@opentelemetry/api` 1.10, which the other two refuse, so it is not run; its multi-processor calls
+  the same methods (`onEnding` optional).
 - It stamps every span started in the block, not only model calls; usage reads `llm` spans only.
 
 Cache, in process. The key is `name|version:N` when a version is given, else
