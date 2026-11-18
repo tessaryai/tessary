@@ -124,7 +124,8 @@ record PromptControllerTest(PromptController controller, TenantService tenants, 
         controller.setLabels(me, org, proj, id, 2, new SetLabelsRequest(List.of("production")));
         controller.setLabels(me, org, proj, id, 1, new SetLabelsRequest(List.of()));
 
-        PromptDetail detail = requireNonNull(controller.get(me, org, proj, id).data());
+        PromptDetail detail =
+                requireNonNull(controller.get(me, org, proj, id, null, null).data());
         assertEquals(List.of(new LabelRef("production", 2)), detail.labels());
         assertEquals(List.of("production", "latest"), detail.versions().get(0).labels());
         assertEquals(List.of(), detail.versions().get(1).labels());
@@ -224,7 +225,7 @@ record PromptControllerTest(PromptController controller, TenantService tenants, 
         assertEquals(
                 false,
                 requireNonNull(controller.delete(me, org, proj, id).data()).deleted());
-        assertError(PromptsError.NOT_FOUND, () -> controller.get(me, org, proj, id));
+        assertError(PromptsError.NOT_FOUND, () -> controller.get(me, org, proj, id, null, null));
     }
 
     private static void assertError(ErrorCode expected, Executable call) {

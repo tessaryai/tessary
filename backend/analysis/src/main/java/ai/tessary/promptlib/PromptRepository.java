@@ -13,6 +13,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeSet;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -197,13 +199,24 @@ public class PromptRepository {
                 .optional();
     }
 
-    /** Newest first. */
-    public List<PromptVersionRow> versionsOf(String projectId, String promptId) {
-        return jdbc.sql("SELECT " + VERSION_COLS + " FROM prompt_version"
-                        + " WHERE project_id = :pid AND prompt_id = :promptId ORDER BY version DESC")
+    /** Newest first, at most {@code limit}, only numbers below {@code beforeVersion} when it is given. */
+    public List<PromptVersionSummaryRow> versionsOf(
+            String projectId, String promptId, int limit, @Nullable Integer beforeVersion) {
+        return jdbc.sql("SELECT id, version, commit_message, created_by, created_via, created_at FROM prompt_version"
+                        + " WHERE project_id = :pid AND prompt_id = :promptId"
+                        + (beforeVersion == null ? "" : " AND version < :before")
+                        + " ORDER BY version DESC LIMIT :limit")
                 .param("pid", projectId)
                 .param("promptId", promptId)
-                .query((rs, n) -> version(rs))
+                .params(beforeVersion == null ? Map.of() : Map.of("before", beforeVersion))
+                .param("limit", limit)
+                .query((rs, n) -> new PromptVersionSummaryRow(
+                        rs.getString("id"),
+                        rs.getInt("version"),
+                        rs.getString("commit_message"),
+                        rs.getString("created_by"),
+                        CreateVia.fromWire(rs.getString("created_via")),
+                        instant(rs, "created_at")))
                 .list();
     }
 
@@ -218,28 +231,58 @@ public class PromptRepository {
     }
 
     /**
-     * The version a label points at, in one statement: reading the label and then the version by number lets a promote
-     * and a delete of the old version land between the two reads.
+     * The fetch in one statement, so the version, its labels and the highest number come from one snapshot: separate
+     * reads let a label move or a delete land between them. Empty when the name is not a prompt of this project; a
+     * prompt with no version matching {@code selector} comes back with a {@code null} version.
      */
-    public Optional<PromptVersionRow> findVersionByLabel(String projectId, String promptId, String label) {
-        return jdbc.sql("SELECT v.id, v.project_id, v.prompt_id, v.version, v.body, v.config, v.commit_message,"
-                        + " v.created_by, v.created_via, v.created_at FROM prompt_label l"
-                        + " JOIN prompt_version v ON v.id = l.version_id"
-                        + " WHERE l.project_id = :pid AND l.prompt_id = :promptId AND l.label = :label")
-                .param("pid", projectId)
-                .param("promptId", promptId)
-                .param("label", label)
-                .query((rs, n) -> version(rs))
-                .optional();
-    }
-
-    /** The highest version, in one statement for the same reason as {@link #findVersionByLabel}. */
-    public Optional<PromptVersionRow> findLatestVersion(String projectId, String promptId) {
-        return jdbc.sql("SELECT " + VERSION_COLS + " FROM prompt_version"
-                        + " WHERE project_id = :pid AND prompt_id = :promptId ORDER BY version DESC LIMIT 1")
-                .param("pid", projectId)
-                .param("promptId", promptId)
-                .query((rs, n) -> version(rs))
+    public Optional<PromptResolveRow> resolve(String projectId, String name, PromptSelector selector) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("pid", projectId);
+        params.put("name", name);
+        String pick =
+                switch (selector) {
+                    case PromptSelector.Version v -> {
+                        params.put("version", v.number());
+                        yield " AND v.version = :version";
+                    }
+                    case PromptSelector.Label l -> {
+                        params.put("label", l.label());
+                        yield " AND v.id = (SELECT l.version_id FROM prompt_label l WHERE l.project_id = p.project_id"
+                                + " AND l.prompt_id = p.id AND l.label = :label)";
+                    }
+                    case PromptSelector.Latest _ -> " ORDER BY v.version DESC LIMIT 1";
+                };
+        String sql = "SELECT " + PROMPT_COLS + ", sel.id AS v_id, sel.version AS v_version, sel.body AS v_body,"
+                + " sel.config AS v_config, sel.commit_message AS v_commit_message, sel.created_by AS v_created_by,"
+                + " sel.created_via AS v_created_via, sel.created_at AS v_created_at,"
+                + " (SELECT COALESCE(array_agg(l.label), '{}') FROM prompt_label l WHERE l.version_id = sel.id)"
+                + " AS v_labels,"
+                + " (SELECT COALESCE(MAX(x.version), 0) FROM prompt_version x WHERE x.project_id = p.project_id"
+                + " AND x.prompt_id = p.id) AS max_version"
+                + " FROM prompt p LEFT JOIN LATERAL (SELECT v.* FROM prompt_version v"
+                + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id" + pick + ") sel ON true"
+                + " WHERE p.project_id = :pid AND p.name = :name";
+        return jdbc.sql(sql)
+                .params(params)
+                .query((rs, n) -> {
+                    PromptRow prompt = prompt(rs);
+                    PromptVersionRow version = rs.getString("v_id") == null
+                            ? null
+                            : new PromptVersionRow(
+                                    rs.getString("v_id"),
+                                    prompt.projectId(),
+                                    prompt.id(),
+                                    rs.getInt("v_version"),
+                                    rs.getString("v_body"),
+                                    rs.getString("v_config"),
+                                    rs.getString("v_commit_message"),
+                                    rs.getString("v_created_by"),
+                                    CreateVia.fromWire(rs.getString("v_created_via")),
+                                    instant(rs, "v_created_at"));
+                    List<String> labels = List.copyOf(new TreeSet<>(
+                            List.of((String[]) rs.getArray("v_labels").getArray())));
+                    return new PromptResolveRow(prompt, version, labels, rs.getInt("max_version"));
+                })
                 .optional();
     }
 
@@ -273,11 +316,14 @@ public class PromptRepository {
     public List<PromptListRow> list(String projectId, PromptListQuery q, int offset, int limit) {
         Map<String, Object> params = new HashMap<>();
         String order = q.order() == PromptListQuery.Order.NAME ? "p.name" : "p.updated_at DESC, p.name";
-        String sql = "SELECT " + PROMPT_COLS + ", s.versions, s.last_config FROM prompt p"
-                + " JOIN LATERAL (SELECT COALESCE(array_agg(v.version ORDER BY v.version), '{}') AS versions,"
-                + " COALESCE((array_agg(v.config ORDER BY v.version DESC))[1], '{}'::jsonb) AS last_config"
+        String sql = "SELECT " + PROMPT_COLS + ", s.versions, COALESCE(lc.config, '{}'::jsonb) AS last_config"
+                + " FROM prompt p"
+                + " JOIN LATERAL (SELECT COALESCE(array_agg(v.version ORDER BY v.version), '{}') AS versions"
                 + " FROM prompt_version v"
                 + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id) s ON true"
+                + " LEFT JOIN LATERAL (SELECT v.config FROM prompt_version v"
+                + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id ORDER BY v.version DESC LIMIT 1) lc"
+                + " ON true"
                 + where(projectId, q, params) + " ORDER BY " + order + " LIMIT :limit OFFSET :offset";
         params.put("limit", limit);
         params.put("offset", offset);

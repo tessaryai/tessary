@@ -65,7 +65,10 @@ public final class PromptDtos {
             @JsonProperty("created_via") CreateVia createdVia,
             @JsonProperty("created_at") String createdAt) {}
 
-    /** {@code labels} holds stored labels only; {@code latest} shows as {@code latest_version}. */
+    /**
+     * {@code labels} holds stored labels only; {@code latest} shows as {@code latest_version}. {@code versions} is one
+     * page, newest first; {@code has_older_versions} says a page below the last one exists.
+     */
     public record PromptDetail(
             String id,
             String name,
@@ -75,9 +78,10 @@ public final class PromptDtos {
             @JsonProperty("updated_at") String updatedAt,
             @JsonProperty("latest_version") int latestVersion,
             List<LabelRef> labels,
-            List<VersionSummary> versions) {
+            List<VersionSummary> versions,
+            @JsonProperty("has_older_versions") boolean hasOlderVersions) {
         public static PromptDetail from(PromptService.PromptDetail d, PromptService.Authors authors) {
-            int latest = d.versions().isEmpty() ? 0 : d.versions().getFirst().version();
+            int latest = d.latestVersion();
             List<VersionSummary> versions = d.versions().stream()
                     .map(v -> {
                         List<String> labels = new ArrayList<>();
@@ -106,7 +110,8 @@ public final class PromptDtos {
                     p.updatedAt().toString(),
                     latest,
                     LabelRef.of(d.labels()),
-                    versions);
+                    versions,
+                    d.hasOlderVersions());
         }
     }
 

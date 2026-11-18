@@ -52,6 +52,8 @@ public class PromptController {
 
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 200;
+    private static final int DEFAULT_VERSION_LIMIT = 100;
+    private static final int MAX_VERSION_LIMIT = 500;
 
     private final PromptService service;
     private final TenantPathResolver resolver;
@@ -120,14 +122,18 @@ public class PromptController {
                 new FolderDeleteResponse(service.deleteFolder(r.project().id(), path)));
     }
 
+    /** {@code limit} versions newest first (default 100, at most 500); {@code beforeVersion} pages to older ones. */
     @GetMapping("/{promptId}")
     public ApiResponse<PromptDtos.PromptDetail> get(
             TenantContext ctx,
             @PathVariable String orgSlug,
             @PathVariable String projectSlug,
-            @PathVariable String promptId) {
+            @PathVariable String promptId,
+            @RequestParam(required = false) @Nullable Integer limit,
+            @RequestParam(required = false) @Nullable Integer beforeVersion) {
         Resolved r = view(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(detail(service.get(r.project().id(), promptId)));
+        int pageSize = TracePageCodec.clampLimit(limit, DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT);
+        return ApiResponse.ok(detail(service.get(r.project().id(), promptId, pageSize, beforeVersion)));
     }
 
     @PatchMapping("/{promptId}")
@@ -211,8 +217,9 @@ public class PromptController {
     private PromptDtos.PromptDetail detail(PromptService.PromptDetail d) {
         return PromptDtos.PromptDetail.from(
                 d,
-                service.authors(
-                        d.versions().stream().map(PromptVersionRow::createdBy).toList()));
+                service.authors(d.versions().stream()
+                        .map(PromptVersionSummaryRow::createdBy)
+                        .toList()));
     }
 
     private PromptVersionView version(PromptService.ResolvedVersion v) {

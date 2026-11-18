@@ -83,7 +83,9 @@ record PromptRepositoryTest(PromptRepository repo, TenantService tenants) {
         assertEquals(Optional.of(prompt), repo.findById(pid, prompt.id()));
         assertEquals(Optional.of(prompt), repo.findByName(pid, "team/a"));
         assertEquals(Optional.of(version), repo.findVersion(pid, prompt.id(), 1));
-        assertEquals(List.of(version), repo.versionsOf(pid, prompt.id()));
+        assertEquals(
+                List.of(new PromptVersionSummaryRow(version.id(), 1, "first", "user-2", CreateVia.API, T2)),
+                repo.versionsOf(pid, prompt.id(), 10, null));
         assertEquals(
                 List.of(new PromptLabelRow(pid, prompt.id(), "production", version.id(), 1, "user-3", T3)),
                 repo.labelsOf(pid, List.of(prompt.id())));
@@ -124,23 +126,91 @@ record PromptRepositoryTest(PromptRepository repo, TenantService tenants) {
         assertEquals(Optional.empty(), repo.findById(pid, p.id()));
     }
 
-    /** A label or {@code latest} reads its version row in one statement, scoped to the project. */
+    /**
+     * The fetch reads the prompt, the wanted version, that version's labels and the highest version number in one
+     * statement. The bug: four reads with no shared snapshot, so a label move between them reports labels that belong
+     * to another version, or {@code latest} on a version that is no longer the highest.
+     */
     @Test
-    void findVersionByLabel_andFindLatestVersion() {
-        String pid = project("prompt-repo-by-label");
-        String other = project("prompt-repo-by-label-other");
+    void resolve_readsVersionLabelsAndLatestInOneStatement() {
+        String pid = project("prompt-repo-resolve");
+        String other = project("prompt-repo-resolve-other");
+        PromptRow p = new PromptRow(Ids.ulid(), pid, "team/a", PromptType.CHAT, List.of("x"), 3, "user-1", T1, T2);
+        repo.insertPrompt(p);
+        PromptVersionRow v1 = version(p, 1, "{}");
+        PromptVersionRow v2 = new PromptVersionRow(
+                Ids.ulid(),
+                pid,
+                p.id(),
+                2,
+                "[{\"role\": \"user\", \"content\": \"hi\"}]",
+                "{\"temperature\": 0.2}",
+                "second",
+                "user-2",
+                CreateVia.API,
+                T2);
+        repo.insertVersion(v2);
+        PromptVersionRow v3 = version(p, 3, "{}");
+        repo.upsertLabel(pid, p.id(), "staging", v2.id(), "user-1", T1);
+        repo.upsertLabel(pid, p.id(), "production", v2.id(), "user-1", T1);
+        repo.upsertLabel(pid, p.id(), "dev", v1.id(), "user-1", T1);
+
+        assertEquals(
+                Optional.of(new PromptResolveRow(p, v2, List.of("production", "staging"), 3)),
+                repo.resolve(pid, "team/a", new PromptSelector.Label("production")));
+        assertEquals(
+                Optional.of(new PromptResolveRow(p, v2, List.of("production", "staging"), 3)),
+                repo.resolve(pid, "team/a", new PromptSelector.Version(2)));
+        assertEquals(
+                Optional.of(new PromptResolveRow(p, v3, List.of(), 3)),
+                repo.resolve(pid, "team/a", new PromptSelector.Latest()));
+        assertEquals(
+                Optional.of(new PromptResolveRow(p, v1, List.of("dev"), 3)),
+                repo.resolve(pid, "team/a", new PromptSelector.Label("dev")));
+        assertEquals(Optional.empty(), repo.resolve(other, "team/a", new PromptSelector.Latest()));
+        assertEquals(Optional.empty(), repo.resolve(other, "team/a", new PromptSelector.Label("production")));
+    }
+
+    /**
+     * The bug: a missing label or version on a prompt that exists answers NOT_FOUND for the whole prompt, and the SDK
+     * evicts the wrong thing. A prompt row with no matching version row tells the three apart.
+     */
+    @Test
+    void resolve_tellsMissingPromptFromMissingVersionAndMissingLabel() {
+        String pid = project("prompt-repo-resolve-missing");
+        PromptRow p = prompt(pid, "p", List.of());
+        version(p, 1, "{}");
+
+        assertEquals(Optional.empty(), repo.resolve(pid, "nope", new PromptSelector.Latest()));
+        assertEquals(
+                Optional.of(new PromptResolveRow(p, null, List.of(), 1)),
+                repo.resolve(pid, "p", new PromptSelector.Version(9)));
+        assertEquals(
+                Optional.of(new PromptResolveRow(p, null, List.of(), 1)),
+                repo.resolve(pid, "p", new PromptSelector.Label("production")));
+    }
+
+    /**
+     * The detail page lists versions without their bodies, newest first, a page at a time. The bug: it read every
+     * body and config of every version, so a prompt with many long versions loaded megabytes for a list of numbers.
+     */
+    @Test
+    void versionsOf_returnsSummariesNewestFirstWithPaging() {
+        String pid = project("prompt-repo-version-page");
         PromptRow p = prompt(pid, "p", List.of());
         PromptVersionRow v1 = version(p, 1, "{}");
         PromptVersionRow v2 = version(p, 2, "{}");
-        repo.upsertLabel(pid, p.id(), "production", v1.id(), "user-1", T1);
-        repo.upsertLabel(pid, p.id(), "staging", v2.id(), "user-1", T1);
+        PromptVersionRow v4 = version(p, 4, "{}");
 
-        assertEquals(Optional.of(v1), repo.findVersionByLabel(pid, p.id(), "production"));
-        assertEquals(Optional.of(v2), repo.findVersionByLabel(pid, p.id(), "staging"));
-        assertEquals(Optional.empty(), repo.findVersionByLabel(pid, p.id(), "canary"));
-        assertEquals(Optional.empty(), repo.findVersionByLabel(other, p.id(), "production"));
-        assertEquals(Optional.of(v2), repo.findLatestVersion(pid, p.id()));
-        assertEquals(Optional.empty(), repo.findLatestVersion(other, p.id()));
+        assertEquals(List.of(summary(v4), summary(v2)), repo.versionsOf(pid, p.id(), 2, null));
+        assertEquals(List.of(summary(v2), summary(v1)), repo.versionsOf(pid, p.id(), 2, 4));
+        assertEquals(List.of(summary(v1)), repo.versionsOf(pid, p.id(), 5, 2));
+        assertEquals(List.of(), repo.versionsOf(project("prompt-repo-version-page-other"), p.id(), 5, null));
+    }
+
+    private static PromptVersionSummaryRow summary(PromptVersionRow v) {
+        return new PromptVersionSummaryRow(
+                v.id(), v.version(), v.commitMessage(), v.createdBy(), v.createdVia(), v.createdAt());
     }
 
     @Test

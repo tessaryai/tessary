@@ -385,12 +385,10 @@ class PromptServiceTest {
 
     @Test
     void resolve_defaultsToProductionAndLatestIsDerived() {
-        when(repo.findByName(PID, "p")).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.findVersionByLabel(PID, ID, "production")).thenReturn(Optional.of(version(2)));
-        when(repo.findLatestVersion(PID, ID)).thenReturn(Optional.of(version(3)));
-        // dev sorts first, so a label list that took the first label instead of the version's own reads dev.
-        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of(label("dev", 1), label("production", 2)));
-        when(repo.maxVersion(PID, ID)).thenReturn(3);
+        when(repo.resolve(PID, "p", new PromptSelector.Label("production")))
+                .thenReturn(Optional.of(new PromptResolveRow(TEXT_PROMPT, version(2), List.of("production"), 3)));
+        when(repo.resolve(PID, "p", new PromptSelector.Latest()))
+                .thenReturn(Optional.of(new PromptResolveRow(TEXT_PROMPT, version(3), List.of(), 3)));
 
         ResolvedVersion production = service().resolve(PID, "p", null, null);
         assertEquals(2, production.version().version());
@@ -408,10 +406,8 @@ class PromptServiceTest {
     void resolve_labelAndItsVersionAreOneRead() {
         // Bug: resolve read the label, then re-read its version by number. A promote and a delete of the old version
         // between the two reads turned a live production label into VERSION_NOT_FOUND.
-        when(repo.findByName(PID, "p")).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.findVersionByLabel(PID, ID, "production")).thenReturn(Optional.of(version(3)));
-        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of(label("production", 3)));
-        when(repo.maxVersion(PID, ID)).thenReturn(3);
+        when(repo.resolve(PID, "p", new PromptSelector.Label("production")))
+                .thenReturn(Optional.of(new PromptResolveRow(TEXT_PROMPT, version(3), List.of("production"), 3)));
 
         ResolvedVersion production = service().resolve(PID, "p", null, null);
 
@@ -423,10 +419,8 @@ class PromptServiceTest {
     void resolve_latestIsOneRead() {
         // Bug: resolve read the highest number, then re-read that version by number. Deleting the top version between
         // the two reads turned latest, which always exists, into VERSION_NOT_FOUND.
-        when(repo.findByName(PID, "p")).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.findLatestVersion(PID, ID)).thenReturn(Optional.of(version(2)));
-        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of());
-        when(repo.maxVersion(PID, ID)).thenReturn(2);
+        when(repo.resolve(PID, "p", new PromptSelector.Latest()))
+                .thenReturn(Optional.of(new PromptResolveRow(TEXT_PROMPT, version(2), List.of(), 2)));
 
         ResolvedVersion latest = service().resolve(PID, "p", null, "latest");
 
@@ -436,7 +430,8 @@ class PromptServiceTest {
 
     @Test
     void resolve_noProductionThrowsLabelNotFound() {
-        when(repo.findByName(PID, "p")).thenReturn(Optional.of(TEXT_PROMPT));
+        when(repo.resolve(PID, "p", new PromptSelector.Label("production")))
+                .thenReturn(Optional.of(new PromptResolveRow(TEXT_PROMPT, null, List.of(), 1)));
 
         TessaryException e =
                 assertThrows(TessaryException.class, () -> service().resolve(PID, "p", null, null));
@@ -446,11 +441,11 @@ class PromptServiceTest {
 
     @Test
     void resolve_missingNameAndVersionAre404() {
-        when(repo.findByName(PID, "nope")).thenReturn(Optional.empty());
+        when(repo.resolve(PID, "nope", new PromptSelector.Label("production"))).thenReturn(Optional.empty());
         assertError(PromptsError.NOT_FOUND, () -> service().resolve(PID, "nope", null, null));
 
-        when(repo.findByName(PID, "p")).thenReturn(Optional.of(TEXT_PROMPT));
-        when(repo.findVersion(PID, ID, 9)).thenReturn(Optional.empty());
+        when(repo.resolve(PID, "p", new PromptSelector.Version(9)))
+                .thenReturn(Optional.of(new PromptResolveRow(TEXT_PROMPT, null, List.of(), 1)));
         TessaryException e =
                 assertThrows(TessaryException.class, () -> service().resolve(PID, "p", 9, null));
         assertEquals(PromptsError.VERSION_NOT_FOUND, e.error());
@@ -475,6 +470,33 @@ class PromptServiceTest {
         when(repo.deleteVersion(PID, ID, 2)).thenReturn(true);
         assertTrue(service().deleteVersion(PID, ID, 2));
         verify(repo).touchPrompt(PID, ID, NOW);
+    }
+
+    private static PromptVersionSummaryRow summary(int n) {
+        return new PromptVersionSummaryRow("v" + n, n, null, BY, CreateVia.UI, NOW);
+    }
+
+    /**
+     * The detail page reads versions a page at a time. The bugs: {@code latest_version} taken from the page's first
+     * row reads 3 on the page of older versions when the prompt's highest is 5, and the page cannot tell that a page of
+     * still older versions exists.
+     */
+    @Test
+    void get_pageOfOlderVersionsKnowsTheLatestAndWhetherMoreExist() {
+        when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
+        when(repo.versionsOf(PID, ID, 3, 4)).thenReturn(List.of(summary(3), summary(2), summary(1)));
+        when(repo.versionsOf(PID, ID, 3, 2)).thenReturn(List.of(summary(1)));
+        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of());
+        when(repo.maxVersion(PID, ID)).thenReturn(5);
+
+        PromptService.PromptDetail older = service().get(PID, ID, 2, 4);
+        assertEquals(List.of(summary(3), summary(2)), older.versions());
+        assertEquals(5, older.latestVersion());
+        assertTrue(older.hasOlderVersions());
+
+        PromptService.PromptDetail oldest = service().get(PID, ID, 2, 2);
+        assertEquals(List.of(summary(1)), oldest.versions());
+        assertFalse(oldest.hasOlderVersions());
     }
 
     @Test

@@ -8759,6 +8759,9 @@
           "created_at" : {
             "type" : "string"
           },
+          "has_older_versions" : {
+            "type" : "boolean"
+          },
           "id" : {
             "type" : "string"
           },
@@ -8800,6 +8803,7 @@
         },
         "required" : [
           "created_at",
+          "has_older_versions",
           "id",
           "labels",
           "latest_version",
@@ -18454,6 +18458,24 @@
             "required" : true,
             "schema" : {
               "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "limit",
+            "required" : false,
+            "schema" : {
+              "format" : "int32",
+              "type" : "integer"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "beforeVersion",
+            "required" : false,
+            "schema" : {
+              "format" : "int32",
+              "type" : "integer"
             }
           }
         ],

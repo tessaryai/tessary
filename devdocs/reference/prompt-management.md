@@ -51,6 +51,19 @@ deadlocking.
   search filters use `starts_with` and an escaped `ILIKE`, never a bare `LIKE`, because `_` and `%`
   are legal in names.
 
+## Reads
+
+- Fetch (`PromptService.resolve`, used by `GET /v1/prompts/fetch` and MCP `get_prompt`) is one
+  statement: `PromptRepository.resolve` reads the prompt row, the selected version through a lateral
+  join, that version's labels and `MAX(version)`. One statement is one snapshot, so `labels`, `isActive`
+  and `latest` always describe the version returned. A prompt row with no matching version tells
+  `VERSION_NOT_FOUND` and `LABEL_NOT_FOUND` apart from `NOT_FOUND`.
+- The detail route returns version summaries with no body and no config, newest first, `limit` at a time
+  (default 100, at most 500), older than `beforeVersion` when it is given. `latest_version` is read on its
+  own, and `has_older_versions` says a page of older versions exists.
+- The list reads each prompt's newest config with a `LIMIT 1` lateral read on `ix_prompt_version_lookup`,
+  not by gathering every version's config.
+
 ## Rules and caps
 
 | Rule | Value |

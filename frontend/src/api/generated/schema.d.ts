@@ -4005,6 +4005,7 @@ export interface components {
         };
         PromptDetail: {
             created_at: string;
+            has_older_versions: boolean;
             id: string;
             labels: components["schemas"]["LabelRef"][];
             /** Format: int32 */
@@ -7690,6 +7691,8 @@ export interface operations {
         parameters: {
             query: {
                 ctx: components["schemas"]["TenantContext"];
+                limit?: number;
+                beforeVersion?: number;
             };
             header?: never;
             path: {

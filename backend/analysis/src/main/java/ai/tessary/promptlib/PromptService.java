@@ -42,6 +42,7 @@ public class PromptService {
 
     static final int MAX_VERSIONS = 1000;
     static final int MAX_CONFIG_CHARS = 65_536;
+    static final int DEFAULT_VERSION_PAGE = 100;
 
     public enum LabelMode {
         /** The UI's PUT: the version ends with exactly the listed labels. */
@@ -127,8 +128,16 @@ public class PromptService {
             int limit,
             long total) {}
 
-    /** {@code versions} newest first; {@code labels} ordered by label. */
-    public record PromptDetail(PromptRow prompt, List<PromptVersionRow> versions, List<PromptLabelRow> labels) {}
+    /**
+     * {@code versions} is one page, newest first; {@code labels} ordered by label. {@code latestVersion} is the highest
+     * number the prompt has, read on its own because a page of older versions does not hold it.
+     */
+    public record PromptDetail(
+            PromptRow prompt,
+            List<PromptVersionSummaryRow> versions,
+            List<PromptLabelRow> labels,
+            int latestVersion,
+            boolean hasOlderVersions) {}
 
     /** A display label per author principal id; one this lookup cannot name reads as {@link #UNKNOWN}. */
     public record Authors(Map<String, String> labels) {
@@ -238,22 +247,45 @@ public class PromptService {
         return repo.findByName(projectId, name);
     }
 
-    /** Throws NOT_FOUND, VERSION_NOT_FOUND, LABEL_NOT_FOUND, BOTH_VERSION_AND_LABEL. With neither, reads production. */
+    /**
+     * Throws NOT_FOUND, VERSION_NOT_FOUND, LABEL_NOT_FOUND, BOTH_VERSION_AND_LABEL. With neither, reads production. One
+     * statement reads the version, its labels and the highest number, so they come from one snapshot.
+     */
     public ResolvedVersion resolve(String projectId, String name, @Nullable Integer version, @Nullable String label) {
         if (version != null && label != null) throw new TessaryException(PromptsError.BOTH_VERSION_AND_LABEL);
-        PromptRow row =
-                findByName(projectId, name).orElseThrow(() -> new TessaryException(PromptsError.NOT_FOUND, name));
-        if (version != null) return resolved(row, requireVersion(row, version));
+        if (PromptBody.holdsNul(name)) throw new TessaryException(PromptsError.NOT_FOUND, name);
         String wanted = label == null ? PromptNames.PRODUCTION : label;
-        Optional<PromptVersionRow> found = PromptNames.LATEST.equals(wanted)
-                ? repo.findLatestVersion(projectId, row.id())
-                : repo.findVersionByLabel(projectId, row.id(), wanted);
-        return resolved(row, found.orElseThrow(() -> new TessaryException(PromptsError.LABEL_NOT_FOUND, name, wanted)));
+        PromptSelector selector = version != null
+                ? new PromptSelector.Version(version)
+                : PromptNames.LATEST.equals(wanted) ? new PromptSelector.Latest() : new PromptSelector.Label(wanted);
+        PromptResolveRow found = repo.resolve(projectId, name, selector)
+                .orElseThrow(() -> new TessaryException(PromptsError.NOT_FOUND, name));
+        PromptVersionRow v = found.version();
+        if (v == null) {
+            throw version != null
+                    ? new TessaryException(
+                            PromptsError.VERSION_NOT_FOUND, found.prompt().name(), version)
+                    : new TessaryException(PromptsError.LABEL_NOT_FOUND, name, wanted);
+        }
+        return resolved(found.prompt(), v, new TreeSet<>(found.labels()), found.maxVersion());
     }
 
+    /** The first page of versions. */
     public PromptDetail get(String projectId, String promptId) {
+        return get(projectId, promptId, DEFAULT_VERSION_PAGE, null);
+    }
+
+    /** {@code limit} versions newest first, below {@code beforeVersion} when it is given. */
+    public PromptDetail get(String projectId, String promptId, int limit, @Nullable Integer beforeVersion) {
         PromptRow row = requirePrompt(projectId, promptId);
-        return new PromptDetail(row, repo.versionsOf(projectId, promptId), repo.labelsOf(projectId, List.of(promptId)));
+        List<PromptVersionSummaryRow> page = repo.versionsOf(projectId, promptId, limit + 1, beforeVersion);
+        boolean older = page.size() > limit;
+        return new PromptDetail(
+                row,
+                older ? List.copyOf(page.subList(0, limit)) : page,
+                repo.labelsOf(projectId, List.of(promptId)),
+                repo.maxVersion(projectId, promptId),
+                older);
     }
 
     public ResolvedVersion getVersion(String projectId, String promptId, int version) {
@@ -442,7 +474,11 @@ public class PromptService {
     }
 
     private ResolvedVersion resolved(PromptRow row, PromptVersionRow v, Set<String> sortedLabels) {
-        boolean isLatest = v.version() == repo.maxVersion(row.projectId(), row.id());
+        return resolved(row, v, sortedLabels, repo.maxVersion(row.projectId(), row.id()));
+    }
+
+    private ResolvedVersion resolved(PromptRow row, PromptVersionRow v, Set<String> sortedLabels, int maxVersion) {
+        boolean isLatest = v.version() == maxVersion;
         List<String> labels = new ArrayList<>(sortedLabels);
         if (isLatest) labels.add(PromptNames.LATEST);
         return new ResolvedVersion(
