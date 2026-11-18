@@ -8,6 +8,7 @@ import {
   Boxes,
   Building2,
   Database,
+  FileText,
   Filter,
   FileUp,
   GitBranch,
@@ -83,6 +84,19 @@ export const NAV_GROUPS: NavGroup[] = [
         description: "Spend, latency, traces and cases, counted over time.",
         keywords: ["spend", "cost", "latency", "p95", "tokens", "usage", "dashboard", "widget", "pulse", "vitals"],
         icon: Activity,
+      },
+    ],
+  },
+  {
+    label: "Build",
+    items: [
+      {
+        id: "prompts",
+        label: "Prompts",
+        icon: FileText,
+        description: "Prompt templates, their versions, and which version runs where.",
+        keywords: ["prompt", "version", "label", "playground", "template"],
+        capability: "prompt_management_enabled",
       },
     ],
   },

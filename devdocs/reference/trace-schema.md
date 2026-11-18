@@ -73,13 +73,14 @@ from standard attributes — `session.id` → `kind='session'` root, `gen_ai.con
 (one per provider trace, `seq` numbered per parent), `user.id` → the denormalized `user_id` column on
 session/trace/span.
 
-The consumed overlay is exactly ONE attribute: `tessary.call_site.id`. Every other `tessary.*`
-name is unread — the [ingestion contract](./ingestion-contract/README.md) carries the full
+The consumed overlay is exactly two attributes: `tessary.call_site.id`, and `tessary.prompt.name`
+with its companion `tessary.prompt.version`. Every other `tessary.*` name is unread — the [ingestion contract](./ingestion-contract/README.md) carries the full
 do-not-emit list and the standard field each one's content belongs on.
 
 | Overlay attribute | Why no gen_ai standard | Future standard to track |
 |---|---|---|
-| `tessary.call_site.id` | the ONE consumed overlay: linkage from a span to a project-defined call site (the dotted spelling roots the expandable `tessary.call_site.*` namespace and is the only spelling read) | — |
+| `tessary.call_site.id` | linkage from a span to a project-defined call site (the dotted spelling roots the expandable `tessary.call_site.*` namespace and is the only spelling read) | — |
+| `tessary.prompt.name`, `tessary.prompt.version` | the managed prompt a span was produced from, and the version string its producer sent. The GenAI registry has no prompt-name attribute, and `gen_ai.prompt.*` is Traceloop's indexed message prefix, which `OtlpSpanMapper` parses as messages, so a name there would collide. Two third-party spellings are read as dialects (see the [ingestion contract](./ingestion-contract/README.md)) | the GenAI agent conventions |
 
 ### Call-site & code provenance — emitted by producers
 

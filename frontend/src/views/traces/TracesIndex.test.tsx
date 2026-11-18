@@ -154,6 +154,42 @@ describe("filters", () => {
     await waitFor(() => expect(currentParams().has("call_site")).toBe(false));
   });
 
+  // Bug: a link from a prompt's page loses its filter, shows a chip the reader cannot remove in one go, or sends a
+  // version with no prompt name.
+  it("reads a deep-linked prompt and version as one chip and one server-side filter", async () => {
+    renderRoute(<TracesIndex />, { route: "/traces?prompt=team%2Fa&prompt_version=2" });
+
+    await screen.findByText("prompt: team/a v2");
+    expect(lastListCall()).toMatchObject({ promptName: "team/a", promptVersion: "2" });
+    const calls = api.listTraces.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter prompt: team/a v2" }));
+    await waitFor(() => expect(lastListCall().promptName).toBeUndefined());
+    expect(lastListCall().promptVersion).toBeUndefined();
+    expect(currentParams().has("prompt")).toBe(false);
+    expect(currentParams().has("prompt_version")).toBe(false);
+    expect(api.listTraces.mock.calls.length).toBe(calls + 1);
+  });
+
+  it("names a version label in brackets and a prompt with no version alone", async () => {
+    renderRoute(<TracesIndex />, { route: "/traces?prompt=p&prompt_version=prod" });
+    await screen.findByText("prompt: p (prod)");
+    cleanup();
+
+    renderRoute(<TracesIndex />, { route: "/traces?prompt=p" });
+    await screen.findByText("prompt: p");
+    expect(lastListCall()).toMatchObject({ promptName: "p", promptVersion: undefined });
+  });
+
+  it("ignores a prompt version with no prompt", async () => {
+    renderRoute(<TracesIndex />, { route: "/traces?prompt_version=2" });
+    await screen.findByText("checkout-agent");
+
+    expect(lastListCall().promptName).toBeUndefined();
+    expect(lastListCall().promptVersion).toBeUndefined();
+    expect(screen.queryByText(/^prompt:/)).toBeNull();
+  });
+
   it("writes a facet to the URL and asks the server for it", async () => {
     renderRoute(<TracesIndex />, { route: "/traces?trace=tr-9" });
     await screen.findByText("checkout-agent");

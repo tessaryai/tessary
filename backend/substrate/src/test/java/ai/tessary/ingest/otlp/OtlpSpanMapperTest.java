@@ -69,6 +69,24 @@ class OtlpSpanMapperTest {
     }
 
     @Test
+    void promptOverlayDoesNotEnterTheMessageList() {
+        // Bug: tessary.prompt.name is parsed as a gen_ai.prompt.N message, or the message parser swallows it so the
+        // prompt link never reaches the attribute bag the resolver reads.
+        Span span = Span.newBuilder()
+                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
+                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
+                .addAttributes(kv("gen_ai.prompt.0.role", "user"))
+                .addAttributes(kv("gen_ai.prompt.0.content", "hi"))
+                .addAttributes(kv(GenAiAttributes.PROMPT_NAME, "p"))
+                .build();
+
+        RawEntry e = mapper.toRawEntries(request(span)).get(0);
+        assertEquals("[{\"role\":\"user\",\"content\":\"hi\"}]", e.inputMessagesJson());
+        assertNotNull(e.metadata());
+        assertEquals("p", e.metadata().get(GenAiAttributes.PROMPT_NAME));
+    }
+
+    @Test
     void structuredMessagesWin_whenBothStructuredAndFlattenedPresent() {
         // The canonical structured array wins over the flattened duplicate.
         String structured = "[{\"role\":\"user\",\"content\":\"canonical\"}]";

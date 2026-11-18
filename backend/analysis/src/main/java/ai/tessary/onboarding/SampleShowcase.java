@@ -1113,6 +1113,8 @@ final class SampleShowcase {
                                 null,
                                 null,
                                 null,
+                                null,
+                                null,
                                 null));
 
                         payloads.add(new SpanPayloadRow(

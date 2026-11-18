@@ -1,0 +1,43 @@
+{
+  "name": "@tessaryai/prompts",
+  "version": "0.1.0",
+  "description": "Fetch, cache, compile and link Tessary managed prompts.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
+    "test": "node --test 'test/**/*.test.ts'",
+    "coverage": "node --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test 'test/**/*.test.ts'"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tessaryai/tessary.git",
+    "directory": "packages/sdk-ts"
+  },
+  "homepage": "https://github.com/tessaryai/tessary",
+  "license": "Apache-2.0",
+  "keywords": [
+    "tessary",
+    "prompts",
+    "prompt-management"
+  ],
+  "packageManager": "pnpm@11.15.1"
+}

@@ -40,6 +40,9 @@ caddy|scripts/check-caddy.sh|RUN
 compose-artifact|scripts/check-compose-artifact.sh|RUN|docker-compose.yml is also the published OCI install artifact; pure text plus a client-side `docker compose config`
 sandbox-runner|scripts/check-sandbox-runner-launcher.sh|RUN
 mcp-bridge|scripts/check-mcp-bridge.sh|RUN
+sdk-python|scripts/check-sdk-python.sh|RUN|the Python prompts SDK runs inside customer processes; cache, retry and compile are pinned at 100 percent coverage
+sdk-ts|scripts/check-sdk-ts.sh|RUN|the TypeScript prompts SDK: install from its own lockfile, tsc, build, node:test at 100 percent coverage
+prompt-regex|scripts/check-prompt-variable-regex.sh|RUN|the prompt variable regex has four copies (server, Prompts page, both SDKs) in three languages; no test spans them
 groundedness-serve|scripts/check-groundedness-serve.sh|RUN|setup runs serve.py from its URL, so an import, header or encoding break shows up nowhere else first
 groundedness-setup|scripts/check-groundedness-setup.sh|RUN|a setup MD checksum line that lags serve.py or the template stops every install
 blob-links|scripts/check-blob-links.sh|RUN|prompts, skills and docs name files by GitHub path, so a move 404s them
@@ -166,6 +169,9 @@ if [ -z "$SLICES" ]; then
     _gate groundedness-setup
     _gate sandbox-runner
     _gate mcp-bridge
+    _gate sdk-python
+    _gate sdk-ts
+    _gate prompt-regex
     _gate price-book-contract
     _gate frontend
     if [ "$SKIP_BACKEND" = 0 ]; then

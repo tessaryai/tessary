@@ -1,0 +1,35 @@
+[project]
+name = "tessary-prompts"
+version = "0.1.0"
+description = "Fetch, cache, compile and link Tessary managed prompts."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = []
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License"]
+
+[project.optional-dependencies]
+otel = ["opentelemetry-api>=1.20"]
+
+[project.urls]
+Homepage = "https://github.com/tessaryai/tessary"
+Repository = "https://github.com/tessaryai/tessary"
+Documentation = "https://github.com/tessaryai/tessary/blob/main/docs/prompts/sdk.mdx"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.11"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-cov>=6,<8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["tessary_prompts"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true

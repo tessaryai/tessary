@@ -1,0 +1,75 @@
+---
+title: "Prompts"
+description: "Understand prompts, prompt versions, and deployment labels in Tessary: how a version is numbered, what latest and production mean, how promote and rollback work, and what is not supported yet."
+---
+
+A prompt is a named template that your agent fetches from Tessary at run time instead of keeping it in code. You change what the agent runs by saving a new version and moving a deployment label to it, with no deploy.
+
+A prompt belongs to one project. Prompts are on by default.
+
+## Prompts and their bodies
+
+A prompt is one of two types, fixed when you create it:
+
+| Type | Body |
+| --- | --- |
+| `text` | One string, 1 to 200,000 characters. |
+| `chat` | A list of 1 to 200 entries. Each entry is a message, `{"role": "system", "content": "..."}`, or a placeholder, `{"type": "placeholder", "name": "history"}`. |
+
+Write a variable as `{{name}}`. A variable name starts with a letter or an underscore and holds only letters, digits, and underscores. Spaces inside the braces are allowed, so `{{ name }}` is the same variable. A dotted name such as `{{user.name}}` is not a variable and stays in the text as written.
+
+A placeholder stands for a list of messages that your code supplies when it compiles the prompt, such as the conversation so far. A placeholder holds no variables.
+
+A prompt name is 1 to 255 characters with no whitespace and no `|`. A `/` in the name puts the prompt in a folder: `support/greeting` sits in the folder `support`. A name cannot start or end with `/` or contain `//`. Tags group prompts for search, up to 50 per prompt, and change nothing an agent fetches.
+
+## Prompt versions
+
+Each save creates a new version, numbered one higher than the highest number the prompt has ever had, so a deleted version's number is never used again. A version never changes after it is created. Each version carries:
+
+- The body.
+- A config: a JSON object of free-form keys, such as the model and its temperature, up to 65,536 characters. Tessary stores it as given and returns it with the body.
+- An optional commit message, up to 500 characters.
+
+A prompt holds up to 1,000 versions. Delete old versions to save more.
+
+## Deployment labels
+
+A deployment label is a name that points at one version of a prompt, such as `production` or `staging`. A label uses 1 to 36 characters from `a-z`, `0-9`, `_`, `.`, and `-`. Each label is on one version of a prompt at a time, and a version can carry several labels.
+
+Two names behave differently from the labels you set:
+
+- `production` is the label a fetch reads when it names neither a version nor a label. A prompt with no `production` label answers such a fetch with `404`.
+- `latest` always points at the highest version number. Tessary derives it on every read and never stores it, so you cannot set, move, or delete it. Deleting the highest version moves `latest` to the next highest.
+
+### Promote and roll back
+
+To promote a version, move the `production` label to it. Every agent that fetches the prompt by its default label gets that version on its next fetch.
+
+To roll back, move `production` back to the older version. The older version is still there, unchanged, because versions are never edited.
+
+A version that carries a label cannot be deleted: move the label first. The only version of a prompt cannot be deleted either; delete the prompt instead.
+
+## Ways to create and fetch prompts
+
+- **The Prompts page**, under **Build** in the project navigation, for writing, comparing, and labeling versions.
+- **The prompts API**, `/v1/prompts`, with a project API key. Reads need a query or admin key, and writes need an admin key. See the [prompts API reference](/reference/prompts-api).
+- **The SDKs** for Python and TypeScript, which cache each fetch and fall back to a copy you supply when Tessary is unreachable. See [Prompt SDKs](/prompts/sdk).
+
+A span that records the name and version of the prompt it was produced from links back to that prompt. The attributes are in the [ingestion contract](/reference/ingestion-contract).
+
+## Not supported yet
+
+- **Composition tags.** A body that contains a tag that pulls in another prompt by name is stored as plain text and is not expanded. Expanding it needs dependency tracking between prompts, cycle checks, and guards on removing a label another prompt depends on.
+- **Protected labels.** Any member with permission to change prompts can move `production`. Protecting a label needs roles scoped to one project, which Tessary does not have.
+- **Import from another prompt tool.** Tessary does not read other vendors' APIs. Create prompts on the Prompts page, through `/v1/prompts`, or with the SDKs.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Prompts API" icon="code" href="/reference/prompts-api">
+    Every `/v1/prompts` route, the key scope each one needs, and how the JSON differs from a common prompt API shape.
+  </Card>
+  <Card title="API keys" icon="key" href="/reference/api-keys">
+    The three key scopes and the errors a wrongly scoped key returns.
+  </Card>
+</CardGroup>

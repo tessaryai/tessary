@@ -1,0 +1,208 @@
+---
+title: "Prompts API"
+description: "Look up every /v1/prompts route, the API key scope each one needs, the request and response fields, the error codes, and how the JSON differs from a common prompt API shape."
+---
+
+The prompts API fetches, lists, creates, labels, and deletes [prompts](/prompts/overview) with a project API key. It returns the JSON field names of a common prompt API shape, so code written against that shape reads its responses unchanged.
+
+## Authentication and scopes
+
+Send a project API key in an `Authorization: Bearer` header. The project comes from the key; no route takes a project argument.
+
+| Key scope | Reads (`GET`) | Writes (`POST`, `PATCH`, `DELETE`) |
+| --- | --- | --- |
+| Query, `tsy_q_` | Yes | No |
+| Admin, `tsy_a_` | Yes | Yes |
+| Write, `tsy_w_` | No | No |
+
+A write key reaches no prompt route, reads included. A write key ships inside every instrumented service, so it is the key most likely to leak, and a leaked one must not be able to read a prompt body or move `production`. The [API keys reference](/reference/api-keys) covers how to mint each scope.
+
+Writes are rate limited per key owner and answer `429` with a `Retry-After` header when the limit is reached. Reads are not rate limited; the SDKs cache them.
+
+When an owner or admin turns prompt management off for the organization, every route answers `403` with `CAPABILITY.DISABLED`.
+
+## Routes
+
+Every route answers `200` on success, inside the envelope `{"meta": {"status": 200, "success": true}, "data": ...}`. `name` is always a query parameter or a body field, never a path segment, so a name with `/` in it needs no encoding.
+
+| Method and path | Scope | Returns | Error codes |
+| --- | --- | --- | --- |
+| `GET /v1/prompts/fetch?name=&version=&label=` | Query | One prompt version | `NAME_REQUIRED`, `BOTH_VERSION_AND_LABEL`, `NOT_FOUND`, `VERSION_NOT_FOUND`, `LABEL_NOT_FOUND` |
+| `GET /v1/prompts?name=&label=&tag=&page=&limit=&fromUpdatedAt=&toUpdatedAt=` | Query | A page of prompts, ordered by name | `COMMON.INVALID_PARAMETER` |
+| `POST /v1/prompts` | Admin | The created version | `TYPE_MISMATCH`, `INVALID_NAME`, `INVALID_LABEL`, `LATEST_RESERVED`, `INVALID_BODY`, `INVALID_CONFIG`, `INVALID_TAG`, `VERSION_LIMIT`, `CONCURRENT_WRITE` |
+| `PATCH /v1/prompts/labels` | Admin | The labeled version | `NOT_FOUND`, `VERSION_NOT_FOUND`, `INVALID_LABEL`, `LATEST_RESERVED` |
+| `DELETE /v1/prompts?name=&version=&label=` | Admin | `{"deleted": true}` | `NAME_REQUIRED`, `BOTH_VERSION_AND_LABEL`, `NOT_FOUND`, `VERSION_NOT_FOUND`, `VERSION_LABELED`, `LAST_VERSION`, `INVALID_LABEL`, `LATEST_RESERVED` |
+
+Error codes without a domain are in the `PROMPTS` domain, for example `PROMPTS.NOT_FOUND`. A malformed body or a field that fails validation answers `400` with `COMMON.INVALID_BODY` or `COMMON.VALIDATION_FAILED`.
+
+### Fetch a prompt
+
+`GET /v1/prompts/fetch` returns one version of the prompt named `name`.
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `name` | Yes | The prompt name, folders included. |
+| `version` | No | A version number. |
+| `label` | No | A deployment label, or `latest` for the highest version. |
+
+Give `version` or `label`, not both. With neither, the fetch reads the `production` label.
+
+```bash
+curl -H "Authorization: Bearer $TESSARY_API_KEY" \
+  "https://tessary.example.com/v1/prompts/fetch?name=support/greeting&label=production"
+```
+
+```json
+{
+  "meta": {"status": 200, "success": true},
+  "data": {
+    "id": "01J9ZK3Q7V8M2Y6N4P1R5S8T0W",
+    "name": "support/greeting",
+    "version": 3,
+    "type": "chat",
+    "prompt": [
+      {"role": "system", "content": "You are the support assistant for {{company}}."},
+      {"type": "placeholder", "name": "history"},
+      {"role": "user", "content": "{{question}}"}
+    ],
+    "config": {"model": "<your-model>", "temperature": 0.2},
+    "labels": ["production", "latest"],
+    "tags": ["support", "tier-1"],
+    "commitMessage": "Shorter system line",
+    "createdAt": "2026-10-18T09:12:44.118Z",
+    "updatedAt": "2026-10-18T09:12:44.118Z",
+    "isActive": true
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `id` | The version's id. |
+| `prompt` | A string for a `text` prompt, an array of messages and placeholders for a `chat` prompt. |
+| `config` | The version's config object, as saved. |
+| `labels` | The labels on this version, sorted, with `latest` appended when it is the highest version. |
+| `commitMessage` | The version's commit message, or `null`. |
+| `createdAt` | When the version was created. |
+| `updatedAt` | When the prompt last changed: a new version, a label move, or a tag change. |
+| `isActive` | `true` when this version carries `production`. |
+
+### List prompts
+
+`GET /v1/prompts` with no `name` lists the project's prompts, ordered by name. `name` narrows the list to that exact name, `label` to prompts with that label on some version, and `tag` to prompts with that tag. `fromUpdatedAt` and `toUpdatedAt` are ISO-8601 instants, such as `2026-10-18T00:00:00Z`, and bound when each prompt last changed. `page` starts at 1. `limit` defaults to 10, up to 100.
+
+```json
+{
+  "meta": {"status": 200, "success": true},
+  "data": {
+    "data": [
+      {
+        "name": "support/greeting",
+        "type": "chat",
+        "versions": [1, 2, 3],
+        "labels": ["production", "staging", "latest"],
+        "tags": ["support"],
+        "lastUpdatedAt": "2026-10-18T09:12:44.118Z",
+        "lastConfig": {"temperature": 0.2}
+      }
+    ],
+    "meta": {"page": 1, "limit": 10, "totalItems": 1, "totalPages": 1}
+  }
+}
+```
+
+`versions` is ascending. `labels` holds every label on the prompt, sorted, with `latest` appended. `lastConfig` is the highest version's config.
+
+### Create a prompt or a version
+
+`POST /v1/prompts` creates version 1 of a new name, or the next version of an existing name.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `name` | Yes | The prompt name. |
+| `type` | No | `text` or `chat`. A new prompt without it is `text`. For an existing prompt it must match the stored type, or the request fails with `TYPE_MISMATCH`. |
+| `prompt` | Yes | The body: a string for `text`, an array for `chat`. |
+| `config` | No | A JSON object. Omitted is `{}`. |
+| `labels` | No | Up to 50 labels to move to the new version. |
+| `tags` | No | Up to 50 tags. Applied only when the request creates the prompt. |
+| `commitMessage` | No | Up to 500 characters. |
+
+```bash
+curl -X POST -H "Authorization: Bearer $TESSARY_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name": "support/greeting", "type": "text", "prompt": "Hello {{name}}", "labels": ["staging"]}' \
+  https://tessary.example.com/v1/prompts
+```
+
+The response is the new version, in the same shape as a fetch.
+
+### Move labels
+
+`PATCH /v1/prompts/labels` moves labels to a version and keeps the version's other labels.
+
+```json
+{"name": "support/greeting", "version": 3, "newLabels": ["production"]}
+```
+
+Each label in `newLabels` leaves the version it was on. The response is the labeled version, in the same shape as a fetch.
+
+### Delete
+
+`DELETE /v1/prompts` acts on the prompt named `name`:
+
+| Parameters | Effect |
+| --- | --- |
+| `name` and `version` | Deletes that version. A labeled version fails with `VERSION_LABELED`; the only version fails with `LAST_VERSION`. |
+| `name` and `label` | Removes that label. `deleted` is `false` when the prompt did not carry it. |
+| `name` alone | Deletes the prompt with every version and label. |
+
+## Shape differences
+
+The JSON field names match a common prompt API shape. The routes and the envelope do not:
+
+- **The name is a query parameter.** Fetch is `GET /v1/prompts/fetch?name=...`, not a path ending in the name.
+- **Bearer authentication, not Basic.** A client that sends a public and secret key pair as Basic credentials cannot call this API without changes.
+- **Removing a label is a delete.** `DELETE /v1/prompts?name=...&label=...` removes one label.
+- **Labels move through `PATCH /v1/prompts/labels`** with `name`, `version`, and `newLabels` in the body.
+- **Every success is `200`.** No route answers `201` or `204`.
+- **Every response is wrapped** in `meta` and `data`. An error carries its code in `meta.error.code`. A `429` from the rate limiter, which answers before the route runs, has the shape `{"ok": false, "error": {"code": "rate.limited", ...}}`.
+- **`type: "chatmessage"` is accepted** on a chat message, as is `type: "message"`, and the message is stored without a `type`.
+- **No composition tags.** A body that contains a tag that references another prompt is stored as plain text.
+
+## Errors
+
+| Status | Code | Cause |
+| --- | --- | --- |
+| `401` | `UNAUTHORIZED` | No bearer header, or a key that fails verification |
+| `403` | `PROMPTS.TOKEN_REQUIRED` | The credential is a cookie session, not a project API key |
+| `403` | `PROMPTS.WRONG_KEY_SCOPE` | A write key on any route, or a query key on a write |
+| `403` | `CAPABILITY.DISABLED` | Prompt management is off for the organization |
+| `400` | `PROMPTS.NAME_REQUIRED` | `name` is missing or blank |
+| `400` | `PROMPTS.BOTH_VERSION_AND_LABEL` | Both `version` and `label` were given |
+| `400` | `PROMPTS.INVALID_NAME` | The name breaks the [name rule](/prompts/overview#prompts-and-their-bodies) |
+| `400` | `PROMPTS.INVALID_LABEL` | A label is not 1 to 36 characters from `a-z`, `0-9`, `_`, `.`, and `-` |
+| `400` | `PROMPTS.LATEST_RESERVED` | A write named `latest` |
+| `400` | `PROMPTS.INVALID_BODY` | The body does not fit the prompt's type; the message names the first problem |
+| `400` | `PROMPTS.INVALID_CONFIG` | `config` is larger than 65,536 characters |
+| `400` | `PROMPTS.INVALID_TAG` | A tag holds whitespace or is longer than 64 characters, or there are more than 50 |
+| `400` | `PROMPTS.TYPE_MISMATCH` | A new version names a different type than the prompt has |
+| `400` | `COMMON.INVALID_BODY` | Malformed JSON, or a request body larger than 1 MiB |
+| `400` | `COMMON.INVALID_PARAMETER` | `fromUpdatedAt` or `toUpdatedAt` is not an ISO-8601 instant |
+| `404` | `PROMPTS.NOT_FOUND` | No prompt with that name in the key's project |
+| `404` | `PROMPTS.VERSION_NOT_FOUND` | The prompt has no such version |
+| `404` | `PROMPTS.LABEL_NOT_FOUND` | No version carries the label; a fetch with neither `version` nor `label` reads `production` |
+| `409` | `PROMPTS.VERSION_LABELED` | The version to delete carries a label |
+| `409` | `PROMPTS.LAST_VERSION` | The version to delete is the prompt's only version |
+| `409` | `PROMPTS.VERSION_LIMIT` | The prompt already has 1,000 versions |
+| `409` | `PROMPTS.CONCURRENT_WRITE` | Another write took the same version number at the same moment; retry |
+| `429` | `rate.limited` | Too many writes; wait for the seconds in `Retry-After` |
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Prompts" icon="file-lines" href="/prompts/overview">
+    What a prompt, a version, and a deployment label are, and how promote and rollback work.
+  </Card>
+  <Card title="API keys" icon="key" href="/reference/api-keys">
+    How to mint a query or admin key, and the token format.
+  </Card>
+</CardGroup>
