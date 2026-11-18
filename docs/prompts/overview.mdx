@@ -53,7 +53,7 @@ Deleting a version deletes the labels it carries. Deleting the version that carr
 
 ## Ways to create and fetch prompts
 
-- **The Prompts page**, under **Build** in the project navigation, for writing, comparing, and labeling versions.
+- **The Prompts page**, under **Build** in the project navigation, for writing, comparing, and labeling versions. Folders open one level at a time, and **New prompt** opens a full form. On a version, **Use prompt** shows Python, TypeScript and HTTP code that fetches that version by one of its deployment labels or by its number.
 - **The prompts API**, `/v1/prompts`, with a project API key. Reads need a query or admin key, and writes need an admin key. See the [prompts API reference](/reference/prompts-api).
 - **The SDKs** for Python and TypeScript, which cache each fetch and fall back to a copy you supply when Tessary is unreachable. See [Prompt SDKs](/prompts/sdk).
 

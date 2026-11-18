@@ -61,7 +61,7 @@ describe("typescript", () => {
   it("fetches by the chosen label, narrows the type, fills variables and placeholders, and links the version", () => {
     expect(fetchSnippet("typescript", CHAT)).toBe(
       [
-        "// pnpm add <path-to>/tessaryai-prompts-0.1.0.tgz",
+        "// pnpm add <path-to>/tessaryai-prompts-<version>.tgz",
         'import { TessaryPrompts } from "@tessaryai/prompts";',
         "",
         'const prompts = new TessaryPrompts({ host: "https://tessary.example.com", apiKey: "tsy_q_YOUR_KEY" });',

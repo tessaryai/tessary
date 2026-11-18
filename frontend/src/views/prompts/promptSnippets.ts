@@ -57,7 +57,7 @@ function typescript(i: SnippetInput): string {
   const args = i.type === "chat" && holes.length ? `${vars}, ${object(holes)}` : vars;
   const call = i.type === "chat" ? "client.chat({ messages, ...prompt.config })" : "client.complete({ prompt: text, ...prompt.config })";
   return [
-    "// pnpm add <path-to>/tessaryai-prompts-0.1.0.tgz",
+    "// pnpm add <path-to>/tessaryai-prompts-<version>.tgz",
     'import { TessaryPrompts } from "@tessaryai/prompts";',
     "",
     `const prompts = new TessaryPrompts({ host: ${str(i.host)}, apiKey: ${str(KEY)} });`,

@@ -11,8 +11,8 @@ export const VERSION_PAGE_SIZE = 100;
 
 /** The list page's folder-level filters; `folder` absent is the root. */
 export type PromptLevelFilters = Pick<PromptLevelParams, "folder" | "label" | "tag">;
-/** A search lists matching names flat, across every folder. */
-export type PromptSearchFilters = { q: string; label?: string; tag?: string };
+/** A search lists matching names flat, across every folder under `folder` (every folder when absent). */
+export type PromptSearchFilters = { q: string; folder?: string; label?: string; tag?: string };
 
 /** Every key starts with its root and the project base, which is what `invalidatePromptReads` drops. */
 export const promptKeys = {

@@ -84,14 +84,15 @@ describe("rows", () => {
     await waitFor(() => expect(lastLevelCall()).toEqual({ folder: "team", page: 1, limit: 50 }));
   });
 
-  // Bug: a search shows leaf names, so two prompts called greeting in different folders look alike, or shows folders.
-  it("lists full names, flat, while searching", async () => {
+  // Bug: a search shows leaf names, so two prompts called greeting in different folders look alike, shows folders, or
+  // drops the folder, so the breadcrumb says support while the rows come from every folder.
+  it("lists full names, flat, while searching inside the folder", async () => {
     searchResult([GREETING, promptSummary({ id: "p-3", name: "team/a/greeting" })]);
     renderPage("?q=greet&folder=support");
 
     expect(await screen.findByRole("link", { name: "support/greeting" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "team/a/greeting" })).toBeTruthy();
-    expect(lastSearchCall()).toEqual({ q: "greet", page: 1, limit: 50 });
+    expect(lastSearchCall()).toEqual({ q: "greet", folder: "support", page: 1, limit: 50 });
     expect(api.listPromptLevel).not.toHaveBeenCalled();
     expect(screen.getByText("2 prompts match this search.")).toBeTruthy();
   });
@@ -243,6 +244,21 @@ describe("states", () => {
     );
     fireEvent.click(screen.getAllByRole("button", { name: "New prompt" })[1]);
     await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default/prompts/new"));
+  });
+
+  // Bug: the empty result of the old filters stood in while the new read ran, so clearing a filter flashed
+  // "No prompts yet" and hid the filters on a project that has prompts.
+  it("shows the skeleton, not an empty state, while a filter change is read", async () => {
+    level([], []);
+    renderPage("?label=beta");
+    await screen.findByText("No prompts match these filters");
+    api.listPromptLevel.mockReturnValue(pending());
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(await screen.findByRole("status", { name: "Loading table" })).toBeTruthy();
+    expect(screen.queryByText("No prompts yet")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Search prompts by name" })).toBeTruthy();
   });
 
   // Bug: Clear filters also leaves the folder, or leaves the filter that emptied the list.

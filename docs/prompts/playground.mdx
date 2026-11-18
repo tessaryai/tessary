@@ -9,7 +9,7 @@ The playground runs one prompt version once against a model, so you can read the
 
 <Steps>
   <Step title="Open the playground">
-    On the **Prompts** page, open a prompt, select a version, and select the **Playground** tab.
+    On the **Prompts** page, open a prompt, select a version, and select **Playground** at the top of the page. **Back to versions** returns to the version list.
 
     The template, the settings, and one field for each variable start from the selected version.
   </Step>
@@ -49,7 +49,7 @@ An empty setting is not sent, and the provider uses its own default. Other confi
 
 The playground runs on OpenAI, Anthropic, OpenRouter, Moonshot, Gemini, GLM, Grok, and Custom keys. A Custom run uses the custom model name saved with the key. Bedrock, Bedrock Mantle, and TypeSafe keys cannot run it; TypeSafe serves decision models, not chat.
 
-With no key the playground can use, the tab asks you to add one under **Settings** then **Providers**.
+With no key the playground can use, it asks you to add one under **Settings** then **Providers**.
 
 Running needs permission to manage the organization, which a viewer does not have.
 
@@ -61,7 +61,7 @@ A run uses your organization's provider key and counts toward its model spend. T
 - **Price book**: Tessary's price list for the model, for every other provider.
 - **Unpriced**: neither has a figure, so the run counts with no cost.
 
-A run is not recorded as a trace and does not count on the prompt's **Usage** tab.
+A run is not recorded as a trace and does not count on the prompt's **Metrics** tab.
 
 ## Save an edit as a new version
 

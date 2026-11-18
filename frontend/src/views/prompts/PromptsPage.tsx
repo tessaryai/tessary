@@ -51,7 +51,7 @@ export function PromptsPage() {
 
   const narrow = { label: label || undefined, tag: tag || undefined };
   const level = usePromptLevel({ folder: folder || undefined, ...narrow }, !searching);
-  const search = usePromptSearch({ q, ...narrow }, searching);
+  const search = usePromptSearch({ q, folder: folder || undefined, ...narrow }, searching);
   const list = searching ? search : level;
   const facets = usePromptFacets();
   const usage = usePromptUsageSummary(7);
@@ -139,6 +139,8 @@ export function PromptsPage() {
     const folders = searching || !level.data ? [] : level.data.pages[0].folders;
     const prompts = list.data.pages.flatMap((page) => page.items);
     if (prompts.length === 0 && folders.length === 0) {
+      // The old filters' empty result is not this read's: an empty state now would be about the wrong filters.
+      if (list.isPlaceholderData) return <TableSkeleton rows={6} cols={7} />;
       if (q || label || tag) {
         return (
           <EmptyState
@@ -224,7 +226,14 @@ export function PromptsPage() {
 
   /** No filter can help a project with no prompt at all, so the empty state stands alone. */
   const projectEmpty =
-    !folder && !q && !label && !tag && level.isSuccess && level.data.pages[0].folders.length === 0 && level.data.pages[0].total === 0;
+    !folder &&
+    !q &&
+    !label &&
+    !tag &&
+    level.isSuccess &&
+    !level.isPlaceholderData &&
+    level.data.pages[0].folders.length === 0 &&
+    level.data.pages[0].total === 0;
   const labelOptions = orderLabels([...(facets.data?.labels ?? []), label].filter(Boolean));
   const tagOptions = [...new Set([...(facets.data?.tags ?? []), tag].filter(Boolean))].sort();
 
