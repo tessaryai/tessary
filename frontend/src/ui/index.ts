@@ -21,6 +21,7 @@ export { Table, THead, TBody, TR, TH, TD } from "./Table";
 export { PageHeader, PageBody, Section } from "./Page";
 export { ConceptPopover } from "./ConceptPopover";
 export { Toggle } from "./Toggle";
+export { Checkbox } from "./Checkbox";
 export { SegmentedControl } from "./SegmentedControl";
 export { ActionMenu } from "./ActionMenu";
 export type { ActionMenuItem } from "./ActionMenu";

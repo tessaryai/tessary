@@ -10,7 +10,7 @@ import { useProjectApi, useTenant } from "../../tenant/TenantContext";
 import {
   ActionMenu, Badge, Button, Card, EmptyState, ErrorNote, LoadingRow, Modal, PageBody, PageHeader, TabNav, useToast,
 } from "../../ui";
-import { LabelEditor } from "./LabelEditor";
+import { joinAnd, LabelEditor } from "./LabelEditor";
 import { LinkedTracesPanel } from "./LinkedTracesPanel";
 import { PlaygroundPanel } from "./PlaygroundPanel";
 import { LabelBadge } from "./promptBits";
@@ -354,9 +354,6 @@ function PromptTab({ detail, view }: { detail: PromptDetail; view: PromptVersion
   );
 }
 
-/** "production and staging", "a, b and c". */
-const joinAnd = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
-
 function VersionStrip({
   detail,
   view,
@@ -421,9 +418,22 @@ function VersionStrip({
         <p className="text-small text-muted">{meta}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <LabelEditor promptId={detail.id} version={view.version} labels={view.labels} allLabels={detail.labels} />
+        <LabelEditor
+          promptId={detail.id}
+          version={view.version}
+          labels={view.labels}
+          allLabels={detail.labels}
+          latestVersion={detail.latest_version}
+        />
         {!own.includes("production") && (
-          <LabelEditor promote promptId={detail.id} version={view.version} labels={view.labels} allLabels={detail.labels} />
+          <LabelEditor
+            promote
+            promptId={detail.id}
+            version={view.version}
+            labels={view.labels}
+            allLabels={detail.labels}
+            latestVersion={detail.latest_version}
+          />
         )}
         <ActionMenu
           label={`More actions for version ${view.version}`}

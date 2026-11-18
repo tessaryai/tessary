@@ -521,7 +521,7 @@ describe("the version strip", () => {
     fireEvent.click(button("Promote to production"));
 
     const panel = screen.getByRole("dialog", { name: "Deployment labels for version 1" });
-    expect(within(panel).getByRole("switch", { name: "production" }).getAttribute("aria-checked")).toBe("true");
+    expect((within(panel).getByRole("checkbox", { name: "production" }) as HTMLInputElement).checked).toBe(true);
     expect((within(panel).getByRole("button", { name: "Promote to production" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(within(panel).getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "Version 2" }));

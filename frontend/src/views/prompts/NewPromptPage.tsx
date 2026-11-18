@@ -172,15 +172,17 @@ export function NewPromptPage() {
           </Panel>
         </div>
         <div className="flex flex-col gap-4">
-          <Card className="flex flex-col gap-2 border border-border py-4">
-            <h2 className="px-4 text-h3 text-fg">Deployment labels</h2>
+          <Card className="flex flex-col gap-3 border border-border p-4">
+            <h2 className="text-h3 text-fg">Deployment labels</h2>
             <LabelChecklist
               value={labels}
               options={[]}
               onChange={setLabels}
               rowHint={(l) => (l === "production" ? "Fetched by default" : null)}
+              latest={{ checked: true }}
+              placeholder="staging"
             />
-            <p className="px-4 text-small text-muted">
+            <p className="text-small text-muted">
               A fetch with no label gets the version that carries production. With production off, that fetch gets a
               not-found error.
             </p>

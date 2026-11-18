@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Tag } from "lucide-react";
+import { Tag } from "lucide-react";
 import type { ApiError, LabelRef } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
-import { Button, Input, Toggle, useToast } from "../../ui";
-import { useDropdown } from "../../ui/useDropdown";
+import { Badge, Button, Checkbox, cn, Field, Input, Modal, useToast } from "../../ui";
 import { labelsWithoutLatest } from "./promptFolders";
 import { invalidatePromptReads } from "./promptReads";
-import { Note } from "./promptBits";
+import { LabelBadge, Note } from "./promptBits";
 
 const LABEL = /^[a-z0-9_.-]{1,36}$/;
+const LABEL_RULE = "Use 1 to 36 lowercase letters, digits, _ . or -.";
 
 /** production and staging always first, then every other label alphabetical, each once. */
 export function orderLabels(labels: string[]): string[] {
@@ -18,17 +18,31 @@ export function orderLabels(labels: string[]): string[] {
   return ["production", "staging", ...rest];
 }
 
-/** One switch per label plus a box to add one; reused by the label panel and both version modals. */
+/** The `latest` row: never set or sent, only shown, ticked when the version is (or will be) the newest. */
+export type LatestRow = { checked: boolean; hint?: string };
+
+const ROW = "flex items-center gap-3 px-3 py-2";
+
+/**
+ * One checkbox per label, then a box to add one; reused by the labels dialog and both version forms. `boxed` draws
+ * the rows in a raised panel, for a dialog.
+ */
 export function LabelChecklist({
   value,
   options,
   onChange,
   rowHint,
+  latest,
+  boxed = false,
+  placeholder = "eu-rollout",
 }: {
   value: string[];
   options: string[];
   onChange: (next: string[]) => void;
   rowHint?: (label: string) => string | null;
+  latest?: LatestRow;
+  boxed?: boolean;
+  placeholder?: string;
 }) {
   const [added, setAdded] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
@@ -38,7 +52,7 @@ export function LabelChecklist({
   const add = () => {
     const label = draft.trim();
     if (label === "latest") return setError("latest is derived from the highest version and cannot be set.");
-    if (!LABEL.test(label)) return setError("Use 1 to 36 lowercase letters, digits, _ . or -.");
+    if (!LABEL.test(label)) return setError(LABEL_RULE);
     if (rows.includes(label)) return setError("This label is already in the list.");
     setAdded([...added, label]);
     onChange(orderLabels([...rows, label]).filter((r) => r === label || value.includes(r)));
@@ -47,69 +61,102 @@ export function LabelChecklist({
   };
 
   return (
-    <div className="flex flex-col">
-      {rows.map((label) => {
-        const hint = rowHint?.(label);
-        return (
-          <div key={label} className="flex items-start justify-between gap-3 px-3.5 py-2">
-            <div className="min-w-0">
-              <div className="font-mono text-small text-fg">{label}</div>
-              {hint && <div className="text-small text-subtle">{hint}</div>}
-            </div>
-            <Toggle
-              label={label}
-              checked={value.includes(label)}
-              onChange={(on) => onChange(rows.filter((r) => (r === label ? on : value.includes(r))))}
+    <div className="flex flex-col gap-4">
+      <ul className={cn("flex flex-col", boxed && "rounded-card border border-border bg-raised py-1")}>
+        {rows.map((label) => {
+          const hint = rowHint?.(label);
+          return (
+            <li key={label} className={ROW}>
+              <Checkbox
+                label={label}
+                checked={value.includes(label)}
+                onChange={(on) => onChange(rows.filter((r) => (r === label ? on : value.includes(r))))}
+              />
+              <LabelBadge label={label} text={label} />
+              {hint && <span className="ml-auto text-right text-small text-muted">{hint}</span>}
+            </li>
+          );
+        })}
+        {latest && (
+          <li className={ROW}>
+            <Checkbox label="latest" checked={latest.checked} disabled onChange={() => {}} />
+            <Badge>latest</Badge>
+            <span className="ml-auto text-right text-small text-muted">{latest.hint ?? "The newest version"}</span>
+          </li>
+        )}
+      </ul>
+      <Field label="New deployment label" hint={LABEL_RULE} error={error}>
+        {(p) => (
+          <div className="flex items-center gap-2">
+            <Input
+              {...p}
+              className="font-mono"
+              placeholder={placeholder}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  add();
+                }
+              }}
             />
+            <Button onClick={add}>Add label</Button>
           </div>
-        );
-      })}
-      <div className="flex flex-col gap-1.5 px-3.5 py-2">
-        <div className="flex items-center gap-2">
-          <Input aria-label="New label" placeholder="New label" value={draft} onChange={(e) => setDraft(e.target.value)} />
-          <Button size="sm" onClick={add}>
-            Add label
-          </Button>
-        </div>
-        {error && <Note tone="error">{error}</Note>}
-      </div>
+        )}
+      </Field>
     </div>
   );
 }
 
-const PANEL =
-  "absolute right-0 top-full mt-1 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-card bg-overlay border border-border-strong py-1";
+/** "production and staging", "a, b and c". */
+export const joinAnd = (items: string[]) =>
+  items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 
-type Props = { promptId: string; version: number; labels: string[]; allLabels: LabelRef[] };
+/** Where a label sits now, and what saving does to it, as the dialog and the new version form say it. */
+export function labelHint(ticked: boolean, here: boolean, elsewhere: number | undefined): string | null {
+  if (here) return ticked ? "On this version" : "Leaves this version";
+  if (elsewhere !== undefined) return ticked ? `Moves from version ${elsewhere}` : `On version ${elsewhere}`;
+  return null;
+}
+
+type Props = { promptId: string; version: number; labels: string[]; allLabels: LabelRef[]; latestVersion: number };
 
 /**
- * The Deployment labels button and its panel. `labels` may carry `latest`; it is never shown, set or sent. With
- * `promote`, the button is Promote to production and the panel opens with production switched on.
+ * The Deployment labels button and its dialog. `labels` may carry `latest`; it is shown, never set or sent. With
+ * `promote`, the button is Promote to production and the dialog opens with production ticked.
  */
 export function LabelEditor({ promote = false, ...props }: Props & { promote?: boolean }) {
-  const { open, setOpen, ref } = useDropdown();
+  const [open, setOpen] = useState(false);
   return (
-    <div ref={ref} className="relative">
+    <>
       <Button
         size="sm"
         aria-haspopup="dialog"
-        aria-expanded={open}
         leadingIcon={promote ? undefined : <Tag size={13} strokeWidth={1.75} aria-hidden="true" />}
-        trailingIcon={promote ? undefined : <ChevronDown size={13} strokeWidth={1.75} aria-hidden="true" />}
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen(true)}
       >
         {promote ? "Promote to production" : "Deployment labels"}
       </Button>
-      {open && <LabelPanel {...props} promote={promote} onClose={() => setOpen(false)} />}
-    </div>
+      {open && <LabelDialog {...props} promote={promote} onClose={() => setOpen(false)} />}
+    </>
   );
 }
 
-function LabelPanel({
+/** What agents that fetch production get next, and how to undo it. */
+function promoteNote(version: number, from: number | undefined): string {
+  const next = `Agents that fetch production get version ${version} on their next fetch. The SDKs cache a prompt for 60 seconds.`;
+  if (from === undefined) return next;
+  if (from > version) return `${next} Version ${from} does not change, so you can promote it again.`;
+  return `${next} To roll back, move production back to version ${from}.`;
+}
+
+export function LabelDialog({
   promptId,
   version,
   labels,
   allLabels,
+  latestVersion,
   promote,
   onClose,
 }: Props & { promote: boolean; onClose: () => void }) {
@@ -120,6 +167,7 @@ function LabelPanel({
   const [value, setValue] = useState(promote && !own.includes("production") ? [...own, "production"] : own);
   const promoting = value.includes("production") && !own.includes("production");
   const unchanged = [...value].sort().join("\n") === [...own].sort().join("\n");
+  const elsewhere = (label: string) => allLabels.find((l) => l.label === label && l.version !== version)?.version;
 
   const save = useMutation({
     mutationFn: (next: string[]) => api.setPromptVersionLabels(promptId, version, next),
@@ -131,38 +179,39 @@ function LabelPanel({
     onError: (err) => toast.error("Could not save labels", (err as ApiError).message),
   });
 
-  const elsewhere = (label: string) => {
-    const at = allLabels.find((l) => l.label === label && l.version !== version);
-    return at && value.includes(label) ? `On version ${at.version}. Saving moves it here.` : null;
-  };
-
   return (
-    <div
-      role="dialog"
-      aria-label={`Deployment labels for version ${version}`}
-      className={PANEL}
-      style={{ boxShadow: "var(--shadow-md)" }}
+    <Modal
+      open
+      onClose={onClose}
+      title={`Deployment labels for version ${version}`}
+      subtitle="An agent fetches the version that carries the label it asks for. A fetch with no label gets production."
+      footer={
+        <>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button size="sm" variant="primary" disabled={unchanged} loading={save.isPending} onClick={() => save.mutate(value)}>
+            {promoting ? "Promote to production" : "Save labels"}
+          </Button>
+        </>
+      }
     >
-      <div className="px-3.5 pb-1 pt-2 font-mono text-label uppercase text-subtle">Deployment labels</div>
-      <LabelChecklist
-        value={value}
-        options={allLabels.map((l) => l.label).concat(own)}
-        onChange={setValue}
-        rowHint={elsewhere}
-      />
-      {own.includes("production") && !value.includes("production") && (
-        <div className="px-3.5 py-2">
+      <div className="flex flex-col gap-4">
+        <LabelChecklist
+          boxed
+          value={value}
+          options={allLabels.map((l) => l.label).concat(own)}
+          onChange={setValue}
+          rowHint={(label) => labelHint(value.includes(label), own.includes(label), elsewhere(label))}
+          latest={{ checked: version === latestVersion }}
+        />
+        {promoting && (
+          <p className="rounded-card bg-raised p-3 text-small text-fg-secondary">{promoteNote(version, elsewhere("production"))}</p>
+        )}
+        {own.includes("production") && !value.includes("production") && (
           <Note tone="warning">No version will carry production. Applications that fetch it get a not-found error.</Note>
-        </div>
-      )}
-      <div className="flex justify-end gap-2 border-t border-border px-3.5 pb-1.5 pt-2.5">
-        <Button size="sm" variant="ghost" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button size="sm" variant="primary" disabled={unchanged} loading={save.isPending} onClick={() => save.mutate(value)}>
-          {promoting ? "Promote to production" : "Save labels"}
-        </Button>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

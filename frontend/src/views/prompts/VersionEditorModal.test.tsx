@@ -57,7 +57,7 @@ describe("creating", () => {
     const onCreated = vi.fn();
     const { onClose, queryClient } = renderEditor(onCreated);
     seedPromptReads(queryClient);
-    fireEvent.click(screen.getByRole("switch", { name: "staging" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "staging" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Commit message" }), { target: { value: "Warmer" } });
 
     save();

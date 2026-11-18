@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * Deployment labels decide which version an application fetches. The bugs worth catching are `latest` offered as a
- * label to set or sent, a label move that does not say it moves, production removed with no warning, a bad label
- * accepted, the wrong set sent, and a saved change that leaves the page stale.
+ * label to set or sent, a label move that does not say it moves, production removed with no warning, a promotion or
+ * a rollback that does not say what agents get next, a bad label accepted, the wrong set sent, and a saved change
+ * that leaves the page stale.
  */
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -21,37 +22,42 @@ const ALL: LabelRef[] = [
   { label: "canary", version: 1 },
 ];
 
-function open(version = 2, labels = ["production", "latest"]) {
+function open(version = 2, labels = ["production", "latest"], { all = ALL, promote = false } = {}) {
   const { queryClient } = renderRoute(
-    <div>
-      <p>outside</p>
-      <LabelEditor promptId="p-1" version={version} labels={labels} allLabels={ALL} />
-    </div>,
+    <LabelEditor promote={promote} promptId="p-1" version={version} labels={labels} allLabels={all} latestVersion={2} />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Deployment labels" }));
+  fireEvent.click(screen.getByRole("button", { name: promote ? "Promote to production" : "Deployment labels" }));
   return { queryClient, panel: screen.getByRole("dialog", { name: `Deployment labels for version ${version}` }) };
 }
 
-const sw = (name: string) => screen.getByRole("switch", { name });
+const box = (name: string) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
+const sw = box;
 
 describe("the label list", () => {
-  // Bug: `latest` drawn as a switch, or production and staging missing until some version carries them.
-  it("offers production and staging, then every other label, and never latest", () => {
+  // Bug: `latest` offered as a label to set, or production and staging missing until some version carries them.
+  it("offers production and staging, then every other label, and shows latest without letting it be set", () => {
     open(2, ["production", "latest"]);
 
-    expect(screen.getAllByRole("switch").map((s) => s.getAttribute("aria-label"))).toEqual(["production", "staging", "canary"]);
-    expect(sw("production").getAttribute("aria-checked")).toBe("true");
-    expect(sw("staging").getAttribute("aria-checked")).toBe("false");
+    expect(screen.getAllByRole("checkbox").map((s) => s.getAttribute("aria-label"))).toEqual(
+      ["production", "staging", "canary", "latest"],
+    );
+    expect(box("production").checked).toBe(true);
+    expect(box("staging").checked).toBe(false);
+    expect(box("latest").disabled).toBe(true);
+    expect(box("latest").checked).toBe(true);
+    expect(screen.getByText("The newest version")).toBeTruthy();
   });
 
   // Bug: turning on a label that sits on another version reads as adding it, not moving it.
-  it("says a label on another version moves here", () => {
+  it("says where each label is, and that a label on another version moves here", () => {
     open();
-    expect(screen.queryByText("On version 1. Saving moves it here.")).toBeNull();
+    expect(screen.getByText("On this version")).toBeTruthy();
+    expect(screen.getAllByText("On version 1")).toHaveLength(2);
+    expect(screen.queryByText("Moves from version 1")).toBeNull();
 
     fireEvent.click(sw("staging"));
 
-    expect(screen.getByText("On version 1. Saving moves it here.")).toBeTruthy();
+    expect(screen.getByText("Moves from version 1")).toBeTruthy();
   });
 
   // Bug: production removed from its version with no word that fetches by the default label start failing.
@@ -65,6 +71,41 @@ describe("the label list", () => {
   });
 });
 
+describe("what agents get next", () => {
+  // Bug: production moves with no word on when agents see it or how to undo it.
+  it("says agents get this version on their next fetch, and how to roll back", () => {
+    open(3, ["staging", "latest"], { all: [{ label: "production", version: 2 }, { label: "staging", version: 3 }], promote: true });
+
+    expect(box("production").checked).toBe(true);
+    expect(screen.getByText("Moves from version 2")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Agents that fetch production get version 3 on their next fetch. The SDKs cache a prompt for 60 seconds. To roll back, move production back to version 2.",
+      ),
+    ).toBeTruthy();
+  });
+
+  // Bug: a rollback reads as if the newer version is lost.
+  it("says the newer version stays when production moves back to an older one", () => {
+    open(1, [], { promote: true });
+
+    expect(
+      screen.getByText(
+        "Agents that fetch production get version 1 on their next fetch. The SDKs cache a prompt for 60 seconds. Version 2 does not change, so you can promote it again.",
+      ),
+    ).toBeTruthy();
+  });
+
+  // Bug: the first production promotion promises a way back that does not exist.
+  it("says only when agents see it when no version carried production", () => {
+    open(1, [], { all: [], promote: true });
+
+    expect(
+      screen.getByText("Agents that fetch production get version 1 on their next fetch. The SDKs cache a prompt for 60 seconds."),
+    ).toBeTruthy();
+  });
+});
+
 describe("adding a label", () => {
   // Bug: a label the server refuses, `latest`, or a duplicate row added.
   it.each([
@@ -74,22 +115,22 @@ describe("adding a label", () => {
     ["canary", "This label is already in the list."],
   ])("refuses %s", (label, error) => {
     open();
-    fireEvent.change(screen.getByRole("textbox", { name: "New label" }), { target: { value: label } });
+    fireEvent.change(screen.getByRole("textbox", { name: "New deployment label" }), { target: { value: label } });
     fireEvent.click(screen.getByRole("button", { name: "Add label" }));
 
     expect(screen.getByText(error)).toBeTruthy();
-    expect(screen.getAllByRole("switch")).toHaveLength(3);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
   });
 
   // Bug: a new label added off, so saving drops it, or the box keeps the text for a second add.
-  it("adds a valid label switched on and clears the box", () => {
+  it("adds a valid label ticked and clears the box", () => {
     open();
-    const box = screen.getByRole("textbox", { name: "New label" }) as HTMLInputElement;
-    fireEvent.change(box, { target: { value: " beta-1 " } });
+    const input = screen.getByRole("textbox", { name: "New deployment label" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: " beta-1 " } });
     fireEvent.click(screen.getByRole("button", { name: "Add label" }));
 
-    expect(sw("beta-1").getAttribute("aria-checked")).toBe("true");
-    expect(box.value).toBe("");
+    expect(box("beta-1").checked).toBe(true);
+    expect(input.value).toBe("");
   });
 });
 
@@ -101,8 +142,8 @@ describe("saving", () => {
     seedPromptReads(queryClient);
 
     fireEvent.click(sw("production"));
-    expect(screen.getByText("On version 2. Saving moves it here.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Promote to production" }));
+    expect(screen.getByText("Moves from version 2")).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Promote to production" }));
 
     expect(await screen.findByText("Version 1 is now production")).toBeTruthy();
     expect(api.setPromptVersionLabels).toHaveBeenCalledWith("p-1", 1, ["production"]);
@@ -149,12 +190,11 @@ describe("saving", () => {
 });
 
 describe("closing", () => {
-  // Bug: the panel stuck open over the page, or Cancel saving the edit.
+  // Bug: the dialog stuck open over the page, or closing it saving the edit.
   it.each([
-    ["Escape", () => fireEvent.keyDown(document, { key: "Escape" })],
-    ["an outside click", () => fireEvent.mouseDown(screen.getByText("outside"))],
+    ["Escape", () => screen.getByRole("dialog").dispatchEvent(new Event("cancel", { cancelable: true }))],
     ["Cancel", () => fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }))],
-    ["the Deployment labels button", () => fireEvent.click(screen.getByRole("button", { name: "Deployment labels" }))],
+    ["the close button", () => fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }))],
   ])("closes on %s without saving", async (_, close) => {
     open();
     fireEvent.click(sw("staging"));
@@ -166,13 +206,14 @@ describe("closing", () => {
   });
 
   // Bug: an edit abandoned by closing comes back on the next open.
-  it("opens fresh after a cancel", () => {
+  it("opens fresh after a cancel", async () => {
     open();
     fireEvent.click(sw("staging"));
-    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     fireEvent.click(screen.getByRole("button", { name: "Deployment labels" }));
 
-    expect(sw("staging").getAttribute("aria-checked")).toBe("false");
+    expect(box("staging").checked).toBe(false);
   });
 });

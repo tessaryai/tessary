@@ -96,7 +96,7 @@ describe("creating", () => {
     renderModal();
     fillValid();
     type("Tags", "a, b, a");
-    fireEvent.click(screen.getByRole("switch", { name: "production" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "production" }));
     type("Commit message", "First");
 
     create();
