@@ -4,7 +4,8 @@ Runs the platform's own **agent** in an isolated sandbox: agentic RCA and Layer-
 [launcher sessions](#launcher-sessions) (the `rca` and `triage` lanes), and the generic agent run
 behind `AgentRunService` as one request to `/runs`. The Java backend has no E2B SDK and no Docker
 client, so it calls this Node sidecar over HTTP and the sidecar owns the sandbox lifecycle. A `/runs`
-request gets one fresh sandbox, torn down after. A session keeps one sandbox for its messages until
+request gets one fresh sandbox, torn down after. Its `timeout_ms` is a positive integer of at most
+one hour, or absent for `SANDBOX_TIMEOUT_MS`; any other value is a `bad_request`. A session keeps one sandbox for its messages until
 it closes, and never shares it with another session.
 
 ## What this was, and why the name changed
