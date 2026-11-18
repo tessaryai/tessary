@@ -15,9 +15,14 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -289,5 +294,22 @@ class PromptFetchCacheTest {
         cache.fetch("p1", "p", PRODUCTION, load);
 
         assertEquals(1, load.calls);
+    }
+
+    static Stream<Arguments> boundsOutOfRange() {
+        return Stream.of(
+                Arguments.of("max-entries", (Consumer<PromptCacheProperties>) p -> p.setMaxEntries(0)),
+                Arguments.of("max-body-chars", (Consumer<PromptCacheProperties>) p -> p.setMaxBodyChars(0)),
+                Arguments.of("ttl-seconds", (Consumer<PromptCacheProperties>) p -> p.setTtlSeconds(-1)));
+    }
+
+    /**
+     * Bug: a zero bound or a negative TTL is accepted, and the cache stores nothing while the operator believes it is
+     * on. Zero TTL is the documented off switch and stays allowed.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("boundsOutOfRange")
+    void aBoundOutOfRangeIsRefusedAtBinding(String bound, Consumer<PromptCacheProperties> set) {
+        assertThrows(IllegalArgumentException.class, () -> set.accept(new PromptCacheProperties()), bound);
     }
 }
