@@ -162,7 +162,20 @@ function PromptView({ detail, promptsPath }: { detail: PromptDetail; promptsPath
   };
 
   const body = () => {
-    if (section === "metrics") return <UsagePanel promptId={detail.id} versions={versions} />;
+    if (section === "metrics") {
+      const at = (version: number, tab: string | null) => hrefWith({ section: null, version: String(version), tab });
+      return (
+        <UsagePanel
+          promptId={detail.id}
+          versions={versions}
+          links={{
+            version: (n) => at(n, null),
+            traces: (n) => at(n, "traces"),
+            usePrompt: hrefWith({ section: null, tab: "use" }),
+          }}
+        />
+      );
+    }
     if (section === "playground") {
       return (
         <div className="flex flex-col gap-4">

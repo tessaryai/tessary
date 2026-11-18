@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import type { VersionSummary, VersionUsage } from "../../api/types";
 import { EmptyState, ErrorNote, SegmentedControl, Table, TableSkeleton, TBody, TD, TH, THead, TR } from "../../ui";
 import { formatCost, formatTokens, formatWhen } from "../traces/index-data";
+import { LabelBadge } from "./promptBits";
 import { formatVersionRef } from "./promptFolders";
 import { usePromptUsage } from "./promptReads";
 
@@ -18,29 +20,84 @@ function formatMs(ms: number | null): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+/** Where a row's version, its linked traces, and the fetch code live on the prompt page. */
+export type UsageLinks = { version: (n: number) => string; traces: (n: number) => string; usePrompt: string };
+
 const NUM = "whitespace-nowrap text-right font-mono tabular-nums";
 const DATE = "whitespace-nowrap font-mono text-small text-muted";
+const LINK = "text-link hover:text-link-hover";
+const HEADERS = [
+  "Version", "Deployment labels", "Calls", "Errors", "p50", "p95", "Input tokens", "Output tokens", "Cost",
+  "First call in range", "Last call in range",
+];
+/** Calls through Cost are numbers, right-aligned. */
+const isNumberColumn = (i: number) => i >= 2 && i <= 8;
 
-function UsageRow({ label, usage }: { label: string; usage: VersionUsage | undefined }) {
+function errorRate(errors: number, calls: number): string {
+  if (errors === 0) return "0%";
+  const pct = (errors / calls) * 100;
+  return pct < 0.1 ? "<0.1%" : `${pct.toFixed(1)}%`;
+}
+
+/** A version of this prompt carries its labels and links; a version only spans name carries neither. */
+type RowVersion = { label: string; labels?: string[]; number?: number };
+
+function UsageRow({ row, usage, links }: { row: RowVersion; usage: VersionUsage | undefined; links: UsageLinks }) {
+  const { label, labels, number } = row;
+  const own = labels?.filter((l) => l !== "latest") ?? [];
+  const leading = (
+    <>
+      <TD className="font-mono">
+        {number === undefined ? label : <Link to={links.version(number)} className={LINK}>{label}</Link>}
+      </TD>
+      <TD>
+        {labels === undefined ? null : labels.length === 0 ? (
+          <span className="text-muted">No labels</span>
+        ) : (
+          <span className="flex flex-wrap gap-1">
+            {own.map((l) => (
+              <LabelBadge key={l} label={l} text={l} />
+            ))}
+            {labels.includes("latest") && <LabelBadge label="latest" text="latest" />}
+          </span>
+        )}
+      </TD>
+    </>
+  );
+  const traces = (
+    <TD className="whitespace-nowrap text-right">
+      {number !== undefined && (
+        <Link to={links.traces(number)} className={LINK}>
+          View traces
+        </Link>
+      )}
+    </TD>
+  );
   if (!usage) {
     return (
       <TR>
-        <TD className="font-mono">{label}</TD>
+        {leading}
         <TD className={NUM}>0</TD>
         {Array.from({ length: 8 }, (_, i) => (
-          <TD key={i} className={NUM}>
+          <TD key={i} className={i < 6 ? NUM : DATE}>
             —
           </TD>
         ))}
+        {traces}
       </TR>
     );
   }
   const unpriced = usage.unpriced_calls;
+  const calls = usage.calls.toLocaleString("en-US");
   return (
     <TR>
-      <TD className="font-mono">{label}</TD>
-      <TD className={NUM}>{usage.calls.toLocaleString("en-US")}</TD>
-      <TD className={NUM}>{usage.error_calls.toLocaleString("en-US")}</TD>
+      {leading}
+      <TD className={NUM}>{calls}</TD>
+      <TD className={NUM}>
+        <span title={`${usage.error_calls.toLocaleString("en-US")} of ${calls} calls failed`}>
+          {errorRate(usage.error_calls, usage.calls)}
+        </span>
+      </TD>
       <TD className={NUM}>{formatMs(usage.p50_ms)}</TD>
       <TD className={NUM}>{formatMs(usage.p95_ms)}</TD>
       <TD className={NUM}>{formatTokens(usage.input_tokens)}</TD>
@@ -52,16 +109,18 @@ function UsageRow({ label, usage }: { label: string; usage: VersionUsage | undef
       </TD>
       <TD className={DATE}>{formatWhen(usage.first_call_in_range)}</TD>
       <TD className={DATE}>{formatWhen(usage.last_call_in_range)}</TD>
+      {traces}
     </TR>
   );
 }
 
-export function UsagePanel({ promptId, versions }: { promptId: string; versions: VersionSummary[] }) {
+/** The Metrics tab: calls, errors, latency, tokens and cost per version, inside one window. */
+export function UsagePanel({ promptId, versions, links }: { promptId: string; versions: VersionSummary[]; links: UsageLinks }) {
   const [days, setDays] = useState("7");
   const usage = usePromptUsage(promptId, Number(days));
 
   const body = () => {
-    if (usage.isPending) return <TableSkeleton rows={3} cols={10} />;
+    if (usage.isPending) return <TableSkeleton rows={3} cols={12} />;
     if (usage.isError) return <ErrorNote error={usage.error} />;
     const { versions: rows, unknown_versions: unknown } = usage.data;
     if (rows.length === 0) {
@@ -82,24 +141,31 @@ export function UsagePanel({ promptId, versions }: { promptId: string; versions:
         <Table>
           <THead>
             <TR>
-              {["Version", "Calls", "Errors", "p50", "p95", "Input tokens", "Output tokens", "Cost", "First seen", "Last seen"].map(
-                (h, i) => (
-                  <TH key={h} className={i > 0 && i < 8 ? "text-right" : undefined}>
-                    {h}
-                  </TH>
-                ),
-              )}
+              {HEADERS.map((h, i) => (
+                <TH key={h} className={isNumberColumn(i) ? "text-right" : undefined}>
+                  {h}
+                </TH>
+              ))}
+              <TH>
+                <span className="sr-only">Traces</span>
+              </TH>
             </TR>
           </THead>
           <TBody>
             {versions.map((v) => (
-              <UsageRow key={v.id} label={formatVersionRef(String(v.version))} usage={byVersion.get(String(v.version))} />
+              <UsageRow
+                key={v.id}
+                row={{ label: formatVersionRef(String(v.version)), labels: v.labels, number: v.version }}
+                usage={byVersion.get(String(v.version))}
+                links={links}
+              />
             ))}
             {other.map((u) => (
               <UsageRow
                 key={u.version === null ? "none" : `sent:${u.version}`}
-                label={u.version === null ? "No version" : formatVersionRef(u.version)}
+                row={{ label: u.version === null ? "No version" : formatVersionRef(u.version) }}
                 usage={u}
+                links={links}
               />
             ))}
           </TBody>
@@ -114,10 +180,16 @@ export function UsagePanel({ promptId, versions }: { promptId: string; versions:
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-h3 text-fg">Usage by version</h3>
+        <h2 className="text-h2 text-fg">Metrics by version</h2>
         <SegmentedControl ariaLabel="Window" value={days} onChange={setDays} options={WINDOWS} />
       </div>
       {body()}
+      <p className="text-small text-muted">
+        A call counts when its span names this prompt and a version. The SDK adds both with prompt.link().{" "}
+        <Link to={links.usePrompt} className={LINK}>
+          View the code to use this prompt
+        </Link>
+      </p>
     </div>
   );
 }

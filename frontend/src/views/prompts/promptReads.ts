@@ -60,9 +60,16 @@ export function usePromptFacets() {
   return useQuery({ queryKey: promptKeys.facets(api.base), queryFn: () => api.getPromptFacets() });
 }
 
+/** Calls per prompt over the window. It counts every linked span, so a filter change on the list does not read it again. */
+export const USAGE_SUMMARY_STALE_MS = 5 * 60_000;
+
 export function usePromptUsageSummary(days: number) {
   const api = useProjectApi();
-  return useQuery({ queryKey: promptKeys.usageSummary(api.base, days), queryFn: () => api.getPromptUsageSummary(days) });
+  return useQuery({
+    queryKey: promptKeys.usageSummary(api.base, days),
+    queryFn: () => api.getPromptUsageSummary(days),
+    staleTime: USAGE_SUMMARY_STALE_MS,
+  });
 }
 
 /** The prompt with its newest `VERSION_PAGE_SIZE` versions. */
@@ -99,7 +106,7 @@ export function usePromptVersion(id: string, v: number, enabled: boolean) {
   });
 }
 
-/** Mounted only on the Usage tab, after the version read succeeds. */
+/** Mounted only on the Metrics tab. */
 export function usePromptUsage(id: string, days: number) {
   const api = useProjectApi();
   return useQuery({ queryKey: promptKeys.usage(api.base, id, days), queryFn: () => api.getPromptUsage(id, days) });

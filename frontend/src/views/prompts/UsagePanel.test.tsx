@@ -2,8 +2,8 @@
 /*
  * Calls per version from the spans that name the prompt. The bugs worth catching are a window control that does not
  * reach the read, usage joined to the wrong version, a version without calls missing from the table, unpriced calls
- * hidden inside a cost, versions spans name that the prompt lacks left unsaid, and an empty window that names the
- * wrong period.
+ * hidden inside a cost, versions spans name that the prompt lacks left unsaid, an empty window that names the
+ * wrong period, columns that read as all-time when they cover only the window, and rows that lead nowhere.
  */
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -15,7 +15,12 @@ import { UsagePanel } from "./UsagePanel";
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const VERSIONS = promptDetail().versions;
-const renderPanel = () => renderRoute(<UsagePanel promptId="p-1" versions={VERSIONS} />);
+const LINKS = {
+  version: (n: number) => `/prompts/p-1?version=${n}`,
+  traces: (n: number) => `/prompts/p-1?version=${n}&tab=traces`,
+  usePrompt: "/prompts/p-1?tab=use",
+};
+const renderPanel = () => renderRoute(<UsagePanel promptId="p-1" versions={VERSIONS} links={LINKS} />);
 const row = (version: string) => screen.getByRole("cell", { name: version }).closest("tr")!;
 const cells = (version: string) => within(row(version)).getAllByRole("cell").map((c) => c.textContent);
 
@@ -36,8 +41,10 @@ describe("the table", () => {
 
     await screen.findByRole("cell", { name: "v2" });
     expect(screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent)).toEqual(["v2", "v1"]);
-    expect(cells("v2").slice(0, 8)).toEqual(["v2", "1,204", "3", "820 ms", "2.4 s", "12.0k", "3.40k", "0.4321"]);
-    expect(cells("v1")).toEqual(["v1", "0", "—", "—", "—", "—", "—", "—", "—", "—"]);
+    expect(cells("v2").slice(0, 9)).toEqual(
+      ["v2", "productionlatest", "1,204", "0.2%", "820 ms", "2.4 s", "12.0k", "3.40k", "0.4321"],
+    );
+    expect(cells("v1")).toEqual(["v1", "No labels", "0", "—", "—", "—", "—", "—", "—", "—", "—", "View traces"]);
     expect(screen.queryByText(/Spans also name versions/)).toBeNull();
   });
 
@@ -51,7 +58,7 @@ describe("the table", () => {
 
     await screen.findByRole("cell", { name: "v2" });
     for (const version of ["v2", "v1"]) {
-      const wraps = within(row(version)).getAllByRole("cell").slice(1).map((c) => c.classList.contains("whitespace-nowrap"));
+      const wraps = within(row(version)).getAllByRole("cell").slice(2, 11).map((c) => c.classList.contains("whitespace-nowrap"));
       expect(wraps).toEqual(Array(9).fill(true));
     }
   });
@@ -81,6 +88,46 @@ describe("the table", () => {
   });
 });
 
+describe("reading the table", () => {
+  // Bug: "First seen" and "Last seen" read as all time, but the server bounds both by the chosen window.
+  it("the first and last columns say they are within the range", async () => {
+    api.getPromptUsage.mockResolvedValue({ days: 7, versions: [versionUsage({ calls: 1 })], unknown_versions: [] });
+    renderPanel();
+
+    await screen.findByRole("cell", { name: "v2" });
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toContain("First call in range");
+    expect(headers).toContain("Last call in range");
+    expect(headers).not.toContain("First seen");
+  });
+
+  // Bug: a raw error count reads the same on 10 calls and on 10,000.
+  it("shows errors as a share of calls, with the count on hover", async () => {
+    api.getPromptUsage.mockResolvedValue({
+      days: 7, versions: [versionUsage({ version: "2", calls: 1204, error_calls: 3 })], unknown_versions: [],
+    });
+    renderPanel();
+
+    expect((await screen.findByText("0.2%")).getAttribute("title")).toBe("3 of 1,204 calls failed");
+  });
+
+  // Bug: a row names a version but leads nowhere, so the reader cannot open the version or its traces.
+  it("links each version to its page and its linked traces, and the note to the fetch code", async () => {
+    api.getPromptUsage.mockResolvedValue({ days: 7, versions: [versionUsage({ calls: 1 })], unknown_versions: [] });
+    renderPanel();
+
+    const link = await screen.findByRole("link", { name: "v2" });
+    expect(link.getAttribute("href")).toBe("/prompts/p-1?version=2");
+    expect(within(row("v2")).getByRole("link", { name: "View traces" }).getAttribute("href")).toBe(
+      "/prompts/p-1?version=2&tab=traces",
+    );
+    expect(screen.getByRole("link", { name: "View the code to use this prompt" }).getAttribute("href")).toBe(
+      "/prompts/p-1?tab=use",
+    );
+    expect(screen.getByText(/The SDK adds both with prompt\.link\(\)\./)).toBeTruthy();
+  });
+});
+
 describe("calls the version list does not hold", () => {
   // Bug: spans that name no version, or a version the prompt lacks, count on the list page's Calls column but were
   // drawn nowhere here, so the two screens disagreed.
@@ -101,9 +148,9 @@ describe("calls the version list does not hold", () => {
     expect(screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent)).toEqual(
       ["v2", "v1", "v9", "(prod)", "No version"],
     );
-    expect(cells("v9").slice(1, 3)).toEqual(["2", "1"]);
-    expect(cells("(prod)")[1]).toBe("1");
-    expect(cells("No version")[1]).toBe("5");
+    expect(cells("v9").slice(2, 4)).toEqual(["2", "50.0%"]);
+    expect(cells("(prod)")[2]).toBe("1");
+    expect(cells("No version")[2]).toBe("5");
   });
 });
 
