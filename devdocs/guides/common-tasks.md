@@ -84,8 +84,9 @@ by hand before you upgrade; the changesets then find nothing to do.
 4. Once the new index is valid: `DROP INDEX CONCURRENTLY IF EXISTS ix_span_payload_fts;`
 
 `0058-span-prompt-window-index.sql` builds `ix_span_prompt_window` over `span` the same way. It reads
-only linked llm spans into the index, so it is small and fast: about 3 s for 6,000,000 spans, 1,000,000
-of them linked, on a laptop. Above about 100,000,000 spans, or on a slow disk, run its
+only linked llm spans into the index, but the build still reads the whole `span` table: about 3 s for
+6,000,000 spans (a 3.9 GB table, 1,000,000 spans linked) on a laptop with the table in cache. When
+`SELECT pg_size_pretty(pg_relation_size('span'));` is above about 30 GB, or the disk is slow, run its
 `CREATE INDEX CONCURRENTLY` statement by hand with `psql` before you upgrade, exactly as the changeset
 spells it. A failed build leaves an invalid index: drop it with
 `DROP INDEX CONCURRENTLY ix_span_prompt_window;` and build again.

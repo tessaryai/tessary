@@ -204,16 +204,20 @@ reads. Both routes need `ORG_VIEW`; `days` defaults to 7 and is capped at 90.
   of all time. `unknown_versions` names the strings that match no stored version: a label, or a
   version deleted since.
 
-The per-prompt read uses `ix_span_prompt`, keyed `(project_id, prompt_name, started_at DESC)` with
-`prompt_version` included, so it scans only its window. The summary has no name to seek on, so it uses
-`ix_span_prompt_window` (`0058`), keyed `(project_id, started_at DESC)` with `prompt_name` and
-`trace_id` included. That index holds only linked, live llm spans, so the summary reads the window
-from the index alone and then looks up each span's trace.
+The summary has no name to seek on, so it reads `ix_span_prompt_window` (`0058`), keyed
+`(project_id, started_at DESC, prompt_name)` with `trace_id` included. That index holds only linked,
+live llm spans, so the summary reads its window from the index alone and then looks up each span's
+trace. The per-prompt read can use either that index or `ix_span_prompt`, keyed
+`(project_id, prompt_name, started_at DESC)` with `prompt_version` included. Both bound it to the
+window, and in both the prompt name is a key column, so the read skips other prompts' entries
+without reading their rows.
 
 Measured on Postgres 16 with one project of 1,000,000 linked llm spans and 5,000,000 other spans over
-90 days, warm cache: the summary over 7 days takes about 80 ms (430 ms before `0058`), and the
-per-prompt read over 90 days for a prompt with 360,000 calls takes about 0.6 to 1 s, most of it JIT
-compile. Both reads join `trace` once per span, so their cost grows with the calls in the window.
+90 days, warm cache: the summary over 7 days takes about 80 ms (220 ms before `0058`), and the
+per-prompt read over 90 days takes under 0.1 s for a prompt with 17,000 calls and about 0.5 to 0.7 s
+for one with 360,000 calls. Both reads join `trace` once per span, so their cost grows with the
+calls in the window; the 90-day read of the large prompt reads about 2.5 GB of `span` pages, so on a
+cold cache it can take seconds.
 
 ## SDK contract
 

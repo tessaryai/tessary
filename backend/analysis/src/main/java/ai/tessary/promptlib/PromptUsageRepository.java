@@ -19,9 +19,9 @@ import org.springframework.stereotype.Repository;
 /**
  * Grouped reads over the llm spans linked to a prompt. Only a settled, live trace counts, so a trace still receiving
  * spans cannot be counted twice between two reads. Reads {@code prompt} and {@code prompt_version} directly for the
- * version list, never through the prompt service. The per-version read seeks {@code ix_span_prompt} by name; the
- * per-name count has no name to seek on, so it reads its window from {@code ix_span_prompt_window}, whose predicate
- * repeats this read's llm and live-span filter word for word.
+ * version list, never through the prompt service. The per-name count has no name to seek on, so it reads its window
+ * from {@code ix_span_prompt_window}, whose predicate repeats this read's llm and live-span filter word for word. The
+ * per-version read uses that index or {@code ix_span_prompt}; both bound it to the window.
  */
 @Repository
 public class PromptUsageRepository {
