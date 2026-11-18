@@ -205,8 +205,11 @@ every linked index entry of the project, over the whole retention period, and fi
 
 `packages/sdk-python` (`tessary-prompts`) and `packages/sdk-ts` (`@tessaryai/prompts`) have no runtime
 dependencies. Python uses only `urllib.request` and needs 3.10 or later; TypeScript uses global
-`fetch`, and its build needs Node 18 or later. Both read `GET /v1/prompts/fetch` and write
-`POST /v1/prompts` and `PATCH /v1/prompts/labels`. Neither is published yet. Gates: `sdk-python` and
+`fetch`, and its build needs Node 18 or later. Both read `GET /v1/prompts/fetch` and `GET /v1/prompts`
+(list, never cached) and write `POST /v1/prompts`, `PATCH /v1/prompts/labels` and `DELETE /v1/prompts`.
+Methods: Python `get_prompt`, `create_prompt`, `update_prompt(name, version, new_labels, remove_labels)`,
+`delete_prompt`, `list_prompts`, `clear_prompt_cache`; TypeScript `get`, `create`, `update`, `delete`,
+`list`, `clearCache`. There is no prefetch method; the docs show a startup loop of fetches instead. Neither is published yet. Gates: `sdk-python` and
 `sdk-ts` in [test-suite.md](./test-suite.md).
 
 Compile. A supplied value becomes `str(value)` or `String(value)`; `None` or `null` becomes an empty
@@ -227,13 +230,17 @@ Cache, in process. The key is `name|version:N` when a version is given, else
 - A fresh entry (age below the TTL) is returned. A stale entry is returned at once, and one background
   refresh per key starts. A successful refresh replaces the entry, a 404 evicts it, and any other failure
   keeps it, logs at DEBUG, and is retried on a later stale read.
-- A miss loads on the caller's thread. Python lets two concurrent cold misses both fetch; TypeScript
-  shares one request.
+- A miss loads on the caller's thread. Concurrent misses on one key share one load: the others wait for
+  its value or its error.
+- Python runs every refresh on one daemon worker thread fed by a queue, started on first use and
+  started again when it is gone (after a fork). TypeScript refreshes are promises.
 - The TTL defaults to 60 seconds, and a per-call TTL overrides the client's.
-- `create` and `update_labels` (`updateLabels`) evict every key of that name after a 2xx, and bump a
-  generation for the name: a load or refresh that started before the write stores nothing. TypeScript also
-  drops the name's loads and refreshes in flight, so a caller after the write never joins a request made
-  before it.
+- `create`, `update` and `delete` evict every key of that name after a 2xx, before the body is parsed,
+  and bump a generation for the name: a load or refresh that started before the write stores nothing. The
+  name's loads and refreshes in flight are dropped too, so a caller after the write never joins a request
+  made before it.
+- `clear_prompt_cache()` (`clearCache()`) drops every entry, load and refresh, and bumps a cache-wide
+  epoch, so nothing in flight stores afterwards.
 
 Fallback. On any SDK error from a load, 404 included, a given fallback becomes a prompt (a string is text,
 a list is chat) with version 0, no labels or tags, config `{}`, and `is_fallback`/`isFallback` true. It is
@@ -241,18 +248,22 @@ never cached and never linked. Without a fallback the error is raised.
 
 Validation is raised before any I/O (Python `ValueError`, TypeScript `TypeError`): a host that is not
 `http(s)://`, an empty key or name, a version that is not an integer of at least 1, version together
-with label, a negative TTL or retry count, a fallback that is neither a string nor a list, and a create
+with label, a negative TTL or client retry count, a timeout that is not positive, a fallback that is neither a string nor a list, and a create
 type that is not `text` or `chat` or does not match the prompt.
 
 Wire. Headers are `Authorization: Bearer`, `Accept: application/json`, a `User-Agent` of
 `tessary-prompts-python/<v>` or `tessary-prompts-ts/<v>`, and `Content-Type: application/json` on a
 body. With neither version nor label the SDK sends neither. Every 2xx is success, and the SDK returns the
-envelope's `data`; a 2xx without a JSON `data` object is a transport error. Errors are parsed from
+envelope's `data`; a 2xx without a JSON `data` object is a transport error, and so is a prompt body
+without a string `name`, an integer `version`, a `type` of `text` or `chat`, and a `prompt` of the
+matching shape, so a fetch with a fallback falls back. Errors are parsed from
 `meta.error`, then the filter shape `error`, then `http_<status>`. Redirects are never followed.
 
-Retries: attempts are `1 + max_retries` (default 2).
+Retries: attempts are `1 + max_retries` (default 2, capped at 4). A per-call `max_retries` and
+`fetch_timeout_seconds` (`maxRetries`, `fetchTimeoutMs`) on a fetch override the client's values; the
+per-call retry count is clamped to 0 to 4.
 
-| Condition | GET | POST, PATCH |
+| Condition | GET | POST, PATCH, DELETE |
 |---|---|---|
 | 429 | retry | retry |
 | 5xx | retry | API error at once (the insert may have committed) |

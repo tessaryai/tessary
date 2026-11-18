@@ -49,15 +49,24 @@ export class HttpTransport {
     return this.#options.backoffMs + this.#options.random() * JITTER_MS;
   }
 
-  /** Send one call with retries and return the envelope's `data` object. */
+  /**
+   * Send one call with retries and return the envelope's `data` object. `maxRetries` and `timeoutMs`
+   * override the client's values for this call.
+   */
   async request(
-    method: "GET" | "POST" | "PATCH",
+    method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     ref: PromptRef,
-    { query, body }: { query?: URLSearchParams; body?: Record<string, unknown> },
+    {
+      query,
+      body,
+      maxRetries = this.#options.maxRetries,
+      timeoutMs = this.#options.timeoutMs,
+    }: { query?: URLSearchParams; body?: Record<string, unknown>; maxRetries?: number; timeoutMs?: number },
   ): Promise<Record<string, unknown>> {
     const o = this.#options;
-    const url = `${o.host}${path}${query ? `?${query}` : ""}`;
+    const search = query?.toString();
+    const url = `${o.host}${path}${search ? `?${search}` : ""}`;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${o.apiKey}`,
       Accept: "application/json",
@@ -65,7 +74,7 @@ export class HttpTransport {
     };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     const isRead = method === "GET";
-    const attempts = 1 + o.maxRetries;
+    const attempts = 1 + maxRetries;
     let attempt = 0;
     let error!: TessaryPromptsError;
     let retryable = false;
@@ -87,7 +96,7 @@ export class HttpTransport {
           headers,
           body: body === undefined ? undefined : JSON.stringify(body),
           redirect: "manual",
-          signal: AbortSignal.timeout(o.timeoutMs),
+          signal: AbortSignal.timeout(timeoutMs),
         });
         text = await response.text();
       } catch (failure) {

@@ -83,6 +83,7 @@ def test_bad_get_arguments_raise_before_any_request(server, kwargs):
         (("http://x", ""), {}),
         (("http://x", "k"), {"cache_ttl_seconds": -1}),
         (("http://x", "k"), {"max_retries": -1}),
+        (("http://x", "k"), {"timeout": 0}),
     ],
 )
 def test_bad_client_arguments_raise(args, kwargs):
@@ -276,32 +277,194 @@ def test_bad_create_arguments_raise_before_any_request(server, args, kwargs):
     assert server.requests == []
 
 
-def test_update_labels_body_is_exact_and_evicts_the_name(server):
+def test_update_prompt_body_is_exact_and_evicts_the_name(server):
     # Bug: camelCase lost on newLabels, or a cached production read survives a promote.
     server.script({"status": 200, "body": envelope(name="a")}, {"status": 200, "body": envelope(name="a", version=2)})
     client = make(server)
     client.get_prompt("a")
-    assert client.update_labels("a", 2, ["production"]).version == 2
+    assert client.update_prompt(name="a", version=2, new_labels=["production"]).version == 2
     patch = server.requests[1]
     assert (patch.method, patch.path) == ("PATCH", "/v1/prompts/labels")
     assert patch.body == {"name": "a", "version": 2, "newLabels": ["production"]}
     assert client.cache.size() == 0
 
 
-@pytest.mark.parametrize("args", [("", 1, ["x"]), ("a", 0, ["x"])])
-def test_bad_update_labels_arguments_raise(server, args):
+def test_update_prompt_sends_remove_labels(server):
+    # Bug: remove_labels never reaches the server, so a label cannot be taken off from code.
+    server.script({"status": 200, "body": envelope(name="a", version=2)})
+    make(server).update_prompt(name="a", version=2, remove_labels=["staging"])
+    assert server.requests[0].body == {"name": "a", "version": 2, "removeLabels": ["staging"]}
+
+
+@pytest.mark.parametrize("kwargs", [{"name": "", "version": 1}, {"name": "a", "version": 0}])
+def test_bad_update_prompt_arguments_raise(server, kwargs):
     # Bug: a label move with no prompt or no version reaches the server.
     with pytest.raises(ValueError):
-        make(server).update_labels(*args)
+        make(server).update_prompt(**kwargs, new_labels=["x"])
     assert server.requests == []
 
 
-def test_update_labels_404_names_the_version(server):
+def test_update_prompt_404_names_the_version(server):
     # Bug: a missing version is reported without saying which one.
     server.script({"status": 404, "body": api_error(404, "PROMPTS.VERSION_NOT_FOUND", "Prompt a has no version 9")})
     with pytest.raises(PromptNotFound) as caught:
-        make(server).update_labels("a", 9, ["production"])
+        make(server).update_prompt(name="a", version=9, new_labels=["production"])
     assert (caught.value.name, caught.value.version) == ("a", 9)
+
+
+def test_delete_prompt_by_label_evicts_the_name(server):
+    # Bug: a stale cached version is served after a delete.
+    deleted = {"meta": {"status": 200, "success": True}, "data": {"deleted": True}}
+    server.script(
+        {"status": 200, "body": envelope(name="a")},
+        {"status": 200, "body": deleted},
+        {"status": 200, "body": envelope(name="a", version=2)},
+    )
+    client = make(server)
+    client.get_prompt("a")
+    assert client.delete_prompt("a", label="production") is True
+    req = server.requests[1]
+    assert (req.method, req.path, req.query) == ("DELETE", "/v1/prompts", "name=a&label=production")
+    assert req.body is None
+    assert client.get_prompt("a").version == 2
+    assert len(server.requests) == 3
+
+
+def test_delete_prompt_sends_the_version_or_nothing(server):
+    # Bug: the version is dropped, so a version delete removes the whole prompt.
+    deleted = {"meta": {"status": 200, "success": True}, "data": {"deleted": True}}
+    server.script({"status": 200, "body": deleted}, {"status": 200, "body": deleted})
+    client = make(server)
+    client.delete_prompt("a", version=3)
+    client.delete_prompt("a")
+    assert [r.query for r in server.requests] == ["name=a&version=3", "name=a"]
+
+
+@pytest.mark.parametrize(
+    "args, kwargs", [(("",), {}), (("a",), {"version": 0}), (("a",), {"version": 1, "label": "x"})]
+)
+def test_bad_delete_prompt_arguments_raise(server, args, kwargs):
+    # Bug: a delete with both a version and a label, or no name, reaches the server.
+    with pytest.raises(ValueError):
+        make(server).delete_prompt(*args, **kwargs)
+    assert server.requests == []
+
+
+def test_delete_prompt_is_not_retried_on_503(server):
+    # Bug: a delete that committed is sent again and deletes the next version a label moved to.
+    server.script({"status": 503}, {"status": 200})
+    with pytest.raises(PromptApiError):
+        make(server).delete_prompt("a", label="production")
+    assert len(server.requests) == 1
+
+
+def test_list_prompts_passes_filters_and_returns_the_page(server):
+    # Bug: filters are dropped from the query, or the page comes back without its meta.
+    page = {
+        "data": [{"name": "a", "type": "text", "versions": [1], "labels": [], "tags": [], "lastUpdatedAt": "x", "lastConfig": {}}],
+        "meta": {"page": 2, "limit": 5, "totalItems": 6, "totalPages": 2},
+    }
+    server.script({"status": 200, "body": {"meta": {"status": 200, "success": True}, "data": page}}, {"status": 200, "body": {"meta": {}, "data": page}})
+    client = make(server)
+    assert client.list_prompts(
+        name="a",
+        label="production",
+        tag="t",
+        page=2,
+        limit=5,
+        from_updated_at="2026-11-01T00:00:00Z",
+        to_updated_at="2026-11-02T00:00:00Z",
+    ) == page
+    client.list_prompts()
+    first, second = server.requests
+    assert (first.method, first.path) == ("GET", "/v1/prompts")
+    assert first.query == (
+        "name=a&label=production&tag=t&page=2&limit=5"
+        "&fromUpdatedAt=2026-11-01T00%3A00%3A00Z&toUpdatedAt=2026-11-02T00%3A00%3A00Z"
+    )
+    assert second.query == ""
+
+
+def test_clear_prompt_cache_forces_a_fetch(server):
+    # Bug: there is no way to drop the cache, so a process serves a moved label for a full TTL.
+    server.script({"status": 200, "body": envelope(version=1)}, {"status": 200, "body": envelope(version=2)})
+    client = make(server)
+    assert client.get_prompt("a").version == 1
+    client.clear_prompt_cache()
+    assert client.cache.size() == 0
+    assert client.get_prompt("a").version == 2
+    assert len(server.requests) == 2
+
+
+def test_per_call_retries_and_timeout_override_the_client(server):
+    # Bug: a caller cannot shorten the 16 s worst case for one call (review finding P5).
+    sleeps = Sleeps()
+    server.script(*[{"status": 503}] * 2, {"status": 200, "body": envelope(), "delay": 0.5})
+    client = make(server, sleep=sleeps, max_retries=4, timeout=5.0)
+    with pytest.raises(PromptApiError):
+        client.get_prompt("a", max_retries=0)
+    assert len(server.requests) == 1
+    with pytest.raises(PromptTransportError):
+        client.get_prompt("a", max_retries=1, fetch_timeout_seconds=0.05)
+    assert len(server.requests) == 3
+
+
+def test_retries_are_capped_at_four(server):
+    # Bug: a large retry count parks the caller for minutes on a dead instance.
+    sleeps = Sleeps()
+    server.script(*[{"status": 503}] * 12)
+    client = make(server, sleep=sleeps, max_retries=10)
+    with pytest.raises(PromptApiError):
+        client.get_prompt("a")
+    assert len(server.requests) == 5
+    with pytest.raises(PromptApiError):
+        client.get_prompt("a", max_retries=9)
+    assert len(server.requests) == 10
+    with pytest.raises(PromptApiError):
+        client.get_prompt("a", max_retries=-3)
+    assert len(server.requests) == 11
+
+
+def test_bad_fetch_timeout_raises_before_any_request(server):
+    # Bug: a zero or negative timeout reaches urllib, which then blocks or fails with a raw error.
+    with pytest.raises(ValueError):
+        make(server).get_prompt("a", fetch_timeout_seconds=0)
+    assert server.requests == []
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"version": None},
+        {"version": "3"},
+        {"version": True},
+        {"name": 7},
+        {"type": "json"},
+        {"prompt": None},
+        {"type": "chat", "prompt": "not a list"},
+        {"type": "text", "prompt": [{"role": "user", "content": "x"}]},
+    ],
+)
+def test_malformed_success_body_returns_the_fallback(server, overrides):
+    # Bug: a 2xx without version (or with a wrong-typed field) raises KeyError past the fallback.
+    data = envelope(**overrides)
+    if overrides.get("version", 0) is None:
+        del data["data"]["version"]
+    server.script({"status": 200, "body": data}, {"status": 200, "body": data})
+    client = make(server)
+    assert client.get_prompt("a", fallback="x").is_fallback
+    with pytest.raises(PromptTransportError):
+        client.get_prompt("a")
+
+
+def test_a_write_with_a_malformed_body_still_evicts_the_name(server):
+    # Bug: the write committed but the bad body raised first, so the old cached version is served on.
+    server.script({"status": 200, "body": envelope(name="a")}, {"status": 201, "body": envelope(name="a", version=None)})
+    client = make(server)
+    client.get_prompt("a")
+    with pytest.raises(PromptTransportError):
+        client.create_prompt("a", "p")
+    assert client.cache.size() == 0
 
 
 def test_host_is_normalised(server):
@@ -337,6 +500,13 @@ def test_2xx_without_a_data_object_is_a_transport_error(server):
     server.script({"status": 200, "body": {"meta": {"status": 200, "success": True}}})
     with pytest.raises(PromptTransportError):
         make(server).get_prompt("a")
+
+
+@pytest.mark.parametrize("data", ["x", [1], None])
+def test_2xx_whose_data_is_not_an_object_is_a_transport_error(server, data):
+    # Bug: a data string or list crashes the caller with a bare AttributeError past the fallback.
+    server.script({"status": 200, "body": {"meta": {"status": 200, "success": True}, "data": data}})
+    assert make(server).get_prompt("a", fallback="f").is_fallback
 
 
 def test_connection_refused_is_a_transport_error():

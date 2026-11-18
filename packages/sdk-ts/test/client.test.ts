@@ -91,6 +91,7 @@ test("bad client arguments throw", () => {
     { host: "http://x", apiKey: "" },
     { host: "http://x", apiKey: "k", cacheTtlSeconds: -1 },
     { host: "http://x", apiKey: "k", maxRetries: -1 },
+    { host: "http://x", apiKey: "k", timeoutMs: 0 },
   ]) {
     assert.throws(() => new TessaryPrompts(options), TypeError);
   }
@@ -288,31 +289,175 @@ test("bad create arguments throw before any request", async () => {
   assert.equal(server.requests.length, 0);
 });
 
-test("updateLabels body is exact and evicts the name", async () => {
+test("update body is exact and evicts the name", async () => {
   // Bug: camelCase lost on newLabels, or a cached production read survives a promote.
   server.script({ status: 200, body: envelope({ name: "a" }) }, { status: 200, body: envelope({ name: "a", version: 2 }) });
   const client = make();
   await client.get("a");
-  assert.equal((await client.updateLabels("a", 2, ["production"])).version, 2);
+  assert.equal((await client.update({ name: "a", version: 2, newLabels: ["production"] })).version, 2);
   const patch = server.requests[1];
   assert.deepEqual([patch.method, patch.path], ["PATCH", "/v1/prompts/labels"]);
   assert.deepEqual(patch.body, { name: "a", version: 2, newLabels: ["production"] });
   assert.equal(client.cache.size(), 0);
 });
 
-test("bad updateLabels arguments throw", async () => {
+test("update sends removeLabels", async () => {
+  // Bug: removeLabels never reaches the server, so a label cannot be taken off from code.
+  server.script({ status: 200, body: envelope({ name: "a", version: 2 }) });
+  await make().update({ name: "a", version: 2, removeLabels: ["staging"] });
+  assert.deepEqual(server.requests[0].body, { name: "a", version: 2, removeLabels: ["staging"] });
+});
+
+test("bad update arguments throw", async () => {
   // Bug: a label move with no prompt or no version reaches the server.
   const client = make();
-  await rejects(client.updateLabels("", 1, ["x"]), TypeError);
-  await rejects(client.updateLabels("a", 0, ["x"]), TypeError);
+  await rejects(client.update({ name: "", version: 1, newLabels: ["x"] }), TypeError);
+  await rejects(client.update({ name: "a", version: 0, newLabels: ["x"] }), TypeError);
   assert.equal(server.requests.length, 0);
 });
 
-test("updateLabels 404 names the version", async () => {
+test("update 404 names the version", async () => {
   // Bug: a missing version is reported without saying which one.
   server.script({ status: 404, body: apiError(404, "PROMPTS.VERSION_NOT_FOUND", "Prompt a has no version 9") });
-  const error = await rejects(make().updateLabels("a", 9, ["production"]), PromptNotFoundError);
+  const error = await rejects(make().update({ name: "a", version: 9, newLabels: ["production"] }), PromptNotFoundError);
   assert.deepEqual([error.promptName, error.version], ["a", 9]);
+});
+
+const DELETED = { meta: { status: 200, success: true }, data: { deleted: true } };
+
+test("delete by label evicts the name", async () => {
+  // Bug: a stale cached version is served after a delete.
+  server.script({ status: 200, body: envelope({ name: "a" }) }, { status: 200, body: DELETED }, { status: 200, body: envelope({ name: "a", version: 2 }) });
+  const client = make();
+  await client.get("a");
+  assert.equal(await client.delete("a", { label: "production" }), true);
+  const req = server.requests[1];
+  assert.deepEqual([req.method, req.path, req.query, req.body], ["DELETE", "/v1/prompts", "name=a&label=production", null]);
+  assert.equal((await client.get("a")).version, 2);
+  assert.equal(server.requests.length, 3);
+});
+
+test("delete sends the version or nothing", async () => {
+  // Bug: the version is dropped, so a version delete removes the whole prompt.
+  server.script({ status: 200, body: DELETED }, { status: 200, body: { meta: {}, data: {} } });
+  const client = make();
+  assert.equal(await client.delete("a", { version: 3 }), true);
+  assert.equal(await client.delete("a"), false);
+  assert.deepEqual(
+    server.requests.map((r) => r.query),
+    ["name=a&version=3", "name=a"],
+  );
+});
+
+test("bad delete arguments throw before any request", async () => {
+  // Bug: a delete with both a version and a label, or no name, reaches the server.
+  const client = make();
+  await rejects(client.delete(""), TypeError);
+  await rejects(client.delete("a", { version: 0 }), TypeError);
+  await rejects(client.delete("a", { version: 1, label: "x" }), TypeError);
+  assert.equal(server.requests.length, 0);
+});
+
+test("delete is not retried on 503", async () => {
+  // Bug: a delete that committed is sent again and deletes the next version a label moved to.
+  server.script({ status: 503 }, { status: 200, body: DELETED });
+  await rejects(make().delete("a", { label: "production" }), PromptApiError);
+  assert.equal(server.requests.length, 1);
+});
+
+test("list passes filters and returns the page", async () => {
+  // Bug: filters are dropped from the query, or the page comes back without its meta.
+  const page = {
+    data: [{ name: "a", type: "text", versions: [1], labels: [], tags: [], lastUpdatedAt: "x", lastConfig: {} }],
+    meta: { page: 2, limit: 5, totalItems: 6, totalPages: 2 },
+  };
+  server.script({ status: 200, body: { meta: {}, data: page } }, { status: 200, body: { meta: {}, data: page } });
+  const client = make();
+  const got = await client.list({
+    name: "a",
+    label: "production",
+    tag: "t",
+    page: 2,
+    limit: 5,
+    fromUpdatedAt: "2026-11-01T00:00:00Z",
+    toUpdatedAt: "2026-11-02T00:00:00Z",
+  });
+  assert.deepEqual(got, page);
+  await client.list();
+  const [first, second] = server.requests;
+  assert.deepEqual([first.method, first.path], ["GET", "/v1/prompts"]);
+  assert.equal(
+    first.query,
+    "name=a&label=production&tag=t&page=2&limit=5&fromUpdatedAt=2026-11-01T00%3A00%3A00Z&toUpdatedAt=2026-11-02T00%3A00%3A00Z",
+  );
+  assert.equal(second.query, "");
+});
+
+test("clearCache forces a fetch", async () => {
+  // Bug: there is no way to drop the cache, so a process serves a moved label for a full TTL.
+  server.script({ status: 200, body: envelope({ version: 1 }) }, { status: 200, body: envelope({ version: 2 }) });
+  const client = make();
+  assert.equal((await client.get("a")).version, 1);
+  client.clearCache();
+  assert.equal(client.cache.size(), 0);
+  assert.equal((await client.get("a")).version, 2);
+  assert.equal(server.requests.length, 2);
+});
+
+test("per-call retries and timeout override the client", async () => {
+  // Bug: a caller cannot shorten the 16 s worst case for one call.
+  server.script({ status: 503 }, { status: 503 }, { status: 200, body: envelope(), delayMs: 500 });
+  const client = make({ maxRetries: 4, timeoutMs: 5000 });
+  await rejects(client.get("a", { maxRetries: 0 }), PromptApiError);
+  assert.equal(server.requests.length, 1);
+  await rejects(client.get("a", { maxRetries: 1, fetchTimeoutMs: 50 }), PromptTransportError);
+  assert.equal(server.requests.length, 3);
+});
+
+test("retries are capped at four", async () => {
+  // Bug: a large retry count parks the caller for minutes on a dead instance.
+  server.script(...Array.from({ length: 12 }, () => ({ status: 503 })));
+  const client = make({ maxRetries: 10 });
+  await rejects(client.get("a"), PromptApiError);
+  assert.equal(server.requests.length, 5);
+  await rejects(client.get("a", { maxRetries: 9 }), PromptApiError);
+  assert.equal(server.requests.length, 10);
+  await rejects(client.get("a", { maxRetries: -3 }), PromptApiError);
+  assert.equal(server.requests.length, 11);
+});
+
+test("a bad fetch timeout throws before any request", async () => {
+  // Bug: a zero or negative timeout reaches AbortSignal.timeout, which then fails every call at once.
+  await rejects(make().get("a", { fetchTimeoutMs: 0 }), TypeError);
+  assert.equal(server.requests.length, 0);
+});
+
+test("a malformed success body returns the fallback", async () => {
+  // Bug: a 2xx without version (or with a wrong-typed field) is returned as a prompt with undefined fields.
+  for (const overrides of [
+    { version: undefined },
+    { version: "3" },
+    { version: 1.5 },
+    { name: 7 },
+    { type: "json" },
+    { prompt: null },
+    { type: "chat", prompt: "not a list" },
+    { type: "text", prompt: [{ role: "user", content: "x" }] },
+  ]) {
+    server.script({ status: 200, body: envelope(overrides) }, { status: 200, body: envelope(overrides) });
+    const client = make();
+    assert.equal((await client.get("a", { fallback: "x" })).isFallback, true, JSON.stringify(overrides));
+    await rejects(client.get("a"), PromptTransportError);
+  }
+});
+
+test("a write with a malformed body still evicts the name", async () => {
+  // Bug: the write committed but the bad body threw first, so the old cached version is served on.
+  server.script({ status: 200, body: envelope({ name: "a" }) }, { status: 201, body: envelope({ name: "a", version: undefined }) });
+  const client = make();
+  await client.get("a");
+  await rejects(client.create({ name: "a", prompt: "p" }), PromptTransportError);
+  assert.equal(client.cache.size(), 0);
 });
 
 test("host is normalised", async () => {

@@ -65,9 +65,18 @@ class HttpTransport:
         return self._backoff + self.rng() * JITTER_SECONDS
 
     def request(
-        self, method: str, path: str, ref: Ref, *, query: dict[str, str] | None = None, body: dict[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        ref: Ref,
+        *,
+        query: dict[str, str] | None = None,
+        body: dict[str, Any] | None = None,
+        max_retries: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Send one call with retries and return the envelope's ``data`` object."""
+        """Send one call with retries and return the envelope's ``data`` object. ``max_retries`` and
+        ``timeout`` override the client's values for this call."""
         url = self._host + path + ("?" + urlencode(query) if query else "")
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -78,14 +87,15 @@ class HttpTransport:
         if data is not None:
             headers["Content-Type"] = "application/json"
         is_read = method == "GET"
-        attempts = 1 + self._max_retries
+        attempts = 1 + (self._max_retries if max_retries is None else max_retries)
+        timeout = self._timeout if timeout is None else timeout
         attempt = 0
         while True:
             attempt += 1
             request = urllib.request.Request(url, data=data, headers=headers, method=method)
             error: TessaryPromptsError
             try:
-                with self._opener.open(request, timeout=self._timeout) as response:
+                with self._opener.open(request, timeout=timeout) as response:
                     raw = response.read()
             except urllib.error.HTTPError as failure:
                 status = failure.code
@@ -115,7 +125,9 @@ class HttpTransport:
     @staticmethod
     def _data(raw: bytes) -> dict[str, Any]:
         try:
-            data: dict[str, Any] = json.loads(raw)["data"]
+            data = json.loads(raw)["data"]
         except (ValueError, TypeError, KeyError) as failure:
             raise PromptTransportError("the server answered 2xx with an unreadable body") from failure
+        if not isinstance(data, dict):
+            raise PromptTransportError("the server answered 2xx with an unreadable body")
         return data

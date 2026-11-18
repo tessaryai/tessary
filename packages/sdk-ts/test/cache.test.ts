@@ -202,3 +202,26 @@ test("evict also stops a load in flight from storing", { timeout: 5_000 }, async
   assert.equal((await pending).version, 3);
   assert.equal(cache.size(), 0);
 });
+
+test("clear drops every entry and stops loads in flight from storing", { timeout: 5_000 }, async () => {
+  // Bug: clearCache leaves a refresh or cold load that started before it free to store its old value.
+  const clock = new Clock();
+  const cache = new PromptCache(clock.read, quiet);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const load = loader(text(1), text(9));
+  await cache.get("a|label:production", 60, load);
+  clock.now = 61_000;
+  const slow = async () => {
+    await gate;
+    return text(1);
+  };
+  await cache.get("a|label:production", 60, slow);
+  const cold = cache.get("b|label:production", 60, slow);
+  cache.clear();
+  release();
+  assert.equal((await cold).version, 1);
+  await cache.whenIdle();
+  assert.equal(cache.size(), 0);
+  assert.equal((await cache.get("a|label:production", 60, load)).version, 9);
+});

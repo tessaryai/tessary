@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
+from .errors import PromptTransportError
+
 # The one variable syntax: any trimmed, non-blank text with no brace between double braces. The
 # backend, the frontend, and the TypeScript SDK hold the same literal, and a repo gate compares the
 # copies. The name starts and ends on a non-space so a long unclosed {{ scans in linear time.
@@ -125,8 +127,18 @@ class ChatPrompt(BasePrompt):
 
 
 def from_data(data: dict[str, Any]) -> TextPrompt | ChatPrompt:
-    """Build a prompt from the ``data`` of a PublicPrompt envelope."""
-    cls = ChatPrompt if data["type"] == "chat" else TextPrompt
+    """Build a prompt from the ``data`` of a PublicPrompt envelope. A body without a usable name,
+    version, type or prompt is a transport error, so ``get_prompt`` falls back instead of crashing."""
+    kind, version = data.get("type"), data.get("version")
+    if (
+        not isinstance(data.get("name"), str)
+        or isinstance(version, bool)
+        or not isinstance(version, int)
+        or kind not in ("text", "chat")
+        or not isinstance(data.get("prompt"), str if kind == "text" else list)
+    ):
+        raise PromptTransportError("the server answered 2xx without a usable name, version, type or prompt")
+    cls = ChatPrompt if kind == "chat" else TextPrompt
     return cls(
         name=data["name"],
         version=data["version"],

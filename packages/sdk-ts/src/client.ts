@@ -28,6 +28,50 @@ export interface GetPromptOptions {
   cacheTtlSeconds?: number;
   /** Returned instead of throwing when the fetch fails and nothing is cached. */
   fallback?: string | ChatItem[];
+  /** Retries for this call, 0 to 4; the client's value when absent. */
+  maxRetries?: number;
+  /** Timeout of each attempt of this call; the client's value when absent. */
+  fetchTimeoutMs?: number;
+}
+
+export interface UpdatePromptInput {
+  name: string;
+  version: number;
+  /** Added to the version, and moved off any other version that holds them. */
+  newLabels?: string[];
+  /** Taken off the version, after `newLabels`. */
+  removeLabels?: string[];
+}
+
+export interface DeletePromptOptions {
+  version?: number;
+  label?: string;
+}
+
+export interface ListPromptsOptions {
+  name?: string;
+  label?: string;
+  tag?: string;
+  page?: number;
+  limit?: number;
+  /** ISO-8601 instants that bound when each prompt last changed. */
+  fromUpdatedAt?: string;
+  toUpdatedAt?: string;
+}
+
+export interface PromptListItem {
+  name: string;
+  type: "text" | "chat";
+  versions: number[];
+  labels: string[];
+  tags: string[];
+  lastUpdatedAt: string;
+  lastConfig: Record<string, unknown>;
+}
+
+export interface PromptListPage {
+  data: PromptListItem[];
+  meta: { page: number; limit: number; totalItems: number; totalPages: number };
 }
 
 export interface CreatePromptInput {
@@ -40,6 +84,7 @@ export interface CreatePromptInput {
   commitMessage?: string;
 }
 
+const MAX_RETRIES_CAP = 4;
 const NOOP_LOGGER: PromptsLogger = { debug: () => {} };
 const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -49,6 +94,15 @@ function checkName(name: string): void {
 
 function checkVersion(version: number): void {
   if (!Number.isInteger(version) || version < 1) throw new TypeError("version must be an integer of at least 1");
+}
+
+function boundedRetries(maxRetries: number): number {
+  return Math.max(0, Math.min(maxRetries, MAX_RETRIES_CAP));
+}
+
+/** Drops absent values, so an optional the caller left out is never sent as null. */
+function present<T extends object>(record: T): Partial<T> {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Partial<T>;
 }
 
 export class TessaryPrompts {
@@ -62,13 +116,15 @@ export class TessaryPrompts {
     const ttl = options.cacheTtlSeconds ?? 60;
     const maxRetries = options.maxRetries ?? 2;
     if (ttl < 0 || maxRetries < 0) throw new TypeError("cacheTtlSeconds and maxRetries must not be negative");
+    const timeoutMs = options.timeoutMs ?? 5000;
+    if (!(timeoutMs > 0)) throw new TypeError("timeoutMs must be positive");
     this.#ttlSeconds = ttl;
     const logger = options.logger ?? NOOP_LOGGER;
     this.#transport = new HttpTransport({
       host: options.host.replace(/\/+$/, ""),
       apiKey: options.apiKey,
-      timeoutMs: options.timeoutMs ?? 5000,
-      maxRetries,
+      timeoutMs,
+      maxRetries: boundedRetries(maxRetries),
       backoffMs: options.retryBackoffMs ?? 500,
       fetch: options.fetch ?? globalThis.fetch,
       sleep: options.sleep ?? realSleep,
@@ -80,10 +136,11 @@ export class TessaryPrompts {
 
   /**
    * Return the version by number, by label, or the `production` label when neither is given. A
-   * stale cached prompt is returned at once and refreshed in the background.
+   * stale cached prompt is returned at once and refreshed in the background. `maxRetries` (0 to 4)
+   * and `fetchTimeoutMs` override the client's values for this call.
    */
   async get(name: string, options: GetPromptOptions = {}): Promise<Prompt> {
-    const { version, label, cacheTtlSeconds, fallback } = options;
+    const { version, label, cacheTtlSeconds, fallback, maxRetries, fetchTimeoutMs } = options;
     checkName(name);
     if (version !== undefined) checkVersion(version);
     if (version !== undefined && label) throw new TypeError("give version or label, not both");
@@ -91,12 +148,17 @@ export class TessaryPrompts {
     if (fallback !== undefined && typeof fallback !== "string" && !Array.isArray(fallback)) {
       throw new TypeError("fallback must be a string (text) or an array of messages (chat)");
     }
+    if (fetchTimeoutMs !== undefined && !(fetchTimeoutMs > 0)) throw new TypeError("fetchTimeoutMs must be positive");
+    const perCall = {
+      maxRetries: maxRetries === undefined ? undefined : boundedRetries(maxRetries),
+      timeoutMs: fetchTimeoutMs,
+    };
     const query = new URLSearchParams({ name });
     if (version !== undefined) query.set("version", String(version));
     if (label) query.set("label", label);
     const key = PromptCache.key(name, version, label);
     const ref = { name, version: version ?? null, label: label || null };
-    const load = async () => fromData(await this.#transport.request("GET", "/v1/prompts/fetch", ref, { query }));
+    const load = async () => fromData(await this.#transport.request("GET", "/v1/prompts/fetch", ref, { query, ...perCall }));
     try {
       return await this.cache.get(key, cacheTtlSeconds ?? this.#ttlSeconds, load);
     } catch (error) {
@@ -115,24 +177,62 @@ export class TessaryPrompts {
       throw new TypeError("a text prompt is a string and a chat prompt is an array of messages");
     }
     const optional = { config: input.config, labels: input.labels, tags: input.tags, commitMessage: input.commitMessage };
-    const body = {
-      name: input.name,
-      type,
-      prompt: input.prompt,
-      ...Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined)),
-    };
+    const body = { name: input.name, type, prompt: input.prompt, ...present(optional) };
     const data = await this.#transport.request("POST", "/v1/prompts", { name: input.name, version: null, label: null }, { body });
     this.cache.evictName(input.name);
     return fromData(data);
   }
 
-  /** Add labels to a version, moving each one off any other version. Needs an admin key. */
-  async updateLabels(name: string, version: number, newLabels: string[]): Promise<Prompt> {
+  /**
+   * Add `newLabels` to a version, moving each one off any other version, then take `removeLabels`
+   * off it. Needs an admin key.
+   */
+  async update(input: UpdatePromptInput): Promise<Prompt> {
+    const { name, version } = input;
     checkName(name);
     checkVersion(version);
-    const body = { name, version, newLabels };
+    const body = { name, version, ...present({ newLabels: input.newLabels, removeLabels: input.removeLabels }) };
     const data = await this.#transport.request("PATCH", "/v1/prompts/labels", { name, version, label: null }, { body });
     this.cache.evictName(name);
     return fromData(data);
+  }
+
+  /**
+   * Delete one version by number, the version a label points at, or with neither the whole prompt.
+   * Deleting the last version deletes the prompt. Needs an admin key; never retried.
+   */
+  async delete(name: string, options: DeletePromptOptions = {}): Promise<boolean> {
+    const { version, label } = options;
+    checkName(name);
+    if (version !== undefined) checkVersion(version);
+    if (version !== undefined && label) throw new TypeError("give version or label, not both");
+    const query = new URLSearchParams({ name });
+    if (version !== undefined) query.set("version", String(version));
+    if (label) query.set("label", label);
+    const ref = { name, version: version ?? null, label: label || null };
+    const data = await this.#transport.request("DELETE", "/v1/prompts", ref, { query });
+    this.cache.evictName(name);
+    return data.deleted === true;
+  }
+
+  /** One page of the project's prompts, ordered by name. Never cached. */
+  async list(options: ListPromptsOptions = {}): Promise<PromptListPage> {
+    const params = present({
+      name: options.name,
+      label: options.label,
+      tag: options.tag,
+      page: options.page,
+      limit: options.limit,
+      fromUpdatedAt: options.fromUpdatedAt,
+      toUpdatedAt: options.toUpdatedAt,
+    });
+    const query = new URLSearchParams(Object.entries(params).map(([key, value]): [string, string] => [key, String(value)]));
+    const ref = { name: options.name ?? "", version: null, label: options.label ?? null };
+    return (await this.#transport.request("GET", "/v1/prompts", ref, { query })) as unknown as PromptListPage;
+  }
+
+  /** Drop every cached prompt, so the next read of each one goes to the server. */
+  clearCache(): void {
+    this.cache.clear();
   }
 }

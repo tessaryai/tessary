@@ -67,16 +67,18 @@ const messages = (await prompts.get("support/answer")).compile(
 - An older prompt is returned at once and refetched in the background, one refetch per entry at a
   time. A failed refetch keeps the old prompt; a 404 drops it. Concurrent first reads of one entry
   share one request.
-- `create` and `updateLabels` drop every cached entry for that name.
+- `create`, `update` and `delete` drop every cached entry for that name, and `clearCache()` drops
+  every entry.
 
 `get(name, { fallback: "Hello {{customer}}" })` returns the fallback instead of rejecting when the
-fetch fails and nothing is cached, a 404 included. A string is a text prompt and an array of
+fetch fails and nothing is cached, a 404 included, or when a 2xx body has no usable name, version,
+type or prompt. A string is a text prompt and an array of
 messages a chat prompt. The fallback has `isFallback: true` and version 0, is never cached, and
 `link` sets nothing, so fallback traffic never counts against a version.
 
 ## Writes
 
-`create` and `updateLabels` need an admin key (`tsy_a_`). A query key gets a 403
+`create`, `update` and `delete` need an admin key (`tsy_a_`). A query key gets a 403
 (`PROMPTS.WRONG_KEY_SCOPE`), and an ingest key (`tsy_w_`) gets a 403 on every prompt route, reads
 included. Writes are rate limited per key owner, so all keys of one user share a limit; reads are
 not.
@@ -84,8 +86,13 @@ not.
 ```typescript
 const admin = new TessaryPrompts({ host: "https://tessary.example.com", apiKey: "tsy_a_YOUR_KEY" });
 const created = await admin.create({ name: "support/greeting", prompt: "Hello {{customer}}", labels: ["staging"] });
-await admin.updateLabels("support/greeting", created.version, ["production"]);
+await admin.update({ name: "support/greeting", version: created.version, newLabels: ["production"], removeLabels: ["staging"] });
+const page = await admin.list({ tag: "support", limit: 50 }); // { data: [...], meta: {...} }; a query key works too
+await admin.delete("support/greeting", { version: 1 }); // or { label }, or neither for the whole prompt
 ```
+
+There is no prefetch call: to start only with every prompt loaded, `await` a `get` for each one at
+startup without a fallback and let a rejection stop the process.
 
 ## Errors
 
@@ -95,9 +102,10 @@ Every error extends `TessaryPromptsError`:
 - `PromptApiError`: any other refusal (`status`, `code`).
 - `PromptTransportError`: a timeout, a connection failure, a redirect, or an unreadable body.
 
-Reads retry on 429, 5xx, timeouts and connection failures; writes retry on 429 only. Up to
-`maxRetries: 2` retries wait for `Retry-After` (capped at 30 seconds) or else 500 ms plus up to
-250 ms of jitter. Redirects are never followed, so the key only goes to the configured host. Pass a
+Reads retry on 429, 5xx, timeouts and connection failures; writes and deletes retry on 429 only. Up
+to `maxRetries: 2` retries (never more than 4) wait for `Retry-After` (capped at 30 seconds) or else 500 ms plus up to
+250 ms of jitter. `get(name, { maxRetries: 0, fetchTimeoutMs: 1000 })` overrides the retries
+(clamped to 0 to 4) and the 5-second `timeoutMs` for one call. Redirects are never followed, so the key only goes to the configured host. Pass a
 `logger` with a `debug(message, fields)` method to see retries and failed refetches; the key is never
 logged.
 

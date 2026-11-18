@@ -59,7 +59,7 @@ class StubServer:
                 except OSError:
                     pass
 
-            do_GET = do_POST = do_PATCH = _handle
+            do_GET = do_POST = do_PATCH = do_DELETE = _handle
 
             def log_message(self, format: str, *args: Any) -> None:
                 pass

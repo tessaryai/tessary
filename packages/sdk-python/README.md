@@ -62,18 +62,21 @@ messages = prompts.get_prompt("support/answer").compile(
 
 - A prompt fetched in the last 60 seconds is served without a request (`cache_ttl_seconds` on the
   client or on one call changes that; `0` skips the cache).
-- An older prompt is returned at once and refetched on a background daemon thread, one refetch per
-  entry at a time. A failed refetch keeps the old prompt; a 404 drops it.
-- `create_prompt` and `update_labels` drop every cached entry for that name.
+- An older prompt is returned at once and refetched in the background, one refetch per entry at a
+  time, all on one daemon thread. A failed refetch keeps the old prompt; a 404 drops it.
+- Concurrent first reads of one entry share one request.
+- `create_prompt`, `update_prompt` and `delete_prompt` drop every cached entry for that name, and
+  `clear_prompt_cache()` drops every entry.
 
 `get_prompt(name, fallback="Hello {{customer}}")` returns the fallback instead of raising when the
-fetch fails and nothing is cached, a 404 included. A string is a text prompt and a list of messages
+fetch fails and nothing is cached, a 404 included, or when a 2xx body has no usable name, version,
+type or prompt. A string is a text prompt and a list of messages
 a chat prompt. The fallback has `is_fallback=True` and version 0, is never cached, and `link` sets
 nothing, so fallback traffic never counts against a version.
 
 ## Writes
 
-`create_prompt` and `update_labels` need an admin key (`tsy_a_`). A query key gets a 403
+`create_prompt`, `update_prompt` and `delete_prompt` need an admin key (`tsy_a_`). A query key gets a 403
 (`PROMPTS.WRONG_KEY_SCOPE`), and an ingest key (`tsy_w_`) gets a 403 on every prompt route, reads
 included. Writes are rate limited per key owner, so all keys of one user share a limit; reads are
 not.
@@ -81,8 +84,14 @@ not.
 ```python
 admin = TessaryPrompts("https://tessary.example.com", "tsy_a_YOUR_KEY")
 created = admin.create_prompt("support/greeting", "Hello {{customer}}", labels=["staging"])
-admin.update_labels("support/greeting", created.version, ["production"])
+admin.update_prompt(name="support/greeting", version=created.version, new_labels=["production"],
+                    remove_labels=["staging"])
+page = admin.list_prompts(tag="support", limit=50)        # {"data": [...], "meta": {...}}; a query key works too
+admin.delete_prompt("support/greeting", version=1)        # or label=..., or neither for the whole prompt
 ```
+
+There is no prefetch call: to start only with every prompt loaded, call `get_prompt` for each one
+at startup without a fallback and exit if one raises.
 
 ## Errors
 
@@ -92,9 +101,10 @@ Every error extends `TessaryPromptsError`:
 - `PromptApiError`: any other refusal (`.status`, `.code`, `.message`).
 - `PromptTransportError`: a timeout, a connection failure, a redirect, or an unreadable body.
 
-Reads retry on 429, 5xx, timeouts and connection failures; writes retry on 429 only. Up to
-`max_retries=2` retries wait for `Retry-After` (capped at 30 seconds) or else 0.5 seconds plus up to
-0.25 seconds of jitter. Redirects are never followed, so the key only goes to the configured host.
+Reads retry on 429, 5xx, timeouts and connection failures; writes and deletes retry on 429 only. Up
+to `max_retries=2` retries (never more than 4) wait for `Retry-After` (capped at 30 seconds) or else 0.5 seconds plus up to
+0.25 seconds of jitter. `get_prompt(..., max_retries=0, fetch_timeout_seconds=1)` overrides the
+retries (clamped to 0 to 4) and the 5-second `timeout` for one call. Redirects are never followed, so the key only goes to the configured host.
 Retries and failed refetches are logged at DEBUG on the `tessary_prompts` logger, never with the key.
 
 ## Development

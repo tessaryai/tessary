@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Prompt values: compile a template, list its variables, and link a span to the version.
+import { PromptTransportError } from "./errors.ts";
 
 export type ChatMessage = { role: string; content: string; [key: string]: unknown };
 export type ChatPlaceholder = { type: "placeholder"; name: string };
@@ -169,8 +170,20 @@ export class ChatPrompt extends BasePrompt<ChatItem[]> {
   }
 }
 
-/** Build a prompt from the `data` of a PublicPrompt envelope. */
+/**
+ * Build a prompt from the `data` of a PublicPrompt envelope. A body without a usable name, version,
+ * type or prompt is a transport error, so `get` falls back instead of returning a broken prompt.
+ */
 export function fromData(data: Record<string, unknown>): TextPrompt | ChatPrompt {
+  const { name, version, type, prompt } = data;
+  if (
+    typeof name !== "string" ||
+    !Number.isInteger(version) ||
+    (type !== "text" && type !== "chat") ||
+    (type === "text" ? typeof prompt !== "string" : !Array.isArray(prompt))
+  ) {
+    throw new PromptTransportError("the server answered 2xx without a usable name, version, type or prompt");
+  }
   // A null optional from the wire falls to the constructor's default, as an absent one does.
   const init = {
     name: data.name as string,
