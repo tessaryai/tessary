@@ -12889,7 +12889,7 @@
             "format" : "int64",
             "type" : "integer"
           },
-          "first_seen" : {
+          "first_call_in_range" : {
             "type" : "string"
           },
           "input_tokens" : {
@@ -12899,7 +12899,7 @@
               "null"
             ]
           },
-          "last_seen" : {
+          "last_call_in_range" : {
             "type" : "string"
           },
           "output_tokens" : {
@@ -12938,9 +12938,9 @@
           "calls",
           "cost_usd",
           "error_calls",
-          "first_seen",
+          "first_call_in_range",
           "input_tokens",
-          "last_seen",
+          "last_call_in_range",
           "output_tokens",
           "p50_ms",
           "p95_ms",

@@ -19,12 +19,17 @@ import org.springframework.stereotype.Repository;
 /**
  * Grouped reads over the llm spans linked to a prompt. Only a settled, live trace counts, so a trace still receiving
  * spans cannot be counted twice between two reads. Reads {@code prompt} and {@code prompt_version} directly for the
- * version list, never through the prompt service. Every statement hits {@code ix_span_prompt}.
+ * version list, never through the prompt service. The per-version read seeks {@code ix_span_prompt} by name; the
+ * per-name count has no name to seek on, so it reads its window from {@code ix_span_prompt_window}, whose predicate
+ * repeats this read's llm and live-span filter word for word.
  */
 @Repository
 public class PromptUsageRepository {
 
-    /** {@code version} is the producer's string, null when the span named the prompt but no version. */
+    /**
+     * {@code version} is the producer's string, null when the span named the prompt but no version. The two bounds are
+     * the first and last call inside the window, not of all time.
+     */
     public record VersionUsageRow(
             @Nullable String version,
             long calls,
@@ -35,8 +40,8 @@ public class PromptUsageRepository {
             @Nullable Long outputTokens,
             @Nullable BigDecimal costUsd,
             long unpricedCalls,
-            String firstSeen,
-            String lastSeen) {}
+            String firstCallInRange,
+            String lastCallInRange) {}
 
     /** {@code versions} ascending; empty only for a prompt whose versions were all deleted under it. */
     public record PromptHead(String id, String name, List<Integer> versions) {}
@@ -51,7 +56,7 @@ public class PromptUsageRepository {
             + " percentile_cont(0.95) WITHIN GROUP (ORDER BY s.latency_ms::float8) AS p95_ms,"
             + " sum(s.input_tokens)::bigint AS input_tokens, sum(s.output_tokens)::bigint AS output_tokens,"
             + " sum(s.total_cost) AS cost_usd, count(*) FILTER (WHERE s.cost_source = 'unpriced') AS unpriced_calls,"
-            + " min(s.started_at) AS first_seen, max(s.started_at) AS last_seen"
+            + " min(s.started_at) AS first_call_in_range, max(s.started_at) AS last_call_in_range"
             + LINKED_LLM_SPANS
             + " AND s.prompt_name = :name GROUP BY s.prompt_version ORDER BY s.prompt_version NULLS LAST";
 
@@ -112,8 +117,8 @@ public class PromptUsageRepository {
                 rs.getBigDecimal("cost_usd"),
                 rs.getLong("unpriced_calls"),
                 // started_at is NOT NULL and a group is never empty, so neither bound can be null.
-                Objects.requireNonNull(Timestamps.iso(rs, "first_seen")),
-                Objects.requireNonNull(Timestamps.iso(rs, "last_seen")));
+                Objects.requireNonNull(Timestamps.iso(rs, "first_call_in_range")),
+                Objects.requireNonNull(Timestamps.iso(rs, "last_call_in_range")));
     }
 
     private static List<Integer> versions(ResultSet rs) throws SQLException {

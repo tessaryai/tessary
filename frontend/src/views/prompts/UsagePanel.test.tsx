@@ -27,7 +27,7 @@ describe("the table", () => {
       versions: [
         versionUsage({
           version: "2", calls: 1204, error_calls: 3, p50_ms: 820, p95_ms: 2400, input_tokens: 12_000, output_tokens: 3_400,
-          cost_usd: 0.4321, first_seen: "2026-09-20T10:00:00Z", last_seen: "2026-09-21T10:00:00Z",
+          cost_usd: 0.4321, first_call_in_range: "2026-09-20T10:00:00Z", last_call_in_range: "2026-09-21T10:00:00Z",
         }),
       ],
       unknown_versions: [],

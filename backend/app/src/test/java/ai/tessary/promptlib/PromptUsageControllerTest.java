@@ -23,6 +23,8 @@ import ai.tessary.tenant.rbac.Role;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.web.ApiResponse;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -47,7 +49,8 @@ record PromptUsageControllerTest(
         TenantPathResolver resolver,
         TenantService tenants,
         OrgMembershipRepository memberships,
-        JdbcClient jdbc) {
+        JdbcClient jdbc,
+        ObjectMapper mapper) {
 
     private static final Instant NOW = Instant.parse("2026-10-10T12:00:00Z");
 
@@ -158,6 +161,35 @@ record PromptUsageControllerTest(
         assertEquals(7, usage(t, id, 0).days());
         assertEquals(90, usage(t, id, 400).days());
         assertEquals(7, summary(t, 0).days());
+    }
+
+    @Test
+    void summaryIgnoresLinkedSpansOlderThanTheWindow() {
+        // Bug: the summary read counts linked spans from before the window, so the list shows all-time calls.
+        Tenant t = tenant("usage-summary-window");
+        call(t.pid(), "summarize", "1", NOW.minus(Duration.ofDays(8)), 100, false, false);
+        call(t.pid(), "summarize", "1", NOW.minus(Duration.ofDays(1)), 100, false, false);
+        call(t.pid(), "old-only", "1", NOW.minus(Duration.ofDays(8)), 100, false, false);
+
+        assertEquals(List.of(new PromptCalls("summarize", 1)), summary(t, 7).items());
+        assertEquals(
+                List.of(new PromptCalls("old-only", 1), new PromptCalls("summarize", 2)),
+                summary(t, 30).items());
+    }
+
+    @Test
+    void versionBoundsSayTheyAreInsideTheRange() throws Exception {
+        // Bug: the wire names the bounds first_seen and last_seen, so a reader takes them as all time.
+        Tenant t = tenant("usage-bounds-wire");
+        String id = prompt(t.pid(), "summarize", 1);
+        Instant at = NOW.minus(Duration.ofHours(1));
+        call(t.pid(), "summarize", "1", at, 100, false, false);
+
+        JsonNode row = mapper.valueToTree(usage(t, id, null).versions().get(0));
+
+        assertEquals(at.toString(), row.path("first_call_in_range").asText());
+        assertEquals(at.toString(), row.path("last_call_in_range").asText());
+        assertEquals(false, row.has("first_seen") || row.has("last_seen"));
     }
 
     @Test

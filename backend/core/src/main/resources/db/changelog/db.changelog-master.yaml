@@ -199,3 +199,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0057-span-prompt-id.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0058-span-prompt-window-index.sql
+      relativeToChangelogFile: false

@@ -4994,10 +4994,10 @@ export interface components {
             cost_usd: number | null;
             /** Format: int64 */
             error_calls: number;
-            first_seen: string;
+            first_call_in_range: string;
             /** Format: int64 */
             input_tokens: number | null;
-            last_seen: string;
+            last_call_in_range: string;
             /** Format: int64 */
             output_tokens: number | null;
             /** Format: int64 */

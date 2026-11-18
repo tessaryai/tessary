@@ -50,8 +50,8 @@ function UsageRow({ label, usage }: { label: string; usage: VersionUsage | undef
           {formatCost(usage.cost_usd)}
         </span>
       </TD>
-      <TD className={DATE}>{formatWhen(usage.first_seen)}</TD>
-      <TD className={DATE}>{formatWhen(usage.last_seen)}</TD>
+      <TD className={DATE}>{formatWhen(usage.first_call_in_range)}</TD>
+      <TD className={DATE}>{formatWhen(usage.last_call_in_range)}</TD>
     </TR>
   );
 }

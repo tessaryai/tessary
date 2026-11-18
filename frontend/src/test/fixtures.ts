@@ -110,6 +110,6 @@ export function promptVersion(over: Partial<PromptVersionView> = {}): PromptVers
 export function versionUsage(over: Partial<VersionUsage> = {}): VersionUsage {
   return {
     version: "2", calls: 0, error_calls: 0, p50_ms: null, p95_ms: null, input_tokens: null, output_tokens: null,
-    cost_usd: null, unpriced_calls: 0, first_seen: "2026-10-01T00:00:00Z", last_seen: "2026-10-01T00:00:00Z", ...over,
+    cost_usd: null, unpriced_calls: 0, first_call_in_range: "2026-10-01T00:00:00Z", last_call_in_range: "2026-10-01T00:00:00Z", ...over,
   };
 }

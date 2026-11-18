@@ -200,11 +200,20 @@ reads. Both routes need `ORG_VIEW`; `days` defaults to 7 and is capped at 90.
 - `GET .../prompts/usage/summary?days`: every prompt name with a call in the window, in name order.
 - `GET .../prompts/{promptId}/usage?days`: one row per version string the spans sent (a null version
   included) with calls, error calls, p50 and p95 latency, tokens, cost and unpriced calls.
-  `unknown_versions` names the strings that match no stored version: a label, or a version deleted since.
+  `first_call_in_range` and `last_call_in_range` are the first and last call inside the window, not
+  of all time. `unknown_versions` names the strings that match no stored version: a label, or a
+  version deleted since.
 
-Both read `ix_span_prompt`, keyed `(project_id, prompt_name, started_at DESC)` with `prompt_version`
-included. The per-prompt read scans only its window. The summary has no name to seek on, so it reads
-every linked index entry of the project, over the whole retention period, and filters on `started_at`.
+The per-prompt read uses `ix_span_prompt`, keyed `(project_id, prompt_name, started_at DESC)` with
+`prompt_version` included, so it scans only its window. The summary has no name to seek on, so it uses
+`ix_span_prompt_window` (`0058`), keyed `(project_id, started_at DESC)` with `prompt_name` and
+`trace_id` included. That index holds only linked, live llm spans, so the summary reads the window
+from the index alone and then looks up each span's trace.
+
+Measured on Postgres 16 with one project of 1,000,000 linked llm spans and 5,000,000 other spans over
+90 days, warm cache: the summary over 7 days takes about 80 ms (430 ms before `0058`), and the
+per-prompt read over 90 days for a prompt with 360,000 calls takes about 0.6 to 1 s, most of it JIT
+compile. Both reads join `trace` once per span, so their cost grows with the calls in the window.
 
 ## SDK contract
 
