@@ -171,16 +171,18 @@ public class PromptService {
 
     private final PromptRepository repo;
     private final PrincipalRepository principals;
+    private final PromptFetchCache fetchCache;
     private final Clock clock;
 
     @Autowired
-    public PromptService(PromptRepository repo, PrincipalRepository principals) {
-        this(repo, principals, Clock.systemUTC());
+    public PromptService(PromptRepository repo, PrincipalRepository principals, PromptFetchCache fetchCache) {
+        this(repo, principals, fetchCache, Clock.systemUTC());
     }
 
-    PromptService(PromptRepository repo, PrincipalRepository principals, Clock clock) {
+    PromptService(PromptRepository repo, PrincipalRepository principals, PromptFetchCache fetchCache, Clock clock) {
         this.repo = repo;
         this.principals = principals;
+        this.fetchCache = fetchCache;
         this.clock = clock;
     }
 
@@ -204,6 +206,7 @@ public class PromptService {
         }
         writeVersion(
                 row, row.lastVersion(), principalId, via, body, configJson, cmd.labels(), cmd.commitMessage(), now);
+        fetchCache.invalidate(projectId);
         return get(projectId, row.id());
     }
 
@@ -234,6 +237,7 @@ public class PromptService {
                     row.createdAt(),
                     row.updatedAt());
         }
+        fetchCache.invalidate(projectId);
         List<String> labels = new ArrayList<>(new TreeSet<>(cmd.labels()));
         labels.add(PromptNames.LATEST);
         return new ResolvedVersion(row, written, body, PromptJson.readObject(configJson), List.copyOf(labels), true);
@@ -291,6 +295,7 @@ public class PromptService {
             }
         }
         repo.touchPrompt(projectId, promptId, now);
+        fetchCache.invalidate(projectId);
         return resolved(row, target, result);
     }
 
@@ -319,7 +324,8 @@ public class PromptService {
 
     /**
      * Throws NOT_FOUND, VERSION_NOT_FOUND, LABEL_NOT_FOUND, BOTH_VERSION_AND_LABEL. With neither, reads production. One
-     * statement reads the version, its labels and the highest number, so they come from one snapshot.
+     * statement reads the version, its labels and the highest number, so they come from one snapshot. A found version
+     * is served from {@link PromptFetchCache} until a prompt write in the project or the TTL drops it.
      */
     public ResolvedVersion resolve(String projectId, String name, @Nullable Integer version, @Nullable String label) {
         if (version != null && label != null) throw new TessaryException(PromptsError.BOTH_VERSION_AND_LABEL);
@@ -328,7 +334,19 @@ public class PromptService {
         PromptSelector selector = version != null
                 ? new PromptSelector.Version(version)
                 : PromptNames.LATEST.equals(wanted) ? new PromptSelector.Latest() : new PromptSelector.Label(wanted);
-        PromptResolveRow found = repo.resolve(projectId, PromptNames.lookupName(name), selector)
+        String lookupName = PromptNames.lookupName(name);
+        return fetchCache.fetch(
+                projectId, lookupName, selector, () -> load(projectId, name, lookupName, selector, version, wanted));
+    }
+
+    private ResolvedVersion load(
+            String projectId,
+            String name,
+            String lookupName,
+            PromptSelector selector,
+            @Nullable Integer version,
+            String wanted) {
+        PromptResolveRow found = repo.resolve(projectId, lookupName, selector)
                 .orElseThrow(() -> new TessaryException(PromptsError.NOT_FOUND, name));
         PromptVersionRow v = found.version();
         if (v == null) {
@@ -402,6 +420,7 @@ public class PromptService {
         List<String> normalized = PromptNames.normalizeTags(tags);
         PromptRow row = requirePrompt(projectId, promptId);
         writeTags(row, normalized, CreateVia.UI, now());
+        fetchCache.invalidate(projectId);
         return get(projectId, promptId);
     }
 
@@ -427,6 +446,7 @@ public class PromptService {
         if (row.isEmpty()) return false;
         int versions = repo.countVersions(projectId, promptId);
         boolean deleted = repo.deletePrompt(projectId, promptId);
+        fetchCache.invalidate(projectId);
         StructuredLog.info(log, Markers.OPS, "prompt.deleted")
                 .message("deleted prompt %s with %d versions", promptId, versions)
                 .field("projectId", projectId)
@@ -440,6 +460,7 @@ public class PromptService {
     public int deleteFolder(String projectId, String folderPath) {
         String path = PromptNames.requireFolder(folderPath);
         int count = repo.deleteFolder(projectId, path + "/");
+        fetchCache.invalidate(projectId);
         StructuredLog.info(log, Markers.OPS, "prompt.folder.deleted")
                 .message("deleted %d prompts in a folder", count)
                 .field("projectId", projectId)
@@ -471,6 +492,7 @@ public class PromptService {
         } else {
             repo.touchPrompt(projectId, promptId, now());
         }
+        fetchCache.invalidate(projectId);
         StructuredLog.info(log, Markers.OPS, "prompt.version.deleted")
                 .message("deleted version %d of prompt %s with %d labels", version, promptId, labelCount)
                 .field("projectId", projectId)

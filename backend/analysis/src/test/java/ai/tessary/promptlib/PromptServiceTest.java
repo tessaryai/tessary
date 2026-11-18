@@ -72,7 +72,8 @@ class PromptServiceTest {
     PrincipalRepository principals;
 
     private PromptService service() {
-        return new PromptService(repo, principals, Clock.fixed(NOW, ZoneOffset.UTC));
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        return new PromptService(repo, principals, new PromptFetchCache(new PromptCacheProperties(), clock), clock);
     }
 
     private static Principal person(String id, @Nullable String displayName, @Nullable String email) {
@@ -592,6 +593,56 @@ class PromptServiceTest {
         PromptService.PromptDetail oldest = service().get(PID, ID, 2, 2);
         assertEquals(List.of(summary(1)), oldest.versions());
         assertFalse(oldest.hasOlderVersions());
+    }
+
+    /** The production fetch of {@code p}, answering {@code first} and then {@code then} on the next read. */
+    private void stubProductionReads(PromptRow first, PromptRow then) {
+        when(repo.resolve(PID, "p", new PromptSelector.Label("production")))
+                .thenReturn(
+                        Optional.of(new PromptResolveRow(first, version(1), List.of("production"), 1)),
+                        Optional.of(new PromptResolveRow(then, version(1), List.of("production"), 1)));
+    }
+
+    @Test
+    void resolve_aSecondFetchIsServedFromTheCache() {
+        // Bug: the fetch path skips the cache, so every SDK fetch reads the database.
+        PromptRow tagged = new PromptRow(ID, PID, "p", PromptType.TEXT, List.of("new"), 1, BY, NOW, NOW);
+        stubProductionReads(TEXT_PROMPT, tagged);
+        PromptService service = service();
+        service.resolve(PID, "p", null, null);
+
+        assertEquals(List.of(), service.resolve(PID, "p", null, null).prompt().tags());
+    }
+
+    @Test
+    void updateTags_invalidatesTheFetchCache() {
+        // Bug: the tag write runs outside a transaction, so an after-commit hook alone never fires and a fetch keeps
+        // the old tags for the full TTL.
+        PromptRow tagged = new PromptRow(ID, PID, "p", PromptType.TEXT, List.of("new"), 1, BY, NOW, NOW);
+        stubProductionReads(TEXT_PROMPT, tagged);
+        when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
+        PromptService service = service();
+        service.resolve(PID, "p", null, null);
+
+        service.updateTags(PID, ID, List.of("new"));
+
+        assertEquals(
+                List.of("new"), service.resolve(PID, "p", null, null).prompt().tags());
+    }
+
+    @Test
+    void deleteFolder_invalidatesTheFetchCache() {
+        // Bug: the folder delete runs outside a transaction, so a fetch keeps serving a deleted prompt for the TTL.
+        PromptRow moved = new PromptRow(ID, PID, "p", PromptType.TEXT, List.of("after"), 1, BY, NOW, NOW);
+        stubProductionReads(TEXT_PROMPT, moved);
+        when(repo.deleteFolder(PID, "team/")).thenReturn(1);
+        PromptService service = service();
+        service.resolve(PID, "p", null, null);
+
+        service.deleteFolder(PID, "team");
+
+        assertEquals(
+                List.of("after"), service.resolve(PID, "p", null, null).prompt().tags());
     }
 
     @Test

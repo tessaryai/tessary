@@ -6,24 +6,33 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.tessary.auth.TenantContext;
+import ai.tessary.open.errors.CapabilityError;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.PromptsError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.plan.Capability;
 import ai.tessary.promptlib.PromptPublicDtos.PromptList;
 import ai.tessary.promptlib.PromptPublicDtos.PublicCreatePromptRequest;
 import ai.tessary.promptlib.PromptPublicDtos.PublicPrompt;
 import ai.tessary.promptlib.PromptPublicDtos.UpdateLabelsRequest;
 import ai.tessary.tenant.KeyScope;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.web.ApiResponse;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * {@code /v1/prompts} through the controller, service and Postgres. The bugs: an ingest key reading or a query key
@@ -31,7 +40,12 @@ import org.springframework.boot.test.context.SpringBootTest;
  * label or {@code latest}, {@code isActive} not tracking {@code production}, and a delete that picks the wrong target.
  */
 @SpringBootTest
-record PromptPublicControllerTest(PromptPublicController controller, TenantService tenants) {
+record PromptPublicControllerTest(
+        PromptPublicController controller,
+        TenantService tenants,
+        PromptService service,
+        CapabilityFixture capabilities,
+        PlatformTransactionManager transactionManager) {
 
     private static TenantContext key(TenantFixture.Setup fix, KeyScope scope) {
         return new TenantContext(
@@ -352,6 +366,61 @@ record PromptPublicControllerTest(PromptPublicController controller, TenantServi
         assertError(
                 CommonError.INVALID_PARAMETER,
                 () -> controller.list(query, null, null, null, null, null, "yesterday", null, null));
+    }
+
+    @Test
+    void aLabelMoveShowsOnTheNextFetch() {
+        // Bug: after production moves, the server keeps serving the cached old version for the full TTL.
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-cache-move");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+        controller.create(admin, post("p", null, "two", null));
+        assertEquals(1, data(controller.fetch(admin, "p", null, null)).version());
+
+        controller.updateLabels(admin, new UpdateLabelsRequest("p", 2, List.of("production"), null));
+
+        assertEquals(2, data(controller.fetch(admin, "p", null, null)).version());
+    }
+
+    @Test
+    void invalidationRunsAfterCommit() {
+        // Bug: the write drops the cache before it commits, a reader on another connection caches the old row again
+        // under the new generation, and the fetch after the commit keeps serving it for the full TTL.
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-cache-commit");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+        controller.create(admin, post("p", null, "two", null));
+        assertEquals(1, data(controller.fetch(admin, "p", null, null)).version());
+        String projectId = fix.project().id();
+        PromptRow prompt = service.findByName(projectId, "p").orElseThrow();
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            service.setLabels(
+                    projectId, prompt.id(), 2, fix.user().id(), Set.of("production"), PromptService.LabelMode.ADD);
+            int seenMidWrite;
+            try (ExecutorService other = Executors.newSingleThreadExecutor()) {
+                seenMidWrite = other.submit(() ->
+                                data(controller.fetch(admin, "p", null, null)).version())
+                        .get(10, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                throw new AssertionError("the concurrent fetch failed", e);
+            }
+            assertEquals(1, seenMidWrite, "the move is not committed yet, so another connection reads version 1");
+        });
+
+        assertEquals(2, data(controller.fetch(admin, "p", null, null)).version());
+    }
+
+    @Test
+    void capabilityOffAnswers403EvenWhenCached() {
+        // Bug: the cache serves a body to an org that turned prompt management off.
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-cache-capability");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+        controller.fetch(admin, "p", null, null);
+        capabilities.withhold(fix.org().id(), Capability.PROMPT_MANAGEMENT);
+
+        assertError(CapabilityError.DISABLED, () -> controller.fetch(admin, "p", null, null));
     }
 
     private static void assertError(ErrorCode expected, Executable call) {

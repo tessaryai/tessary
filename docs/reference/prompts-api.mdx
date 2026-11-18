@@ -47,6 +47,8 @@ Error codes without a domain are in the `PROMPTS` domain, for example `PROMPTS.N
 
 Give `version` or `label`, not both. With neither, the fetch reads the `production` label.
 
+The server keeps a found prompt in memory for up to 60 seconds and drops it when the prompt changes. If your install runs more than one backend, a change can take up to 60 seconds to show on a fetch that reaches another one.
+
 ```bash
 curl -H "Authorization: Bearer $TESSARY_API_KEY" \
   "https://tessary.example.com/v1/prompts/fetch?name=support/greeting&label=production"

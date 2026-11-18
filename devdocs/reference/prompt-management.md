@@ -71,6 +71,24 @@ deadlocking.
 - The list reads each prompt's newest config with a `LIMIT 1` lateral read on `ix_prompt_version_lookup`,
   not by gathering every version's config.
 
+## Fetch cache
+
+`PromptService.resolve` reads through `PromptFetchCache`, an in-process map of found versions keyed by
+project, trimmed name and selector (a version number, a label, or `latest`; no label means
+`production`). A 404 of any kind is never stored. Each project has a generation counter: a load reads it
+before its query and stores its result only if it is unchanged. Every prompt write (create, next
+version, label move or removal, tag update, version delete, prompt delete, folder delete) calls
+`invalidate` after its write statement, which bumps the project's generation and drops its entries
+after the transaction commits, and not at all on a rollback. `updateTags` and `deleteFolder` run outside
+a transaction, so theirs runs at once. Dropping before the commit would let a reader on another
+connection store the old row under the new generation, where nothing would drop it.
+
+The key scope check and the capability check run before the cache on every request, so turning prompt
+management off takes effect at once. On one node invalidation is exact. Nothing invalidates across
+nodes, so on more than one node another node serves a moved label until the TTL ends, on top of the SDK's
+own 60-second cache. Bounds: `tessary.prompts.fetch-cache.*` in
+[config-keys.md](./config-keys.md). The least recently used entry goes first when either bound is passed.
+
 ## Rules and caps
 
 | Rule | Value |
@@ -287,4 +305,6 @@ Which keys can run it: [`../guides/provider-keys.md`](../guides/provider-keys.md
 `label`, `fromVersion`, `toVersion`), `prompt.version.deleted` (with `labelCount` and `promptDeleted`),
 `prompt.tags.updated` (`projectId`, `promptId`, `tagCount`, `via`; no tag text), `prompt.deleted` (with `versions`),
 `prompt.folder.deleted` (with `count`), and `playground.run.completed` (provider, model, duration,
-tokens, cost, price source, prompt version id).
+tokens, cost, price source, prompt version id). The fetch cache logs `prompt.cache.stats` (`hits`,
+`misses`, `entries`, `bodyChars`) at most once a minute, only after a minute with fetches, and
+`prompt.cache.invalidated` (`projectId`, `entriesDropped`) at DEBUG.
