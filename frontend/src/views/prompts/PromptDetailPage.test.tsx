@@ -228,7 +228,7 @@ describe("the header", () => {
     renderPage("?section=new&from=1");
 
     expect(((await screen.findByRole("textbox", { name: "Content of message 1" })) as HTMLTextAreaElement).value).toBe("You are kind.");
-    fireEvent.click(button("Create version"));
+    fireEvent.click(button("Create version 3"));
 
     await waitFor(() => expect(currentParams().get("version")).toBe("3"));
     expect(currentParams().get("section")).toBeNull();

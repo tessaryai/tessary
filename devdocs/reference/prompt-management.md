@@ -67,7 +67,9 @@ deadlocking.
   `VERSION_NOT_FOUND` and `LABEL_NOT_FOUND` apart from `NOT_FOUND`.
 - The detail route returns version summaries with no body and no config, newest first, `limit` at a time
   (default 100, at most 500), older than `beforeVersion` when it is given. `latest_version` is read on its
-  own, and `has_older_versions` says a page of older versions exists.
+  own, and `has_older_versions` says a page of older versions exists. `next_version` is the prompt's
+  `last_version + 1`, the number the next version takes unless another write takes it first; after the
+  top version is deleted it is more than `latest_version + 1`, so the New version screen names it.
 - The list reads each prompt's newest config with a `LIMIT 1` lateral read on `ix_prompt_version_lookup`,
   not by gathering every version's config.
 

@@ -154,6 +154,10 @@ record PromptControllerTest(PromptController controller, TenantService tenants, 
                 .id();
         controller.createVersion(me, org, proj, id, new CreateVersionRequest("two", null, null, null));
         controller.deleteVersion(me, org, proj, id, 2);
+        // Bug: the New version screen counts on from latest, so it promises version 2 and saving makes version 3.
+        PromptDetail before =
+                requireNonNull(controller.get(me, org, proj, id, null, null).data());
+        assertEquals(List.of(1, 3), List.of(before.latestVersion(), before.nextVersion()));
 
         PromptVersionView next = requireNonNull(controller
                 .createVersion(me, org, proj, id, new CreateVersionRequest("three", null, null, null))

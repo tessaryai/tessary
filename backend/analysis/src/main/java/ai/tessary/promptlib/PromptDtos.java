@@ -109,7 +109,9 @@ public final class PromptDtos {
 
     /**
      * {@code labels} holds stored labels only; {@code latest} shows as {@code latest_version}. {@code versions} is one
-     * page, newest first; {@code has_older_versions} says a page below the last one exists.
+     * page, newest first; {@code has_older_versions} says a page below the last one exists. {@code next_version} is the
+     * number the next version will take unless another write takes it first; numbers are never reused, so after a
+     * delete of the top version it is more than {@code latest_version + 1}.
      */
     public record PromptDetail(
             String id,
@@ -121,7 +123,8 @@ public final class PromptDtos {
             @JsonProperty("latest_version") int latestVersion,
             List<LabelRef> labels,
             List<VersionSummary> versions,
-            @JsonProperty("has_older_versions") boolean hasOlderVersions) {
+            @JsonProperty("has_older_versions") boolean hasOlderVersions,
+            @JsonProperty("next_version") int nextVersion) {
         public static PromptDetail from(PromptService.PromptDetail d, PromptService.Authors authors) {
             int latest = d.latestVersion();
             List<VersionSummary> versions = d.versions().stream()
@@ -153,7 +156,8 @@ public final class PromptDtos {
                     latest,
                     LabelRef.of(d.labels()),
                     versions,
-                    d.hasOlderVersions());
+                    d.hasOlderVersions(),
+                    p.lastVersion() + 1);
         }
     }
 

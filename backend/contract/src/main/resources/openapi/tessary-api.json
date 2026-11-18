@@ -8844,6 +8844,10 @@
           "name" : {
             "type" : "string"
           },
+          "next_version" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "tags" : {
             "items" : {
               "type" : "string"
@@ -8874,6 +8878,7 @@
           "labels",
           "latest_version",
           "name",
+          "next_version",
           "tags",
           "type",
           "updated_at",

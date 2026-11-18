@@ -4058,6 +4058,8 @@ export interface components {
             /** Format: int32 */
             latest_version: number;
             name: string;
+            /** Format: int32 */
+            next_version: number;
             tags: string[];
             /** @enum {string} */
             type: "text" | "chat";

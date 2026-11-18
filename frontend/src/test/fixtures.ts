@@ -93,6 +93,7 @@ export function promptDetail(over: Partial<PromptDetail> = {}): PromptDetail {
       },
     ],
     has_older_versions: false,
+    next_version: 3,
     ...over,
   };
 }

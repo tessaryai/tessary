@@ -81,7 +81,7 @@ export function NewVersionPanel({
           <h2 className="text-h2 text-fg">New version</h2>
           <VersionSelect label="Starts from" value={from.version} versions={versions} onChange={onFrom} />
         </div>
-        <p className="text-small text-muted">Saving creates a new version. A version never changes after it is created.</p>
+        <p className="text-small text-muted">{`Saving creates version ${detail.next_version}. A version never changes after it is created.`}</p>
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_300px] items-start gap-4">
         <div className="flex min-w-0 flex-col gap-4">
@@ -138,7 +138,7 @@ export function NewVersionPanel({
           <div className="flex justify-end gap-2">
             <Button onClick={() => navigate(cancelHref)}>Cancel</Button>
             <Button variant="primary" loading={create.isPending} onClick={submit}>
-              Create version
+              {`Create version ${detail.next_version}`}
             </Button>
           </div>
           <Link

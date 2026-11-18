@@ -38,7 +38,7 @@ function renderPanel({ from = FROM, draft, detail = DETAIL }: { from?: PromptVer
   return { onCreated, onFrom, queryClient };
 }
 
-const save = () => fireEvent.click(screen.getByRole("button", { name: "Create version" }));
+const save = () => fireEvent.click(screen.getByRole("button", { name: "Create version 3" }));
 const content = () => screen.getByRole("textbox", { name: "Content of message 1" }) as HTMLTextAreaElement;
 const config = () => screen.getByRole("textbox", { name: "Config JSON" }) as HTMLTextAreaElement;
 const changes = () => screen.getByRole("heading", { name: "Changes from version 2" }).closest("div")!.parentElement!;
@@ -52,6 +52,14 @@ describe("opening", () => {
     expect((screen.getByRole("textbox", { name: "Placeholder name 2" }) as HTMLInputElement).value).toBe("history");
     expect(config().value).toBe(JSON.stringify({ temperature: 0.2 }, null, 2));
     expect((screen.getByRole("combobox", { name: "Starts from" }) as HTMLSelectElement).value).toBe("2");
+  });
+
+  // Bug: the screen counts on from latest, so after the top version was deleted it names a number saving will not use.
+  it("names the number the new version takes, which the server reports", () => {
+    renderPanel({ detail: promptDetail({ next_version: 5 }) });
+
+    expect(screen.getByText("Saving creates version 5. A version never changes after it is created.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create version 5" })).toBeTruthy();
   });
 
   // Bug: the playground's edit is lost on the way to Save as new version.
