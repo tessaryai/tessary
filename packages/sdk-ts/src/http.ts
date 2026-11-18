@@ -3,7 +3,9 @@
 import type { PromptsLogger } from "./cache.ts";
 import { PromptApiError, PromptNotFoundError, PromptTransportError, type TessaryPromptsError } from "./errors.ts";
 
-export const VERSION = "0.1.0";
+// A placeholder: .github/workflows/sdk-release.yml writes the released version here and in package.json
+// before it builds, and the stamped files are never committed.
+export const VERSION = "0.0.0-dev";
 const RETRY_AFTER_CAP_SECONDS = 30;
 const JITTER_MS = 250;
 

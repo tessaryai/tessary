@@ -129,7 +129,7 @@ Retries and failed refetches are logged at DEBUG on the `tessary_prompts` logger
 ## Development
 
 ```bash
-bash scripts/check-sdk-python.sh   # from the repo root: uv sync, then pytest at 100% line and branch coverage
+bash scripts/check-sdk-python.sh   # from the repo root: pytest at 100% coverage, oldest-OpenTelemetry run, wheel smoke
 ```
 
 The suite runs against a scripted local HTTP server; no Tessary instance is needed.

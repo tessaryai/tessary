@@ -14,8 +14,8 @@ The full guide, with the Python package side by side, is
 The package is not on npm yet. From a checkout of the repository:
 
 ```bash
-cd packages/sdk-ts && pnpm install && pnpm pack   # builds dist/ and writes tessaryai-prompts-0.1.0.tgz
-pnpm add <path-to>/tessaryai-prompts-0.1.0.tgz    # in your application
+cd packages/sdk-ts && pnpm install && pnpm pack   # builds dist/ and writes tessaryai-prompts-0.0.0-dev.tgz
+pnpm add <path-to>/tessaryai-prompts-0.0.0-dev.tgz    # in your application
 ```
 
 ## Quick start
@@ -130,7 +130,7 @@ logged.
 ## Development
 
 ```bash
-bash scripts/check-sdk-ts.sh   # from the repo root: install, tsc, build, node:test at 100% coverage
+bash scripts/check-sdk-ts.sh   # from the repo root: install, tsc, build, node:test at 100% coverage, pack smoke
 ```
 
 The tests run the `.ts` sources directly on Node 24 or later against a local stub server; no Tessary

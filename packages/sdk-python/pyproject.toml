@@ -1,12 +1,26 @@
 [project]
 name = "tessary-prompts"
-version = "0.1.0"
+version = "0.0.0.dev0"
 description = "Fetch, cache, compile and link Tessary managed prompts."
 readme = "README.md"
 license = "Apache-2.0"
+authors = [{ name = "Tessary" }]
+keywords = ["tessary", "prompts", "prompt-management", "llm", "opentelemetry"]
 requires-python = ">=3.10"
 dependencies = []
-classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
 
 [project.optional-dependencies]
 otel = ["opentelemetry-api>=1.20"]
@@ -15,6 +29,7 @@ otel = ["opentelemetry-api>=1.20"]
 Homepage = "https://github.com/tessaryai/tessary"
 Repository = "https://github.com/tessaryai/tessary"
 Documentation = "https://github.com/tessaryai/tessary/blob/main/docs/prompts/sdk.mdx"
+Changelog = "https://github.com/tessaryai/tessary/releases"
 
 [build-system]
 requires = ["uv_build>=0.8,<0.11"]

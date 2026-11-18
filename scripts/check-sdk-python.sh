@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # tessary-prompts (packages/sdk-python) gate: its pytest suite at 100 percent line and branch coverage,
-# and the OpenTelemetry tests again on the oldest OpenTelemetry SDK the otel extra allows.
+# the OpenTelemetry tests again on the oldest OpenTelemetry SDK the otel extra allows, and a smoke
+# install of the built wheel.
 # The SDK is the one Tessary client that runs inside a customer's process, so a cache or retry bug
 # ships to every user at once; the suite runs against a scripted local http.server, no instance needed.
 # Needs uv (check.yml installs it). Locally a missing uv skips with a reason, as scripts/check.sh asks;
@@ -22,4 +23,17 @@ uv run --no-sync pytest -q -p no:cacheprovider --cov=tessary_prompts --cov-branc
 # again on the oldest OpenTelemetry SDK the otel extra allows, in a venv of its own.
 UV_PROJECT_ENVIRONMENT=.venv-otel-oldest uv run --locked --quiet --no-default-groups --group otel-oldest \
   pytest -q -p no:cacheprovider tests/test_otel.py
-echo "ok $P: tessary-prompts tests pass at 100 percent line and branch coverage"
+# Package smoke: build as the release does, install the wheel into a fresh venv and import it there (-I,
+# so the source tree is not on the path). A file the build leaves out fails here, not on a user's install.
+smoke="$(mktemp -d)"; trap 'rm -rf "$smoke"' EXIT
+uv build --quiet --out-dir "$smoke/dist"
+uv venv --quiet "$smoke/venv"
+wheel="$(ls "$smoke"/dist/*.whl)"
+uv pip install --quiet --python "$smoke/venv/bin/python" "${wheel}[otel]"
+"$smoke/venv/bin/python" -I -c '
+from importlib import resources
+import tessary_prompts, tessary_prompts.otel
+assert resources.files("tessary_prompts").joinpath("py.typed").is_file(), "py.typed is missing"
+assert tessary_prompts.otel.PromptLinkSpanProcessor
+'
+echo "ok $P: tessary-prompts tests pass at 100 percent line and branch coverage, and the built wheel installs and imports"

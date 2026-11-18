@@ -223,7 +223,9 @@ dependencies. Python uses only `urllib.request` and needs 3.10 or later; TypeScr
 (list, never cached) and write `POST /v1/prompts`, `PATCH /v1/prompts/labels` and `DELETE /v1/prompts`.
 Methods: Python `get_prompt`, `create_prompt`, `update_prompt(name, version, new_labels, remove_labels)`,
 `delete_prompt`, `list_prompts`, `clear_prompt_cache`; TypeScript `get`, `create`, `update`, `delete`,
-`list`, `clearCache`. There is no prefetch method; the docs show a startup loop of fetches instead. Neither is published yet. Gates: `sdk-python` and
+`list`, `clearCache`. There is no prefetch method; the docs show a startup loop of fetches instead. Neither is published yet; `.github/workflows/sdk-release.yml` (dispatch only) publishes them once the
+registry projects exist. Each SDK has its own version, counted from its newest `sdk-python-v` or `sdk-ts-v`
+tag; the repo files hold a dev placeholder that the workflow stamps before the build. Gates: `sdk-python` and
 `sdk-ts` in [test-suite.md](./test-suite.md).
 
 Compile. A supplied value becomes `str(value)` or `String(value)`; `None` or `null` becomes an empty

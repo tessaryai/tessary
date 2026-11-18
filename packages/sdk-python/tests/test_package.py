@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 import subprocess
 import sys
-from importlib import resources
+from importlib import metadata, resources
+
+from tessary_prompts import __version__
 
 
 def test_the_package_ships_a_py_typed_marker():
@@ -19,3 +21,8 @@ def test_importing_the_package_does_not_import_opentelemetry():
         "assert not loaded, loaded\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_the_version_constant_matches_the_package_metadata():
+    # Bug: the release stamp writes pyproject.toml but not _version.py, so the User-Agent names the wrong version.
+    assert __version__ == metadata.version("tessary-prompts")

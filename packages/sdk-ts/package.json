@@ -1,6 +1,6 @@
 {
   "name": "@tessaryai/prompts",
-  "version": "0.1.0",
+  "version": "0.0.0-dev",
   "description": "Fetch, cache, compile and link Tessary managed prompts.",
   "type": "module",
   "sideEffects": false,
@@ -53,7 +53,13 @@
   "keywords": [
     "tessary",
     "prompts",
-    "prompt-management"
+    "prompt-management",
+    "llm",
+    "opentelemetry"
   ],
-  "packageManager": "pnpm@11.15.1"
+  "packageManager": "pnpm@11.15.1",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }
