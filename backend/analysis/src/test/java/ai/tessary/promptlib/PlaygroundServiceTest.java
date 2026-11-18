@@ -373,10 +373,7 @@ class PlaygroundServiceTest {
                         new Subject("prompt_version", "pv-3"));
         assertEquals(
                 "pv-3",
-                exported.get(0)
-                        .getAttributes()
-                        .get(AttributeKey.stringKey(
-                                PlaygroundService.OBSERVATION_PREFIX + "metadata.prompt_version_id")));
+                exported.get(0).getAttributes().get(AttributeKey.stringKey(PlaygroundService.PROMPT_VERSION_ID)));
 
         assertEquals(
                 PromptsError.VERSION_NOT_FOUND,
@@ -408,12 +405,8 @@ class PlaygroundServiceTest {
                         MODEL,
                         "tessary.project.id",
                         PID,
-                        PlaygroundService.OBSERVATION_PREFIX + "metadata.project_id",
-                        PID,
-                        PlaygroundService.OBSERVATION_PREFIX + "metadata.lane",
+                        "tessary.lane",
                         "playground",
-                        PlaygroundService.OBSERVATION_PREFIX + "metadata.provider",
-                        "OPENAI",
                         "gen_ai.response.model",
                         MODEL + "-2026"),
                 stringAttributes(span));
@@ -501,13 +494,6 @@ class PlaygroundServiceTest {
         assertEquals(List.of("REQUEST_REFUSED", "IllegalStateException"), statusMessages());
         for (SpanData span : exported) {
             assertEquals(StatusCode.ERROR, span.getStatus().getStatusCode());
-            assertEquals(
-                    span.getAttributes()
-                            .get(AttributeKey.stringKey(PlaygroundService.OBSERVATION_PREFIX + "status_message")),
-                    span.getStatus().getDescription());
-            assertEquals(
-                    "ERROR",
-                    span.getAttributes().get(AttributeKey.stringKey(PlaygroundService.OBSERVATION_PREFIX + "level")));
         }
         verify(accountant, never())
                 .recordChatCall(
@@ -534,10 +520,7 @@ class PlaygroundServiceTest {
     }
 
     private List<String> statusMessages() {
-        return exported.stream()
-                .map(s -> s.getAttributes()
-                        .get(AttributeKey.stringKey(PlaygroundService.OBSERVATION_PREFIX + "status_message")))
-                .toList();
+        return exported.stream().map(s -> s.getStatus().getDescription()).toList();
     }
 
     private static Map<String, String> stringAttributes(SpanData span) {

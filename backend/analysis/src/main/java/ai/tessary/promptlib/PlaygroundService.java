@@ -53,8 +53,8 @@ public class PlaygroundService {
     static final String LANE = "playground";
     static final String SPAN_NAME = "playground-run";
 
-    /** The observation attribute prefix the self-tracing backend reads, the same keys JevDecisionClient stamps. */
-    static final String OBSERVATION_PREFIX = "lang" + "fuse.observation.";
+    /** The prompt version a run started from, on the platform's own span; no prompt or message text is ever set. */
+    static final String PROMPT_VERSION_ID = "tessary.prompt.version_id";
 
     private static final Set<String> FORWARDED =
             Set.of("temperature", "max_tokens", "maxTokens", "top_p", "topP", "stop");
@@ -180,12 +180,8 @@ public class PlaygroundService {
                 .setAttribute("gen_ai.system", target.provider().name().toLowerCase(Locale.ROOT))
                 .setAttribute("gen_ai.request.model", target.modelId())
                 .setAttribute("tessary.project.id", projectId)
-                .setAttribute(OBSERVATION_PREFIX + "metadata.project_id", projectId)
-                .setAttribute(OBSERVATION_PREFIX + "metadata.lane", LANE)
-                .setAttribute(
-                        OBSERVATION_PREFIX + "metadata.provider",
-                        target.provider().name());
-        if (subject != null) builder.setAttribute(OBSERVATION_PREFIX + "metadata.prompt_version_id", subject.id());
+                .setAttribute("tessary.lane", LANE);
+        if (subject != null) builder.setAttribute(PROMPT_VERSION_ID, subject.id());
         return builder.startSpan();
     }
 

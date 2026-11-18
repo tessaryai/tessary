@@ -175,10 +175,7 @@ DTO, the MCP tools included, is snake_case.
 ## Linking spans to a prompt
 
 A span names the prompt it was produced from with `tessary.prompt.name` and `tessary.prompt.version`.
-Ingest also reads two third-party prompt dialects, the observation-scoped prompt name and version keys
-and then the shorter prompt name and version keys some SDKs emit, and takes the version only from the
-pair that supplied the name. `gen_ai.prompt.*` is never read as a prompt
-reference. The pair lands in `span.prompt_name` and `span.prompt_version` as the producer's text, so a
+No other attribute is read as a prompt reference; `gen_ai.prompt.*` is a message family. The pair lands in `span.prompt_name` and `span.prompt_version` as the producer's text, so a
 version may be a label such as `prod`. A name or version over 512 characters drops the link and keeps the
 span. Attribute rows: [ingestion-contract](./ingestion-contract/README.md) and
 [trace-schema.md](./trace-schema.md).

@@ -44,7 +44,7 @@ It is one of the two `tessary.*` overlays with a reader; the other is the prompt
 
 The [prompt SDKs](/prompts/sdk#link-automatically) set this pair for you on every span started inside a linked block.
 
-When the `tessary.prompt.*` pair is absent, Tessary reads two third-party prompt dialects in this order: the observation-scoped prompt name and version keys, then the shorter prompt name and version keys. Some SDKs emit these keys. `gen_ai.prompt.*` is a message family, never a prompt link.
+Only the `tessary.prompt.*` pair links a span to a prompt. `gen_ai.prompt.*` is a message family, never a prompt link.
 
 ## Kind
 
