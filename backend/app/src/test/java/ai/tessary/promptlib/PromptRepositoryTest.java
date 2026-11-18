@@ -334,6 +334,75 @@ record PromptRepositoryTest(PromptRepository repo, TenantService tenants) {
         assertEquals(Optional.of(b.id()), repo.lockPrompt(pidB, b.id()));
     }
 
+    /**
+     * One level of the folder tree: the child folders of a path with their prompt counts, and the prompts directly in
+     * it. The bugs: {@code team/a} also counts the prompts of {@code team/ab}, a prompt two levels down shows as a
+     * direct prompt, a folder past the first page of prompts never shows, and a filter narrows the prompts but not the
+     * folder counts.
+     */
+    @Test
+    void folderLevel_returnsChildFoldersWithCountsAndDirectPrompts() {
+        String pid = project("prompt-repo-level");
+        PromptRow labeled = prompt(pid, "team/a/x", List.of());
+        repo.upsertLabel(pid, labeled.id(), "staging", version(labeled, 1, "{}").id(), "user-1", T1);
+        for (String name : List.of("team/a/y", "team/a/deep/z", "team/ab/w", "team/direct", "root")) {
+            version(prompt(pid, name, List.of()), 1, "{}");
+        }
+        version(prompt(project("prompt-repo-level-other"), "team/a/other", List.of()), 1, "{}");
+
+        PromptListQuery team = query("team", null, null, null);
+        assertEquals(
+                List.of(new PromptFolderRow("team/a", 3, T1), new PromptFolderRow("team/ab", 1, T1)),
+                repo.childFolders(pid, team));
+        assertEquals(List.of("team/direct"), names(pid, team.directOnly()));
+        assertEquals(1, repo.count(pid, team.directOnly()));
+
+        PromptListQuery root = query(null, null, null, null);
+        assertEquals(List.of(new PromptFolderRow("team", 5, T1)), repo.childFolders(pid, root));
+        assertEquals(List.of("root"), names(pid, root.directOnly()));
+
+        PromptListQuery teamA = query("team/a", null, null, null);
+        assertEquals(List.of(new PromptFolderRow("team/a/deep", 1, T1)), repo.childFolders(pid, teamA));
+        assertEquals(List.of("team/a/x", "team/a/y"), names(pid, teamA.directOnly()));
+
+        assertEquals(
+                List.of(new PromptFolderRow("team/a", 1, T1)),
+                repo.childFolders(pid, query("team", null, "staging", null)));
+    }
+
+    /**
+     * The newest prompt sets a folder's updated time. The bug: the folder row shows the time of an arbitrary prompt.
+     */
+    @Test
+    void folderLevel_folderUpdatedAtIsItsNewestPrompt() {
+        String pid = project("prompt-repo-level-time");
+        repo.insertPrompt(new PromptRow(Ids.ulid(), pid, "f/old", PromptType.TEXT, List.of(), 0, "user-1", T1, T1));
+        repo.insertPrompt(new PromptRow(Ids.ulid(), pid, "f/new", PromptType.TEXT, List.of(), 0, "user-1", T1, T3));
+        repo.insertPrompt(new PromptRow(Ids.ulid(), pid, "f/mid", PromptType.TEXT, List.of(), 0, "user-1", T1, T2));
+
+        assertEquals(List.of(new PromptFolderRow("f", 3, T3)), repo.childFolders(pid, query(null, null, null, null)));
+    }
+
+    /**
+     * The list's label and tag pickers offer every label and tag of the project, sorted, each once. The bug: the pickers
+     * offer only what the rows on screen carry, so at a root that holds only folders nothing can be picked.
+     */
+    @Test
+    void facets_listEveryLabelAndTagOfTheProjectOnce() {
+        String pid = project("prompt-repo-facet-lists");
+        PromptRow a = prompt(pid, "deep/a", List.of("tier-1", "support"));
+        repo.upsertLabel(pid, a.id(), "staging", version(a, 1, "{}").id(), "user-1", T1);
+        repo.upsertLabel(pid, a.id(), "production", version(a, 2, "{}").id(), "user-1", T1);
+        PromptRow b = prompt(pid, "b", List.of("support"));
+        repo.upsertLabel(pid, b.id(), "production", version(b, 1, "{}").id(), "user-1", T1);
+        PromptRow other = prompt(project("prompt-repo-facet-lists-other"), "c", List.of("elsewhere"));
+        repo.upsertLabel(
+                other.projectId(), other.id(), "canary", version(other, 1, "{}").id(), "user-1", T1);
+
+        assertEquals(List.of("production", "staging"), repo.labelNames(pid));
+        assertEquals(List.of("support", "tier-1"), repo.tagNames(pid));
+    }
+
     @Test
     void list_carriesVersionsAndLastConfig() {
         String pid = project("prompt-repo-last");

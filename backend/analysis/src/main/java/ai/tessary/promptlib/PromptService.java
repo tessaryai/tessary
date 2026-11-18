@@ -82,7 +82,8 @@ public class PromptService {
             Order order,
             int page,
             int limit,
-            @Nullable List<PromptListFilter.Condition> filter) {
+            @Nullable List<PromptListFilter.Condition> filter,
+            boolean direct) {
         public enum Order {
             UPDATED,
             NAME
@@ -101,12 +102,30 @@ public class PromptService {
                 Order order,
                 int page,
                 int limit) {
-            this(name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, null);
+            this(name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, null, false);
         }
 
         public PromptListQuery withFilter(List<PromptListFilter.Condition> conditions) {
             return new PromptListQuery(
-                    name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, conditions);
+                    name,
+                    folder,
+                    q,
+                    label,
+                    tag,
+                    type,
+                    fromUpdatedAt,
+                    toUpdatedAt,
+                    order,
+                    page,
+                    limit,
+                    conditions,
+                    direct);
+        }
+
+        /** Only the prompts directly in {@code folder}, or at the root when it is null, not those in its subfolders. */
+        public PromptListQuery directOnly() {
+            return new PromptListQuery(
+                    name, folder, q, label, tag, type, fromUpdatedAt, toUpdatedAt, order, page, limit, filter, true);
         }
 
         /** MCP: page 1, limit 100, order UPDATED ("when each last changed"). */
@@ -400,6 +419,21 @@ public class PromptService {
         Map<String, Map<String, Object>> configs = new HashMap<>();
         for (PromptListRow i : items) configs.put(i.prompt().id(), PromptJson.readObject(i.lastConfigJson()));
         return new PromptPage(items, labels, configs, page, q.limit(), total);
+    }
+
+    /** The child folders of {@code q.folder()}, or of the root, under the same filters as the list. */
+    public List<PromptFolderRow> folders(String projectId, PromptListQuery q) {
+        return repo.childFolders(projectId, q);
+    }
+
+    /** Every deployment label in the project, sorted, each once. */
+    public List<String> labelNames(String projectId) {
+        return repo.labelNames(projectId);
+    }
+
+    /** Every tag in the project, sorted, each once. */
+    public List<String> tagNames(String projectId) {
+        return repo.tagNames(projectId);
     }
 
     /**

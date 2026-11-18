@@ -12,6 +12,8 @@ import ai.tessary.promptlib.PromptDtos.CreatePromptRequest;
 import ai.tessary.promptlib.PromptDtos.CreateVersionRequest;
 import ai.tessary.promptlib.PromptDtos.DeleteResponse;
 import ai.tessary.promptlib.PromptDtos.FolderDeleteResponse;
+import ai.tessary.promptlib.PromptDtos.PromptFacets;
+import ai.tessary.promptlib.PromptDtos.PromptLevel;
 import ai.tessary.promptlib.PromptDtos.PromptPage;
 import ai.tessary.promptlib.PromptDtos.PromptVersionView;
 import ai.tessary.promptlib.PromptDtos.SetLabelsRequest;
@@ -91,6 +93,47 @@ public class PromptController {
                 page == null ? 1 : page,
                 TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT));
         return ApiResponse.ok(PromptPage.from(service.list(r.project().id(), query)));
+    }
+
+    /**
+     * One level of the folder tree under {@code folder} (the root when absent): every child folder with its prompt
+     * count, and a page of the prompts directly in it, by name. {@code label} and {@code tag} narrow both.
+     */
+    @GetMapping("/level")
+    public ApiResponse<PromptLevel> level(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @RequestParam(required = false) @Nullable String folder,
+            @RequestParam(required = false) @Nullable String label,
+            @RequestParam(required = false) @Nullable String tag,
+            @RequestParam(required = false) @Nullable Integer page,
+            @RequestParam(required = false) @Nullable Integer limit) {
+        Resolved r = view(ctx, orgSlug, projectSlug);
+        String path = blankToNull(folder);
+        PromptListQuery query = new PromptListQuery(
+                null,
+                path,
+                null,
+                blankToNull(label),
+                blankToNull(tag),
+                null,
+                null,
+                null,
+                PromptListQuery.Order.NAME,
+                page == null ? 1 : page,
+                TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT));
+        String pid = r.project().id();
+        return ApiResponse.ok(
+                PromptLevel.from(path, service.folders(pid, query), service.list(pid, query.directOnly())));
+    }
+
+    /** The list's label and tag filter options. */
+    @GetMapping("/facets")
+    public ApiResponse<PromptFacets> facets(
+            TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
+        String pid = view(ctx, orgSlug, projectSlug).project().id();
+        return ApiResponse.ok(new PromptFacets(service.labelNames(pid), service.tagNames(pid)));
     }
 
     @PostMapping

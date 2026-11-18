@@ -114,7 +114,12 @@ The variable regex has four copies: `PromptNames.VARIABLE`, `VARIABLE_PATTERN` i
 
 UI routes live under `/api/orgs/{orgSlug}/projects/{projectSlug}/prompts` behind
 `@RequiresCapability(PROMPT_MANAGEMENT)`. Reads need `ORG_VIEW`, writes and the playground `ORG_MANAGE`.
-The literal segments `usage`, `folders` and `playground` win over `{promptId}`.
+The literal segments `usage`, `folders`, `level`, `facets` and `playground` win over `{promptId}`.
+The list page reads one folder level at a time: `GET .../prompts/level?folder&label&tag&page&limit`
+returns every child folder of `folder` (the root when absent) with its prompt count and newest update,
+and one page of the prompts directly in it, ordered by name; `total` counts those prompts only, and
+`label` and `tag` narrow both. A search uses the flat `GET .../prompts?q`. `GET .../prompts/facets` returns
+every deployment label and tag in the project, sorted, for the list's filter pickers.
 A version on these routes and on MCP `get_prompt` carries `created_by` (a principal id) and
 `created_by_label`: the principal's display name, else its email, else `Unknown`, read in one
 `PrincipalRepository.findByIds` per response. A key's write is stored under the principal that owns the key,

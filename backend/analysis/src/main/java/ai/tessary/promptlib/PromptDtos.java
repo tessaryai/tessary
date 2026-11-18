@@ -54,6 +54,48 @@ public final class PromptDtos {
         }
     }
 
+    /** A folder one level below the listed one: {@code name} is its last segment, {@code path} the whole path. */
+    public record FolderSummary(
+            String path,
+            String name,
+            @JsonProperty("prompt_count") long promptCount,
+            @JsonProperty("updated_at") String updatedAt) {
+        static FolderSummary of(PromptFolderRow row) {
+            return new FolderSummary(
+                    row.path(),
+                    row.path().substring(row.path().lastIndexOf('/') + 1),
+                    row.promptCount(),
+                    row.updatedAt().toString());
+        }
+    }
+
+    /**
+     * One level of the folder tree. {@code folders} holds every child folder, by name, on every page; {@code items} is
+     * one page of the prompts directly in the folder, by name, and {@code total} counts those prompts only.
+     */
+    public record PromptLevel(
+            @Nullable String folder,
+            List<FolderSummary> folders,
+            List<PromptSummary> items,
+            int page,
+            int limit,
+            long total) {
+        public static PromptLevel from(
+                @Nullable String folder, List<PromptFolderRow> folders, PromptService.PromptPage page) {
+            PromptPage prompts = PromptPage.from(page);
+            return new PromptLevel(
+                    folder,
+                    folders.stream().map(FolderSummary::of).toList(),
+                    prompts.items(),
+                    prompts.page(),
+                    prompts.limit(),
+                    prompts.total());
+        }
+    }
+
+    /** Every deployment label and tag in the project, sorted, each once: the list's filter options. */
+    public record PromptFacets(List<String> labels, List<String> tags) {}
+
     /** {@code labels} includes {@code latest} on the highest version. */
     public record VersionSummary(
             String id,

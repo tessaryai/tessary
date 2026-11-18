@@ -14,7 +14,10 @@ import ai.tessary.promptlib.PromptDtos.CreatePromptRequest;
 import ai.tessary.promptlib.PromptDtos.CreateVersionRequest;
 import ai.tessary.promptlib.PromptDtos.LabelRef;
 import ai.tessary.promptlib.PromptDtos.PromptDetail;
+import ai.tessary.promptlib.PromptDtos.PromptFacets;
+import ai.tessary.promptlib.PromptDtos.PromptLevel;
 import ai.tessary.promptlib.PromptDtos.PromptPage;
+import ai.tessary.promptlib.PromptDtos.PromptSummary;
 import ai.tessary.promptlib.PromptDtos.PromptVersionView;
 import ai.tessary.promptlib.PromptDtos.SetLabelsRequest;
 import ai.tessary.promptlib.PromptDtos.UpdateTagsRequest;
@@ -188,6 +191,60 @@ record PromptControllerTest(PromptController controller, TenantService tenants, 
         assertError(
                 CommonError.INVALID_PARAMETER,
                 () -> controller.list(me, org, proj, null, null, null, null, null, "json", null, null));
+    }
+
+    /**
+     * One level of the tree: the child folders with their counts, then the prompts directly in the folder, by name,
+     * paged, with {@code total} counting those prompts only. The bugs: a folder past the first page of prompts never
+     * shows, a prompt in a subfolder is listed as a direct prompt, and paging by update time moves a prompt between
+     * pages when it is edited.
+     */
+    @Test
+    void levelListsChildFoldersAndPagesTheDirectPromptsByName() {
+        var fix = TenantFixture.bootstrap(tenants, "prompt-ctl-level");
+        TenantContext me = owner(fix);
+        String org = fix.org().slug();
+        String proj = fix.project().slug();
+        for (String name : List.of("team/b", "team/a", "team/sub/x", "team/sub/y", "other")) {
+            controller.create(me, org, proj, text(name, null));
+        }
+        controller.create(me, org, proj, text("team/sub/z", List.of("staging")));
+
+        PromptLevel first = requireNonNull(
+                controller.level(me, org, proj, "team", null, null, 1, 1).data());
+        assertEquals(List.of("team/sub 3"), folders(first));
+        assertEquals(
+                List.of("team/a"),
+                first.items().stream().map(PromptSummary::name).toList());
+        assertEquals(2, first.total());
+        PromptLevel second = requireNonNull(
+                controller.level(me, org, proj, "team", null, null, 2, 1).data());
+        assertEquals(
+                List.of("team/b"),
+                second.items().stream().map(PromptSummary::name).toList());
+
+        PromptLevel root = requireNonNull(
+                controller.level(me, org, proj, " ", null, null, null, null).data());
+        assertEquals(List.of("team 5"), folders(root));
+        assertEquals(
+                List.of("other"), root.items().stream().map(PromptSummary::name).toList());
+        assertEquals(50, root.limit());
+
+        PromptLevel staging = requireNonNull(controller
+                .level(me, org, proj, null, "staging", null, null, null)
+                .data());
+        assertEquals(List.of("team 1"), folders(staging));
+        assertEquals(List.of(), staging.items());
+
+        PromptFacets facets = requireNonNull(controller.facets(me, org, proj).data());
+        assertEquals(List.of("staging"), facets.labels());
+        assertEquals(List.of(), facets.tags());
+    }
+
+    private static List<String> folders(PromptLevel level) {
+        return level.folders().stream()
+                .map(f -> f.path() + " " + f.promptCount())
+                .toList();
     }
 
     @Test

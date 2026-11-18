@@ -34,6 +34,9 @@ public class PromptRepository {
     private static final String VERSION_COLS =
             "id, project_id, prompt_id, version, body, config, commit_message, created_by, created_via, created_at";
 
+    /** The part of a name after the listed folder's prefix; {@code substr} counts characters, so the offset does too. */
+    private static final String REST_OF_NAME = "substr(p.name, :levelOffset)";
+
     private final JdbcClient jdbc;
 
     public PromptRepository(JdbcClient jdbc) {
@@ -353,6 +356,41 @@ public class PromptRepository {
                 .single();
     }
 
+    /**
+     * The folders one level below {@code q.folder()} (the root when null) that hold a prompt matching {@code q}, by
+     * path, each with the count of matching prompts anywhere under it and the newest one's update time.
+     */
+    public List<PromptFolderRow> childFolders(String projectId, PromptListQuery q) {
+        Map<String, Object> params = new HashMap<>();
+        String folder = q.folder();
+        String prefix = folder == null ? "" : folder + "/";
+        params.put("levelPrefix", prefix);
+        String sql = "SELECT :levelPrefix || split_part(" + REST_OF_NAME + ", '/', 1) AS path, count(*) AS prompts,"
+                + " max(p.updated_at) AS updated_at FROM prompt p" + where(projectId, q, params)
+                + " AND strpos(" + REST_OF_NAME + ", '/') > 0 GROUP BY 1 ORDER BY 1";
+        params.put("levelOffset", prefix.codePointCount(0, prefix.length()) + 1);
+        return jdbc.sql(sql)
+                .params(params)
+                .query((rs, n) ->
+                        new PromptFolderRow(rs.getString("path"), rs.getLong("prompts"), instant(rs, "updated_at")))
+                .list();
+    }
+
+    public List<String> labelNames(String projectId) {
+        return jdbc.sql("SELECT DISTINCT label FROM prompt_label WHERE project_id = :pid ORDER BY label")
+                .param("pid", projectId)
+                .query(String.class)
+                .list();
+    }
+
+    public List<String> tagNames(String projectId) {
+        return jdbc.sql("SELECT DISTINCT t.tag FROM prompt p, jsonb_array_elements_text(p.tags) AS t(tag)"
+                        + " WHERE p.project_id = :pid ORDER BY t.tag")
+                .param("pid", projectId)
+                .query(String.class)
+                .list();
+    }
+
     private static String where(String projectId, PromptListQuery q, Map<String, Object> params) {
         StringBuilder sql = new StringBuilder(" WHERE p.project_id = :pid");
         params.put("pid", projectId);
@@ -365,6 +403,11 @@ public class PromptRepository {
         if (folder != null) {
             sql.append(" AND starts_with(p.name, :folderPrefix)");
             params.put("folderPrefix", folder + "/");
+        }
+        if (q.direct()) {
+            String prefix = folder == null ? "" : folder + "/";
+            sql.append(" AND strpos(").append(REST_OF_NAME).append(", '/') = 0");
+            params.put("levelOffset", prefix.codePointCount(0, prefix.length()) + 1);
         }
         String search = q.q();
         if (search != null) {

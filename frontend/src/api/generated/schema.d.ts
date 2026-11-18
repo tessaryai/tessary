@@ -1252,6 +1252,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptController_facets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/folders": {
         parameters: {
             query?: never;
@@ -1263,6 +1279,22 @@ export interface paths {
         put?: never;
         post?: never;
         delete: operations["PromptController_deleteFolder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PromptController_level"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2450,6 +2482,14 @@ export interface components {
             data?: components["schemas"]["PromptDetail"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponsePromptFacets: {
+            data?: components["schemas"]["PromptFacets"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponsePromptLevel: {
+            data?: components["schemas"]["PromptLevel"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponsePromptList: {
             data?: components["schemas"]["PromptList"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -3341,6 +3381,13 @@ export interface components {
             /** Format: int32 */
             deleted_count: number;
         };
+        FolderSummary: {
+            name: string;
+            path: string;
+            /** Format: int64 */
+            prompt_count: number;
+            updated_at: string;
+        };
         FrustratedConversationView: {
             callSiteId: string | null;
             cleared: boolean;
@@ -4016,6 +4063,21 @@ export interface components {
             type: "text" | "chat";
             updated_at: string;
             versions: components["schemas"]["VersionSummary"][];
+        };
+        PromptFacets: {
+            labels: string[];
+            tags: string[];
+        };
+        PromptLevel: {
+            folder: string | null;
+            folders: components["schemas"]["FolderSummary"][];
+            items: components["schemas"]["PromptSummary"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            page: number;
+            /** Format: int64 */
+            total: number;
         };
         PromptList: {
             data: components["schemas"]["PromptMeta"][];
@@ -7607,6 +7669,31 @@ export interface operations {
             };
         };
     };
+    PromptController_facets: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptFacets"];
+                };
+            };
+        };
+    };
     PromptController_deleteFolder: {
         parameters: {
             query: {
@@ -7629,6 +7716,36 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseFolderDeleteResponse"];
+                };
+            };
+        };
+    };
+    PromptController_level: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                folder?: string;
+                label?: string;
+                tag?: string;
+                page?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePromptLevel"];
                 };
             };
         };
