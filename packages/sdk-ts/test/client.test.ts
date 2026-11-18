@@ -414,6 +414,23 @@ test("per-call retries and timeout override the client", async () => {
   assert.equal(server.requests.length, 3);
 });
 
+test("a cold load is shared only by callers with the same per-call options", async () => {
+  // Bug: the client hands the cache no per-call options, so a caller with a 1 s timeout and no retries
+  // joins a default caller's load and waits out its retries.
+  server.script(...Array.from({ length: 3 }, () => ({ status: 200, body: envelope() })));
+  const client = make();
+  const shares: Array<string | undefined> = [];
+  const get = client.cache.get.bind(client.cache);
+  client.cache.get = (key, ttl, loader, share) => {
+    shares.push(share);
+    return get(key, ttl, loader, share);
+  };
+  await client.get("a");
+  await client.get("b", { maxRetries: 0, fetchTimeoutMs: 1000 });
+  await client.get("c", { maxRetries: 9 });
+  assert.deepEqual(shares, [undefined, "0:1000", "4:undefined"]);
+});
+
 test("retries are capped at four", async () => {
   // Bug: a large retry count parks the caller for minutes on a dead instance.
   server.script(...Array.from({ length: 12 }, () => ({ status: 503 })));

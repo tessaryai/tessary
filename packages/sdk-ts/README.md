@@ -84,7 +84,8 @@ const messages = (await prompts.get("support/answer")).compile(
   client or on one call changes that; `0` skips the cache).
 - An older prompt is returned at once and refetched in the background, one refetch per entry at a
   time. A failed refetch keeps the old prompt; a 404 drops it. Concurrent first reads of one entry
-  share one request.
+  share one request. A read with its own `maxRetries` or `fetchTimeoutMs` shares only with reads
+  that use the same values.
 - `create`, `update` and `delete` drop every cached entry for that name, and `clearCache()` drops
   every entry.
 

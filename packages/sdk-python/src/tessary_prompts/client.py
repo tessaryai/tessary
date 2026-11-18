@@ -111,8 +111,10 @@ class TessaryPrompts:
             )
             return from_data(data)
 
+        # Callers on the client's values share one cold load; a caller with its own shares only with its peers.
+        share = None if retries is None and fetch_timeout_seconds is None else f"{retries}:{fetch_timeout_seconds}"
         try:
-            return self.cache.get(key, ttl, load)  # type: ignore[return-value]
+            return self.cache.get(key, ttl, load, share)  # type: ignore[return-value]
         except TessaryPromptsError as error:
             if isinstance(error, PromptNotFound):
                 self.cache.evict(key)

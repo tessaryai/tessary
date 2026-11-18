@@ -133,6 +133,28 @@ test("concurrent cold misses share one request", async () => {
   assert.equal(load.calls, 1);
 });
 
+test("a caller with its own retries and timeout does not wait on another caller's load", { timeout: 5_000 }, async () => {
+  // Bug: a caller that asks for no retries and a 1 s timeout joins a load with the default retries and
+  // waits behind its Retry-After sleeps for a minute or more.
+  const cache = new PromptCache(new Clock().read, quiet);
+  const slow = held();
+  const first = cache.get("k", 60, slow.load);
+  const own = await cache.get("k", 60, loader(text(2)), "0:1000");
+  assert.equal(own.version, 2);
+  slow.release(text(1));
+  assert.equal((await first).version, 1);
+});
+
+test("callers with the same per-call options share one load", async () => {
+  // Bug: per-call options split every caller into its own load, so N cold callers with the same options
+  // send N requests.
+  const cache = new PromptCache(new Clock().read, quiet);
+  const load = loader(text(1));
+  const [a, b] = await Promise.all([cache.get("k", 60, load, "0:1000"), cache.get("k", 60, load, "0:1000")]);
+  assert.equal(a, b);
+  assert.equal(load.calls, 1);
+});
+
 test("a failed cold miss is not cached and rejects every waiter", async () => {
   // Bug: a shared failed load is cached, or leaves a waiter hanging.
   const cache = new PromptCache(new Clock().read, quiet);

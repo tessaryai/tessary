@@ -270,7 +270,9 @@ Cache, in process. The key is `name|version:N` when a version is given, else
   refresh per key starts. A successful refresh replaces the entry, a 404 evicts it, and any other failure
   keeps it, logs at DEBUG, and is retried on a later stale read.
 - A miss loads on the caller's thread. Concurrent misses on one key share one load: the others wait for
-  its value or its error.
+  its value or its error. Only callers with the same per-call retries and timeout share a load (the
+  load key carries them after the cache key), so a caller that asked for a short fetch never waits
+  behind a longer one.
 - Python runs every refresh on one daemon worker thread fed by a queue, started on first use and
   started again when it is gone (after a fork). TypeScript refreshes are promises.
 - The TTL defaults to 60 seconds, and a per-call TTL overrides the client's.

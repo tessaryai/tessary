@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // In-process prompt cache: a fresh entry is served, a stale entry is served at once and refreshed
-// in the background (one refresh per key), and concurrent misses on one key share one load. A write
+// in the background (one refresh per key), and concurrent misses on one key share one load when they
+// ask for the same per-call retries and timeout. A write
 // bumps its name's generation and a clear bumps the cache's epoch, so a load or refresh that started
 // before either stores nothing.
 import { PromptNotFoundError } from "./errors.ts";
@@ -43,18 +44,23 @@ export class PromptCache {
     return `${name}|label:${label || "production"}`;
   }
 
-  async get(key: string, ttlSeconds: number, loader: () => Promise<Prompt>): Promise<Prompt> {
+  /**
+   * `share` names the caller's per-call retries and timeout: a cold miss joins only a load started
+   * with the same ones, so no caller waits on a load slower than it asked for.
+   */
+  async get(key: string, ttlSeconds: number, loader: () => Promise<Prompt>, share?: string): Promise<Prompt> {
     if (ttlSeconds === 0) return loader();
     const entry = this.#entries.get(key);
-    if (entry === undefined) return this.#load(key, loader);
+    // The suffix keeps the name prefix, so evictName still drops the load.
+    if (entry === undefined) return this.#load(key, share === undefined ? key : `${key}|${share}`, loader);
     if (this.#clock() - entry.fetchedAt >= ttlSeconds * 1000 && !this.#refreshing.has(key)) {
       this.#refreshing.set(key, this.#refresh(key, loader));
     }
     return entry.value;
   }
 
-  #load(key: string, loader: () => Promise<Prompt>): Promise<Prompt> {
-    const pending = this.#loading.get(key);
+  #load(key: string, loadKey: string, loader: () => Promise<Prompt>): Promise<Prompt> {
+    const pending = this.#loading.get(loadKey);
     if (pending !== undefined) return pending;
     const stamp = this.#stamp(key);
     // Declared first so `finally` can compare the slot with this very promise.
@@ -67,10 +73,10 @@ export class PromptCache {
         return value;
       } finally {
         // A write may have dropped this load and a newer one may hold the slot.
-        if (this.#loading.get(key) === load) this.#loading.delete(key);
+        if (this.#loading.get(loadKey) === load) this.#loading.delete(loadKey);
       }
     })();
-    this.#loading.set(key, load);
+    this.#loading.set(loadKey, load);
     return load;
   }
 

@@ -159,8 +159,11 @@ export class TessaryPrompts {
     const key = PromptCache.key(name, version, label);
     const ref = { name, version: version ?? null, label: label || null };
     const load = async () => fromData(await this.#transport.request("GET", "/v1/prompts/fetch", ref, { query, ...perCall }));
+    // Callers on the client's values share one cold load; a caller with its own shares only with its peers.
+    const share =
+      perCall.maxRetries === undefined && fetchTimeoutMs === undefined ? undefined : `${perCall.maxRetries}:${fetchTimeoutMs}`;
     try {
-      return await this.cache.get(key, cacheTtlSeconds ?? this.#ttlSeconds, load);
+      return await this.cache.get(key, cacheTtlSeconds ?? this.#ttlSeconds, load, share);
     } catch (error) {
       if (error instanceof PromptNotFoundError) this.cache.evict(key);
       if (fallback === undefined) throw error;

@@ -83,7 +83,8 @@ messages = prompts.get_prompt("support/answer").compile(
   client or on one call changes that; `0` skips the cache).
 - An older prompt is returned at once and refetched in the background, one refetch per entry at a
   time, all on one daemon thread. A failed refetch keeps the old prompt; a 404 drops it.
-- Concurrent first reads of one entry share one request.
+- Concurrent first reads of one entry share one request. A read with its own `max_retries` or
+  `fetch_timeout_seconds` shares only with reads that use the same values.
 - `create_prompt`, `update_prompt` and `delete_prompt` drop every cached entry for that name, and
   `clear_prompt_cache()` drops every entry.
 

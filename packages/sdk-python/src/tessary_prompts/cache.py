@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """In-process prompt cache: a fresh entry is served, a stale entry is served at once and
 refreshed in the background (one refresh per key, all on one worker thread), and concurrent misses
-on one key share one load. A write bumps its name's generation and a clear bumps the cache's epoch,
-so a load or refresh that started before either stores nothing."""
+on one key share one load when they ask for the same per-call retries and timeout. A write bumps
+its name's generation and a clear bumps the cache's epoch, so a load or refresh that started before
+either stores nothing."""
 
 from __future__ import annotations
 
@@ -81,7 +82,14 @@ class PromptCache:
     def _stamp(self, key: str) -> tuple[int, int]:
         return self._epoch, self._generations.get(_name_of(key), 0)
 
-    def get(self, key: str, ttl: float, loader: Callable[[], BasePrompt]) -> BasePrompt:
+    @staticmethod
+    def _load_key(key: str, share: str | None) -> str:
+        # The suffix keeps the name prefix, so evict_name still drops the load.
+        return key if share is None else f"{key}|{share}"
+
+    def get(self, key: str, ttl: float, loader: Callable[[], BasePrompt], share: str | None = None) -> BasePrompt:
+        """``share`` names the caller's per-call retries and timeout: a cold miss joins only a load
+        started with the same ones, so no caller waits on a load slower than it asked for."""
         if ttl == 0:
             return loader()
         token = object()
@@ -89,10 +97,11 @@ class PromptCache:
             stamp = self._stamp(key)
             entry = self._entries.get(key)
             if entry is None:
-                load = self._loading.get(key)
+                load_key = self._load_key(key, share)
+                load = self._loading.get(load_key)
                 lead = load is None
                 if lead:
-                    load = self._loading[key] = _Load()
+                    load = self._loading[load_key] = _Load()
                 else:
                     load.waiters += 1
             else:
@@ -100,12 +109,14 @@ class PromptCache:
                 if start:
                     self._refreshing[key] = token
         if entry is None:
-            return self._lead(key, load, stamp, loader) if lead else self._join(load)
+            return self._lead(key, load_key, load, stamp, loader) if lead else self._join(load)
         if start:
             self._runner(lambda: self._refresh(key, loader, stamp, token))
         return entry[0]
 
-    def _lead(self, key: str, load: _Load, stamp: tuple[int, int], loader: Callable[[], BasePrompt]) -> BasePrompt:
+    def _lead(
+        self, key: str, load_key: str, load: _Load, stamp: tuple[int, int], loader: Callable[[], BasePrompt]
+    ) -> BasePrompt:
         try:
             load.value = loader()
             return load.value
@@ -117,8 +128,8 @@ class PromptCache:
                 if load.error is None and self._stamp(key) == stamp:
                     self._entries[key] = (load.value, self._clock())  # type: ignore[assignment]
                 # A write or clear may have dropped this load and a newer one may hold the slot.
-                if self._loading.get(key) is load:
-                    del self._loading[key]
+                if self._loading.get(load_key) is load:
+                    del self._loading[load_key]
             load.done.set()
 
     @staticmethod
@@ -174,8 +185,8 @@ class PromptCache:
         with self._lock:
             return len(self._entries)
 
-    def _waiters(self, key: str) -> int:
-        """Callers waiting on the load in flight for ``key``. For tests."""
+    def _waiters(self, key: str, share: str | None = None) -> int:
+        """Callers waiting on the load in flight for ``key`` and ``share``. For tests."""
         with self._lock:
-            load = self._loading.get(key)
+            load = self._loading.get(self._load_key(key, share))
             return 0 if load is None else load.waiters

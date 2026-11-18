@@ -174,7 +174,7 @@ The cache lives in your process. Each prompt name with a version or label is one
 - A prompt fetched within the last 60 seconds is served from the cache without a request.
 - An older prompt is returned at once, and the SDK refetches it in the background. Only one refetch runs per entry at a time. In Python, all refetches run on one background thread.
 - If a background refetch fails, the old prompt keeps being served. If it returns 404, the entry is dropped.
-- When several calls ask for the same prompt and nothing is cached, they share one request.
+- When several calls ask for the same prompt and nothing is cached, they share one request. A call that sets its own retries or timeout shares only with calls that set the same ones.
 - Creating a prompt, changing its labels, or deleting it through the same client drops every cached entry for that name.
 
 Set `cache_ttl_seconds` (`cacheTtlSeconds`) on the client to change the 60 seconds, or on one call to override it for that call. `0` skips the cache entirely. `clear_prompt_cache()` (`clearCache()`) drops every cached prompt, so the next call for each one goes to the server.

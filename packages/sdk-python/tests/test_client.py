@@ -409,6 +409,25 @@ def test_per_call_retries_and_timeout_override_the_client(server):
     assert len(server.requests) == 3
 
 
+def test_a_cold_load_is_shared_only_by_callers_with_the_same_per_call_options(server):
+    # Bug: the client hands the cache no per-call options, so a caller with a 1 s timeout and no retries joins
+    # a default caller's load and waits out its retries.
+    server.script(*[{"status": 200, "body": envelope()}] * 3)
+    client = make(server, cache_ttl_seconds=60)
+    shares = []
+    get = client.cache.get
+
+    def spy(key, ttl, loader, share=None):
+        shares.append(share)
+        return get(key, ttl, loader, share)
+
+    client.cache.get = spy  # type: ignore[method-assign]
+    client.get_prompt("a")
+    client.get_prompt("b", max_retries=0, fetch_timeout_seconds=1)
+    client.get_prompt("c", max_retries=9)
+    assert shares == [None, "0:1", "4:None"]
+
+
 def test_retries_are_capped_at_four(server):
     # Bug: a large retry count parks the caller for minutes on a dead instance.
     sleeps = Sleeps()

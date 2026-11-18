@@ -310,6 +310,62 @@ def test_shared_cold_load_error_reaches_every_waiter():
     assert cache.size() == 0
 
 
+def test_a_caller_with_its_own_retries_and_timeout_does_not_wait_on_another_callers_load():
+    # Bug: a caller that asks for no retries and a 1 s timeout joins a load with the default retries and
+    # waits behind its Retry-After sleeps for a minute or more.
+    cache = PromptCache(Clock(), Runner())
+    entered = threading.Event()
+    release = threading.Event()
+    slow_result = []
+
+    def slow():
+        entered.set()
+        assert release.wait(5)
+        return text(1)
+
+    t = threading.Thread(target=lambda: slow_result.append(cache.get("a|label:production", 60, slow)))
+    t.start()
+    assert entered.wait(5)
+    try:
+        own = cache.get("a|label:production", 60, Loader(text(2)), share="retries=0,timeout=1")
+    finally:
+        release.set()
+        t.join(5)
+    assert own.version == 2
+    assert slow_result[0].version == 1
+
+
+def test_callers_with_the_same_per_call_options_share_one_load():
+    # Bug: per-call options split every caller into its own load, so N cold callers with the same
+    # options send N requests.
+    cache = PromptCache(Clock(), Runner())
+    entered = threading.Event()
+    release = threading.Event()
+    calls = {"n": 0}
+    results = []
+
+    def load():
+        calls["n"] += 1
+        entered.set()
+        assert release.wait(5)
+        return text(1)
+
+    def caller():
+        results.append(cache.get("a|label:production", 60, load, share="retries=0,timeout=1"))
+
+    threads = [threading.Thread(target=caller) for _ in range(3)]
+    threads[0].start()
+    assert entered.wait(5)
+    for t in threads[1:]:
+        t.start()
+    _wait_for_waiters(cache, "a|label:production", 2, share="retries=0,timeout=1")
+    release.set()
+    for t in threads:
+        t.join(5)
+    assert calls["n"] == 1
+    assert len(results) == 3
+
+
 def test_a_write_during_a_shared_cold_load_starts_a_new_load():
     # Bug: a caller after a write joins the load that started before it and gets the old version.
     cache = PromptCache(Clock(), Runner())
@@ -352,10 +408,10 @@ def test_clear_drops_every_entry_and_stops_loads_in_flight_from_storing():
     assert cache.get("a|label:production", 60, load).version == 9
 
 
-def _wait_for_waiters(cache, key, count):
+def _wait_for_waiters(cache, key, count, share=None):
     """Spin until ``count`` callers wait on the load in flight for ``key``; no sleep-based ordering."""
     for _ in range(100000):
-        if cache._waiters(key) >= count:
+        if cache._waiters(key, share) >= count:
             return
         threading.Event().wait(0.001)
-    raise AssertionError(f"only {cache._waiters(key)} of {count} callers joined the load")
+    raise AssertionError(f"only {cache._waiters(key, share)} of {count} callers joined the load")
