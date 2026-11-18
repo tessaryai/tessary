@@ -21,7 +21,8 @@ export const promptKeys = {
   facets: (base: string) => ["prompts", base, "facets"] as const,
   usageSummary: (base: string, days: number) => ["prompt-usage-summary", base, days] as const,
   detail: (base: string, id: string) => ["prompt", base, id] as const,
-  olderVersions: (base: string, id: string) => ["prompt", base, id, "older"] as const,
+  /** `below` is the oldest version of the detail page, so a write that moves it starts the older pages afresh. */
+  olderVersions: (base: string, id: string, below: number | undefined) => ["prompt", base, id, "older", below] as const,
   version: (base: string, id: string, v: number) => ["prompt-version", base, id, v] as const,
   usage: (base: string, id: string, days: number) => ["prompt-usage", base, id, days] as const,
   traces: (base: string, name: string, v: number) => ["prompt-traces", base, name, v] as const,
@@ -83,13 +84,14 @@ export function usePrompt(id: string) {
 
 /**
  * The versions older than the detail read's page, a page at a time. Nothing is read until the reader asks
- * (`enabled`), and each page starts below the oldest version already shown.
+ * (`enabled`), and each page starts below the oldest version already shown. A refetch reuses the first page param,
+ * so that version is in the key: after a create or delete the older pages start again below the new detail page.
  */
 export function useOlderVersions(detail: PromptDetail, enabled: boolean) {
   const api = useProjectApi();
   const oldest = detail.versions.at(-1)?.version;
   return useInfiniteQuery({
-    queryKey: promptKeys.olderVersions(api.base, detail.id),
+    queryKey: promptKeys.olderVersions(api.base, detail.id, oldest),
     queryFn: ({ pageParam }) => api.getPrompt(detail.id, { limit: VERSION_PAGE_SIZE, beforeVersion: pageParam }),
     initialPageParam: oldest ?? 0,
     getNextPageParam: (last) => (last.has_older_versions ? last.versions.at(-1)?.version : undefined),
