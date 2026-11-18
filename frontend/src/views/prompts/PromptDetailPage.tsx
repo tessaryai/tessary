@@ -177,7 +177,7 @@ function PromptView({ detail, promptsPath }: { detail: PromptDetail; promptsPath
       return (
         <UsagePanel
           promptId={detail.id}
-          versions={versions}
+          versions={detail.versions}
           links={{
             version: (n) => at(n, null),
             traces: (n) => at(n, "traces"),

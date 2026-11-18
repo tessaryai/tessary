@@ -12899,6 +12899,15 @@
               "null"
             ]
           },
+          "labels" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
           "last_call_in_range" : {
             "type" : "string"
           },
@@ -12940,6 +12949,7 @@
           "error_calls",
           "first_call_in_range",
           "input_tokens",
+          "labels",
           "last_call_in_range",
           "output_tokens",
           "p50_ms",

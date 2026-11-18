@@ -4997,6 +4997,7 @@ export interface components {
             first_call_in_range: string;
             /** Format: int64 */
             input_tokens: number | null;
+            labels: string[] | null;
             last_call_in_range: string;
             /** Format: int64 */
             output_tokens: number | null;

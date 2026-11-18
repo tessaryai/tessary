@@ -114,7 +114,10 @@ function UsageRow({ row, usage, links }: { row: RowVersion; usage: VersionUsage 
   );
 }
 
-/** The Metrics tab: calls, errors, latency, tokens and cost per version, inside one window. */
+/**
+ * The Metrics tab: calls, errors, latency, tokens and cost per version, inside one window. `versions` is the detail
+ * read's first page, never the older pages, so the table does not change when the Versions tab opens them.
+ */
 export function UsagePanel({ promptId, versions, links }: { promptId: string; versions: VersionSummary[]; links: UsageLinks }) {
   const [days, setDays] = useState("7");
   const usage = usePromptUsage(promptId, Number(days));
@@ -132,10 +135,20 @@ export function UsagePanel({ promptId, versions, links }: { promptId: string; ve
       );
     }
     const byVersion = new Map(rows.map((u) => [u.version, u]));
-    const known = new Set(versions.map((v) => String(v.version)));
+    // The server says which version strings this prompt lacks, so a version below the loaded page still counts as one
+    // of its versions, with the labels the server sent. The loaded page adds a zero row for each version without calls.
+    const lacking = new Set(unknown);
+    const own = new Map<number, RowVersion>(
+      versions.map((v) => [v.version, { label: formatVersionRef(String(v.version)), labels: v.labels, number: v.version }]),
+    );
+    for (const u of rows) {
+      if (u.version === null || lacking.has(u.version) || own.has(Number(u.version))) continue;
+      own.set(Number(u.version), { label: formatVersionRef(u.version), labels: u.labels ?? [], number: Number(u.version) });
+    }
+    const ownRows = [...own.values()].sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
     // The list page counts every span that names the prompt, so calls on no version or a version this prompt lacks
     // get rows here too.
-    const other = rows.filter((u) => u.version === null || !known.has(u.version));
+    const other = rows.filter((u) => u.version === null || lacking.has(u.version));
     return (
       <div className="flex flex-col gap-3" data-density="compact">
         <Table>
@@ -152,13 +165,8 @@ export function UsagePanel({ promptId, versions, links }: { promptId: string; ve
             </TR>
           </THead>
           <TBody>
-            {versions.map((v) => (
-              <UsageRow
-                key={v.id}
-                row={{ label: formatVersionRef(String(v.version)), labels: v.labels, number: v.version }}
-                usage={byVersion.get(String(v.version))}
-                links={links}
-              />
+            {ownRows.map((r) => (
+              <UsageRow key={`own:${r.number}`} row={r} usage={byVersion.get(String(r.number))} links={links} />
             ))}
             {other.map((u) => (
               <UsageRow

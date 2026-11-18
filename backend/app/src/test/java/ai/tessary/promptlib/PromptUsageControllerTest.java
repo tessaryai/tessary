@@ -3,6 +3,7 @@ package ai.tessary.promptlib;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.tessary.auth.TenantContext;
@@ -88,7 +89,8 @@ record PromptUsageControllerTest(
                                 new BigDecimal("0.003000"),
                                 2,
                                 first.toString(),
-                                last.toString())),
+                                last.toString(),
+                                List.of("latest"))),
                         List.of()),
                 usage,
                 "p50 of 100..400 is 250; p95 is 300 + 0.85 x 100; two priced calls at 0.0015 each");
@@ -212,6 +214,37 @@ record PromptUsageControllerTest(
     }
 
     @Test
+    void eachRowCarriesTheLabelsOfTheVersionItNames() {
+        // Bug: the Metrics tab can label and link only the versions the page has loaded, so a used version below the
+        // newest page shows as a version this prompt does not have, with no labels and no links.
+        Tenant t = tenant("usage-labels");
+        String id = prompt(t.pid(), "summarize", 1, 2, 3);
+        label(t.pid(), id, "staging", 1);
+        label(t.pid(), id, "production", 1);
+        Instant at = NOW.minus(Duration.ofHours(1));
+        call(t.pid(), "summarize", "1", at, 100, false, false);
+        call(t.pid(), "summarize", "3", at, 100, false, false);
+        call(t.pid(), "summarize", "03", at, 100, false, false);
+        call(t.pid(), "summarize", "7", at, 100, false, false);
+        call(t.pid(), "summarize", null, at, 100, false, false);
+
+        PromptUsage usage = usage(t, id, null);
+
+        assertEquals(
+                Arrays.asList(
+                        Arrays.asList("03", null),
+                        Arrays.asList("1", List.of("production", "staging")),
+                        Arrays.asList("3", List.of("latest")),
+                        Arrays.asList("7", null),
+                        Arrays.asList(null, null)),
+                usage.versions().stream()
+                        .map(v -> Arrays.asList(v.version(), v.labels()))
+                        .toList());
+        assertEquals(List.of("03", "7"), usage.unknownVersions());
+        assertNull(PromptUsageController.versionNumber("9999999999"), "past the int range names no version");
+    }
+
+    @Test
     void unknownPromptIs404() {
         // Bug: an unknown or another project's prompt id answers an empty page instead of a 404.
         Tenant t = tenant("usage-404");
@@ -302,6 +335,17 @@ record PromptUsageControllerTest(
                     .update();
         }
         return id;
+    }
+
+    private void label(String pid, String promptId, String label, int version) {
+        jdbc.sql("INSERT INTO prompt_label (project_id, prompt_id, label, version_id, updated_by)"
+                        + " SELECT :pid, :prompt, :label, id, 'u' FROM prompt_version"
+                        + " WHERE project_id = :pid AND prompt_id = :prompt AND version = :version")
+                .param("pid", pid)
+                .param("prompt", promptId)
+                .param("label", label)
+                .param("version", version)
+                .update();
     }
 
     /**

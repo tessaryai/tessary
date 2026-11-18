@@ -20,6 +20,8 @@ public final class PromptUsageDtos {
      * {@code version} is the string the producer sent, null when it sent none. A null token or cost sum means no
      * linked span reported one, never zero; {@code unpriced_calls} says how many calls the cost leaves out.
      * {@code first_call_in_range} and {@code last_call_in_range} bound the calls inside the window, not all time.
+     * {@code labels} are the deployment labels of the version the row names, sorted, with {@code latest} last on the
+     * highest version; null when the row names no version of this prompt.
      */
     public record VersionUsage(
             @Nullable String version,
@@ -32,9 +34,10 @@ public final class PromptUsageDtos {
             @JsonProperty("cost_usd") @Nullable BigDecimal costUsd,
             @JsonProperty("unpriced_calls") long unpricedCalls,
             @JsonProperty("first_call_in_range") String firstCallInRange,
-            @JsonProperty("last_call_in_range") String lastCallInRange) {
+            @JsonProperty("last_call_in_range") String lastCallInRange,
+            @Nullable List<String> labels) {
 
-        static VersionUsage from(PromptUsageRepository.VersionUsageRow row) {
+        static VersionUsage from(PromptUsageRepository.VersionUsageRow row, @Nullable List<String> labels) {
             BigDecimal cost = row.costUsd();
             return new VersionUsage(
                     row.version(),
@@ -47,7 +50,8 @@ public final class PromptUsageDtos {
                     cost == null ? null : cost.setScale(6, RoundingMode.HALF_UP),
                     row.unpricedCalls(),
                     row.firstCallInRange(),
-                    row.lastCallInRange());
+                    row.lastCallInRange(),
+                    labels);
         }
 
         private static @Nullable Long rounded(@Nullable Double ms) {

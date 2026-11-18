@@ -21,10 +21,12 @@ import ai.tessary.web.ApiResponse;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +51,8 @@ public class PromptUsageController {
 
     private static final int DEFAULT_DAYS = 7;
     private static final int MAX_DAYS = 90;
+
+    private static final Pattern CANONICAL_VERSION = Pattern.compile("[1-9][0-9]{0,9}");
 
     private final TenantPathResolver resolver;
     private final PromptUsageRepository usage;
@@ -100,18 +104,42 @@ public class PromptUsageController {
                 .orElseThrow(() -> new TessaryException(PromptsError.NOT_FOUND, promptId));
         List<VersionUsageRow> rows = usage.byVersion(projectId, head.name(), since(window));
 
-        Set<String> known = new HashSet<>();
-        head.versions().forEach(v -> known.add(String.valueOf(v)));
-        Set<String> unknown = new TreeSet<>();
+        Set<Integer> named = new TreeSet<>();
         for (VersionUsageRow row : rows) {
-            String version = row.version();
-            if (version != null && !known.contains(version)) {
-                unknown.add(version);
-            }
+            Integer number = versionNumber(row.version());
+            if (number != null) named.add(number);
+        }
+        Map<Integer, List<String>> stored = usage.storedLabels(projectId, promptId, named);
+        Set<String> unknown = new TreeSet<>();
+        List<VersionUsage> versions = new ArrayList<>(rows.size());
+        for (VersionUsageRow row : rows) {
+            List<String> labels = labelsOf(versionNumber(row.version()), stored, head.latestVersion());
+            if (row.version() != null && labels == null) unknown.add(row.version());
+            versions.add(VersionUsage.from(row, labels));
         }
         logComputed(projectId, head.name(), window, rows.size(), started);
-        return ApiResponse.ok(
-                new PromptUsage(window, rows.stream().map(VersionUsage::from).toList(), List.copyOf(unknown)));
+        return ApiResponse.ok(new PromptUsage(window, versions, List.copyOf(unknown)));
+    }
+
+    /** Null when {@code number} names no stored version; {@code latest} goes last on the highest one. */
+    private static @Nullable List<String> labelsOf(
+            @Nullable Integer number, Map<Integer, List<String>> stored, int latestVersion) {
+        if (number == null) return null;
+        List<String> labels = stored.get(number);
+        if (labels == null || number != latestVersion) return labels;
+        List<String> withLatest = new ArrayList<>(labels);
+        withLatest.add(PromptNames.LATEST);
+        return List.copyOf(withLatest);
+    }
+
+    /**
+     * The version number a span's version string names, or null for a label, a padded number such as {@code 03}, or no
+     * version: only the canonical decimal form matches a version, as a fetch by version would answer it.
+     */
+    static @Nullable Integer versionNumber(@Nullable String version) {
+        if (version == null || !CANONICAL_VERSION.matcher(version).matches()) return null;
+        long number = Long.parseLong(version);
+        return number > Integer.MAX_VALUE ? null : (int) number;
     }
 
     private String requireReader(TenantContext ctx, String orgSlug, String projectSlug) {

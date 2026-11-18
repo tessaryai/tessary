@@ -154,6 +154,27 @@ describe("calls the version list does not hold", () => {
   });
 });
 
+describe("versions below the loaded page", () => {
+  // Bug: only the versions the Versions tab had loaded counted as this prompt's, so with more than 100 versions an older
+  // version with calls showed as one this prompt lacks, with no labels and no links, until older versions were opened.
+  it("draws a used version the page has not loaded as a version of this prompt, with its labels and links", async () => {
+    api.getPromptUsage.mockResolvedValue({
+      days: 7,
+      versions: [versionUsage({ version: "2", calls: 4 }), versionUsage({ version: "1", calls: 3, labels: ["staging"] })],
+      unknown_versions: [],
+    });
+    renderRoute(<UsagePanel promptId="p-1" versions={VERSIONS.slice(0, 1)} links={LINKS} />);
+
+    const link = await screen.findByRole("link", { name: "v1" });
+    expect(link.getAttribute("href")).toBe("/prompts/p-1?version=1");
+    expect(screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent)).toEqual(["v2", "v1"]);
+    expect(cells("v1").slice(1, 3)).toEqual(["staging", "3"]);
+    expect(within(row("v1")).getByRole("link", { name: "View traces" }).getAttribute("href")).toBe(
+      "/prompts/p-1?version=1&tab=traces",
+    );
+  });
+});
+
 describe("the window", () => {
   // Bug: the window control changes the label but not the read.
   it("reads the chosen window", async () => {

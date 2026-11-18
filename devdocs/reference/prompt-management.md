@@ -203,8 +203,12 @@ reads. Both routes need `ORG_VIEW`; `days` defaults to 7 and is capped at 90.
 - `GET .../prompts/{promptId}/usage?days`: one row per version string the spans sent (a null version
   included) with calls, error calls, p50 and p95 latency, tokens, cost and unpriced calls.
   `first_call_in_range` and `last_call_in_range` are the first and last call inside the window, not
-  of all time. `unknown_versions` names the strings that match no stored version: a label, or a
-  version deleted since.
+  of all time. `unknown_versions` names the strings that match no stored version: a label, a
+  padded number such as `03`, or a version deleted since. Each row's `labels` holds the deployment
+  labels of the version it names (with `latest` last on the highest), or null for a string in
+  `unknown_versions` and for no version. The route reads the prompt's own rows only for the version
+  numbers the spans sent, so the Metrics tab labels and links a version below the detail page's first
+  100, and its cost does not grow with the version count.
 
 The summary has no name to seek on, so it reads `ix_span_prompt_window` (`0058`), keyed
 `(project_id, started_at DESC, prompt_name)` with `trace_id` included. That index holds only linked,

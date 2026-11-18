@@ -3,10 +3,11 @@ package ai.tessary.promptlib;
 
 import ai.tessary.storage.Timestamps;
 import java.math.BigDecimal;
-import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +22,8 @@ import org.springframework.stereotype.Repository;
  * spans cannot be counted twice between two reads. Reads {@code prompt} and {@code prompt_version} directly for the
  * version list, never through the prompt service. The per-name count has no name to seek on, so it reads its window
  * from {@code ix_span_prompt_window}, whose predicate repeats this read's llm and live-span filter word for word. The
- * per-version read uses that index or {@code ix_span_prompt}; both bound it to the window.
+ * per-version read uses that index or {@code ix_span_prompt}; both bound it to the window. The prompt's own rows are read
+ * only for the versions the usage rows name, so a prompt with many versions costs no more than one with few.
  */
 @Repository
 public class PromptUsageRepository {
@@ -43,8 +45,8 @@ public class PromptUsageRepository {
             String firstCallInRange,
             String lastCallInRange) {}
 
-    /** {@code versions} ascending; empty only for a prompt whose versions were all deleted under it. */
-    public record PromptHead(String id, String name, List<Integer> versions) {}
+    /** {@code latestVersion} is the highest version, 0 only for a prompt whose versions were all deleted under it. */
+    public record PromptHead(String id, String name, int latestVersion) {}
 
     private static final String LINKED_LLM_SPANS = " FROM span s JOIN trace t ON t.project_id = s.project_id"
             + " AND t.id = s.trace_id WHERE s.project_id = :pid AND s.kind = 'llm' AND s.is_deleted IS NOT TRUE"
@@ -64,10 +66,15 @@ public class PromptUsageRepository {
             + LINKED_LLM_SPANS
             + " AND s.prompt_name IS NOT NULL GROUP BY s.prompt_name ORDER BY s.prompt_name";
 
-    private static final String HEAD = "SELECT p.id, p.name,"
-            + " COALESCE(array_agg(v.version ORDER BY v.version) FILTER (WHERE v.version IS NOT NULL), '{}')"
-            + " AS versions FROM prompt p LEFT JOIN prompt_version v ON v.project_id = p.project_id"
-            + " AND v.prompt_id = p.id WHERE p.project_id = :pid AND p.id = :id GROUP BY p.id, p.name";
+    private static final String HEAD = "SELECT p.id, p.name, COALESCE((SELECT max(v.version) FROM prompt_version v"
+            + " WHERE v.project_id = p.project_id AND v.prompt_id = p.id), 0) AS latest_version FROM prompt p"
+            + " WHERE p.project_id = :pid AND p.id = :id";
+
+    private static final String VERSION_LABELS = "SELECT v.version,"
+            + " COALESCE(array_agg(l.label ORDER BY l.label) FILTER (WHERE l.label IS NOT NULL), '{}') AS labels"
+            + " FROM prompt_version v LEFT JOIN prompt_label l ON l.version_id = v.id"
+            + " WHERE v.project_id = :pid AND v.prompt_id = :promptId AND v.version = ANY(:versions)"
+            + " GROUP BY v.version";
 
     private final JdbcClient jdbc;
 
@@ -101,8 +108,23 @@ public class PromptUsageRepository {
         return jdbc.sql(HEAD)
                 .param("pid", projectId)
                 .param("id", promptId)
-                .query((rs, n) -> new PromptHead(rs.getString("id"), rs.getString("name"), versions(rs)))
+                .query((rs, n) -> new PromptHead(rs.getString("id"), rs.getString("name"), rs.getInt("latest_version")))
                 .optional();
+    }
+
+    /** The stored labels of each of {@code versions} that exists, sorted; a missing version has no key. */
+    public Map<Integer, List<String>> storedLabels(String projectId, String promptId, Collection<Integer> versions) {
+        Map<Integer, List<String>> labels = new HashMap<>();
+        if (versions.isEmpty()) return labels;
+        jdbc.sql(VERSION_LABELS)
+                .param("pid", projectId)
+                .param("promptId", promptId)
+                .param("versions", versions.toArray(Integer[]::new))
+                .query((rs, n) -> Map.entry(rs.getInt("version"), List.of((String[])
+                        rs.getArray("labels").getArray())))
+                .list()
+                .forEach(e -> labels.put(e.getKey(), e.getValue()));
+        return labels;
     }
 
     private static VersionUsageRow versionRow(ResultSet rs) throws SQLException {
@@ -119,10 +141,5 @@ public class PromptUsageRepository {
                 // started_at is NOT NULL and a group is never empty, so neither bound can be null.
                 Objects.requireNonNull(Timestamps.iso(rs, "first_call_in_range")),
                 Objects.requireNonNull(Timestamps.iso(rs, "last_call_in_range")));
-    }
-
-    private static List<Integer> versions(ResultSet rs) throws SQLException {
-        Array array = rs.getArray("versions");
-        return List.of((Integer[]) array.getArray());
     }
 }
