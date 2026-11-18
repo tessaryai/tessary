@@ -383,6 +383,50 @@ record PromptPublicControllerTest(
     }
 
     @Test
+    void aNextVersionShowsOnTheNextLatestFetch() {
+        // Bug: creating a version leaves the cached latest in place, so label=latest answers the old body.
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-cache-next");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", null));
+        assertEquals(1, data(controller.fetch(admin, "p", null, "latest")).version());
+
+        controller.create(admin, post("p", null, "two", null));
+
+        assertEquals(2, data(controller.fetch(admin, "p", null, "latest")).version());
+    }
+
+    @Test
+    void aDeletedVersionIsNotServedFromTheCache() {
+        // Bug: a version delete by number or by label leaves the cached version, so a fetch serves a deleted body.
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-cache-delete-version");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+        controller.create(admin, post("p", null, "two", List.of("staging")));
+        controller.create(admin, post("p", null, "three", null));
+        assertEquals(3, data(controller.fetch(admin, "p", 3, null)).version());
+        assertEquals(2, data(controller.fetch(admin, "p", null, "staging")).version());
+
+        controller.delete(admin, "p", 3, null);
+        controller.delete(admin, "p", null, "staging");
+
+        assertError(PromptsError.VERSION_NOT_FOUND, () -> controller.fetch(admin, "p", 3, null));
+        assertError(PromptsError.LABEL_NOT_FOUND, () -> controller.fetch(admin, "p", null, "staging"));
+    }
+
+    @Test
+    void aDeletedPromptIsNotServedFromTheCache() {
+        // Bug: a prompt delete leaves its cached versions, so the SDK keeps receiving a prompt that no longer exists.
+        var fix = TenantFixture.bootstrap(tenants, "prompt-pub-cache-delete-prompt");
+        TenantContext admin = key(fix, KeyScope.ADMIN);
+        controller.create(admin, post("p", null, "one", List.of("production")));
+        assertEquals(1, data(controller.fetch(admin, "p", null, null)).version());
+
+        controller.delete(admin, "p", null, null);
+
+        assertError(PromptsError.NOT_FOUND, () -> controller.fetch(admin, "p", null, null));
+    }
+
+    @Test
     void invalidationRunsAfterCommit() {
         // Bug: the write drops the cache before it commits, a reader on another connection caches the old row again
         // under the new generation, and the fetch after the commit keeps serving it for the full TTL.
