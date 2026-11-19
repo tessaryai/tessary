@@ -1,21 +1,47 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { auth } from "../../api/client";
-import { ApiError } from "../../api/types";
+import type { ApiError, CapabilityOverrideView } from "../../api/types";
 import type { CapabilityWire } from "../../api/types-auth";
 import { useAuth } from "../../auth/AuthContext";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, PageBody, PageHeader, Section, Spinner, Toggle, useToast } from "../../ui";
 
-/** The row reads the build's default from the server; the toggle pins an override over it. */
+type Feature = {
+  capability: CapabilityWire;
+  title: string;
+  description: string;
+  onText: string;
+  offText: string;
+  errorTitle: string;
+};
 
-const TRIAGE_AUTOMATIC: CapabilityWire = "triage_automatic_enabled";
+const FEATURES: Feature[] = [
+  {
+    capability: "triage_automatic_enabled",
+    title: "Automatic triage",
+    description:
+      "Triage every finding as soon as it opens, instead of waiting for someone to press Run triage. Each run is an " +
+      "agent session on your organization's model provider, and there is no spending cap.",
+    onText: "Automatic triage is on",
+    offText: "Automatic triage is off",
+    errorTitle: "Could not change automatic triage",
+  },
+  {
+    capability: "prompt_management_enabled",
+    title: "Prompt management",
+    description:
+      "Prompts, versions, and deployment labels for this organization, with the Prompts page, the /v1/prompts API, " +
+      "and the playground. Off hides the page and returns 403 on every prompt route.",
+    onText: "Prompt management is on",
+    offText: "Prompt management is off",
+    errorTitle: "Could not change prompt management",
+  },
+];
 
 export function Features() {
   const { orgSlug } = useTenant();
   const { user } = useAuth();
-  const qc = useQueryClient();
-  const toast = useToast();
 
   const overrides = useQuery({
     queryKey: ["capability-overrides", orgSlug],
@@ -29,17 +55,6 @@ export function Features() {
   const me = members.data?.find((m) => m.user_id === user?.id);
   // Affordance only: the backend re-checks CAPABILITIES_MANAGE on every write.
   const canManage = me?.role === "owner" || me?.role === "admin";
-  const triage = overrides.data?.find((o) => o.capability === TRIAGE_AUTOMATIC);
-
-  const set = useMutation({
-    mutationFn: (enabled: boolean) => auth.setCapabilityOverride(orgSlug, TRIAGE_AUTOMATIC, enabled),
-    onSuccess: (view) => {
-      toast.success(view.enabled ? "Automatic triage is on" : "Automatic triage is off");
-      qc.invalidateQueries({ queryKey: ["capability-overrides", orgSlug] });
-      qc.invalidateQueries({ queryKey: ["capabilities", orgSlug] });
-    },
-    onError: (err) => toast.error("Could not change automatic triage", (err as ApiError).message),
-  });
 
   return (
     <PageBody size="narrow">
@@ -50,34 +65,57 @@ export function Features() {
       />
 
       <Section>
-        {overrides.isLoading ? (
+        {overrides.isPending ? (
           <div className="flex items-center gap-2 py-12 text-small text-muted">
             <Spinner size="sm" />
             Loading features…
           </div>
         ) : overrides.isError ? (
           <ErrorNote error={overrides.error} />
-        ) : triage ? (
-          <div className="rounded-card border border-border px-4 py-4 flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-small text-fg">Automatic triage</div>
-              <div className="text-label text-muted mt-0.5">
-                Triage every finding as soon as it opens, instead of waiting for someone to press Run triage. Each
-                run is an agent session on your organization's model provider, and there is no spending cap.
-              </div>
-              <div className="text-label text-muted mt-1">
-                Default: <span className="text-fg">{triage.default_enabled ? "on" : "off"}</span>
-              </div>
-            </div>
-            <Toggle
-              checked={triage.enabled}
-              disabled={!canManage || set.isPending}
-              onChange={(on: boolean) => set.mutate(on)}
-              label="Automatic triage"
-            />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {FEATURES.map((feature) => {
+              const view = overrides.data.find((o) => o.capability === feature.capability);
+              return view ? <FeatureRow key={feature.capability} view={view} feature={feature} canManage={canManage} /> : null;
+            })}
           </div>
-        ) : null}
+        )}
       </Section>
     </PageBody>
+  );
+}
+
+/** One capability: the row reads the build's default from the server, and the toggle pins an override over it. */
+function FeatureRow({ view, feature, canManage }: { view: CapabilityOverrideView; feature: Feature; canManage: boolean }) {
+  const { orgSlug } = useTenant();
+  const qc = useQueryClient();
+  const toast = useToast();
+
+  const set = useMutation({
+    mutationFn: (enabled: boolean) => auth.setCapabilityOverride(orgSlug, feature.capability, enabled),
+    onSuccess: (next) => {
+      toast.success(next.enabled ? feature.onText : feature.offText);
+      qc.invalidateQueries({ queryKey: ["capability-overrides", orgSlug] });
+      qc.invalidateQueries({ queryKey: ["capabilities", orgSlug] });
+    },
+    onError: (err) => toast.error(feature.errorTitle, (err as ApiError).message),
+  });
+
+  return (
+    <div className="rounded-card border border-border px-4 py-4 flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <div className="text-small text-fg">{feature.title}</div>
+        <div className="text-label text-muted mt-0.5">{feature.description}</div>
+        <div className="text-label text-muted mt-1">
+          Default: <span className="text-fg">{view.default_enabled ? "on" : "off"}</span>
+        </div>
+      </div>
+      <Toggle
+        checked={view.enabled}
+        disabled={!canManage || set.isPending}
+        onChange={(on: boolean) => set.mutate(on)}
+        label={feature.title}
+      />
+    </div>
   );
 }

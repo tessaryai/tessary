@@ -6,6 +6,9 @@ import ai.tessary.ingest.CallSiteResolver;
 import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.KindNormalizer;
 import ai.tessary.ingest.MediaExternalizer;
+import ai.tessary.ingest.PromptLinkIds;
+import ai.tessary.ingest.PromptRefResolver;
+import ai.tessary.ingest.PromptRefResolver.PromptRef;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.RedactionStamp;
 import ai.tessary.model.ContentExtractor;
@@ -94,6 +97,7 @@ public class SpanBatchWriter {
     private final MediaRefRepository mediaRefs;
     private final CallSiteRegistry callSites;
     private final SpanLateness lateness;
+    private final PromptLinkIds promptLinks;
     private final ObjectMapper mapper;
     private final TransactionTemplate txn;
 
@@ -113,6 +117,7 @@ public class SpanBatchWriter {
             MediaRefRepository mediaRefs,
             CallSiteRegistry callSites,
             SpanLateness lateness,
+            PromptLinkIds promptLinks,
             ObjectMapper mapper,
             PlatformTransactionManager transactionManager) {
         this.sessions = sessions;
@@ -127,6 +132,7 @@ public class SpanBatchWriter {
         this.mediaRefs = mediaRefs;
         this.callSites = callSites;
         this.lateness = lateness;
+        this.promptLinks = promptLinks;
         this.mapper = mapper;
         this.txn = new TransactionTemplate(transactionManager);
     }
@@ -157,7 +163,7 @@ public class SpanBatchWriter {
         // Mutated as new ids are seen: an unknown id gets a minimal call_site row, so call sites emerge from plain-OTLP
         // traffic.
         Set<String> knownCallSites = callSites.callSiteIds(projectId);
-        List<Prepared> prepared = validate(projectId, entries, knownCallSites);
+        List<Prepared> prepared = linkPrompts(projectId, validate(projectId, entries, knownCallSites));
         if (prepared.isEmpty()) return 0;
 
         // Sorted so concurrent batches take span row locks in one direction only.
@@ -285,6 +291,28 @@ public class SpanBatchWriter {
         retrievedDocs.insertAll(docRows);
     }
 
+    /**
+     * Stamps each linked span with the id of the prompt its name names, from one lookup for the whole batch, read
+     * before the transaction so it holds no lock. A name that names no prompt keeps its text and gets no id.
+     */
+    private List<Prepared> linkPrompts(String projectId, List<Prepared> prepared) {
+        Set<String> names = new LinkedHashSet<>();
+        for (Prepared p : prepared) {
+            String name = p.span().promptName();
+            if (name != null) names.add(name);
+        }
+        if (names.isEmpty()) return prepared;
+        Map<String, String> ids = promptLinks.resolve(projectId, names);
+        if (ids.isEmpty()) return prepared;
+        List<Prepared> linked = new ArrayList<>(prepared.size());
+        for (Prepared p : prepared) {
+            String name = p.span().promptName();
+            String id = name == null ? null : ids.get(name);
+            linked.add(id == null ? p : p.withSpan(p.span().withPromptId(id)));
+        }
+        return linked;
+    }
+
     /** A trace that never rolled up contributes no sample; first arrivals are not late. */
     private void recordLateness(Prepared p, @Nullable String rolledUpThrough) {
         if (rolledUpThrough == null) return;
@@ -385,6 +413,7 @@ public class SpanBatchWriter {
         String errorTypeAttr = trimmedAttr(raw, GenAiAttributes.ERROR_TYPE);
 
         IngestPricer.Priced priced = pricer.price(raw, kind);
+        PromptRef prompt = PromptRefResolver.resolve(raw.metadata());
         Long latencyMs =
                 endedAt == null ? null : Duration.between(startedAt, endedAt).toMillis();
 
@@ -438,6 +467,10 @@ public class SpanBatchWriter {
                 null,
                 null,
                 null,
+                null,
+                prompt == null ? null : prompt.name(),
+                prompt == null ? null : prompt.version(),
+                // Filled per batch by linkPrompts, so a linked span adds no read of its own.
                 null);
 
         SpanPayloadRow payload = new SpanPayloadRow(
@@ -622,7 +655,12 @@ public class SpanBatchWriter {
             @Nullable Instant endedAt,
             Instant eventTs,
             boolean isRoot,
-            @Nullable String threadId) {}
+            @Nullable String threadId) {
+
+        Prepared withSpan(SpanRow linked) {
+            return new Prepared(linked, payload, sideTables, mediaIds, startedAt, endedAt, eventTs, isRoot, threadId);
+        }
+    }
 
     private static @Nullable String trimmedAttr(RawEntry raw, String key) {
         Map<String, Object> attrs = raw.metadata();

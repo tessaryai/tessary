@@ -9,6 +9,8 @@ import org.jspecify.annotations.Nullable;
  * resolver partial indexes near-empty. Generated totals are null whenever every input is null: zero would launder "no
  * usage sent" into "free". @param costSource {@code provided}, {@code inferred} (under {@code priceBookVersion}) or
  * {@code unpriced} @param errorType a short class label (facets group by it); the prose is {@code errorMessage}
+ * @param promptName the managed prompt that produced this span, from tessary.prompt.name; no FK
+ * @param promptId the prompt row {@code promptName} named when the span was ingested; null when it named none; no FK
  */
 public record SpanRow(
         String projectId,
@@ -54,7 +56,61 @@ public record SpanRow(
         @Nullable Integer depth,
         @Nullable Long totalTokens,
         @Nullable String totalCost,
-        @Nullable String createdAt) {
+        @Nullable String createdAt,
+        @Nullable String promptName,
+        @Nullable String promptVersion,
+        @Nullable String promptId) {
+
+    public SpanRow withPromptId(@Nullable String resolvedPromptId) {
+        return new SpanRow(
+                projectId,
+                traceId,
+                id,
+                parentSpanId,
+                path,
+                sessionId,
+                userId,
+                projectVersionId,
+                callSiteId,
+                traceName,
+                kind,
+                name,
+                isLogicalRoot,
+                status,
+                level,
+                errorType,
+                errorMessage,
+                startedAt,
+                endedAt,
+                latencyMs,
+                ttftMs,
+                providedModelName,
+                modelId,
+                inputTokens,
+                outputTokens,
+                cacheReadTokens,
+                cacheWriteTokens,
+                reasoningTokens,
+                inputCost,
+                outputCost,
+                cacheReadCost,
+                cacheWriteCost,
+                costSource,
+                priceBookVersion,
+                inputPreview,
+                outputPreview,
+                correlationState,
+                pathState,
+                eventTs,
+                isDeleted,
+                depth,
+                totalTokens,
+                totalCost,
+                createdAt,
+                promptName,
+                promptVersion,
+                resolvedPromptId);
+    }
 
     public static final class CostSource {
         public static final String PROVIDED = "provided";

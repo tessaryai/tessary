@@ -7,8 +7,18 @@
  * still arriving or genuinely nothing.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatCost, formatLatency, formatTokens, formatWhen } from "./index-data";
+import { filterParams, formatCost, formatLatency, formatTokens, formatWhen } from "./index-data";
 import { sessionDurationMs, sessionName, type SessionListItem } from "./session-index-data";
+
+describe("filterParams", () => {
+  // Bug: the prompt filter never reaches the traces read, or a version is sent with no prompt name.
+  it("sends the prompt name and version together, and no version without a name", () => {
+    expect(filterParams({ promptName: "p", promptVersion: "2" })).toMatchObject({ promptName: "p", promptVersion: "2" });
+    const versionOnly = filterParams({ promptVersion: "2" });
+    expect(versionOnly.promptName).toBeUndefined();
+    expect(versionOnly.promptVersion).toBeUndefined();
+  });
+});
 
 describe("formatTokens", () => {
   it.each([

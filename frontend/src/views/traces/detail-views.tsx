@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useMemo, useState } from "react";
-import { cn } from "../../ui";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { Badge, cn } from "../../ui";
+import { useCapabilities } from "../../capabilities/useCapabilities";
+import { useProjectApi, useTenant } from "../../tenant/TenantContext";
 import { ChatItems, PriorContext, messageItems, planConversation, planTools, spanItems } from "./detail-chat";
 import type { Emphasis } from "./detail-chat";
 import { Chevron, Pane, ToolCallBatch, ToolDetails, toolStepOf } from "./detail-tool";
@@ -237,6 +241,7 @@ export function TreeView({
           indent={(depths.get(o.id) ?? 0) * 16}
           focused={focusId === o.id}
           onSelect={() => onSelect(o.id)}
+          trailing={o.prompt_name && <PromptChip name={o.prompt_name} version={o.prompt_version ?? null} />}
         >
           <SpanIcon kind={o.kind} />
           <span className="font-mono text-fg min-w-0 flex-1 truncate text-small">
@@ -247,6 +252,49 @@ export function TreeView({
         </ExpandableRow>
       ))}
     </div>
+  );
+}
+
+/** `name v3` for a version number, `name (prod)` for a label the producer sent, `name` when it sent none. */
+function promptLabel(name: string, version: string | null): string {
+  if (!version) return name;
+  return /^\d+$/.test(version) ? `${name} v${version}` : `${name} (${version})`;
+}
+
+/**
+ * The managed prompt a span was produced from. It links to the prompt only when a prompt of that name exists in
+ * the project, and reads nothing when prompt management is off. A label the span sent links to the version that
+ * carries the label now, or to the prompt alone when none does.
+ */
+function PromptChip({ name, version }: { name: string; version: string | null }) {
+  const enabled = useCapabilities().isEnabled("prompt_management_enabled");
+  const { orgSlug, projectSlug } = useTenant();
+  const api = useProjectApi();
+  const prompts = useQuery({
+    queryKey: ["prompts", api.base, { name }],
+    queryFn: () => api.listPrompts({ name }),
+    staleTime: 300_000,
+    enabled,
+  });
+  const label = promptLabel(name, version);
+  const badge = <Badge tone="neutral" className="shrink-0">{label}</Badge>;
+  if (!enabled || !prompts.data) return badge;
+  const id = prompts.data.items[0]?.id;
+  if (!id) return <span title="No prompt with this name in the project">{badge}</span>;
+  const number = !version
+    ? undefined
+    : /^\d+$/.test(version)
+      ? version
+      : prompts.data.items[0].labels.find((l) => l.label === version)?.version;
+  const query = number === undefined ? "" : `?version=${number}`;
+  return (
+    <Link
+      to={`/orgs/${orgSlug}/projects/${projectSlug}/prompts/${encodeURIComponent(id)}${query}`}
+      aria-label={`Open prompt ${label}`}
+      className="shrink-0"
+    >
+      {badge}
+    </Link>
   );
 }
 
@@ -297,12 +345,15 @@ function ExpandableRow({
   indent,
   focused,
   onSelect,
+  trailing,
   children,
 }: {
   o: Span;
   indent: number;
   focused: boolean;
   onSelect: () => void;
+  /** Interactive content, such as a link, which cannot sit inside the select button. */
+  trailing?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -336,6 +387,7 @@ function ExpandableRow({
           className="flex items-center min-w-0 flex-1 text-left cursor-pointer gap-2.5">
           {children}
         </button>
+        {trailing}
       </div>
       {hasPayload && open && (
         <div className="pr-2.5 pb-2" style={{ paddingLeft: indent + 10 }}>

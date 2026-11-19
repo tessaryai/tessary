@@ -1,0 +1,57 @@
+[project]
+name = "tessary-prompts"
+version = "0.0.0.dev0"
+description = "Fetch, cache, compile and link Tessary managed prompts."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "Tessary" }]
+keywords = ["tessary", "prompts", "prompt-management", "llm", "opentelemetry"]
+requires-python = ">=3.10"
+dependencies = []
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+otel = ["opentelemetry-api>=1.20"]
+
+[project.urls]
+Homepage = "https://github.com/tessaryai/tessary"
+Repository = "https://github.com/tessaryai/tessary"
+Documentation = "https://github.com/tessaryai/tessary/blob/main/docs/prompts/sdk.mdx"
+Changelog = "https://github.com/tessaryai/tessary/releases"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.11"]
+build-backend = "uv_build"
+
+[dependency-groups]
+test = ["pytest>=8,<10", "pytest-cov>=6,<8"]
+# The span processor is duck-typed, so the gate runs it against the newest OpenTelemetry SDK (dev)
+# and the oldest one the otel extra allows (otel-oldest).
+dev = [{ include-group = "test" }, "opentelemetry-sdk>=1.20"]
+otel-oldest = [{ include-group = "test" }, "opentelemetry-api==1.20.0", "opentelemetry-sdk==1.20.0"]
+
+[tool.uv]
+conflicts = [[{ group = "dev" }, { group = "otel-oldest" }]]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["tessary_prompts"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true

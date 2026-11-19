@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import ai.tessary.tenant.KeyScope;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -82,6 +83,18 @@ class RateLimitFilterTest {
                                 + "swept into rate limiting by it",
                         "GET",
                         "/auth/login",
+                        true),
+                // A prompt write carries a body of up to 200 KB under an ADMIN key; unthrottled, one leaked key could
+                // write without bound. Reads stay exempt like /v1/query: the SDK cache is their guard.
+                Arguments.of("a prompt create must be rate-limited", "POST", "/v1/prompts", false),
+                Arguments.of("a prompt label move must be rate-limited", "PATCH", "/v1/prompts/labels", false),
+                Arguments.of("a prompt delete must be rate-limited", "DELETE", "/v1/prompts", false),
+                Arguments.of("a prompt fetch must stay unthrottled", "GET", "/v1/prompts/fetch", true),
+                Arguments.of("the prompt list must stay unthrottled", "GET", "/v1/prompts", true),
+                Arguments.of(
+                        "only /v1/prompts writes are throttled; another /v1 POST stays exempt",
+                        "POST",
+                        "/v1/traces",
                         true));
         Stream<Arguments> guardedActuator = Stream.of(
                         "/actuator", "/actuator/env", "/actuator/loggers", "/actuator/heapdump", "/actuator/prometheus")
@@ -228,6 +241,35 @@ class RateLimitFilterTest {
         assertEquals(429, limited.getStatus(), "the 61st rapid call must 429");
         assertEquals("1", limited.getHeader("Retry-After"), "the per-user pool refills ten a second");
         assertEquals(200, apiCall(f, "usr_quiet").getStatus(), "another user's allowance is untouched");
+    }
+
+    @Test
+    @DisplayName("a bearer key's prompt writes share the per-user burst; its prompt fetches are never throttled")
+    void promptWritesAreThrottledPerKeyPrincipalAndFetchesAreNot() throws ServletException, IOException {
+        RateLimitFilter f = filter();
+        for (int i = 0; i < 60; i++) {
+            assertEquals(
+                    200, bearerCall(f, "POST", "/v1/prompts").getStatus(), "write " + (i + 1) + " is in the burst");
+        }
+        assertEquals(429, bearerCall(f, "POST", "/v1/prompts").getStatus(), "the 61st rapid prompt write must 429");
+        for (int i = 0; i < 100; i++) {
+            assertEquals(
+                    200,
+                    bearerCall(f, "GET", "/v1/prompts/fetch").getStatus(),
+                    "a fetch must pass even with the write allowance spent");
+        }
+    }
+
+    /** Through {@code doFilter}, so {@code shouldNotFilter} decides, with the context AuthFilter sets for a key. */
+    private static MockHttpServletResponse bearerCall(RateLimitFilter f, String method, String path)
+            throws ServletException, IOException {
+        MockHttpServletRequest req = request(method, path);
+        req.setAttribute(
+                TenantContext.ATTRIBUTE,
+                new TenantContext("usr_key_owner", null, "org_1", "prj_1", "member", "key_1", KeyScope.ADMIN));
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        f.doFilter(req, res, new MockFilterChain());
+        return res;
     }
 
     private static MockHttpServletResponse apiCall(RateLimitFilter f, String userId)

@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -21,7 +22,25 @@ public final class LogCapture implements BeforeEachCallback, AfterEachCallback {
     private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
 
     private LogCapture(Class<?> source) {
-        this.logger = (Logger) LoggerFactory.getLogger(source);
+        this.logger = logbackLogger(source);
+    }
+
+    /**
+     * Test classes run concurrently, and while another thread is initializing SLF4J, {@code getLogger} answers a
+     * substitute logger, not logback's. The substitute forwards to the real logger once initialization ends, so waiting
+     * for it is enough.
+     */
+    private static Logger logbackLogger(Class<?> source) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        org.slf4j.Logger found = LoggerFactory.getLogger(source);
+        while (!(found instanceof Logger logback)) {
+            if (System.nanoTime() > deadline) {
+                throw new IllegalStateException("SLF4J did not finish initializing within 10 seconds");
+            }
+            Thread.onSpinWait();
+            found = LoggerFactory.getLogger(source);
+        }
+        return logback;
     }
 
     public static LogCapture of(Class<?> source) {

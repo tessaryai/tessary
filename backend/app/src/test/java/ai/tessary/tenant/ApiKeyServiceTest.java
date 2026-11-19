@@ -12,6 +12,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * MCP-token semantics are security-critical: a bcrypt regression, a missed
@@ -19,7 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * stale token works forever". Coverage focuses on the verification surface.
  */
 @SpringBootTest
-record ApiKeyServiceTest(TenantService tenants, ApiKeyService tokens, ApiKeyRepository repo) {
+record ApiKeyServiceTest(TenantService tenants, ApiKeyService tokens, ApiKeyRepository repo, JdbcClient jdbc) {
 
     @Test
     void issuedToken_verifies_andUpdatesLastUsedAt() {
@@ -73,5 +74,25 @@ record ApiKeyServiceTest(TenantService tenants, ApiKeyService tokens, ApiKeyRepo
         assertTrue(repo.findByPrefix(prefix).isPresent(), "prefix should hit");
 
         assertTrue(tokens.verify(forgery).isEmpty(), "bcrypt must reject when only the lookup prefix matches");
+    }
+
+    /**
+     * Catches a cached rejection that falls through to the row read and bcrypt, so a flood of one bad token costs a
+     * database read per request. The row is un-revoked behind the cache: only the negative cache can still refuse it.
+     */
+    @Test
+    void verify_answersARecentRejectionFromTheCache() {
+        var fix = TenantFixture.bootstrap(tenants, "tok-negative");
+        var issued = tokens.issue(fix.project().id(), fix.user().id(), "negative");
+        assertTrue(tokens.revoke(issued.token().id()));
+        assertTrue(tokens.verify(issued.plaintext()).isEmpty(), "a revoked key is rejected and remembered");
+
+        jdbc.sql("UPDATE api_key SET revoked_at = NULL WHERE id = :id")
+                .param("id", issued.token().id())
+                .update();
+
+        assertTrue(
+                tokens.verify(issued.plaintext()).isEmpty(),
+                "within the negative TTL the remembered rejection answers, not the row");
     }
 }

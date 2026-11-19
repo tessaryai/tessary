@@ -1,4 +1,4 @@
-# Release: the only publisher. Builds the four images (backend, frontend, sandbox-runner, agent-sandbox)
+# Release: the platform's publisher (the prompt SDKs have their own, sdk-release.yml). Builds the four images (backend, frontend, sandbox-runner, agent-sandbox)
 # for linux/amd64 and arm64 on native runners, publishes the E2B agent template (the e2b recipe of the
 # same agent runtime) and the docker-compose.yml OCI artifact, all to Docker Hub `tessaryai/tessary`.
 #

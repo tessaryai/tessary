@@ -158,6 +158,9 @@ public final class SubstrateV2Fixtures {
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
                 null);
     }
 
@@ -303,6 +306,13 @@ public final class SubstrateV2Fixtures {
         return updated;
     }
 
+    /** Re-write a span with the managed prompt it was produced from, as ingest stores the link. */
+    public SpanRow withPrompt(SpanRow row, String name, @Nullable String version) {
+        SpanRow updated = copyOf(row).prompt(name, version).build();
+        spans.upsertAll(List.of(updated));
+        return updated;
+    }
+
     public static SpanRowCopy copyOf(SpanRow row) {
         return new SpanRowCopy(row);
     }
@@ -326,6 +336,9 @@ public final class SubstrateV2Fixtures {
         private String costSource;
         private @Nullable String inputPreview;
         private @Nullable String outputPreview;
+        private @Nullable String promptName;
+        private @Nullable String promptVersion;
+        private @Nullable String promptId;
 
         private SpanRowCopy(SpanRow row) {
             this.row = row;
@@ -345,6 +358,20 @@ public final class SubstrateV2Fixtures {
             this.costSource = row.costSource();
             this.inputPreview = row.inputPreview();
             this.outputPreview = row.outputPreview();
+            this.promptName = row.promptName();
+            this.promptVersion = row.promptVersion();
+            this.promptId = row.promptId();
+        }
+
+        public SpanRowCopy prompt(@Nullable String promptName, @Nullable String promptVersion) {
+            this.promptName = promptName;
+            this.promptVersion = promptVersion;
+            return this;
+        }
+
+        public SpanRowCopy promptId(@Nullable String promptId) {
+            this.promptId = promptId;
+            return this;
         }
 
         public SpanRowCopy name(String name) {
@@ -439,7 +466,10 @@ public final class SubstrateV2Fixtures {
                     null,
                     null,
                     null,
-                    null);
+                    null,
+                    promptName,
+                    promptVersion,
+                    promptId);
         }
     }
 
@@ -794,6 +824,8 @@ public final class SubstrateV2Fixtures {
         private @Nullable String payloadOutput;
         private @Nullable String payloadAttributes;
         private boolean writePayload;
+        private @Nullable String promptName;
+        private @Nullable String promptVersion;
 
         private SpanSeed(SubstrateV2Fixtures fx, String projectId) {
             this.fx = fx;
@@ -903,6 +935,12 @@ public final class SubstrateV2Fixtures {
             return this;
         }
 
+        public SpanSeed prompt(@Nullable String name, @Nullable String version) {
+            this.promptName = name;
+            this.promptVersion = version;
+            return this;
+        }
+
         public SpanSeed previews(@Nullable String inputPreview, @Nullable String outputPreview) {
             this.inputPreview = inputPreview;
             this.outputPreview = outputPreview;
@@ -980,6 +1018,9 @@ public final class SubstrateV2Fixtures {
                     null,
                     null,
                     null,
+                    null,
+                    promptName,
+                    promptVersion,
                     null);
         }
 

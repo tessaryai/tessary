@@ -1,0 +1,262 @@
+# SDK release: publishes the prompt SDKs, `tessary-prompts` (packages/sdk-python) to PyPI and
+# `@tessaryai/prompts` (packages/sdk-ts) to npm. Release (release.yml) publishes the platform; this
+# workflow publishes nothing else.
+#
+# Version: each SDK has its own version, separate from the platform's. The pushed git tag
+# `sdk-python-v<semver>` or `sdk-ts-v<semver>` is the only source of truth; preflight counts the next
+# version from the newest tag of each package and the dispatched bump. With no tag yet, the first
+# release is 0.1.0. The repo files hold a dev placeholder; the job stamps the version into the package
+# before the build and never commits the stamped files.
+#
+# Ordering, per package: count the version, refuse a version the registry already has (a run that
+# published but failed to push its tag), stamp, run the package's gate, build, publish, then push the
+# tag, then write the GitHub release. A failed publish leaves no tag. One job per package, so one can
+# fail without the other.
+#
+# Credentials: PyPI and npm trusted publishing (OIDC) for repository tessaryai/tessary, this workflow
+# file and the `sdk-release` environment, which also holds the approval rule. If trusted publishing is
+# not available, set PYPI_API_TOKEN or NPM_TOKEN in that environment and the publish step uses it.
+#
+# dry_run (on by default) runs everything up to the registry's own dry run and pushes no tag.
+
+name: SDK release
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Which SDK to release"
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - python
+          - ts
+      bump:
+        description: "Which part of the package's newest tag to bump"
+        required: true
+        default: "Patch (x.y.z+1)"
+        type: choice
+        # Placeholders, not real numbers: a literal here would be a copy of the version.
+        options:
+          - "Patch (x.y.z+1)"
+          - "Minor (x.y+1.0)"
+          - "Major (x+1.0.0)"
+      dry_run:
+        description: "Build, check and dry-run the publish; push no tag"
+        required: true
+        default: true
+        type: boolean
+
+# One SDK release at a time, so two runs never count the same version. Not cancel-in-progress: a
+# cancelled run may already have published.
+concurrency:
+  group: sdk-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  preflight:
+    name: Preflight - count the versions
+    runs-on: ubuntu-24.04
+    outputs:
+      python_version: ${{ steps.count.outputs.python_version }}
+      python_base: ${{ steps.count.outputs.python_base }}
+      ts_version: ${{ steps.count.outputs.ts_version }}
+      ts_base: ${{ steps.count.outputs.ts_base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # need full tag history to count from the newest sdk-*-v tag
+
+      - id: count
+        env:
+          BUMP: ${{ inputs.bump }}
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          # The value arrives as `Patch (x.y.z+1)`; keep the first word, lowercased.
+          BUMP="$(printf '%s' "${BUMP%% *}" | tr '[:upper:]' '[:lower:]')"
+          count() {
+            local key="$1" prefix="$2" base major minor patch
+            # Release tags only: `-v:refname` ranks `-rc.1` above the release. `|| true` because an empty or
+            # SIGPIPE'd grep fails under pipefail.
+            base="$(git tag --list "${prefix}[0-9]*" --sort=-v:refname \
+                      | grep -xE "${prefix}[0-9]+\.[0-9]+\.[0-9]+" | head -n1 || true)"
+            if [ -z "$base" ]; then
+              echo "${key}_version=0.1.0" >> "$GITHUB_OUTPUT"
+              echo "${key}_base=" >> "$GITHUB_OUTPUT"
+              echo "${key}: no ${prefix} tag yet, so this is the first release, 0.1.0" | tee -a "$GITHUB_STEP_SUMMARY"
+              return
+            fi
+            # Refuse a commit the newest tag already points at, so one commit never ships under two versions.
+            if [ "$(git rev-parse "${base}^{commit}")" = "${{ github.sha }}" ]; then
+              echo "::error::${base} already points at ${{ github.sha }}; there is nothing new to release." >&2
+              exit 1
+            fi
+            IFS=. read -r major minor patch <<<"${base#"$prefix"}"
+            case "$BUMP" in
+              major) major=$((major + 1)); minor=0; patch=0 ;;
+              minor) minor=$((minor + 1)); patch=0 ;;
+              patch) patch=$((patch + 1)) ;;
+              *) echo "::error::Unknown bump '$BUMP'; expected major, minor or patch." >&2; exit 1 ;;
+            esac
+            echo "${key}_version=${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+            echo "${key}_base=${base}" >> "$GITHUB_OUTPUT"
+            echo "${key}: ${base} -> ${prefix}${major}.${minor}.${patch} (${BUMP} bump)" | tee -a "$GITHUB_STEP_SUMMARY"
+          }
+          case "$PACKAGE" in both|python) count python sdk-python-v ;; esac
+          case "$PACKAGE" in both|ts) count ts sdk-ts-v ;; esac
+
+  # ---------------------------------------------------------------------------------------------
+  python:
+    name: tessary-prompts to PyPI
+    if: inputs.package == 'both' || inputs.package == 'python'
+    needs: preflight
+    runs-on: ubuntu-24.04
+    environment: sdk-release
+    env:
+      VERSION: ${{ needs.preflight.outputs.python_version }}
+      BASE: ${{ needs.preflight.outputs.python_base }}
+    permissions:
+      contents: write # push the tag and write the release
+      id-token: write # PyPI trusted publishing
+    defaults:
+      run:
+        working-directory: packages/sdk-python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+
+      - name: Refuse a version PyPI already has
+        run: |
+          set -euo pipefail
+          status="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/tessary-prompts/${VERSION}/json")"
+          case "$status" in
+            404) echo "tessary-prompts ${VERSION} is not on PyPI yet" ;;
+            200) echo "::error::tessary-prompts ${VERSION} is already on PyPI; push its tag by hand or bump again." >&2; exit 1 ;;
+            *) echo "::error::PyPI answered ${status} for tessary-prompts ${VERSION}" >&2; exit 1 ;;
+          esac
+
+      - name: Stamp the version
+        run: |
+          set -euo pipefail
+          uv version "$VERSION" --no-sync
+          printf '# SPDX-License-Identifier: Apache-2.0\n__version__ = "%s"\n' "$VERSION" > src/tessary_prompts/_version.py
+
+      - name: Run the package gate
+        run: bash ../../scripts/check-sdk-python.sh
+
+      - name: Build
+        run: uv build --out-dir dist
+
+      - name: Publish
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          args=(dist/*)
+          [ "$DRY_RUN" = true ] && args+=(--dry-run)
+          if [ -n "${PYPI_API_TOKEN:-}" ]; then
+            UV_PUBLISH_TOKEN="$PYPI_API_TOKEN" uv publish --trusted-publishing never "${args[@]}"
+          else
+            uv publish --trusted-publishing always "${args[@]}"
+          fi
+
+      - name: Push the tag and write the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="sdk-python-v${VERSION}"
+          git tag "$TAG" "${{ github.sha }}"
+          git push origin "$TAG"
+          notes=(--generate-notes)
+          [ -n "$BASE" ] && notes+=(--notes-start-tag "$BASE")
+          # --latest=false: the platform release stays the repository's latest.
+          gh release create "$TAG" --repo "${{ github.repository }}" --title "tessary-prompts ${VERSION}" \
+            --latest=false "${notes[@]}"
+
+  # ---------------------------------------------------------------------------------------------
+  ts:
+    name: "@tessaryai/prompts to npm"
+    if: inputs.package == 'both' || inputs.package == 'ts'
+    needs: preflight
+    runs-on: ubuntu-24.04
+    environment: sdk-release
+    env:
+      VERSION: ${{ needs.preflight.outputs.ts_version }}
+      BASE: ${{ needs.preflight.outputs.ts_base }}
+    permissions:
+      contents: write # push the tag and write the release
+      id-token: write # npm trusted publishing and provenance
+    defaults:
+      run:
+        working-directory: packages/sdk-ts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Must precede setup-node; pnpm comes from the package's `packageManager`, never a second pin.
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: packages/sdk-ts/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Refuse a version npm already has
+        run: |
+          set -euo pipefail
+          # A package that was never published answers 404 too, so an empty answer means "not there".
+          found="$(pnpm view "@tessaryai/prompts@${VERSION}" version 2>/dev/null || true)"
+          if [ -n "$found" ]; then
+            echo "::error::@tessaryai/prompts ${VERSION} is already on npm; push its tag by hand or bump again." >&2
+            exit 1
+          fi
+          echo "@tessaryai/prompts ${VERSION} is not on npm yet"
+
+      - name: Stamp the version
+        run: |
+          set -euo pipefail
+          pnpm version "$VERSION" --no-git-tag-version
+          sed -i -E "s/^export const VERSION = \".*\";$/export const VERSION = \"${VERSION}\";/" src/http.ts
+          grep -qx "export const VERSION = \"${VERSION}\";" src/http.ts
+
+      - name: Run the package gate
+        run: bash ../../scripts/check-sdk-ts.sh
+
+      # publishConfig sets public access and provenance. --no-git-checks: the stamp leaves the tree dirty.
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          args=(--no-git-checks)
+          [ "$DRY_RUN" = true ] && args+=(--dry-run)
+          pnpm publish "${args[@]}"
+
+      - name: Push the tag and write the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="sdk-ts-v${VERSION}"
+          git tag "$TAG" "${{ github.sha }}"
+          git push origin "$TAG"
+          notes=(--generate-notes)
+          [ -n "$BASE" ] && notes+=(--notes-start-tag "$BASE")
+          # --latest=false: the platform release stays the repository's latest.
+          gh release create "$TAG" --repo "${{ github.repository }}" --title "@tessaryai/prompts ${VERSION}" \
+            --latest=false "${notes[@]}"

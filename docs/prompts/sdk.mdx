@@ -1,0 +1,303 @@
+---
+title: "Prompt SDKs"
+description: "Fetch, cache, compile, and link Tessary prompts from Python or TypeScript, and create, label, list, and delete prompts from code."
+---
+
+The Python package `tessary-prompts` and the TypeScript package `@tessaryai/prompts` fetch a prompt from your Tessary instance, keep it in an in-process cache, fill in its variables, and link the span of the model call to the prompt version that produced it. Both talk to the `/v1/prompts` routes described in the [prompts API reference](/reference/prompts-api) and have no runtime dependencies.
+
+## Install
+
+Neither package is on PyPI or npm yet. Install it from a checkout of the [Tessary repository](https://github.com/tessaryai/tessary).
+
+<Tabs>
+  <Tab title="Python">
+    Needs Python 3.10 or later.
+
+    ```bash
+    pip install ./packages/sdk-python
+    ```
+
+    With uv, run `uv add ./packages/sdk-python` instead. Add the `otel` extra (`./packages/sdk-python[otel]`) to install `opentelemetry-api` for [linking spans automatically](#link-automatically). The main package never imports it.
+  </Tab>
+  <Tab title="TypeScript">
+    Needs Node 18 or later, for the global `fetch`.
+
+    ```bash
+    cd packages/sdk-ts
+    pnpm install
+    pnpm pack
+    ```
+
+    `pnpm pack` builds the package and writes a file named `tessaryai-prompts-<version>.tgz`. Install that file in your application with `pnpm add <path-to>/tessaryai-prompts-<version>.tgz`. A checkout build carries the version `0.0.0-dev`. For automatic span linking, also add `@opentelemetry/api`.
+  </Tab>
+</Tabs>
+
+## Fetch, compile, and link a prompt
+
+Create one client per process with your instance origin and a query-scoped API key (`tsy_q_`). [API keys](/reference/api-keys) explains the scopes and where to mint a key.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from opentelemetry import trace
+    from tessary_prompts import TessaryPrompts
+
+    prompts = TessaryPrompts("https://tessary.example.com", "tsy_q_YOUR_KEY")
+    tracer = trace.get_tracer(__name__)
+
+    prompt = prompts.get_prompt("support/greeting")
+    text = prompt.compile(customer="Ada")
+
+    with tracer.start_as_current_span("support.greeting") as span:
+        prompt.link(span)
+        response = client.messages.create(model=MODEL, messages=[{"role": "user", "content": text}])
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    import { trace } from "@opentelemetry/api";
+    import { TessaryPrompts } from "@tessaryai/prompts";
+
+    const prompts = new TessaryPrompts({ host: "https://tessary.example.com", apiKey: "tsy_q_YOUR_KEY" });
+    const tracer = trace.getTracer("support");
+
+    const prompt = await prompts.get("support/greeting");
+    if (prompt.type !== "text") throw new Error("support/greeting is not a text prompt");
+    const text = prompt.compile({ customer: "Ada" });
+
+    await tracer.startActiveSpan("support.greeting", async (span) => {
+      prompt.link(span);
+      const response = await client.messages.create({ model: MODEL, messages: [{ role: "user", content: text }] });
+      span.end();
+    });
+    ```
+  </Tab>
+</Tabs>
+
+In TypeScript, `get` returns `TextPrompt | ChatPrompt`. Check `prompt.type` before you use what `compile` returns: a string for a text prompt, an array of messages for a chat prompt.
+
+With no version and no label, the SDK fetches the version that carries the `production` deployment label. Pass `version=3` (`{ version: 3 }`) for one version or `label="staging"` (`{ label: "staging" }`) for another label. Giving both is an error raised before any request.
+
+`link` sets two span attributes, `tessary.prompt.name` and `tessary.prompt.version`, the version as a string. It works on any object with a `set_attribute` (Python) or `setAttribute` (TypeScript) method and returns the span. In Python, `prompt.link()` with no argument links the active OpenTelemetry span, and does nothing when OpenTelemetry is not installed. `span_attributes()` (`spanAttributes()`) returns the same two attributes when you set them yourself.
+
+### Link automatically
+
+Prompt usage counts only model-call spans. When an instrumentation library starts those spans for you, you cannot call `link` on them. Instead, add the prompt link span processor to your tracer provider once, and run the model call inside a linked block. Every span started inside the block gets the two attributes, including spans that a child function or an instrumented client starts.
+
+<Tabs>
+  <Tab title="Python">
+    Needs `opentelemetry-api`, which the `otel` extra installs.
+
+    ```python
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from tessary_prompts.otel import PromptLinkSpanProcessor
+
+    provider = TracerProvider()
+    provider.add_span_processor(PromptLinkSpanProcessor())
+    trace.set_tracer_provider(provider)
+
+    prompt = prompts.get_prompt("support/greeting")
+    with prompt.linked():
+        response = client.messages.create(model=MODEL, messages=[{"role": "user", "content": prompt.compile(customer="Ada")}])
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    Needs `@opentelemetry/api` and a registered context manager, which the OpenTelemetry Node SDK sets up.
+
+    ```typescript
+    import { NodeSDK } from "@opentelemetry/sdk-node";
+    import { PromptLinkSpanProcessor, withPrompt } from "@tessaryai/prompts/otel";
+
+    new NodeSDK({ spanProcessors: [new PromptLinkSpanProcessor() /* , your exporter's processor */] }).start();
+
+    const prompt = await prompts.get("support/greeting");
+    if (prompt.type !== "text") throw new Error("support/greeting is not a text prompt");
+    const response = await withPrompt(prompt, () =>
+      client.messages.create({ model: MODEL, messages: [{ role: "user", content: prompt.compile({ customer: "Ada" }) }] }),
+    );
+    ```
+
+    `linkActiveSpan(prompt)` links the active span and returns it, or returns `undefined` when no span is active.
+  </Tab>
+</Tabs>
+
+The link travels in a private OpenTelemetry context key, not in baggage, so it is never sent to other services. A span started after the block ends carries no link. In nested blocks, the inner prompt wins. A fallback prompt links nothing, even inside another prompt's block. The processor sets the attributes on every span started in the block, not only model calls; usage still counts only `llm` spans.
+
+### How variables are filled
+
+A variable is written `{{name}}`, with optional spaces inside the braces. A name is any text that is not blank and holds no brace, so `{{user.name}}`, `{{first-name}}` and `{{ first name }}` are variables too. Spaces at the start and end of the name are dropped.
+
+| You pass | Result |
+| --- | --- |
+| A value | Its string form, such as `3` for the number 3 |
+| `None` or `null` | An empty string |
+| Nothing, or `undefined` in TypeScript | The variable is left in the text unchanged |
+
+Empty braces, and text in braces that holds a brace of its own, are left unchanged and are not variables. `variables()` lists the variable names of a prompt in the order they first appear. Because any other text in double braces is a variable, `variables()` also lists text such as `"a":1` from `{{"a":1}}`. It stays in the text unless you pass a value for it.
+
+## Chat prompts
+
+A chat prompt is a list of messages, each with a `role` and `content`. It can also hold placeholders, `{"type": "placeholder", "name": "history"}`, which stand for a list of messages you supply at compile time, such as a conversation history. Compiling fills the variables in every message's `content`.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    prompt = prompts.get_prompt("support/answer")
+    messages = prompt.compile(
+        question="Where is my order?",
+        history=[{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}],
+    )
+    ```
+
+    A list-valued keyword argument replaces the placeholder of the same name.
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    const prompt = await prompts.get("support/answer");
+    const messages = prompt.compile(
+      { question: "Where is my order?" },
+      { history: [{ role: "user", content: "Hi" }, { role: "assistant", content: "Hello" }] },
+    );
+    ```
+
+    The second argument maps placeholder names to messages. An array-valued variable of the same name also fills a placeholder.
+  </Tab>
+</Tabs>
+
+Each supplied message must be an object with `role` and `content`; anything else raises a `TypeError`. A placeholder you do not fill stays in the output unchanged, so you can see it.
+
+## Cache and fallback
+
+The cache lives in your process. Each prompt name with a version or label is one cache entry.
+
+- A prompt fetched within the last 60 seconds is served from the cache without a request.
+- An older prompt is returned at once, and the SDK refetches it in the background. Only one refetch runs per entry at a time. In Python, all refetches run on one background thread.
+- If a background refetch fails, the old prompt keeps being served. If it returns 404, the entry is dropped.
+- When several calls ask for the same prompt and nothing is cached, they share one request. A call that sets its own retries or timeout shares only with calls that set the same ones.
+- Creating a prompt, changing its labels, or deleting it through the same client drops every cached entry for that name.
+
+Set `cache_ttl_seconds` (`cacheTtlSeconds`) on the client to change the 60 seconds, or on one call to override it for that call. `0` skips the cache entirely. `clear_prompt_cache()` (`clearCache()`) drops every cached prompt, so the next call for each one goes to the server.
+
+A fallback keeps your agent running when Tessary cannot answer and nothing is cached:
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    prompt = prompts.get_prompt("support/greeting", fallback="Hello {{customer}}, how can I help?")
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    const prompt = await prompts.get("support/greeting", { fallback: "Hello {{customer}}, how can I help?" });
+    ```
+  </Tab>
+</Tabs>
+
+A string fallback is a text prompt and a list of messages is a chat prompt. The SDK returns it on any failure, a 404 included, and also when the server answers without a usable name, version, type, or prompt. A fallback prompt has `is_fallback` (`isFallback`) set to true and version 0. It is never cached, and `link` and linked blocks set nothing on the span, so fallback traffic never counts against a prompt version.
+
+### Fetch at startup
+
+There is no separate prefetch call. To make sure a process starts with every prompt it needs, call `get_prompt` (`get`) for each one at startup, without a fallback, and stop the process if a call fails. Later calls are then served from the cache.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import sys
+
+    from tessary_prompts import TessaryPromptsError
+
+    for name in ("support/greeting", "support/answer"):
+        try:
+            prompts.get_prompt(name)
+        except TessaryPromptsError as error:
+            sys.exit(f"cannot load prompt {name}: {error}")
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    for (const name of ["support/greeting", "support/answer"]) {
+      await prompts.get(name);
+    }
+    ```
+
+    A failed `get` rejects, so an unhandled rejection at startup stops the process.
+  </Tab>
+</Tabs>
+
+## Create, label, list, and delete prompts
+
+Writes need an admin-scoped key (`tsy_a_`). A query key gets a 403 with the code `PROMPTS.WRONG_KEY_SCOPE`, and an ingest key (`tsy_w_`) gets a 403 on every prompt route, reads included. Writes are rate limited per key owner, so all keys of one user share a limit, as the [prompts API reference](/reference/prompts-api) describes; reads are not.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    admin = TessaryPrompts("https://tessary.example.com", "tsy_a_YOUR_KEY")
+
+    created = admin.create_prompt(
+        "support/greeting",
+        "Hello {{customer}}, thanks for reaching out.",
+        labels=["staging"],
+        commit_message="Warmer opening",
+    )
+    admin.update_prompt(name="support/greeting", version=created.version, new_labels=["production"])
+
+    page = admin.list_prompts(tag="support", limit=50)
+    admin.delete_prompt("support/greeting", label="staging")
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    const admin = new TessaryPrompts({ host: "https://tessary.example.com", apiKey: "tsy_a_YOUR_KEY" });
+
+    const created = await admin.create({
+      name: "support/greeting",
+      prompt: "Hello {{customer}}, thanks for reaching out.",
+      labels: ["staging"],
+      commitMessage: "Warmer opening",
+    });
+    await admin.update({ name: "support/greeting", version: created.version, newLabels: ["production"] });
+
+    const page = await admin.list({ tag: "support", limit: 50 });
+    await admin.delete("support/greeting", { label: "staging" });
+    ```
+  </Tab>
+</Tabs>
+
+Creating a prompt with an existing name adds the next version, and its type must match the existing prompt's. Pass `type="chat"` (`type: "chat"`) and a list of messages for a chat prompt. Both calls return the resulting version.
+
+`update_prompt` (`update`) adds `new_labels` (`newLabels`) to the version and takes each one off the version that held it, then takes `remove_labels` (`removeLabels`) off the version. `latest` always points at the highest version and cannot be set or removed.
+
+`list_prompts` (`list`) returns one page of prompts, ordered by name, as `{"data": [...], "meta": {...}}`. It takes the filters of the [list route](/reference/prompts-api): `name`, `label`, `tag`, `page`, `limit`, and `from_updated_at` and `to_updated_at` (`fromUpdatedAt`, `toUpdatedAt`) as ISO-8601 instants. Lists are never cached, and a query key can list.
+
+`delete_prompt` (`delete`) deletes one version with `version`, the version a label points at with `label`, or the whole prompt with neither. Deleting the last version deletes the prompt. It returns true when the server confirms the delete.
+
+## Errors and retries
+
+Every error the SDK raises extends `TessaryPromptsError`.
+
+| Error | Raised when |
+| --- | --- |
+| `PromptNotFound` (`PromptNotFoundError`) | The server answers 404: no prompt with that name, version, or label. Carries the name, version, and label you asked for. |
+| `PromptApiError` | The server refuses the request. Carries the HTTP status and the error code, such as `PROMPTS.WRONG_KEY_SCOPE` or `UNAUTHORIZED`. |
+| `PromptTransportError` | No usable answer arrives: a timeout, a connection failure, a redirect, or a body that is not the expected JSON. |
+| `ValueError` (`TypeError` in TypeScript) | An argument is invalid, raised before any request. |
+
+Reads retry on a 429, a 5xx, a timeout, or a connection failure. Writes and deletes retry only on a 429, because a write that failed with a 5xx or a timeout may already have been saved. A client makes up to 2 retries by default (`max_retries`, `maxRetries`), and never more than 4. Before each retry it waits for the server's `Retry-After` header, capped at 30 seconds, or else for 0.5 seconds plus up to 0.25 seconds of random jitter. The timeout of each request defaults to 5 seconds (`timeout`, `timeoutMs`).
+
+To change these for one fetch, pass `max_retries` and `fetch_timeout_seconds` to `get_prompt`, or `maxRetries` and `fetchTimeoutMs` to `get`. A per-call retry count outside 0 to 4 is moved to the nearest end of that range.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    prompt = prompts.get_prompt("support/greeting", max_retries=0, fetch_timeout_seconds=1, fallback="Hello!")
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    const prompt = await prompts.get("support/greeting", { maxRetries: 0, fetchTimeoutMs: 1000, fallback: "Hello!" });
+    ```
+  </Tab>
+</Tabs>
+
+The SDK never follows a redirect, so your API key is only ever sent to the host you configured.
