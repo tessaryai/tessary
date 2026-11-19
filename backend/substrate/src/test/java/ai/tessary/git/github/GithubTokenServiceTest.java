@@ -298,11 +298,18 @@ class GithubTokenServiceTest {
 
     @Test
     void installationPermissions_readsTheMintAnswer_andARefreshMintsAgain() {
-        http.on(MINT, response(201, """
-                        {"token":"ghs_1","expires_at":"%s","permissions":{"contents":"read","metadata":"read"}}""".formatted(Instant.now().plusSeconds(3600))), response(201, """
-                        {"token":"ghs_2","expires_at":"%s",
-                         "permissions":{"contents":"write","pull_requests":"write","nested":{"x":1}}}""".formatted(
-                        Instant.now().plusSeconds(3600))));
+        String expires = Instant.now().plusSeconds(3600).toString();
+        http.on(
+                MINT,
+                response(
+                        201,
+                        "{\"token\":\"ghs_1\",\"expires_at\":\"" + expires
+                                + "\",\"permissions\":{\"contents\":\"read\",\"metadata\":\"read\"}}"),
+                response(
+                        201,
+                        "{\"token\":\"ghs_2\",\"expires_at\":\"" + expires
+                                + "\",\"permissions\":{\"contents\":\"write\",\"pull_requests\":\"write\","
+                                + "\"nested\":{\"x\":1}}}"));
         GithubTokenService svc = service(configuredApp());
 
         assertEquals(

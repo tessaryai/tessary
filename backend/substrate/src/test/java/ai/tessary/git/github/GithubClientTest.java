@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -383,9 +384,13 @@ class GithubClientTest {
             {"number":7,"html_url":"https://github.com/acme/web/pull/7","state":"%s","merged_at":%s,
              "head":{"ref":"tessary/case-1","sha":"c3"},"base":{"ref":"main"}}""";
 
+    private static String prJson(String state, String mergedAt) {
+        return String.format(Locale.ROOT, PR_JSON, state, mergedAt);
+    }
+
     @Test
     void createPullRequest_opensItReadyForReview() throws Exception {
-        http.on(BASE + "/repos/acme/web/pulls", response(201, PR_JSON.formatted("open", "null")));
+        http.on(BASE + "/repos/acme/web/pulls", response(201, prJson("open", "null")));
 
         PullRequest pr = client.createPullRequest(repo("web"), "tessary/case-1", "main", "Fix the retry", "Why");
 
@@ -415,7 +420,7 @@ class GithubClientTest {
         http.on(
                 BASE + "/repos/acme/web/pulls?head=acme%3Atessary%2Fcase-1&state=all&sort=created&direction=desc"
                         + "&per_page=1",
-                response(200, "[" + PR_JSON.formatted(state, mergedAt) + "]"));
+                response(200, "[" + prJson(state, mergedAt) + "]"));
 
         PullRequest pr = client.findPullRequest(repo("web"), "tessary/case-1").orElseThrow();
 
@@ -435,9 +440,7 @@ class GithubClientTest {
 
     @Test
     void pullRequest_readsOne_andAMissingOneIsPrNotFound() {
-        http.on(
-                        BASE + "/repos/acme/web/pulls/7",
-                        response(200, PR_JSON.formatted("closed", "\"2026-11-01T00:00:00Z\"")))
+        http.on(BASE + "/repos/acme/web/pulls/7", response(200, prJson("closed", "\"2026-11-01T00:00:00Z\"")))
                 .on(BASE + "/repos/acme/web/pulls/8", response(404, "{}"));
 
         assertTrue(client.pullRequest(repo("web"), 7).merged());
