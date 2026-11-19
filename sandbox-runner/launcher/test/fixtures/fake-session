@@ -27,6 +27,7 @@ const { finished } = require('node:stream');
  *   replyBefore202 /message plays the whole reply first and answers 202 100 ms later
  *   eventsAnswer   the first /events answers this status with a multi-line HTML body, as a proxy does
  *   strayLines     raw lines the log starts with, ahead of every event
+ *   patch          each reply emits a patch event with this data just before its message_end
  */
 async function startFakeSession({ port, secret, shape = {} }) {
   const startingPolls = shape.startingPolls === undefined ? 1 : shape.startingPolls;
@@ -102,6 +103,7 @@ async function startFakeSession({ port, secret, shape = {} }) {
     emit('text', { delta: `echo:${text}` });
     emit('tool_start', { call_id: `call-${n}`, server: 'tessary', tool: 'get_trace', input_summary: '{}' });
     emit('tool_end', { call_id: `call-${n}`, result_summary: 'ok', bytes: 2, duration_ms: 5, ok: true });
+    if (shape.patch) emit('patch', shape.patch);
     endReply('done');
   }
 

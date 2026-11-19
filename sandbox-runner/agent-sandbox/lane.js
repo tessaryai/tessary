@@ -18,12 +18,13 @@
  *         Without json_schema the agent answers in prose.
  *
  * clone_url embeds a short-lived token and mcp.token is a live platform key: git runs with its args
- * kept out of errors, the token travels through the agent config and never argv, and scrubToken
- * covers both shapes, so neither secret can reach a log or this script's output.
+ * kept out of errors and resets the clone's remote URL without the clone token, the MCP token travels
+ * through the agent config and never argv, and scrubToken covers both shapes, so neither secret can
+ * reach a log or this script's output.
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { git, runAgent, describeError, failureEnvelope, quarantineRepo, writeDossier, WORK, REPO } = require('./agent-stream');
+const { cloneRepo, runAgent, describeError, failureEnvelope, quarantineRepo, writeDossier, WORK, REPO } = require('./agent-stream');
 
 const LANES = {
   run: { edit: { '*': 'allow', [`${REPO}/**`]: 'deny' } },
@@ -35,8 +36,7 @@ async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 
   if (input.clone_url) {
-    git(['clone', '--quiet', input.clone_url, REPO]);
-    git(['-C', REPO, 'checkout', '--quiet', input.head_sha]);
+    cloneRepo({ url: input.clone_url, headSha: input.head_sha });
     quarantineRepo();
   }
 

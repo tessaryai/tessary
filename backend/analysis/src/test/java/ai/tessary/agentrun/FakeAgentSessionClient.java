@@ -61,6 +61,12 @@ final class FakeAgentSessionClient implements AgentSessionClient {
         return seq -> new SessionEvent.Failure(seq, kind, "detail of " + kind);
     }
 
+    /** A fix reply's patch with one changed file holding {@code contentBase64}. */
+    static At patch(String path, String contentBase64) {
+        return seq -> new SessionEvent.Patch(
+                seq, "a41c0de", List.of(new SessionEvent.PatchFile(path, "100644", contentBase64)), List.of(), null);
+    }
+
     static At end(SessionEvent.EndReason reason, long outputTokens) {
         return seq -> new SessionEvent.MessageEnd(
                 seq, new AgentSpanTelemetry.AgentUsage(10, outputTokens, 0, 0, BigDecimal.ONE), reason);
