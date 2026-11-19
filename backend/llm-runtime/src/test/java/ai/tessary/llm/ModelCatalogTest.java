@@ -60,6 +60,23 @@ class ModelCatalogTest {
         assertEquals(before.agentic(), after.agentic(), "capability fields are NOT overlaid");
     }
 
+    /**
+     * The bug: a live listing for a frontier model drops the flag, so once the cache warms the fix lane refuses the
+     * model it offered a moment before.
+     */
+    @Test
+    void mergeLiveKeepsTheFrontierFlagOfAMatchingStaticEntry() {
+        List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(
+                ModelProvider.OPENROUTER,
+                List.of(new ProviderModel("anthropic/claude-opus-5.5", "Claude Opus 5.5 (live)", "Anthropic")));
+        ModelCatalog.CatalogEntry after = merged.stream()
+                .filter(e -> e.modelName().equals("anthropic/claude-opus-5.5"))
+                .findFirst()
+                .orElseThrow();
+
+        assertTrue(after.frontier());
+    }
+
     @Test
     void mergeLiveSynthesizesAFailClosedEntryForALiveModelWithNoStaticMatch() {
         List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(
@@ -70,6 +87,7 @@ class ModelCatalogTest {
                 .orElseThrow();
 
         assertFalse(synthesized.agentic(), "a model this table has never evaluated must not be agentic");
+        assertFalse(synthesized.frontier(), "a model this table has never evaluated must not write fixes");
         assertEquals("OpenAI", synthesized.vendor());
         assertEquals("GPT-6 Preview", synthesized.displayName());
     }

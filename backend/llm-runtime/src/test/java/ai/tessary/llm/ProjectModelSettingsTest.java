@@ -305,7 +305,12 @@ class ProjectModelSettingsTest {
         "FRUSTRATION, OPENROUTER:anthropic/claude-sonnet-5.5, TYPESAFE:jev-latest",
         "RCA, NOPE:some-model, anthropic.claude-sonnet-5-5",
         // A row from before Nova was removed must not pin a sandbox to a model that resolves nowhere.
-        "RCA, amazon.nova-2-lite, anthropic.claude-sonnet-5-5"
+        "RCA, amazon.nova-2-lite, anthropic.claude-sonnet-5-5",
+        // Frontier is not agentic: the fix lane's flag must not let a model onto the other sandbox lanes.
+        "RCA, OPENROUTER:anthropic/claude-opus-5.5, anthropic.claude-sonnet-5-5",
+        // Agentic is not frontier, and Custom is never frontier: neither may pin the fix lane.
+        "FIX, anthropic.claude-sonnet-5-5, anthropic.claude-opus-5-5",
+        "FIX, CUSTOM:my-self-hosted-model, anthropic.claude-opus-5-5"
     })
     void aStoredRowTheLaneCannotRunFallsBackToTheOrder(ModelLane lane, String stored, String fallback) {
         when(repo.findByProject(PID)).thenReturn(List.of(row(lane, stored)));
@@ -357,6 +362,80 @@ class ProjectModelSettingsTest {
         assertEquals(ModelProvider.GROK, resolved.provider());
         assertEquals("grok-4.7", resolved.modelId());
         assertEquals("xai/grok-4.7", resolved.modelsDevId());
+    }
+
+    /**
+     * The bug: the fix lane applies the agentic check, so it refuses OpenRouter's Opus (frontier, not agentic) and
+     * accepts Sonnet, Custom or the platform provider, none of which the owner chose to write pull requests.
+     */
+    @Test
+    void theFixLaneSavesOnlyFrontierModels() {
+        platformOffered = true;
+        for (String frontier : List.of(
+                "anthropic.claude-opus-5-5",
+                "ANTHROPIC:claude-opus-5-5",
+                "OPENROUTER:anthropic/claude-opus-5.5",
+                "OPENAI:gpt-6.1-sol",
+                "OPENROUTER:openai/gpt-6.1-sol")) {
+            settings.set(PID, ORG, ModelLane.FIX, frontier);
+            verify(repo).upsert(PID, ModelLane.FIX, frontier);
+        }
+        for (String other :
+                List.of(SONNET, MANTLE_SOL, "GROK:grok-4.7", "CUSTOM:my-self-hosted-model", PLATFORM_SONNET)) {
+            TessaryException ex =
+                    assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.FIX, other));
+            assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), other);
+        }
+    }
+
+    /**
+     * The bug: reading a stored row applies the agentic check, so a saved OpenRouter Opus pin (frontier, not agentic)
+     * reads as unset and the lane silently runs another model.
+     */
+    @Test
+    void aStoredFrontierRowThatIsNotAgenticPinsTheFixLane() {
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.FIX, "OPENROUTER:anthropic/claude-opus-5.5")));
+
+        assertEquals(
+                new ProjectModelSettings.LaneSelection("OPENROUTER:anthropic/claude-opus-5.5", false),
+                settings.resolve(PID, ModelLane.FIX).orElseThrow());
+    }
+
+    /** The bug: the frontier flag leaks to the other sandbox lanes, which only run agentic models. */
+    @Test
+    void aFrontierModelThatIsNotAgenticIsStillRefusedOnTheOtherSandboxLanes() {
+        TessaryException ex = assertThrows(
+                TessaryException.class,
+                () -> settings.set(PID, ORG, ModelLane.RCA, "OPENROUTER:anthropic/claude-opus-5.5"));
+        assertEquals(ModelConfigError.MODEL_NOT_AGENTIC, ex.error());
+    }
+
+    /** The bug: an unpinned fix lane picks a cheaper model, or a model the org holds no key for. */
+    @Test
+    void anUnpinnedFixLaneTakesTheFrontierModelOfTheFirstProviderTheOrgHolds() {
+        configured(ModelProvider.GEMINI, ModelProvider.BEDROCK);
+        var bedrock = settings.resolve(PID, ModelLane.FIX).orElseThrow();
+        assertEquals("anthropic.claude-opus-5-5", bedrock.modelKey());
+        assertTrue(bedrock.automatic());
+
+        configured(ModelProvider.OPENROUTER);
+        assertEquals(
+                new ProjectModelSettings.ResolvedAgenticModel(
+                        ModelProvider.OPENROUTER, "anthropic/claude-opus-5.5", "openrouter/anthropic/claude-opus-5.5"),
+                settings.resolveAgenticModel(PID, ModelLane.FIX).orElseThrow());
+    }
+
+    /**
+     * The bug: an org with no frontier provider gets a fix model anyway (Custom, the platform provider, or another
+     * lane's model), so the fix step runs on a model the owner never accepted for code changes.
+     */
+    @Test
+    void theFixLaneHasNoModelWhenTheOrgHoldsNoFrontierProvider() {
+        configured(ModelProvider.GEMINI, ModelProvider.BEDROCK_MANTLE, ModelProvider.CUSTOM);
+        platformOffered = true;
+
+        assertTrue(settings.resolve(PID, ModelLane.FIX).isEmpty());
+        assertTrue(settings.resolve(PID, ModelLane.RCA).isPresent(), "the other sandbox lanes still resolve");
     }
 
     @Test

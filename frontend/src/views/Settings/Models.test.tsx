@@ -16,7 +16,7 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 function entry(provider: CatalogEntry["provider"], modelName: string, flags: Partial<CatalogEntry>): CatalogEntry {
   return {
     provider, vendor: "Vendor", model_name: modelName, display_name: modelName,
-    default_base_url: "https://example.invalid", agentic: false, decision: false, ...flags,
+    default_base_url: "https://example.invalid", agentic: false, decision: false, frontier: false, ...flags,
   };
 }
 
@@ -109,9 +109,9 @@ const TRIAGE: ModelSettingsResponse = {
     },
   ],
   models: [
-    { model_key: "claude-haiku", display_name: "Claude Haiku", vendor: "Anthropic", agentic: true, endpoint: "RUNTIME", inference_profile_id: "p1" },
-    { model_key: "claude-opus", display_name: "Claude Opus", vendor: "Anthropic", agentic: true, endpoint: "RUNTIME", inference_profile_id: "p2" },
-    { model_key: "gpt-luna", display_name: "GPT Luna", vendor: "OpenAI", agentic: true, endpoint: "MANTLE", inference_profile_id: "p3" },
+    { model_key: "claude-haiku", display_name: "Claude Haiku", vendor: "Anthropic", agentic: true, frontier: false, endpoint: "RUNTIME", inference_profile_id: "p1" },
+    { model_key: "claude-opus", display_name: "Claude Opus", vendor: "Anthropic", agentic: true, frontier: false, endpoint: "RUNTIME", inference_profile_id: "p2" },
+    { model_key: "gpt-luna", display_name: "GPT Luna", vendor: "OpenAI", agentic: true, frontier: false, endpoint: "MANTLE", inference_profile_id: "p3" },
   ],
   rates: [
     { model_key: "claude-haiku", input_rate_per_million: 1, output_rate_per_million: 5 },

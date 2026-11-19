@@ -119,6 +119,18 @@ record AgentRunRepositoryTest(TenantService tenants, JdbcClient jdbc, ProjectPur
         assertEquals(Optional.empty(), runs.openRunOfJob(pid + "/job-1"), "a closed run is no longer open");
     }
 
+    /** A lane added in Java but not in the table's CHECK: its first run fails to open and the run bar stays empty. */
+    @Test
+    void everyLaneOpensARunAndReadsBackAsThatLane() {
+        String pid = project("agent-run-lanes");
+        for (Lane lane : Lane.values()) {
+            String jobId = pid + "/job-" + lane.wire();
+            at(T0).open(pid, lane, "subject-" + lane.wire(), jobId, 1);
+
+            assertEquals(lane, at(T0).openRunOfJob(jobId).orElseThrow().lane());
+        }
+    }
+
     /** Unbounded step storage: a subject keeps its newest run and the one before it, never more. */
     @Test
     void openingARunKeepsOnlyTheNewestEarlierRunOfThatSubject() {

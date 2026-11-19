@@ -17,7 +17,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Triage and RCA agent runs and their steps in plain words. A subject keeps its newest run and the one before it; a run
+ * Triage, RCA and fix agent runs and their steps in plain words. A subject keeps its newest run and the one before it; a run
  * stores at most {@link #MAX_STEPS} steps and keeps counting past them.
  */
 @Repository
@@ -58,7 +58,8 @@ public class AgentRunRepository {
 
     public enum Lane {
         TRIAGE,
-        RCA;
+        RCA,
+        FIX;
 
         String wire() {
             return name().toLowerCase(Locale.ROOT);

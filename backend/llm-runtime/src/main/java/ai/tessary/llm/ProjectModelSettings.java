@@ -118,7 +118,10 @@ public class ProjectModelSettings {
         // Wrong-kind rows fail isOfferedOn below.
         boolean agentic = bedrock.map(BedrockModelProfile.ModelDescriptor::agentic)
                 .orElseGet(() -> catalog.map(ModelCatalog.CatalogEntry::agentic).orElse(false));
-        if (lane.agentic() && !agentic) {
+        boolean frontier = bedrock.map(BedrockModelProfile.ModelDescriptor::frontier)
+                .orElseGet(
+                        () -> catalog.map(ModelCatalog.CatalogEntry::frontier).orElse(false));
+        if (lane.frontierOnly() ? !frontier : lane.agentic() && !agentic) {
             return Optional.empty();
         }
         if (!isOfferedOn(lane, row.modelKey())) {
@@ -296,7 +299,8 @@ public class ProjectModelSettings {
     private void validate(String orgId, ModelLane lane, String modelKey) {
         Optional<BedrockModelProfile.ModelDescriptor> bedrock = BedrockModelProfile.find(modelKey);
         if (bedrock.isPresent()) {
-            requireServable(lane, modelKey, bedrock.get().agentic());
+            requireServable(
+                    lane, modelKey, bedrock.get().agentic(), bedrock.get().frontier());
             return;
         }
         // A miss on both halves: the model is not ours.
@@ -312,11 +316,16 @@ public class ProjectModelSettings {
         if (lane.decision() != entry.decision() || (!lane.decision() && !lane.agentic())) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
         }
-        requireServable(lane, modelKey, entry.agentic());
+        requireServable(lane, modelKey, entry.agentic(), entry.frontier());
     }
 
-    private static void requireServable(ModelLane lane, String modelKey, boolean agentic) {
-        if (lane.agentic() && !agentic) {
+    /** The fix lane asks for frontier in place of agentic, so a frontier model needs no agentic flag there. */
+    private static void requireServable(ModelLane lane, String modelKey, boolean agentic, boolean frontier) {
+        if (lane.frontierOnly()) {
+            if (!frontier) {
+                throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
+            }
+        } else if (lane.agentic() && !agentic) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
         }
         if (!isOfferedOn(lane, modelKey)) {
