@@ -68,8 +68,6 @@ public class CaseService {
 
     private static final String CLOSED_NOTE = "Closed.";
 
-    private static final String AUTOMATIC_NONCE = "auto";
-
     private static final Duration COVERAGE_WINDOW = Duration.ofDays(1);
 
     private static final ObjectReader CITATIONS =
@@ -530,15 +528,23 @@ public class CaseService {
     }
 
     /**
-     * The automatic-RCA tick's entry, the same path as the button. {@code owner} is who the run's key is issued to. Its
-     * own nonce keeps it off a person's coalesced report, and every automatic trigger on the same newest finding
-     * coalesces, so two ticks never queue two runs for one window.
+     * The automatic-RCA tick's entry, the same path as the button. {@code owner} is who the run's key is issued to.
+     * Empty when the case's newest run is still queued or running. The nonce names the newest report, so two ticks
+     * that both saw it coalesce, and a window that joins after it, even one older than the newest finding, gets a new
+     * run rather than that finding's finished one.
      */
     @Transactional
-    public RcaReportView runRcaAutomatically(String projectId, String id, String owner) {
+    public Optional<RcaReportView> runRcaAutomatically(String projectId, String id, String owner) {
         CaseRow row = require(projectId, id);
-        return rcaTrigger.trigger(
-                projectId, newestFindingId(projectId, row), owner, AUTOMATIC_NONCE, RcaTriggerService.Origin.AUTOMATIC);
+        Optional<RcaReportRow> latest = rcaReports.latestByCase(projectId, row.id());
+        if (latest.isPresent()
+                && (JobRow.Status.PENDING.equals(latest.get().status())
+                        || JobRow.Status.CLAIMED.equals(latest.get().status()))) {
+            return Optional.empty();
+        }
+        String nonce = "auto-" + latest.map(RcaReportRow::id).orElse("first");
+        return Optional.of(rcaTrigger.trigger(
+                projectId, newestFindingId(projectId, row), owner, nonce, RcaTriggerService.Origin.AUTOMATIC));
     }
 
     private String newestFindingId(String projectId, CaseRow row) {

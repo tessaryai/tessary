@@ -148,8 +148,7 @@ public class RcaAutoTrigger {
         int triggered = 0;
         for (String caseId : due) {
             try {
-                cases.runRcaAutomatically(project.id(), caseId, owner.get());
-                triggered++;
+                if (cases.runRcaAutomatically(project.id(), caseId, owner.get()).isPresent()) triggered++;
             } catch (RuntimeException e) {
                 StructuredLog.warn(log, Markers.OPS, "rca.auto.case-failed")
                         .field("project", project.id())

@@ -40,6 +40,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -351,17 +352,18 @@ record CaseServiceTest(
 
     /**
      * The tick's path acts as the owner (whom the run's key is issued to) but is narrated as automatic, with no
-     * person as actor. A second tick before the first run is recorded coalesces onto it and narrates nothing.
+     * person as actor. A second tick while the first run is queued requests nothing and narrates nothing.
      */
     @Test
     void anAutomaticRunActsAsTheOwnerAndIsNarratedAsAutomatic() {
         Project p = project("svc-rca-auto");
         CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
 
-        RcaReportView first = service.runRcaAutomatically(p.id(), row.id(), "user-owner");
-        RcaReportView second = service.runRcaAutomatically(p.id(), row.id(), "user-owner");
+        RcaReportView first =
+                service.runRcaAutomatically(p.id(), row.id(), "user-owner").orElseThrow();
+        Optional<RcaReportView> second = service.runRcaAutomatically(p.id(), row.id(), "user-owner");
 
-        assertEquals(first.id(), second.id());
+        assertEquals(Optional.empty(), second, "the first run is still queued");
         assertEquals(
                 "user-owner",
                 jdbc.sql("SELECT payload->>'created_by' FROM job WHERE id = :id")
@@ -376,6 +378,43 @@ record CaseServiceTest(
         assertEquals(
                 "Requested automatically for windows that no RCA has read.",
                 requested.get(0).summary());
+    }
+
+    /**
+     * A window can join after the run with an older {@code created_at} than the case's newest finding (its ruling came
+     * late), so the newest finding is still the one the last automatic run was anchored on. The bug: that run's job is
+     * found again and nothing new runs, on every tick.
+     */
+    @Test
+    void anAutomaticRunStartsForALateWindowWhenTheNewestFindingWasAlreadyAnalysed() {
+        Project p = project("svc-rca-auto-late");
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
+        RcaReportView first =
+                service.runRcaAutomatically(p.id(), row.id(), "user-owner").orElseThrow();
+        rcaReports.recordFindingIds(first.jobId(), List.of(Objects.requireNonNull(row.latestFindingId())));
+        rcaJobs.markDone(first.jobId());
+        String late = "2026-01-01T00:00:00Z";
+        String lateFinding = Objects.requireNonNull(findings.recordArmedWindow(
+                        Ids.ulid(),
+                        p.id(),
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-late",
+                        "cause-late",
+                        1,
+                        "cs-a",
+                        ARMED_PAYLOAD,
+                        late,
+                        late,
+                        late,
+                        late))
+                .findingId();
+        findings.attachToCase(p.id(), lateFinding, row.id(), Instant.now().toString());
+
+        RcaReportView second =
+                service.runRcaAutomatically(p.id(), row.id(), "user-owner").orElseThrow();
+
+        assertNotEquals(first.id(), second.id());
+        assertEquals(JobRow.Status.PENDING, second.status());
     }
 
     @Test
