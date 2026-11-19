@@ -504,7 +504,9 @@ class PlaygroundServiceTest {
 
             TessaryException busy = assertThrows(TessaryException.class, () -> service.run(ORG, PID, req));
             assertEquals(PlaygroundError.BUSY, busy.error());
-            assertEquals("The playground already has 1 runs in flight; try again in a moment", busy.getMessage());
+            assertEquals(
+                    "The playground has no free run slot for this organization right now; try again in a moment",
+                    busy.getMessage());
 
             release.countDown();
             assertEquals("Hi Ada.", first.get(10, TimeUnit.SECONDS).content());

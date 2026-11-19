@@ -108,7 +108,7 @@ public class PlaygroundService {
                                 .id());
         ChatTarget target = targets.resolve(orgId, req.provider(), req.model());
 
-        if (!permits.tryAcquire(orgId)) throw new TessaryException(PlaygroundError.BUSY, concurrency);
+        if (!permits.tryAcquire(orgId)) throw new TessaryException(PlaygroundError.BUSY);
         Span span = startSpan(projectId, target, subject);
         try (var _ = span.makeCurrent()) {
             ChatResult result;

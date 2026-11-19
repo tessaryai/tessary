@@ -17,7 +17,9 @@ public enum PlaygroundError implements ErrorCode {
     PROVIDER_NO_CREDIT(HttpStatus.PAYMENT_REQUIRED, "Provider %s has no credit left on the key (HTTP %s)"),
     REQUEST_REFUSED(HttpStatus.UNPROCESSABLE_ENTITY, "Provider %s refused the request (HTTP %s): %s"),
     TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "Provider %s did not answer within %s ms"),
-    BUSY(HttpStatus.TOO_MANY_REQUESTS, "The playground already has %s runs in flight; try again in a moment"),
+    BUSY(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "The playground has no free run slot for this organization right now; try again in a moment"),
     PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "Provider %s is unavailable: %s"),
     MALFORMED_RESPONSE(HttpStatus.BAD_GATEWAY, "Provider %s returned an unusable answer: %s");
 

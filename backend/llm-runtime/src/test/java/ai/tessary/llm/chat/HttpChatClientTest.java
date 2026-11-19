@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -586,5 +587,47 @@ class HttpChatClientTest {
 
         assertEquals("Hi.", client().complete(openAi(), userOnly()).content());
         sent(2);
+    }
+
+    @Test
+    void aCallerInterruptedWhileWaiting_failsAsUnavailableAndKeepsTheInterrupt() throws Exception {
+        // The send may never start: the caller stops waiting first.
+        lenient()
+                .when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenAnswer(inv -> {
+                    Thread.sleep(5_000);
+                    return ok(OPENAI_ANSWER);
+                });
+        Thread.currentThread().interrupt();
+        try {
+            TessaryException e = failure(() -> client().complete(openAi(), userOnly()));
+
+            assertSame(PlaygroundError.PROVIDER_UNAVAILABLE, e.error());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void aRuntimeFailureInTheSend_propagatesUnchanged() throws Exception {
+        IllegalStateException boom = new IllegalStateException("boom");
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenThrow(boom);
+
+        assertSame(boom, assertThrows(IllegalStateException.class, () -> client().complete(openAi(), userOnly())));
+    }
+
+    @Test
+    void anUndeclaredCheckedFailureInTheSend_isATransportFailure() throws Exception {
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenAnswer(inv -> {
+                    throw new Exception("odd");
+                });
+
+        TessaryException e = failure(() -> client().complete(openAi(), userOnly()));
+
+        assertSame(PlaygroundError.PROVIDER_UNAVAILABLE, e.error());
+        assertEquals(PlaygroundError.PROVIDER_UNAVAILABLE.render(ModelProvider.OPENAI, "IOException"), e.getMessage());
     }
 }

@@ -1,0 +1,134 @@
+---
+title: "Use prompts from code"
+description: "Fetch a managed prompt with the Tessary Python SDK or over HTTP, compile its variables, link the model call to the version, and keep running when Tessary cannot answer."
+---
+
+Your code fetches a prompt version by name, fills its variables, and makes the model call. The call's span names the prompt and version, so the call counts on that version's **Metrics** tab and its trace lists under **Linked traces**.
+
+The Tessary Python SDK does all of this through `tessary.prompts`. Any other language uses the [prompts API](/reference/prompts-api) over HTTP and sets two span attributes itself.
+
+## Before you begin
+
+- A project API key. The write key your application sends traces with (`tsy_w_`) reads prompts, so an application needs one key. Writes need an admin key (`tsy_a_`). See [API keys](/reference/api-keys).
+- A prompt with a `production` label, or the label or version number you want to fetch. See [Prompts](/prompts/overview).
+
+## Fetch, compile, and link a prompt
+
+<Tabs>
+  <Tab title="Python">
+    ```bash
+    pip install tessary
+    ```
+
+    ```python
+    import tessary
+
+    tessary.init("https://tessary.example.com", "tsy_w_YOUR_KEY")
+
+    prompt = tessary.prompts.get("support/greeting", label="production")
+    messages = prompt.compile(company="Acme", question="Where is my order?", history=history)
+
+    with prompt.linked():
+        reply = client.chat(messages=messages, **prompt.config)
+    ```
+
+    `tessary.prompts` uses the client `tessary.init()` built: the same origin and the same key. `get` with neither `version` nor `label` reads `production`.
+
+    Every span started inside `with prompt.linked():` carries the prompt's name and version on the copy sent to Tessary. Your other tracing backends receive their spans unchanged, and a span that already names a prompt keeps it. `prompt.linked()` is the same as `tessary.context(prompt=prompt)`, so it combines with the session and user arguments `tessary.context` takes.
+
+    A producer that sets its own span attributes can call `prompt.span_attributes()`, which returns the two attributes, or `prompt.link(span)`, which sets them on that span.
+  </Tab>
+  <Tab title="TypeScript">
+    There is no TypeScript SDK yet. Fetch the version over HTTP, then set the two attributes on the span of the model call:
+
+    ```typescript
+    const res = await fetch(
+      "https://tessary.example.com/v1/prompts/fetch?name=support%2Fgreeting&label=production",
+      { headers: { Authorization: "Bearer " + process.env.TESSARY_TOKEN } },
+    );
+    const { data: prompt } = await res.json();
+    // prompt.body holds the messages; fill {{company}} and {{question}} before the call.
+
+    await tracer.startActiveSpan("support.greeting", async (span) => {
+      span.setAttribute("tessary.prompt.name", prompt.name);
+      span.setAttribute("tessary.prompt.version", String(prompt.version));
+      try {
+        const reply = await client.chat({ messages, ...prompt.config });
+      } finally {
+        span.end();
+      }
+    });
+    ```
+  </Tab>
+</Tabs>
+
+<Check>Make one call, then open the prompt on the **Prompts** page. The call appears on the version's **Metrics** tab, and its trace appears under **Linked traces**.</Check>
+
+A span links when it carries `tessary.prompt.name`. `tessary.prompt.version` is stored as the text sent, so a label such as `production` works as a version too. No other attribute links a span to a prompt. The rules are in [Span requirements](/instrument/span-requirements).
+
+### Link a prompt kept somewhere else
+
+`tessary.context(prompt=("support/greeting", "7"))` links the spans in its block to a name and version you supply, for a prompt Tessary does not store.
+
+## How variables are filled
+
+`compile` replaces each `{{name}}` with the value you pass, converted to text. A value of `None` becomes empty text, and a variable you do not pass stays as written. A name that is not a Python identifier, such as `user.name`, goes in a dictionary: `prompt.compile(**{"user.name": "Ada"})`.
+
+A text prompt compiles to a string. A chat prompt compiles to a list of `{"role", "content"}` messages, and each placeholder is replaced by the list of messages you pass under its name, each one compiled too. A placeholder you do not pass stays in the list.
+
+## Cache and fallback
+
+`get` keeps each fetched version in memory for 60 seconds. After that, the next `get` returns the cached copy at once and refreshes it in the background, so a fetch rarely waits on the network. Pass `cache_ttl_seconds=` to change the time for one call, or `0` to skip the cache.
+
+Pass `fallback=` to keep running when Tessary cannot answer, including when the prompt does not exist:
+
+```python
+prompt = tessary.prompts.get(
+    "support/greeting",
+    fallback=[{"role": "system", "content": "You are the support assistant for {{company}}."}],
+)
+```
+
+A fallback is a string for a text prompt or a list for a chat prompt. It comes back as version 0 with `prompt.is_fallback` true. It is never cached and never linked, so a call made with it does not count on any version.
+
+Without a fallback, a failed fetch raises one of these errors, all subclasses of `tessary.prompts.PromptError`:
+
+| Error | Cause |
+| --- | --- |
+| `PromptNotFound` | No such prompt, version, or label |
+| `PromptApiError` | Tessary refused the request; it carries the status, the error code, and the message |
+| `PromptTransportError` | Tessary could not be reached, timed out, or answered with something the SDK could not read |
+
+A read is retried twice on a `429`, a server error, a timeout, or a lost connection. Pass `max_retries=` (0 to 4) and `fetch_timeout_seconds=` to change that for one call.
+
+## Create, label, list, and delete prompts
+
+Writes need an admin key. Pass it as `admin_token=`, or set `TESSARY_ADMIN_TOKEN`, which the SDK reads at each write. The key `tessary.init()` was given is never used for a write.
+
+```python
+tessary.prompts.create(
+    "support/greeting",
+    [{"role": "system", "content": "You are the support assistant for {{company}}."}],
+    labels=["staging"],
+    commit_message="First draft",
+)
+
+tessary.prompts.update("support/greeting", 2, new_labels=["production"], remove_labels=["staging"])
+
+page = tessary.prompts.list(tag="support")
+
+tessary.prompts.delete("support/greeting", version=1)
+```
+
+`create` makes version 1 of a new name, or the next version of an existing one. A string body is a text prompt and a list is a chat prompt, unless you pass `type=`. `update` moves labels to a version and takes labels off it. `list` returns one page of prompts and is never cached. `delete` with `version=` or `label=` deletes one version, and with neither deletes the prompt. Each write clears the cached copies of that name, and `clear_cache()` clears them all.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Prompts" icon="file-lines" href="/prompts/overview">
+    Prompt versions, deployment labels, and how promote and rollback work.
+  </Card>
+  <Card title="Prompts API" icon="brackets-curly" href="/reference/prompts-api">
+    The routes the SDK calls, with their fields, limits, and error codes.
+  </Card>
+</CardGroup>
