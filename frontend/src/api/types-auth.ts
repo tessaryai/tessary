@@ -207,7 +207,9 @@ export type CapabilityWire =
   | "groundedness_enabled"
   | "secret_leak_enabled"
   | "malformed_output_enabled"
-  | "triage_automatic_enabled";
+  | "triage_automatic_enabled"
+  | "rca_automatic_enabled"
+  | "fix_pr_enabled";
 
 /** Every capability is present, so an absent key is version skew rather than "off". */
 export interface CapabilitiesView {

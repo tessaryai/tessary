@@ -58,8 +58,13 @@ public final class CaseDtos {
              * queue resolves finding to case without a fetch per case.
              */
             @JsonProperty("latest_finding_id") @Nullable String latestFindingId,
-            /** A pressed case is locked against new findings joining it. */
+            /** Set only on a case RCA locked before cases stayed live; such a case takes no new findings. */
             @JsonProperty("locked_at") @Nullable String lockedAt,
+            /**
+             * Windows (findings) in the case that its newest finished RCA did not read. Null when no RCA has finished,
+             * and on responses that do not compute it.
+             */
+            @JsonProperty("windows_since_rca") @Nullable Integer windowsSinceRca,
             /** Null is the common case: most cases have never been analyzed. */
             @Nullable String cause,
             /**
@@ -77,11 +82,15 @@ public final class CaseDtos {
         }
 
         public static CaseView of(CaseRow row, @Nullable CaseLead lead) {
-            return of(row, lead, null);
+            return of(row, lead, null, null);
         }
 
-        /** @param run where the newest report's analysis stands; a done one leaves no mark */
-        public static CaseView of(CaseRow row, @Nullable CaseLead lead, @Nullable RcaRunView run) {
+        /**
+         * @param run where the newest report's analysis stands; a done one leaves no mark
+         * @param windowsSinceRca null when no RCA of the case has finished
+         */
+        public static CaseView of(
+                CaseRow row, @Nullable CaseLead lead, @Nullable RcaRunView run, @Nullable Integer windowsSinceRca) {
             RcaRunView mark = run != null && !RcaRunView.DONE.equals(run.state()) ? run : null;
             return new CaseView(
                     row.id(),
@@ -110,6 +119,7 @@ public final class CaseDtos {
                     row.findingCount(),
                     row.latestFindingId(),
                     row.lockedAt(),
+                    windowsSinceRca,
                     lead == null ? null : lead.summary(),
                     lead == null ? null : lead.verdict(),
                     mark == null ? null : mark.state(),

@@ -25,7 +25,10 @@ public record CaseRow(
          */
         @Nullable String latestFindingId,
         String state,
-        /** A locked case never gets a new finding joined to it; the cause's next positive opens a fresh case. */
+        /**
+         * Set only on cases RCA locked before cases stayed live; nothing sets it now. Such a case stays frozen: no new
+         * finding joins it, and the cause's next positive opens a fresh case.
+         */
         @Nullable String lockedAt,
         String title,
         String basis,

@@ -112,8 +112,7 @@ record CaseControllerTest(
 
     /**
      * Pressing RCA spends the org's own model on a strong run, so a viewer, who may not manage the org, is refused and
-     * the case stays unlocked; the owner's press locks the case and returns the report it queued. Absorbing a
-     * case closes it.
+     * nothing is queued; the owner's press returns the report it queued. Absorbing a case closes it.
      */
     @Test
     void onlyAManagerPressesRcaAndAbsorbClosesTheCase() {
@@ -134,13 +133,15 @@ record CaseControllerTest(
                 ResponseStatusException.class, () -> controller.runRca(viewerSession, org, project, row.id()));
         assertEquals(HttpStatus.FORBIDDEN, refused.getStatusCode());
         assertEquals(
-                null, cases.findById(fix.project().id(), row.id()).orElseThrow().lockedAt());
+                null,
+                requireNonNull(controller
+                                .get(owner(fix), org, project, row.id())
+                                .data())
+                        .rcaReportId());
 
         var report = requireNonNull(
                 controller.runRca(owner(fix), org, project, row.id()).data());
         assertEquals(JobRow.Status.PENDING, report.status(), "the press queued a run and returned its report");
-        assertEquals(
-                true, cases.findById(fix.project().id(), row.id()).orElseThrow().lockedAt() != null);
 
         CaseView absorbed = requireNonNull(
                 controller.absorb(owner(fix), org, project, row.id()).data());

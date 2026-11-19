@@ -231,4 +231,142 @@ record RcaReportRepositoryTest(
         assertEquals(Map.of(), reports.runStatesByCase(never.projectId(), List.of()), "an empty page reads nothing");
         assertFalse(reports.runState(never.projectId(), report.id()).isPresent());
     }
+
+    /**
+     * A window that joins the live case after the run claimed it reads as unread; the ones the claim read do not. A
+     * report still queued has concluded nothing, so it counts for nothing.
+     */
+    @Test
+    void windowsSinceRcaCountsWhatTheNewestFinishedReportDidNotRead() {
+        Seeded s = caseIn("rca-unread");
+        RcaReportView report = cases.runRca(s.projectId(), s.caseId(), "user-1");
+        reports.recordFindingIds(report.jobId(), List.of(s.findingId()));
+
+        assertEquals(Map.of(), reports.windowsSinceRca(s.projectId(), List.of(s.caseId())));
+
+        jobs.markDone(report.jobId());
+        assertEquals(Map.of(s.caseId(), 0), reports.windowsSinceRca(s.projectId(), List.of(s.caseId())));
+
+        join(s, "later", Instant.now().plusSeconds(60));
+        assertEquals(Map.of(s.caseId(), 1), reports.windowsSinceRca(s.projectId(), List.of(s.caseId())));
+    }
+
+    /** A report from before {@code finding_ids} read every finding of its case created no later than itself. */
+    @Test
+    void aReportWithoutFindingIdsReadEveryFindingCreatedBeforeIt() {
+        Seeded s = caseIn("rca-unread-legacy");
+        RcaReportView report = cases.runRca(s.projectId(), s.caseId(), "user-1");
+        jobs.markDone(report.jobId());
+        jdbc.sql("UPDATE rca_report SET created_at = '2030-01-01T00:00:00Z' WHERE id = :id")
+                .param("id", report.id())
+                .update();
+        join(s, "before", Instant.parse("2029-12-31T00:00:00Z"));
+        join(s, "after", Instant.parse("2030-01-02T00:00:00Z"));
+
+        assertEquals(Map.of(s.caseId(), 1), reports.windowsSinceRca(s.projectId(), List.of(s.caseId())));
+    }
+
+    /** The claim's write against the real column: every claim replaces the set, since a retry can read more. */
+    @Test
+    void recordFindingIds_replacesTheSetOnEveryClaim() {
+        Seeded s = caseIn("rca-finding-ids");
+        RcaReportView report = cases.runRca(s.projectId(), s.caseId(), "user-1");
+        String later = join(s, "retry", Instant.now().plusSeconds(60));
+
+        reports.recordFindingIds(report.jobId(), List.of(s.findingId()));
+        reports.recordFindingIds(report.jobId(), List.of(s.findingId(), later));
+
+        assertEquals(
+                "[\"" + s.findingId() + "\", \"" + later + "\"]",
+                jdbc.sql("SELECT finding_ids::text FROM rca_report WHERE id = :id")
+                        .param("id", report.id())
+                        .query(String.class)
+                        .single());
+    }
+
+    /** The case page's report after a window anchored nothing new: the newest across the case, not the newest finding's. */
+    @Test
+    void latestByCaseIsTheNewestReportAcrossTheCase() {
+        Seeded s = caseIn("rca-latest-by-case");
+        Seeded other = caseIn("rca-latest-by-case-other");
+        RcaReportView first = cases.runRca(s.projectId(), s.caseId(), "user-1");
+        jobs.markDone(first.jobId());
+        join(s, "unanalysed", Instant.now().plusSeconds(60));
+
+        assertEquals(
+                first.id(),
+                reports.latestByCase(s.projectId(), s.caseId()).orElseThrow().id());
+
+        RcaReportView rerun = trigger.trigger(s.projectId(), s.findingId(), "user-1", Ids.ulid());
+        assertEquals(
+                rerun.id(),
+                reports.latestByCase(s.projectId(), s.caseId()).orElseThrow().id());
+        assertFalse(reports.latestByCase(other.projectId(), s.caseId()).isPresent(), "another project's case");
+    }
+
+    /** Only windows after the toggle that no run read are due; a window from before it is a backlog, not news. */
+    @Test
+    void automaticRcaIsDueOnlyForUnreadWindowsAfterTheToggle() {
+        Seeded s = caseIn("rca-auto-toggle");
+        Instant created = Instant.parse(
+                findings.findById(s.projectId(), s.findingId()).orElseThrow().createdAt());
+        Instant now = Instant.now().plusSeconds(3600);
+
+        assertEquals(List.of(), reports.dueForAutomaticRca(s.projectId(), created.plusSeconds(60), now, 100));
+        assertEquals(
+                List.of(s.caseId()), reports.dueForAutomaticRca(s.projectId(), created.minusSeconds(60), now, 100));
+
+        RcaReportView report = cases.runRca(s.projectId(), s.caseId(), "user-1");
+        reports.recordFindingIds(report.jobId(), List.of(s.findingId()));
+        jobs.markDone(report.jobId());
+        assertEquals(
+                List.of(), reports.dueForAutomaticRca(s.projectId(), Instant.EPOCH, now, 100), "the run read it all");
+    }
+
+    /**
+     * Never while a run of the case is queued, and not again until the newest run is old enough, failed ones
+     * included, so a failing run is not retried every tick.
+     */
+    @Test
+    void automaticRcaWaitsForAQueuedRunAndForTheGapAfterTheNewest() {
+        Seeded s = caseIn("rca-auto-gap");
+        RcaReportView report = cases.runRca(s.projectId(), s.caseId(), "user-1");
+        reports.recordFindingIds(report.jobId(), List.of(s.findingId()));
+        join(s, "unread", Instant.now().plusSeconds(60));
+        Instant requested = Instant.parse(report.createdAt());
+        Instant later = Instant.now().plusSeconds(3600);
+
+        assertEquals(List.of(), reports.dueForAutomaticRca(s.projectId(), Instant.EPOCH, later, 100), "queued");
+
+        jobs.markFailed(report.jobId(), "rejected");
+        assertEquals(
+                List.of(),
+                reports.dueForAutomaticRca(s.projectId(), Instant.EPOCH, requested.minusSeconds(1), 100),
+                "the newest run is too recent, even though it failed");
+        assertEquals(List.of(s.caseId()), reports.dueForAutomaticRca(s.projectId(), Instant.EPOCH, later, 100));
+
+        caseRows.resolve(s.projectId(), s.caseId(), CaseRow.Resolution.HUMAN, "fixed", "user-1", Instant.now());
+        assertEquals(List.of(), reports.dueForAutomaticRca(s.projectId(), Instant.EPOCH, later, 100), "resolved");
+    }
+
+    /** A window joined to the seeded case, created at {@code at}. */
+    private String join(Seeded s, String label, Instant at) {
+        String when = at.toString();
+        String id = Objects.requireNonNull(findings.recordArmedWindow(
+                        Ids.ulid(),
+                        s.projectId(),
+                        BuiltInDetector.Kind.SECRET_LEAK,
+                        "clf-" + label,
+                        "cause-" + label,
+                        1,
+                        "cs-a",
+                        ARMED_PAYLOAD,
+                        when,
+                        when,
+                        when,
+                        when))
+                .findingId();
+        findings.attachToCase(s.projectId(), id, s.caseId(), when);
+        return id;
+    }
 }

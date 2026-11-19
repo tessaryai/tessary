@@ -151,10 +151,7 @@ public class CaseRepository {
                 .optional();
     }
 
-    /**
-     * A locked case (RCA pressed) never matches, so the next positive opens a fresh case rather than joining one an
-     * agent may be reading.
-     */
+    /** A case locked before cases stayed live never matches, so it stays frozen and the next positive opens a fresh one. */
     public Optional<CaseRow> findLive(String projectId, CaseKey key) {
         return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND detector = :detector "
                         + "AND subject_kind = :subjectKind AND subject_id = :subjectId AND metric = :metric "
@@ -232,18 +229,6 @@ public class CaseRepository {
                 .param("now", now.toString())
                 .update();
         link(projectId, detection, id, now);
-    }
-
-    /** A no-op past the first call: re-pressing must not re-stamp the lock time. */
-    public void lock(String projectId, String id, Instant now) {
-        jdbc.sql("""
-                UPDATE eval_case SET locked_at = :now, updated_at = :now
-                WHERE project_id = :pid AND id = :id AND locked_at IS NULL
-                """)
-                .param("pid", projectId)
-                .param("id", id)
-                .param("now", now.toString())
-                .update();
     }
 
     /** The {@code case_id IS NULL} guard means the first case to claim a finding keeps it. */

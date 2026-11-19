@@ -68,6 +68,8 @@ public class CaseService {
 
     private static final String CLOSED_NOTE = "Closed.";
 
+    private static final String AUTOMATIC_NONCE = "auto";
+
     private static final Duration COVERAGE_WINDOW = Duration.ofDays(1);
 
     private static final ObjectReader CITATIONS =
@@ -161,12 +163,13 @@ public class CaseService {
         // Both buckets in one lookup: a closure that cannot say what it turned out to be is the least useful row.
         Map<String, CaseLead> leads = leadsFor(projectId, live, closed);
         Map<String, RcaRunView> marks = runsFor(projectId, live, closed);
+        Map<String, Integer> unread = windowsSinceRca(projectId, live, closed);
 
         List<CaseView> open = live.stream()
-                .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id())))
+                .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id()), unread.get(row.id())))
                 .toList();
         List<CaseView> resolved = closed.stream()
-                .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id())))
+                .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id()), unread.get(row.id())))
                 .toList();
         // Rendered only when the queue is empty, so a project with open cases never pays for them.
         return new TriageView(open, resolved, watching(projectId, open.isEmpty()));
@@ -187,6 +190,14 @@ public class CaseService {
                 Arrays.stream(batches).flatMap(List::stream).map(CaseRow::id).collect(Collectors.toSet());
         return rcaReports.runStatesByCase(projectId, caseIds).entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> RcaRunView.of(e.getValue())));
+    }
+
+    /** Keyed by case id: windows each case's newest finished RCA did not read. */
+    @SafeVarargs
+    private Map<String, Integer> windowsSinceRca(String projectId, List<CaseRow>... batches) {
+        Set<String> caseIds =
+                Arrays.stream(batches).flatMap(List::stream).map(CaseRow::id).collect(Collectors.toSet());
+        return rcaReports.windowsSinceRca(projectId, caseIds);
     }
 
     private static @Nullable CaseLead lead(Map<String, CaseLead> leads, CaseRow row) {
@@ -211,9 +222,10 @@ public class CaseService {
         CasePageCodec.Page page = CasePageCodec.trim(rows, pageSize, order);
         Map<String, CaseLead> leads = leadsFor(projectId, page.rows());
         Map<String, RcaRunView> marks = runsFor(projectId, page.rows());
+        Map<String, Integer> unread = windowsSinceRca(projectId, page.rows());
         return new CasesPage(
                 page.rows().stream()
-                        .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id())))
+                        .map(row -> CaseView.of(row, lead(leads, row), marks.get(row.id()), unread.get(row.id())))
                         .toList(),
                 page.nextCursor());
     }
@@ -247,7 +259,7 @@ public class CaseService {
         CaseRow row = require(projectId, id);
         FindingRow finding = findingBehind(projectId, row);
         boolean detectorAvailable = detectorAvailable(projectId, row);
-        RcaReportRow report = latestRcaReport(projectId, finding);
+        RcaReportRow report = rcaReports.latestByCase(projectId, row.id()).orElse(null);
         RcaReportView rca = inlinedRcaReport(projectId, report);
         RcaRunView run = rca != null ? rca.run() : runOf(projectId, report);
         List<FindingRow> held = findings.listByCase(projectId, row.id());
@@ -256,7 +268,11 @@ public class CaseService {
         RateDetail toolError = rateDetail(worst);
         return new CaseDetailView(
                 // Captioned off the report in hand, so the header cannot disagree with the analysis below it.
-                CaseView.of(row, leadOf(rca), run),
+                CaseView.of(
+                        row,
+                        leadOf(rca),
+                        run,
+                        rcaReports.windowsSinceRca(projectId, Set.of(row.id())).get(row.id())),
                 events.listByCase(projectId, row.id()).stream()
                         .map(CaseEventView::of)
                         .toList(),
@@ -503,45 +519,40 @@ public class CaseService {
     }
 
     /**
-     * Lock the case, record the press and enqueue RCA on its newest finding, committed together. A locked case takes no
-     * new findings, so the agent's subject stays what the person read. Closed cases can still be analysed; re-pressing
-     * coalesces onto the one report.
+     * Enqueue RCA on the case's newest finding; the run reads every finding the case holds when a worker claims it. The
+     * case stays live, so later windows keep joining it. Closed cases can still be analysed; re-pressing coalesces onto
+     * the one report.
      */
     @Transactional
     public RcaReportView runRca(String projectId, String id, String actor) {
         CaseRow row = require(projectId, id);
+        return rcaTrigger.trigger(projectId, newestFindingId(projectId, row), actor, null);
+    }
+
+    /**
+     * The automatic-RCA tick's entry, the same path as the button. {@code owner} is who the run's key is issued to. Its
+     * own nonce keeps it off a person's coalesced report, and every automatic trigger on the same newest finding
+     * coalesces, so two ticks never queue two runs for one window.
+     */
+    @Transactional
+    public RcaReportView runRcaAutomatically(String projectId, String id, String owner) {
+        CaseRow row = require(projectId, id);
+        return rcaTrigger.trigger(
+                projectId, newestFindingId(projectId, row), owner, AUTOMATIC_NONCE, RcaTriggerService.Origin.AUTOMATIC);
+    }
+
+    private String newestFindingId(String projectId, CaseRow row) {
         List<FindingRow> caseFindings = findings.listByCase(projectId, row.id());
         if (caseFindings.isEmpty()) {
             throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, row.reference());
         }
-        String newestFindingId = caseFindings.get(0).id();
-
-        Instant now = Instant.now();
-        if (row.lockedAt() == null) {
-            cases.lock(projectId, row.id(), now);
-            events.append(
-                    projectId,
-                    row.id(),
-                    CaseEventRow.Kind.RCA_REQUESTED,
-                    actor,
-                    "Requested — locks the case to its findings; the cause's next positive opens a new case.",
-                    null,
-                    now);
-        }
-        return rcaTrigger.trigger(projectId, newestFindingId, actor, null);
+        return caseFindings.get(0).id();
     }
 
     /** From the VIEW, so the header cannot disagree with the body. */
     private static @Nullable CaseLead leadOf(@Nullable RcaReportView rca) {
         if (rca == null || !JobRow.Status.DONE.equals(rca.status())) return null;
         return new CaseLead(rca.verdict(), rca.summary());
-    }
-
-    private @Nullable RcaReportRow latestRcaReport(String projectId, @Nullable FindingRow finding) {
-        if (finding == null) return null;
-        return rcaReports.listByFinding(projectId, finding.id(), 1).stream()
-                .findFirst()
-                .orElse(null);
     }
 
     /**

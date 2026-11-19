@@ -297,6 +297,20 @@ class RcaAnalysisServiceTest {
                         .subList(0, 3));
     }
 
+    /**
+     * The claim records which findings the run read, so a window that joins the live case later reads as unread. The
+     * bug is a report that records nothing and so counts every later window as read.
+     */
+    @Test
+    void theClaimRecordsTheFindingsTheRunReads() {
+        when(evidence.claimFirst(PROJECT, "f1", ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP))
+                .thenReturn(new FindingEvidenceRepository.Head(List.of(WITNESS_ROW), false));
+
+        dossierOf(FindingAdapters.of(List.of(FakeFindingAdapter.owning("custom-x", null, null, "# Owner evidence\n"))));
+
+        verify(reports).recordFindingIds("job-1", List.of("f1"));
+    }
+
     private void stubPage(String role, FindingEvidenceRepository.SpanRef... rows) {
         when(evidence.spanPage(eq(PROJECT), eq("f1"), eq(role), anyInt(), isNull(), eq(false), eq(false)))
                 .thenReturn(new FindingEvidenceRepository.SpanPage(List.of(rows), null));

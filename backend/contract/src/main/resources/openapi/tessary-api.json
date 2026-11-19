@@ -3341,6 +3341,13 @@
           },
           "title" : {
             "type" : "string"
+          },
+          "windows_since_rca" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
           }
         },
         "required" : [
@@ -3373,7 +3380,8 @@
           "subject_id",
           "subject_kind",
           "subject_label",
-          "title"
+          "title",
+          "windows_since_rca"
         ],
         "type" : "object"
       },
