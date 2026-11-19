@@ -623,6 +623,15 @@ class AgentSessionRunnerTest {
         assertEquals(List.of("note Writing the analysis @0"), sink);
     }
 
+    /** A fix run whose live line says it is ruling: a fix run's answer reads "Writing the fix". */
+    @Test
+    void aFixAnswerReadsWritingTheFix() {
+        client.reply(text(RULING), end());
+
+        assertEquals(RULING, runner().run(task(ModelLane.FIX), noting).json());
+        assertEquals(List.of("note Writing the fix @0"), sink);
+    }
+
     /**
      * A fix committed from what the agent changed before it was corrected: the answer carries the patch of the reply
      * that answered, and a corrected reply's patch replaces the first reply's.

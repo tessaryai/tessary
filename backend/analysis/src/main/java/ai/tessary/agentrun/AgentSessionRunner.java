@@ -505,7 +505,11 @@ public class AgentSessionRunner {
         }
 
         private String answerWords() {
-            return task.lane() == ModelLane.RCA ? "Writing the analysis" : "Writing the ruling";
+            return switch (task.lane()) {
+                case RCA -> "Writing the analysis";
+                case FIX -> "Writing the fix";
+                default -> "Writing the ruling";
+            };
         }
 
         private void add(AgentSpanTelemetry.AgentUsage u) {

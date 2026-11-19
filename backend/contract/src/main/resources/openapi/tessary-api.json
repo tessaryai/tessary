@@ -5738,6 +5738,9 @@
       },
       "GitIntegrationView" : {
         "properties" : {
+          "canWrite" : {
+            "type" : "boolean"
+          },
           "defaultBranch" : {
             "type" : "string"
           },
@@ -5752,14 +5755,28 @@
           },
           "repoOwner" : {
             "type" : "string"
+          },
+          "writeReason" : {
+            "enum" : [
+              "APP_PERMISSION_MISSING",
+              "TOKEN_CANNOT_PUSH",
+              "CHECK_FAILED",
+              "UNSUPPORTED"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
+          "canWrite",
           "defaultBranch",
           "host",
           "provider",
           "repoName",
-          "repoOwner"
+          "repoOwner",
+          "writeReason"
         ],
         "type" : "object"
       },

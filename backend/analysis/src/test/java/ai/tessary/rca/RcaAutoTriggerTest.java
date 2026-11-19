@@ -139,6 +139,32 @@ class RcaAutoTriggerTest {
         verify(cases).runRcaAutomatically("p-1", "case-good", "user-owner");
     }
 
+    /** Bug caught: a failed project read escapes the scheduled tick and kills the scheduler thread's run. */
+    @Test
+    void aFailedProjectReadEndsTheTickQuietly() {
+        when(projects.findActive()).thenThrow(new IllegalStateException("db down"));
+
+        trigger().tick();
+
+        verifyNoInteractions(capabilities, reports, cases);
+    }
+
+    /** Bug caught: one project whose scan fails stops the sweep before the next project's cases run. */
+    @Test
+    void oneProjectsFailureDoesNotStopTheNextProject() {
+        when(projects.findActive()).thenReturn(List.of(project("p-bad", "org-a"), project("p-good", "org-b")));
+        when(capabilities.isEnabled(anyString(), any(Capability.class))).thenReturn(true);
+        when(overrides.enabledSince("org-a", "rca_automatic_enabled")).thenThrow(new IllegalStateException("gone"));
+        when(overrides.enabledSince("org-b", "rca_automatic_enabled")).thenReturn(Optional.of(TURNED_ON));
+        when(reports.dueForAutomaticRca(eq("p-good"), eq(TURNED_ON), any(Instant.class), anyInt()))
+                .thenReturn(List.of("case-1"));
+        when(memberships.findByOrg("org-b")).thenReturn(List.of(owner("org-b", "user-owner")));
+
+        trigger().tick();
+
+        verify(cases).runRcaAutomatically("p-good", "case-1", "user-owner");
+    }
+
     private void enabled(String projectId, String orgId) {
         when(projects.findActive()).thenReturn(List.of(project(projectId, orgId)));
         when(capabilities.isEnabled(orgId, Capability.RCA)).thenReturn(true);

@@ -3125,11 +3125,14 @@ export interface components {
             scorerVersion: string | null;
         };
         GitIntegrationView: {
+            canWrite: boolean;
             defaultBranch: string;
             host: string;
             provider: string;
             repoName: string;
             repoOwner: string;
+            /** @enum {string|null} */
+            writeReason: "APP_PERMISSION_MISSING" | "TOKEN_CANNOT_PUSH" | "CHECK_FAILED" | "UNSUPPORTED" | null;
         };
         GlobalSearchView: {
             hits: components["schemas"]["SearchHit"][];

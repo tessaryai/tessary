@@ -3,7 +3,6 @@ package ai.tessary.rca;
 
 import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.tenant.Ids;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -170,11 +169,7 @@ public class RcaReportRepository {
             + " ELSE n.finding_ids @> jsonb_build_array(x.id) END)";
 
     private String json(List<String> values) {
-        try {
-            return mapper.writeValueAsString(values);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("finding ids did not serialize", e);
-        }
+        return mapper.valueToTree(values).toString();
     }
 
     public Optional<RcaReportRow> findById(String projectId, String id) {
@@ -192,16 +187,6 @@ public class RcaReportRepository {
                 .param("jobId", jobId)
                 .query(String.class)
                 .optional();
-    }
-
-    public List<RcaReportRow> listByFinding(String projectId, String findingId, int limit) {
-        return jdbc.sql("SELECT " + COLS + " " + FROM
-                        + " WHERE r.project_id = :pid AND r.finding_id = :fid ORDER BY r.created_at DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("fid", findingId)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
     }
 
     public record CaseLead(
