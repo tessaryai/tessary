@@ -240,19 +240,24 @@ cold cache it can take seconds.
 
 The Tessary SDK's `tessary.prompts` module is the client. It uses the client `tessary.init()` already
 built: the same origin and the same write token, so an application needs one secret. Writes need an
-admin key, passed as `admin_token=` to the write calls or set as `TESSARY_ADMIN_TOKEN`; the write token
-is never upgraded. It uses only the standard library for HTTP (`urllib.request`).
+admin key, passed as `admin_token=` to the write call or set as `TESSARY_ADMIN_TOKEN`, which is read at
+each write; the write token is never upgraded. It uses only the standard library for HTTP (`urllib.request`).
 
 - `tessary.prompts.get(name, *, version=None, label=None, fallback=None, cache_ttl_seconds=None,
   max_retries=None, fetch_timeout_seconds=None)` returns a `TextPrompt` or `ChatPrompt`. With neither
-  selector it reads `production`. `list(...)` is never cached. `create`, `update(name, version,
-  new_labels, remove_labels)`, `delete` and `clear_cache()` complete the surface.
+  selector it reads `production`. `list(...)` is never cached. `create(name, prompt, type=None, ...)`
+  infers the type from the body when none is given (a str is text, a list is chat), and `update(name,
+  version, new_labels, remove_labels)`, `delete` and `clear_cache()` complete the surface.
+- Names are trimmed the way the server trims them before any request or cache key, so `" a "` and `"a"`
+  are one prompt to the cache.
 
 Linking. `prompt.linked()` is `tessary.context(prompt=prompt)`: every span started inside the block
 carries the pair on Tessary's copy, added as the span ends, so the application's other backends receive
 their spans unchanged and a pair the producer set itself is never overwritten. `tessary.context(prompt=)`
 also takes a `(name, version)` tuple for prompts kept elsewhere. A fallback links nothing and masks an
-outer prompt. `prompt.span_attributes()` returns the pair (the version as a string) for a producer that
+outer prompt. A span that already carries any prompt link of its own (either half of the Tessary pair, or
+Langfuse's observation prompt name) keeps it, and the scope adds nothing. `prompt.span_attributes()` returns
+the pair (the version as a string) for a producer that
 sets attributes itself. There is no separate span processor to add.
 
 Compile. A supplied value becomes `str(value)`; `None` becomes an empty string; a name not supplied
@@ -266,7 +271,8 @@ Cache, in process. The key is `name|version:N` when a version is given, else
 
 - A TTL of 0 calls the loader and neither reads nor writes the cache.
 - A fresh entry (age below the TTL) is returned. A stale entry is returned at once, and one background
-  refresh per key starts. A successful refresh replaces the entry, a 404 evicts it, and any other failure
+  refresh per key starts. A successful refresh replaces the entry, a 404 evicts that key only (other
+  selectors of the name keep loading and storing), and any other failure
   keeps it, logs at DEBUG, and is retried on a later stale read.
 - A miss loads on the caller's thread. Concurrent misses on one key share one load, but only callers
   with the same per-call retries and timeout share one, so a caller that asked for a short fetch never
@@ -282,7 +288,8 @@ Fallback. On any SDK error from a load, 404 included, a given fallback becomes a
 a list is chat) with version 0, no labels or tags, config `{}`, and `is_fallback` true. It is never cached
 and never linked. Without a fallback the error is raised.
 
-Validation is raised as `ValueError` before any I/O: an empty name, a version that is not an integer of at
+Validation is raised as `ValueError` before any I/O: an empty or blank name, a chat body whose items are
+not `{role, content}` messages or `{type: placeholder, name}` placeholders, a version that is not an integer of at
 least 1, version together with label, a negative TTL or retry count, a timeout that is not positive, a
 fallback that is neither a string nor a list, and a create type that is not `text` or `chat`.
 
@@ -290,8 +297,9 @@ Wire. Headers are `Authorization: Bearer`, `Accept: application/json`, a `User-A
 `tessary-python/<v>`, and `Content-Type: application/json` on a body. With neither version nor label the
 SDK sends neither. Every 2xx is success, and the SDK returns the envelope's `data`; a 2xx without a JSON
 `data` object, or a prompt without a string `name`, an integer `version`, a `type` of `text` or `chat` and
-a `prompt` of the matching shape, is a transport error, so a fetch with a fallback falls back. Errors are
-parsed from `meta.error`, then `http_<status>`. Redirects are never followed.
+a `prompt` of the matching shape (for chat, every item a message or a placeholder), is a transport error,
+so a fetch with a fallback falls back. Errors are parsed from `meta.error`, then the top-level `error`
+object the auth filter answers with, then `http_<status>`. Redirects are never followed.
 
 Retries: attempts are `1 + max_retries` (default 2, capped at 4); a per-call value is clamped to 0 to 4.
 
