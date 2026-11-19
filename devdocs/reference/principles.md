@@ -128,9 +128,8 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   `call_site_id`.
 - **Prompt links are the second overlay, and also a plain attribute.** `tessary.prompt.name` and
   `tessary.prompt.version` name the managed prompt a span came from, because no semantic convention
-  names a managed prompt version. Langfuse's observation prompt pair is read as a dialect, like
-  OpenInference and Traceloop, only when the Tessary pair is absent. A link never gates ingestion: a
-  name that matches no prompt is kept as text.
+  names a managed prompt version. No other vendor's prompt attribute is read as a link. A link never
+  gates ingestion: a name that matches no prompt is kept as text.
 - **Untagged spans still ingest fully.** Only call-site-scoped features (per-call-site baselines,
   behaviour profiles) skip them — degradation, not rejection.
 

@@ -44,7 +44,8 @@ public class TraceFilters {
                 || present(query.to())
                 || present(query.status())
                 || present(query.q())
-                || !query.detectedBy().isEmpty();
+                || !query.detectedBy().isEmpty()
+                || present(query.promptName());
     }
 
     /** Up to {@link #MAX_DETECTED_BY} distinct classifier ids, or {@link TraceDetectionRepository#ANY} on its own. */
@@ -115,6 +116,7 @@ public class TraceFilters {
         addExists(where, params, "provided_model_name", "model", query.model());
         addExists(where, params, "kind", "kind", query.kind());
         addExists(where, params, "call_site_id", "callSite", query.callSite());
+        addPromptExists(where, params, query);
         Boolean hasCallSite = query.hasCallSite();
         if (hasCallSite != null) {
             where.append(hasCallSite ? " AND EXISTS" : " AND NOT EXISTS")
@@ -182,6 +184,24 @@ public class TraceFilters {
         where.append(" AND EXISTS (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id"
                 + " AND sx.trace_id = t.id AND NOT sx.is_deleted AND sx." + column + " = :" + name + ")");
         params.put(name, value);
+    }
+
+    /** One EXISTS, so the name and the version must sit on the same span; a version alone narrows nothing. */
+    private static void addPromptExists(
+            StringBuilder where, Map<String, Object> params, TraceV2Repository.TraceQuery query) {
+        String name = query.promptName();
+        if (name == null || name.isBlank()) {
+            return;
+        }
+        where.append(" AND EXISTS (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id AND sx.trace_id = t.id"
+                + " AND NOT sx.is_deleted AND sx.prompt_name = :promptName");
+        params.put("promptName", name);
+        String version = query.promptVersion();
+        if (version != null && !version.isBlank()) {
+            where.append(" AND sx.prompt_version = :promptVersion");
+            params.put("promptVersion", version);
+        }
+        where.append(')');
     }
 
     private static void addEq(

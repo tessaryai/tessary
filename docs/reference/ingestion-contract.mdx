@@ -27,7 +27,7 @@ Both transports write down the same path, so a stored span is identical no matte
 
 - **Field** is the wire name. There is one spelling per field. Tessary reads exactly the names listed here, with no compatibility aliases and no deprecated-spelling fallbacks.
 - **Applies to** says which spans the field is read for. `always` means every span; otherwise it names the `gen_ai.operation.name` family or the carrier the field is only read on.
-- **Origin** says where the name comes from: `OTLP proto` for a protobuf span field rather than an attribute, `OTel semconv` for the general semantic conventions, `gen_ai semconv` for the GenAI conventions, `OpenInference`, `Traceloop` and `Langfuse` for third-party dialects accepted for compatibility, `Tessary` for its own two overlays, `carrier extension` for the generic `input` and `output` carriers, and `any` for the attribute bag.
+- **Origin** says where the name comes from: `OTLP proto` for a protobuf span field rather than an attribute, `OTel semconv` for the general semantic conventions, `gen_ai semconv` for the GenAI conventions, `OpenInference` and `Traceloop` for third-party dialects accepted for compatibility, `Tessary` for its own two overlays, `carrier extension` for the generic `input` and `output` carriers, and `any` for the attribute bag.
 
 ## Identity and timing
 
@@ -170,9 +170,8 @@ Without it, a span still lands and is still queryable, but it belongs to no call
 | --- | --- | --- | --- |
 | `tessary.prompt.name` | Links the span to the managed prompt it was produced from. Feeds the prompt's usage counts and the trace and session filters by prompt | always. Usage counts read `llm` spans only | Tessary |
 | `tessary.prompt.version` | The version of that prompt, stored as the text sent, so `3` and a label such as `production` are both kept as sent | read only with `tessary.prompt.name` | Tessary |
-| `langfuse.observation.prompt.name`, `langfuse.observation.prompt.version` | The same link, read only when the `tessary.prompt.*` pair is absent | always | Langfuse |
 
-The `tessary.prompt.*` pair wins whenever it is present, and the version is always read from the same pair as the name. A name or version longer than 512 characters drops that part of the link and keeps the span; a dropped name drops the version with it. Ingest never refuses a span for its prompt: a name that matches no prompt in the project is kept as text and linked to nothing. `gen_ai.prompt.*` is never read as a prompt link, because it is the flattened message family listed under Content.
+The version is read only with a name. A name or version longer than 512 characters drops that part of the link and keeps the span; a dropped name drops the version with it. Ingest never refuses a span for its prompt: a name that matches no prompt in the project is kept as text and linked to nothing. `gen_ai.prompt.*` is never read as a prompt link, because it is the flattened message family listed under Content.
 
 This is the second sanctioned Tessary overlay, because no semantic convention names a managed prompt version. Any producer can set the pair as plain attributes. The Tessary SDK sets it for every span inside `tessary.context(prompt=...)`, on Tessary's copy of the span only.
 

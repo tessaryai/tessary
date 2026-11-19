@@ -12,6 +12,8 @@ import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.model.Pipeline;
 import ai.tessary.pipeline.PipelineService;
+import ai.tessary.plan.CapabilityService;
+import ai.tessary.promptlib.PromptService;
 import ai.tessary.query.QueryService;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanPayloadRow;
@@ -57,6 +59,8 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
         private SessionReadService sessions = mock(SessionReadService.class);
         private FindingService findings = mock(FindingService.class);
         private CaseService cases = mock(CaseService.class);
+        private PromptService prompts = mock(PromptService.class);
+        private CapabilityService capabilities = mock(CapabilityService.class);
 
         Builder pipeline(Pipeline served) {
             this.pipeline = mock(PipelineService.class);
@@ -99,6 +103,16 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
             return this;
         }
 
+        Builder prompts(PromptService prompts) {
+            this.prompts = prompts;
+            return this;
+        }
+
+        Builder capabilities(CapabilityService capabilities) {
+            this.capabilities = capabilities;
+            return this;
+        }
+
         McpToolHarness build() {
             ProjectRepository projects = mock(ProjectRepository.class);
             Project project = new Project(
@@ -114,7 +128,9 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
                     sessions,
                     findings,
                     cases,
-                    mock(TraceDetectionRepository.class));
+                    mock(TraceDetectionRepository.class),
+                    prompts,
+                    capabilities);
             return new McpToolHarness(registry, new McpDispatcher(registry, MAPPER));
         }
     }
@@ -222,7 +238,9 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
                 1, // depth (generated)
                 120L, // totalTokens (generated)
                 "0.000600000000", // totalCost (generated)
-                started.plusSeconds(2).toString());
+                started.plusSeconds(2).toString(),
+                null,
+                null);
     }
 
     static SpanPayloadRow payload(String traceId, String spanId) {

@@ -63,7 +63,7 @@ deadlocking.
 
 - Fetch (`PromptService.resolve`, used by `GET /v1/prompts/fetch` and MCP `get_prompt`) is one
   statement: `PromptRepository.resolve` reads the prompt row, the selected version through a lateral
-  join, that version's labels and `MAX(version)`. One statement is one snapshot, so `labels`, `is_active`
+  join, that version's labels and `MAX(version)`. One statement is one snapshot, so `labels`
   and `latest` always describe the version returned. A prompt row with no matching version tells
   `VERSION_NOT_FOUND` and `LABEL_NOT_FOUND` apart from `NOT_FOUND`.
 - The detail route returns version summaries with no body and no config, newest first, `limit` at a time
@@ -73,7 +73,7 @@ deadlocking.
   top version is deleted it is more than `latest_version + 1`, so the New version screen names it.
 - The list reads each prompt's newest config with a `LIMIT 1` lateral read on `ix_prompt_version_lookup`,
   not by gathering every version's config. It gathers each prompt's version numbers into an array only
-  for the public list, which returns them, and when a JSON filter is set; the UI list, the folder level
+  for the public list, which returns them; the UI list, the folder level
   and search read only the count. The count still reads one index entry per version.
 
 ## Fetch cache
@@ -103,7 +103,7 @@ own 60-second cache. Bounds: `tessary.prompts.fetch-cache.*` in
 | Tag | `^\S{1,64}$`, at most 50 per prompt, order kept, duplicates dropped. |
 | Variable | `\{\{\s*([^{}\s][^{}]*[^{}\s]|[^{}\s])\s*\}\}`: any trimmed, non-blank text with no brace, so dots, hyphens and inner spaces are allowed; first-appearance order, deduplicated. The name starts and ends on a non-space so a long unclosed `{{` scans in linear time. Java's `\s` is ASCII only and JavaScript's and Python's are Unicode, so a non-breaking space at a name's edge is trimmed by the SDKs and the page but kept by the server's list. Placeholders hold none. |
 | Placeholder name | `^[A-Za-z_][A-Za-z0-9_]*$` |
-| Body | Text: a non-empty string. Chat: a non-empty list. A message needs string `role` and `content`, accepts `type` `message` or `chatmessage` on input, and any other key is dropped; it is stored as `{role, content}`. A placeholder is exactly `{type: "placeholder", name}`. No size cap of its own. |
+| Body | Text: a non-empty string. Chat: a non-empty list. A message needs string `role` and `content`, may carry `type: "message"` on input, and any other key is dropped; it is stored as `{role, content}`. A placeholder is exactly `{type: "placeholder", name}`. No size cap of its own. |
 | Config | A JSON object; `null` means `{}`. No size cap of its own. |
 | Commit message | At most 500 characters. |
 | NUL | U+0000 is refused in a name, folder, tag, body, config (keys and nested strings too) and commit message, because Postgres stores it in neither text nor jsonb, and a looked-up name holding it names no prompt. An integrity error from the version insert or the tag update is still a 400 `COMMON.INVALID_BODY`, with no SQL cause attached, because the database's error context would quote the stored JSON. |
@@ -137,7 +137,7 @@ Headless routes:
 | Route | Key | Does |
 |---|---|---|
 | `GET /v1/prompts/fetch?name&version&label` | write, query or admin | One version; neither selector reads `production`. |
-| `GET /v1/prompts?name&label&tag&page&limit&fromUpdatedAt&toUpdatedAt&filter` | write, query or admin | Prompt metadata, ordered by name. `filter` (below) replaces the other narrowing parameters. |
+| `GET /v1/prompts?name&label&tag&page&limit&fromUpdatedAt&toUpdatedAt` | write, query or admin | Prompt metadata, ordered by name. |
 | `POST /v1/prompts` | admin | 201. A new name makes version 1, an existing name its next version, and its `tags`, when sent, replace the prompt's; a different type is `TYPE_MISMATCH`. |
 | `PATCH /v1/prompts/labels` | admin | Moves `new_labels` and removes `remove_labels` (`ADD`). |
 | `DELETE /v1/prompts?name&version&label` | admin | `version` deletes it, `label` deletes the version it points at, neither deletes the prompt. |
@@ -153,53 +153,33 @@ transaction. The public POST answers HTTP 201 through `@ResponseStatus`, with `A
 `/v1/prompts` requests are throttled per principal by `RateLimitFilter` (429 with `Retry-After`); reads
 are not.
 
-The list's `filter` is a JSON list of conditions in the grammar Langfuse's prompt list uses, with snake_case column names, parsed and
-checked by `PromptListFilter`: types `string`, `stringOptions`, `number`, `datetime`, `arrayOptions` and
-`stringObject`, each with a fixed set of columns and operators (the user page lists them). Each condition
-is a predicate on one version `v` of prompt `p`: `id` is the version id, `created_at` the version's,
-`updated_at` the prompt's, `labels` the version's stored labels plus `latest` when it is the highest, `tags`
-and `name` the prompt's, `config` a top-level key of the version's config. `PromptRepository` maps each
-column and operator to a fixed fragment and binds every value; substring operators are an escaped `ILIKE`.
-A prompt is listed when a version meets every condition (an `EXISTS` in the WHERE), and `versions`,
-`last_config` and `labels` come from the matching versions only; `latest` is listed only when the highest
-version matched. With `filter`, `name`, `label`, `tag`, `fromUpdatedAt` and `toUpdatedAt` are ignored, as
-Langfuse does.
-
 MCP: `list_prompts(folder?, label?)` and `get_prompt(name, version?, label?)`, read-only, listed for
 every token, each checking the capability on the call ([auth-and-mcp.md](./auth-and-mcp.md) § *MCP
 server*).
 
 ## Wire casing
 
-`/v1/prompts` follows Tessary's own conventions, not Langfuse's prompt API. JSON fields are
-snake_case like every other Tessary DTO (`commit_message`, `created_at`, `is_active`, `last_updated_at`,
-`last_config`, `total_items`, `total_pages`, `new_labels`), and query parameters are camelCase like every
-other Tessary route (`fromUpdatedAt`, `promptName`, `beforeVersion`). The response sits in the usual
-`{data, meta}` envelope, and `name` is always a query parameter or a body field. A script written against
-Langfuse's prompt API therefore needs more than renamed fields: new paths, the envelope, and the field
-names above.
+`/v1/prompts` follows Tessary's own conventions and the Prompts page's field names. JSON fields are
+snake_case like every other Tessary DTO; a version is `{id, name, version, type, body, config, labels,
+tags, commit_message, created_at, updated_at}`, a write sends `body`, and a list is `{items, page, limit,
+total}` like the Prompts page's list, each item carrying `versions`, `labels`, `tags`, `updated_at` and
+`latest_config`. Query parameters are camelCase like every other Tessary route (`fromUpdatedAt`,
+`promptName`, `beforeVersion`), the response sits in the usual `{data, meta}` envelope, and `name` is
+always a query parameter or a body field.
 
 ## Linking spans to a prompt
 
 A span names the prompt it was produced from with `tessary.prompt.name` and `tessary.prompt.version`.
-Langfuse's `langfuse.observation.prompt.name` and `.version` reach the same columns: that
-pair is read as a Langfuse dialect, the way OpenInference and Traceloop spans are, and only when the
-`tessary.prompt.*` pair is absent; the version always comes from the same pair as the name. `gen_ai.prompt.*` is a message family, never a
-prompt reference. The pair lands in `span.prompt_name` and `span.prompt_version` as the producer's text, so a
+No other attribute is read as a prompt reference: Tessary reads no other vendor's prompt attributes, and
+`gen_ai.prompt.*` is a message family. The pair lands in `span.prompt_name` and `span.prompt_version` as the producer's text, so a
 version may be a label such as `prod`. A name or version over 512 characters drops that part of the link
 and keeps the span, and a dropped name drops the version with it. Attribute rows: [ingestion-contract](./ingestion-contract/README.md) and
 [trace-schema.md](./trace-schema.md).
 
-Ingest also resolves the name to the project's prompt and stores its id in `span.prompt_id`.
-`SpanBatchWriter` collects the distinct names of one batch and asks `ingest/PromptLinkIds` once, before
-the batch transaction, so a linked span adds no read of its own. `PromptLinkIds` keeps found names for
-60 seconds in a bounded in-process map (10,000 entries) and reads the rest in one statement. A name that
-names no prompt, such as one kept in Langfuse, is kept as a miss for 10 seconds, so it costs
-one read per name in that time, not one per batch, and a prompt created after its first linked span is
-linked within 10 seconds. The lookup runs before the batch transaction, and if it fails the batch
-write fails with it. Ingest sits below the prompt feature, so a prompt write cannot evict this map: a prompt deleted
-and created again under its name keeps the old id on new spans for up to 60 seconds. The id has no foreign
-key, and the text columns stay, so a link to a deleted prompt still shows its name.
+Ingest never looks a prompt up. The pair is stored as text, every read (usage, the traces and sessions
+filters) keys on the name, and a name that matches no prompt in the project is kept and linked to nothing,
+so a prompt link can never fail or slow an ingest batch. The name is trimmed the way prompt names are
+(`PromptNames.lookupName`), so a span and the prompt it names compare equal.
 
 `GET .../traces` and the two `GET .../sessions` routes take `promptName` and `promptVersion` (ignored
 without `promptName`); the Traces page's facet keys are `prompt` and `prompt_version`.
@@ -245,7 +225,7 @@ each write; the write token is never upgraded. It uses only the standard library
 
 - `tessary.prompts.get(name, *, version=None, label=None, fallback=None, cache_ttl_seconds=None,
   max_retries=None, fetch_timeout_seconds=None)` returns a `TextPrompt` or `ChatPrompt`. With neither
-  selector it reads `production`. `list(...)` is never cached. `create(name, prompt, type=None, ...)`
+  selector it reads `production`. `list(...)` is never cached. `create(name, body, type=None, ...)`
   infers the type from the body when none is given (a str is text, a list is chat), and `update(name,
   version, new_labels, remove_labels)`, `delete` and `clear_cache()` complete the surface.
 - Names are trimmed the way the server trims them before any request or cache key, so `" a "` and `"a"`
@@ -255,8 +235,8 @@ Linking. `prompt.linked()` is `tessary.context(prompt=prompt)`: every span start
 carries the pair on Tessary's copy, added as the span ends, so the application's other backends receive
 their spans unchanged and a pair the producer set itself is never overwritten. `tessary.context(prompt=)`
 also takes a `(name, version)` tuple for prompts kept elsewhere. A fallback links nothing and masks an
-outer prompt. A span that already carries any prompt link of its own (either half of the Tessary pair, or
-Langfuse's observation prompt name) keeps it, and the scope adds nothing. `prompt.span_attributes()` returns
+outer prompt. A span that already carries either half of the Tessary pair keeps it, and the scope adds
+nothing. `prompt.span_attributes()` returns
 the pair (the version as a string) for a producer that
 sets attributes itself. There is no separate span processor to add.
 
@@ -297,7 +277,7 @@ Wire. Headers are `Authorization: Bearer`, `Accept: application/json`, a `User-A
 `tessary-python/<v>`, and `Content-Type: application/json` on a body. With neither version nor label the
 SDK sends neither. Every 2xx is success, and the SDK returns the envelope's `data`; a 2xx without a JSON
 `data` object, or a prompt without a string `name`, an integer `version`, a `type` of `text` or `chat` and
-a `prompt` of the matching shape (for chat, every item a message or a placeholder), is a transport error,
+a `body` of the matching shape (for chat, every item a message or a placeholder), is a transport error,
 so a fetch with a fallback falls back. Errors are parsed from `meta.error`, then the top-level `error`
 object the auth filter answers with, then `http_<status>`. Redirects are never followed.
 

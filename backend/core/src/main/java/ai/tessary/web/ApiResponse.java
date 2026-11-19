@@ -11,6 +11,11 @@ public record ApiResponse<T>(ResponseMeta meta, @Nullable T data) {
         return new ApiResponse<>(ResponseMeta.ok(), data);
     }
 
+    /** For a handler that answers HTTP 201, so the envelope's status says the same. */
+    public static <T> ApiResponse<T> created(@Nullable T data) {
+        return new ApiResponse<>(ResponseMeta.created(), data);
+    }
+
     public static ApiResponse<Void> failure(int status, ErrorBody error) {
         return new ApiResponse<>(ResponseMeta.failure(status, error), null);
     }

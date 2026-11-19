@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -30,6 +31,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 @Order(20) // AuthFilter is @Order(10)
 public class RateLimitFilter extends OncePerRequestFilter {
+
+    private static final Set<String> PROMPT_WRITE_METHODS = Set.of("POST", "PATCH", "DELETE");
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
@@ -85,7 +88,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // && !isPublicActuatorPath.
         boolean guardedActuator = AuthFilter.isActuatorPath(path) && !AuthFilter.isPublicActuatorPath(path);
         boolean credentialRoute = isCredentialRoute(path, req.getMethod());
-        return !(path.startsWith("/api/") || path.startsWith("/mcp") || guardedActuator || credentialRoute);
+        // A prompt write carries up to 1 MiB under an ADMIN key, so it gets the principal bucket; reads, HEAD and
+        // browser preflights stay exempt like /v1/query, guarded by the SDK cache.
+        boolean promptWrite = ("/v1/prompts".equals(path) || path.startsWith("/v1/prompts/"))
+                && PROMPT_WRITE_METHODS.contains(req.getMethod());
+        return !(path.startsWith("/api/")
+                || path.startsWith("/mcp")
+                || guardedActuator
+                || credentialRoute
+                || promptWrite);
     }
 
     @Override

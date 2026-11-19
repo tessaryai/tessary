@@ -80,7 +80,7 @@ do-not-emit list and the standard field each one's content belongs on.
 | Overlay attribute | Why no gen_ai standard | Future standard to track |
 |---|---|---|
 | `tessary.call_site.id` | linkage from a span to a project-defined call site (the dotted spelling roots the expandable `tessary.call_site.*` namespace and is the only spelling read) | — |
-| `tessary.prompt.name`, `tessary.prompt.version` | linkage from a span to the managed prompt version it came from, into `span.prompt_name`, `span.prompt_version` and `span.prompt_id` ([prompt-management.md](./prompt-management.md)); Langfuse's `langfuse.observation.prompt.*` pair is read as a dialect when this pair is absent | none yet: GenAI semconv has no managed-prompt reference |
+| `tessary.prompt.name`, `tessary.prompt.version` | linkage from a span to the managed prompt version it came from, into `span.prompt_name` and `span.prompt_version` ([prompt-management.md](./prompt-management.md)) | none yet: GenAI semconv has no managed-prompt reference |
 
 ### Call-site & code provenance — emitted by producers
 
