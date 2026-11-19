@@ -5,7 +5,7 @@ description: "Look up every wire field the Tessary ingestion pipeline consumes, 
 
 Tessary reads these fields off every span you send. Anything not listed here is still carried verbatim into the attribute bag and is queryable, but it drives no ingest-time processing.
 
-The contract is standard first. The platform reads OTel (OpenTelemetry) and gen_ai semantic-convention names wherever one exists, accepts third-party dialects for compatibility, and defines exactly one attribute of its own: `tessary.call_site.id`.
+The contract is standard first. The platform reads OTel (OpenTelemetry) and gen_ai semantic-convention names wherever one exists, accepts third-party dialects for compatibility, and defines two names of its own: `tessary.call_site.id`, and the `tessary.prompt.name` and `tessary.prompt.version` pair.
 
 <Note>
   For the practical subset, meaning what you have to emit to get a working project, read [Span requirements](/instrument/span-requirements). This page is the exhaustive lookup behind it.
@@ -27,7 +27,7 @@ Both transports write down the same path, so a stored span is identical no matte
 
 - **Field** is the wire name. There is one spelling per field. Tessary reads exactly the names listed here, with no compatibility aliases and no deprecated-spelling fallbacks.
 - **Applies to** says which spans the field is read for. `always` means every span; otherwise it names the `gen_ai.operation.name` family or the carrier the field is only read on.
-- **Origin** says where the name comes from: `OTLP proto` for a protobuf span field rather than an attribute, `OTel semconv` for the general semantic conventions, `gen_ai semconv` for the GenAI conventions, `OpenInference` and `Traceloop` for third-party dialects accepted for compatibility, `Tessary` for the one overlay attribute, `carrier extension` for the generic `input` and `output` carriers, and `any` for the attribute bag.
+- **Origin** says where the name comes from: `OTLP proto` for a protobuf span field rather than an attribute, `OTel semconv` for the general semantic conventions, `gen_ai semconv` for the GenAI conventions, `OpenInference`, `Traceloop` and `Langfuse` for third-party dialects accepted for compatibility, `Tessary` for its own two overlays, `carrier extension` for the generic `input` and `output` carriers, and `any` for the attribute bag.
 
 ## Identity and timing
 
@@ -160,9 +160,21 @@ Ingest needs none of these fields. Groundedness needs `.content` to compare an a
 | --- | --- | --- | --- |
 | `tessary.call_site.id` | Binds the span to its call site, and is denormalized onto its trace. Unseen call sites are materialized automatically | always | Tessary |
 
-This is the only sanctioned Tessary overlay attribute, and the dotted spelling roots a `tessary.call_site.*` namespace. Any producer can set it as a plain attribute, or a Collector `attributes` or `transform` rule can add it. No SDK is required.
+This is one of the two sanctioned Tessary overlays, and the dotted spelling roots a `tessary.call_site.*` namespace. Any producer can set it as a plain attribute, or a Collector `attributes` or `transform` rule can add it. No SDK is required.
 
 Without it, a span still lands and is still queryable, but it belongs to no call site, and the connect gate on a new project does not open on it. An untagged span carries a null `call_site_id`, so a filter on any call site excludes it outright.
+
+## Prompt
+
+| Field | Consumed for | Applies to | Origin |
+| --- | --- | --- | --- |
+| `tessary.prompt.name` | Links the span to the managed prompt it was produced from. Feeds the prompt's usage counts and the trace and session filters by prompt | always. Usage counts read `llm` spans only | Tessary |
+| `tessary.prompt.version` | The version of that prompt, stored as the text sent, so `3` and a label such as `production` are both kept as sent | read only with `tessary.prompt.name` | Tessary |
+| `langfuse.observation.prompt.name`, `langfuse.observation.prompt.version` | The same link, read only when the `tessary.prompt.*` pair is absent | always | Langfuse |
+
+The `tessary.prompt.*` pair wins whenever it is present, and the version is always read from the same pair as the name. A name or version longer than 512 characters drops that part of the link and keeps the span; a dropped name drops the version with it. Ingest never refuses a span for its prompt: a name that matches no prompt in the project is kept as text and linked to nothing. `gen_ai.prompt.*` is never read as a prompt link, because it is the flattened message family listed under Content.
+
+This is the second sanctioned Tessary overlay, because no semantic convention names a managed prompt version. Any producer can set the pair as plain attributes. The Tessary SDK sets it for every span inside `tessary.context(prompt=...)`, on Tessary's copy of the span only.
 
 ## Everything else
 
@@ -185,7 +197,7 @@ These arrive without being rejected and survive verbatim in the attribute bag. T
 
 ## Attributes with no reader
 
-The consumed `tessary.*` surface is exactly one attribute. Every other `tessary.*` spelling has no reader anywhere on the platform, and its content belongs on the standard field instead.
+The consumed `tessary.*` surface is `tessary.call_site.id` and the `tessary.prompt.*` pair. Every other `tessary.*` spelling has no reader anywhere on the platform, and its content belongs on the standard field instead.
 
 | Do not emit | Use instead |
 | --- | --- |

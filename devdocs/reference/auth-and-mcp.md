@@ -31,9 +31,13 @@ All project-scoped bearer tokens live in the `api_key` table and are issued/veri
 
 | Family | Prefix | Typical use |
 |---|---|---|
-| `write` | `tsy_w_…` | Ingest (`POST /v1/traces`) |
-| `query` | `tsy_q_…` | Aggregation-first query API |
-| `admin` | `tsy_a_…` | Superset: write + query + `/mcp` tools |
+| `write` | `tsy_w_…` | Ingest (`POST /v1/traces`), plus prompt reads (`GET /v1/prompts`, `GET /v1/prompts/fetch`) |
+| `query` | `tsy_q_…` | Aggregation-first query API, plus prompt reads |
+| `admin` | `tsy_a_…` | Superset: write + query + `/mcp` tools + prompt writes (`POST`, `PATCH .../labels`, `DELETE` on `/v1/prompts`) |
+
+Prompt reads are the one surface write and query keys share: an application that sends traces fetches its
+prompts with the same key. `KeyScope.permits` grows that one shared route set; everything else stays
+least privilege.
 
 MCP token UI (`McpTokenController`) and the plugin device-link handshake mint **admin**-scoped
 keys via `ApiKeyService.issue(...)`. So do the three agent lanes, one short-lived key per run, revoked

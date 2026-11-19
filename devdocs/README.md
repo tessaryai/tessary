@@ -41,6 +41,7 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 | [reference/config-keys.md](./reference/config-keys.md) | Every config prefix → `@ConfigurationProperties` class, the `@Value` exceptions, and the yaml-declared env vars. |
 | [reference/telemetry-naming.md](./reference/telemetry-naming.md) | Platform-emitted OTel / Langfuse span & trace names: kebab product verbs, metadata keys, Alloy filter, inventory. |
 | [reference/telemetry-contract.md](./reference/telemetry-contract.md) | The home.tessary.ai ping shape, license-check endpoint, opt-out env var, and versioning rules — the heartbeat client and the `telemetry` package it lives in. |
+| [reference/prompt-management.md](./reference/prompt-management.md) | Managed prompts: tables, writes, reads, key scopes, span links, usage, the SDK contract and the playground. |
 | [reference/media-contract.md](./reference/media-contract.md) | The media contract: supported modalities (images and PDFs), storage, and export. |
 
 ## Concepts — *understand why/how* (subsystems)

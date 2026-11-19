@@ -96,7 +96,7 @@ Set it on the span that covers the model call, with a literal value.
 - **Tag the span that covers the model call**, not a parent request or handler span.
 - **Tag only the call sites you meant to tag.** An unwanted call site is easier to leave out than to retire.
 
-`tessary.call_site.id` is also the only `tessary.*` attribute Tessary reads. Session identity goes in `session.id`, the end user in `user.id`, nesting is derived from the span's parent, the call's kind goes in `gen_ai.operation.name`, and a failure goes in the span status. [Span requirements](/instrument/span-requirements) lists the full vocabulary and the names that have no reader.
+Besides `tessary.call_site.id`, the only `tessary.*` names Tessary reads are the `tessary.prompt.name` and `tessary.prompt.version` pair that links a span to a managed prompt. Session identity goes in `session.id`, the end user in `user.id`, nesting is derived from the span's parent, the call's kind goes in `gen_ai.operation.name`, and a failure goes in the span status. [Span requirements](/instrument/span-requirements) lists the full vocabulary and the names that have no reader.
 
 ## When you cannot edit the code
 

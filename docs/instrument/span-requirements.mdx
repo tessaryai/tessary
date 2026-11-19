@@ -33,7 +33,16 @@ These are protobuf fields on the OTLP (OpenTelemetry Protocol) span, not attribu
 | --- | --- | --- | --- |
 | `tessary.call_site.id` | Yes | Binds the span to its call site. The trace takes the root span's call site, else the first tagged span's ([Call sites](/concepts/call-sites#a-trace-takes-the-first-call-site-it-reached)). | The dotted spelling is the only one read. Any producer can set it, including a Collector `attributes` or `transform` rule. An id Tessary has not seen before materializes a new call site. |
 
-This is the only `tessary.*` attribute with a reader. [The call-site tag](/instrument/call-site-tag) covers what a call site is and how to choose an id.
+It is one of the two `tessary.*` overlays with a reader; the other is the prompt pair below. [The call-site tag](/instrument/call-site-tag) covers what a call site is and how to choose an id.
+
+## Prompt
+
+| Attribute | Required | Carries | Constraints |
+| --- | --- | --- | --- |
+| `tessary.prompt.name` | Optional | The managed prompt the span was produced from. Counts the call on the prompt's usage and lets the traces list filter by prompt. | At most 512 characters. A longer name drops the link, not the span. Usage counts read `llm` spans only. |
+| `tessary.prompt.version` | Optional | The version of that prompt. | Stored as the text sent, so `3` and `production` both work. Read only with `tessary.prompt.name`. At most 512 characters. |
+
+The Tessary SDK sets this pair for you on every span inside `tessary.context(prompt=...)`. Spans that already carry Langfuse's `langfuse.observation.prompt.name` and `.version` link too. `gen_ai.prompt.*` is a message family, never a prompt link.
 
 ## Kind
 
@@ -143,18 +152,19 @@ These are standard OpenTelemetry semantic conventions, set by the producer. They
 
 ## Accepted dialects
 
-If an LLM auto-instrumentation is already emitting one of these, leave it alone. Both are normalized to the canonical vocabulary at ingest, so a native span and a dialect span carrying the same content produce the same stored shape. Translating a dialect by hand adds work and risk for no gain.
+If an LLM auto-instrumentation is already emitting one of these, leave it alone. Each is normalized to the canonical vocabulary at ingest, so a native span and a dialect span carrying the same content produce the same stored shape. Translating a dialect by hand adds work and risk for no gain.
 
 | Dialect | Keys | Normalized to |
 | --- | --- | --- |
 | OpenInference | `openinference.span.kind`, `llm.model_name`, `llm.system` / `llm.provider`, `llm.input_messages` / `llm.output_messages`, `llm.token_count.*`, `llm.cost.*`, `tool_call.function.name`, `tool_call.id` | The `gen_ai.*` names in the tables above. |
 | OpenLLMetry (Traceloop) | `traceloop.span.kind`, the flattened `gen_ai.prompt.<N>.role` / `.content` and `gen_ai.completion.<N>.*` families, `traceloop.entity.input` / `.output` | The same. |
+| Langfuse | `langfuse.observation.prompt.name` / `.version`, read only when the `tessary.prompt.*` pair is absent | The `tessary.prompt.*` pair in [Prompt](#prompt). |
 
 When a span carries both the structured `gen_ai.input.messages` array and the flattened `gen_ai.prompt.<N>.*` family, the structured array wins and the flattened copy is ignored. Never treat `gen_ai.prompt.*` as a canonical message key.
 
 ## Do not emit
 
-`tessary.call_site.id` is the only `tessary.*` name with a reader. Every other `tessary.*` spelling, and every ad-hoc alias of a canonical field such as `sessionId` or `enduser.id`, is carried verbatim and read by nothing. Put the content on the standard field from the tables above instead.
+`tessary.call_site.id` and the `tessary.prompt.*` pair are the only `tessary.*` names with a reader. Every other `tessary.*` spelling, and every ad-hoc alias of a canonical field such as `sessionId` or `enduser.id`, is carried verbatim and read by nothing. Put the content on the standard field from the tables above instead.
 
 [Ingestion contract](/reference/ingestion-contract#attributes-with-no-reader) lists each unread name against the field that replaces it.
 
