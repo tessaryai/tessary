@@ -123,7 +123,7 @@ export type ModelProvider =
   | "GLM"
   | "GROK"
   | "CUSTOM"
-  // AWS's second Bedrock endpoint: OpenAI-wire, and the only place the GPT-5.6 line lives.
+  // AWS's second Bedrock endpoint: OpenAI-wire, serving the GPT line from us-east-1.
   | "BEDROCK_MANTLE"
   | "TYPESAFE"
   // Supplied by the deployment, with no key of the org's own; listed only when offered.

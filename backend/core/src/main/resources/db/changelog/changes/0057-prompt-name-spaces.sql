@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0056-prompt-name-spaces
+--changeset evals:0057-prompt-name-spaces
 -- A prompt name may hold whitespace inside it, as in another prompt tool, so "Support Agent" is a valid name. The Java
 -- rule trims the edges before a write, and the CHECK still refuses whitespace at either edge as the backstop. This
 -- widens the constraint, so every stored name already passes it.

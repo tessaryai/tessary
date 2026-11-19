@@ -138,6 +138,21 @@ test('an egress credential on the docker backend is the caller\'s bad_request: o
   }
 });
 
+test('a run timeout_ms that is not a positive integer up to an hour is the caller\'s bad_request (a NaN, negative or overflowing timer kills the run at once; a huge one holds the only docker slot for weeks)', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    const credential = { provider: 'GEMINI', api_key: 'k' };
+    for (const timeout of ['600000', 0, -1, 1.5, 3600001, 2 ** 31]) {
+      const res = await request(port, 'POST', '/runs', { auth: 'Bearer testkey', body: { mcp: MCP, credential, timeout_ms: timeout } });
+      assert.equal(res.status, 502);
+      assert.equal(res.body.kind, 'bad_request', String(timeout));
+      assert.equal(res.body.detail, 'run: timeout_ms must be a positive integer of at most 3600000 ms');
+    }
+  } finally {
+    child.kill();
+  }
+});
+
 test('a docker backend with no SANDBOX_WORK_VOLUME refuses to boot', async () => {
   const child = spawnLauncher({ SANDBOX_BACKEND: 'docker', SANDBOX_WORK_VOLUME: '', SANDBOX_API_KEY: 'testkey' });
   let stderr = '';

@@ -188,17 +188,20 @@ databaseChangeLog:
       file: db/changelog/changes/0053-frustration-hour-trial.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0054-prompt-library.sql
+      file: db/changelog/changes/0054-model-lineup-2026-11.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0055-span-prompt-link.sql
+      file: db/changelog/changes/0055-prompt-library.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0056-prompt-name-spaces.sql
+      file: db/changelog/changes/0056-span-prompt-link.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0057-span-prompt-id.sql
+      file: db/changelog/changes/0057-prompt-name-spaces.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0058-span-prompt-window-index.sql
+      file: db/changelog/changes/0058-span-prompt-id.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0059-span-prompt-window-index.sql
       relativeToChangelogFile: false

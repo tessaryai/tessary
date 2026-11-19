@@ -87,11 +87,13 @@ class ProjectModelSettingControllerTest {
                 List.of(
                         "ANTHROPIC",
                         "ANTHROPIC",
+                        "ANTHROPIC",
                         "OPENROUTER",
                         "OPENROUTER",
                         "MOONSHOT",
                         "OPENAI",
                         "OPENAI",
+                        "GEMINI",
                         "GEMINI",
                         "GLM",
                         "GROK",
@@ -180,9 +182,9 @@ class ProjectModelSettingControllerTest {
                 ORG_SLUG,
                 PROJECT_SLUG,
                 " RCA ",
-                new ProjectModelSettingController.SetLaneModelRequest("anthropic.claude-haiku-4-5"));
+                new ProjectModelSettingController.SetLaneModelRequest("anthropic.claude-haiku-5-5"));
 
-        verify(settings).set(PROJECT_ID, ORG_ID, ModelLane.RCA, "anthropic.claude-haiku-4-5");
+        verify(settings).set(PROJECT_ID, ORG_ID, ModelLane.RCA, "anthropic.claude-haiku-5-5");
     }
 
     @Test
