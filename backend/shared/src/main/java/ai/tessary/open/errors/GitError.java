@@ -29,6 +29,13 @@ public enum GitError implements ErrorCode {
             HttpStatus.BAD_REQUEST,
             "These credentials cannot read %s. Grant the token Contents: read on this repository,"
                     + " or enter a repository it already covers"),
+    WRITE_ACCESS_MISSING(
+            HttpStatus.BAD_REQUEST,
+            "These credentials cannot write to %s. Grant Contents: write and Pull requests: write on this"
+                    + " repository"),
+    /** A ref create or a fast-forward update lost to a push that landed first. Tessary never force-pushes. */
+    BRANCH_MOVED(HttpStatus.CONFLICT, "Branch %s on %s changed while Tessary was writing to it"),
+    PR_NOT_FOUND(HttpStatus.NOT_FOUND, "No pull request #%s on %s"),
     INSTALL_STATE_INVALID(HttpStatus.BAD_REQUEST, "GitHub install state is invalid or expired"),
     NO_INSTALLED_REPOS(HttpStatus.BAD_REQUEST, "The GitHub App installation grants no repositories"),
     NO_ADMIN_INSTALLATIONS(

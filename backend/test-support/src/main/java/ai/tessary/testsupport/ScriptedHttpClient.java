@@ -90,6 +90,10 @@ public final class ScriptedHttpClient extends HttpClient {
                 null);
     }
 
+    public static HttpResponse<String> response(int status, String body, Map<String, List<String>> headers) {
+        return new Response(status, body, HttpHeaders.of(headers, (k, v) -> true), null);
+    }
+
     public static String body(HttpRequest req) {
         List<ByteBuffer> chunks = new ArrayList<>();
         req.bodyPublisher()
