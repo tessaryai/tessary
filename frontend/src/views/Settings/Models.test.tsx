@@ -236,6 +236,33 @@ describe("choosing a model", () => {
     expect(within(lane("Triage model")).getByRole("option", { name: "No model" })).toBeTruthy();
   });
 
+  // Bug: the fix lane read "No key runs this job" like any other lane, so nobody learned that Fix PRs stay off, or
+  // that warning stayed once a key served a frontier model.
+  it("says Fix PRs stay off while no key serves the fix lane, and not once one does", async () => {
+    const fix = {
+      id: "fix" as const, label: "Fix", description: "Writes a fix.", group: "agent_vm" as const,
+      provider_options: [
+        { provider: "ANTHROPIC" as const, label: "Anthropic", model_keys: ["ANTHROPIC:frontier"], default_model_key: "ANTHROPIC:frontier" },
+      ],
+      effective_model_key: null, automatic: true,
+    };
+    const said = "Fix PRs stay off until this organization adds a key for a provider that serves a frontier model.";
+    api.getModelSettings.mockResolvedValue({ ...SETTINGS, lanes: [...SETTINGS.lanes, fix] });
+    renderModels();
+    expect(await screen.findByText(said)).toBeTruthy();
+    cleanup();
+
+    api.getModelSettings.mockResolvedValue({
+      ...SETTINGS,
+      lanes: [...SETTINGS.lanes, { ...fix, effective_model_key: "ANTHROPIC:frontier" }],
+      catalog_models: [...SETTINGS.catalog_models, entry("ANTHROPIC", "frontier", { frontier: true })],
+      configured_providers: [...SETTINGS.configured_providers, "ANTHROPIC"],
+    });
+    renderModels();
+    await screen.findByLabelText("Fix provider");
+    expect(screen.queryByText(said)).toBeNull();
+  });
+
   it("shows the read loading and failing", async () => {
     api.getModelSettings.mockReturnValue(new Promise(() => {}));
     renderModels();

@@ -75,6 +75,11 @@ describe("run words", () => {
     ["RCA.TIMED_OUT", true, undefined],
     ["CLASSIFIER.TRIAGE_LAUNCHER_MISCONFIGURED", true, undefined],
     [null, true, undefined],
+    ["provider_rejected", true, providers],
+    ["MODEL_CONFIG.FRONTIER_MODEL_MISSING", true, models],
+    ["GIT.WRITE_ACCESS_MISSING", false, { label: "Open Git integration", to: "/orgs/acme/projects/default/settings/git" }],
+    ["GIT.TOKEN_MINT_FAILED", true, { label: "Open Git integration", to: "/orgs/acme/projects/default/settings/git" }],
+    ["GIT.BRANCH_MOVED", true, undefined],
   ])("stopFix(%s, canProviders %s)", (code, canProviders, fix) => {
     expect(stopFix(code, "/orgs/acme/projects/default", canProviders)).toEqual(fix);
   });
@@ -105,6 +110,30 @@ describe("run words", () => {
     ["RCA.UPSTREAM_FAILED", "RCA", "the agent ended without an answer. Run RCA again."],
     ["RCA.SOMETHING_NEW", "RCA", "the run hit a setting it cannot use. Fix it, then run RCA again."],
     [null, "triage", "the run hit a setting it cannot use. Fix it, then run triage again."],
+    // A fix runs after each RCA, so its stops send the reader to RCA, and a provider stop arrives as a bare kind.
+    ["provider_rejected", "fix", "the provider rejected the stored key. Fix the key, then run RCA again."],
+    ["MODEL_CONFIG.MISSING_CREDENTIALS", "fix", "there is no key for the provider the fix runs on. Add one, then run RCA again."],
+    ["AGENT_RUN.TIMED_OUT", "fix", "the run did not finish in its time limit. Run RCA again."],
+    ["AGENT_RUN.LAUNCHER_UNAVAILABLE", "fix", "the sandbox launcher did not answer. Check that it runs, then run RCA again."],
+    ["interrupted", "fix", "the worker stopped during the run. Run RCA again."],
+    [
+      "GIT.TOKEN_MINT_FAILED",
+      "fix",
+      "Tessary could not get an access token for the repository. Check the connection, then run RCA again.",
+    ],
+    ["AGENT_RUN.RUN_FAILED", "fix", "the agent ended without an answer. Run RCA again."],
+    ["AGENT_RUN.BAD_OUTPUT", "fix", "the agent returned nothing Tessary could use. Run RCA again."],
+    ["GIT.BRANCH_MOVED", "fix", "the pull request branch changed while Tessary was writing to it. Run RCA again."],
+    [
+      "GIT.WRITE_ACCESS_MISSING",
+      "fix",
+      "the repository connection cannot write. Grant Contents: write and Pull requests: write, then run RCA again.",
+    ],
+    [
+      "MODEL_CONFIG.FRONTIER_MODEL_MISSING",
+      "fix",
+      "the fix runs only on a frontier model, and no key serves one. Add one, then run RCA again.",
+    ],
   ] as const)("stopReason(%s, %s)", (code, lane, words) => {
     expect(stopReason(code, lane)).toBe(words);
   });

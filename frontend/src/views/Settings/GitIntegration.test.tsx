@@ -17,7 +17,10 @@ import { api } from "../../test/api";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
-const CONNECTED = { repoOwner: "acme", repoName: "app", defaultBranch: "main", provider: "github", host: "github.example.com" };
+const CONNECTED = {
+  repoOwner: "acme", repoName: "app", defaultBranch: "main", provider: "github", host: "github.example.com",
+  canWrite: true, writeReason: null,
+};
 
 beforeEach(() => {
   api.getGitIntegration.mockResolvedValue(null);
@@ -45,7 +48,9 @@ describe("parseRepo", () => {
     expect(url.searchParams.get("name")).toBe("Tessary: a-very-long-organization-name/s");
     expect(url.searchParams.get("target_name")).toBe("a-very-long-organization-name");
     expect(url.searchParams.get("description")).toContain("select only a-very-long-organization-name/service");
-    expect(url.searchParams.get("contents")).toBe("read");
+    // Bug: the template still asked for a read-only token, so every token made from it left Fix PRs read-only.
+    expect(url.searchParams.get("contents")).toBe("write");
+    expect(url.searchParams.get("pull_requests")).toBe("write");
     expect(url.searchParams.get("expires_in")).toBe("90");
 
     const bare = new URL(tokenTemplateUrl(null));
@@ -65,6 +70,23 @@ describe("a connected repository", () => {
     expect(screen.getByText("github · github.example.com")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(await screen.findByText("Repository disconnected")).toBeTruthy();
+  });
+
+  // Bug: a read-only connection looked the same as one that can write, so Fix PRs stayed off with no visible reason,
+  // or the page named a fix for a different cause (a token fix for an App, or a grant for a failed check).
+  it.each([
+    [true, null, "Tessary can push branches and open fix pull requests on this repository."],
+    [false, "APP_PERMISSION_MISSING",
+      "Read-only, so Fix PRs cannot open a pull request. Grant the GitHub App Contents: write and Pull requests: write, then accept the new permissions on its installation."],
+    [false, "TOKEN_CANNOT_PUSH",
+      "Read-only, so Fix PRs cannot open a pull request. Disconnect, then connect again with a token that grants Contents: write and Pull requests: write."],
+    [false, "CHECK_FAILED", "Tessary could not check whether it can write to this repository. Reload the page to try again."],
+    [false, "UNSUPPORTED", "Read-only. Tessary cannot open pull requests on this provider."],
+  ])("states write access (can write %s, %s)", async (canWrite, writeReason, said) => {
+    api.getGitIntegration.mockResolvedValue({ ...CONNECTED, canWrite, writeReason });
+    renderRoute(<GitIntegration />);
+
+    expect(await screen.findByText(said)).toBeTruthy();
   });
 
   it("names a refused disconnect, and a host-less provider without a stray separator", async () => {

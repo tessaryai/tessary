@@ -10,7 +10,8 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
-  CaseDetail, ClassifierDetail, FlaggedAnswer, FrustratedConversation, FrustrationDetail, RcaReport, RcaRun,
+  CaseDetail, ClassifierDetail, FixPr, FixRun, FlaggedAnswer, FrustratedConversation, FrustrationDetail, RcaReport,
+  RcaRun,
 } from "../../api/types";
 import { ApiError } from "../../api/types";
 import type { CapabilitiesView, Me } from "../../api/types-auth";
@@ -203,7 +204,7 @@ describe("closing a case", () => {
   });
 
   it("absorbs the case after the confirmation, and says why an absorb was refused", async () => {
-    api.absorbCase.mockRejectedValueOnce(new ApiError(409, { code: "CASE.LOCKED", message: "Case is locked" }));
+    api.absorbCase.mockRejectedValueOnce(new ApiError(409, { code: "CASE.ALREADY_RESOLVED", message: "Case C-1 is already closed" }));
     renderPage();
     await heading(BASE.case.title);
 
@@ -211,7 +212,7 @@ describe("closing a case", () => {
     expect(within(dialog()).getByText("The evidence in this case's findings counts toward the baseline.")).toBeTruthy();
     const confirmAbsorb = () => within(dialog()).getByRole("button", { name: "Absorb" });
     fireEvent.click(confirmAbsorb());
-    expect(await within(dialog()).findByText("CASE.LOCKED")).toBeTruthy();
+    expect(await within(dialog()).findByText("CASE.ALREADY_RESOLVED")).toBeTruthy();
 
     fireEvent.click(confirmAbsorb());
     await waitFor(() => expect(api.absorbCase).toHaveBeenCalledTimes(2));
@@ -522,6 +523,195 @@ describe("the RCA run bar", () => {
     expect(screen.queryByRole("img", { name: markName })).toBeNull();
     expect(button("Run RCA").disabled).toBe(false);
     expect(api.getRcaReport).not.toHaveBeenCalled();
+  });
+});
+
+describe("windows since the last RCA", () => {
+  // Bug: a live case kept gathering windows after its RCA and the page gave no sign the analysis was behind them.
+  it.each([
+    [3, "3 new windows since the last RCA"],
+    [1, "1 new window since the last RCA"],
+  ])("says %i joined since the last RCA", async (n, said) => {
+    api.getCase.mockResolvedValue(plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1" }, { windows_since_rca: n }));
+    renderPage();
+
+    expect(await screen.findByText(said)).toBeTruthy();
+    expect(button("Re-run RCA").disabled).toBe(false);
+  });
+
+  it.each([0, null])("says nothing when %s windows joined", async (n) => {
+    api.getCase.mockResolvedValue(plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1" }, { windows_since_rca: n }));
+    renderPage();
+    await screen.findByRole("link", { name: "Read the full analysis" });
+
+    expect(screen.queryByText(/since the last RCA/)).toBeNull();
+  });
+});
+
+const fixRun = (over: Partial<FixRun> = {}): FixRun => ({
+  id: "fix-1", status: "done", outcome: "pr_opened", reason: null, note: null,
+  pr_url: "https://github.com/acme/app/pull/12", causes: ["code:src/refunds.ts", "prompt:agent/prompt.md"],
+  checks: [], patch_files: 2, created_at: "2026-10-09T16:20:00Z", updated_at: "2026-10-09T16:40:00Z", run: null, ...over,
+});
+
+const fixPr = (over: Partial<FixPr> = {}): FixPr => ({
+  number: 12, url: "https://github.com/acme/app/pull/12", state: "open", branch: "tessary/fix-case-1-1760000000",
+  causes: ["code:src/refunds.ts", "prompt:agent/prompt.md"], opened_at: "2026-10-09T16:40:00Z",
+  updated_at: new Date(Date.now() - 5 * 60_000).toISOString(), ...over,
+});
+
+/** An analysed case, so no RCA bar competes with the fix's. */
+const fixCase = (fix: CaseDetail["fix"]) => plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1", fix });
+
+describe("the fix pull request", () => {
+  // Bug: a fix run waiting for a worker carries no agent run yet, and read as nothing at all.
+  it("shows a queued fix in the bar from its status alone", async () => {
+    api.getCase.mockResolvedValue(fixCase({ pr: null, latest_run: fixRun({ status: "queued", outcome: null, run: null }) }));
+    renderPage();
+
+    expect(await screen.findByText("Queued. It starts when a worker is free.")).toBeTruthy();
+    expect(within(theBar() as HTMLElement).getByText("Fix")).toBeTruthy();
+  });
+
+  // Bug: the fix bar read the RCA's steps, or read any steps before someone opened them.
+  it("a running fix names its step, and reads its own steps once opened", async () => {
+    api.getCase.mockResolvedValue(fixCase({ pr: null, latest_run: fixRun({ status: "running", outcome: null, run: rcaRun({ run_id: "run-f" }) }) }));
+    api.getFixSteps.mockResolvedValue(stepsPage(TRIAGE_STEPS, { runId: "run-f" }));
+    renderPage();
+
+    expect(await screen.findByText("Comparing the index sources before and after commit a41c0de…")).toBeTruthy();
+    expect(api.getFixSteps).not.toHaveBeenCalled();
+    fireEvent.click(button("Show steps"));
+    expect(await screen.findByText("Read the finding and its numbers")).toBeTruthy();
+    expect(api.getFixSteps).toHaveBeenCalledWith("fix-1", 0);
+    expect(api.getRcaSteps).not.toHaveBeenCalled();
+  });
+
+  // Bug: a fix that failed before its agent ran read as empty, or told the reader to run "fix" again, which no button does.
+  it("a failed fix names its cause and sends the reader to RCA", async () => {
+    api.getCase.mockResolvedValue(fixCase({ pr: null, latest_run: fixRun({ status: "failed", outcome: null, reason: "GIT.BRANCH_MOVED", run: null }) }));
+    renderPage();
+
+    expect(
+      await screen.findByText("Stopped: the pull request branch changed while Tessary was writing to it. Run RCA again."),
+    ).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Stopped" })).toBeTruthy();
+  });
+
+  // Bug: while a new RCA ran, a second bar for the old fix sat beside it.
+  it("shows only the RCA's bar while a new RCA runs", async () => {
+    api.getCase.mockResolvedValue({
+      ...runningCase(), fix: { pr: null, latest_run: fixRun({ status: "failed", outcome: null, reason: "interrupted" }) },
+    });
+    api.getRcaReport.mockResolvedValue({ ...ANSWER_REPORT, status: "claimed", run: rcaRun() });
+    renderPage();
+
+    expect(await screen.findByText("Comparing the index sources before and after commit a41c0de…")).toBeTruthy();
+    expect(screen.getAllByRole("img", { name: markName })).toHaveLength(1);
+    expect(screen.queryByText(/the worker stopped during the run/)).toBeNull();
+  });
+
+  // Bug: the pull request could not be reached from the case, its state read as live, or what the run did was missing.
+  it("links the pull request with the state Tessary last read, what the newest run did, and its checks", async () => {
+    api.getCase.mockResolvedValue(fixCase({
+      pr: fixPr(),
+      latest_run: fixRun({
+        checks: [
+          { command: "pnpm test", result: "passed", note: null },
+          { command: "pnpm e2e", result: "not_run", note: "needs a browser" },
+        ],
+      }),
+    }));
+    renderPage();
+
+    const link = await screen.findByRole("link", { name: "Pull request #12" });
+    expect(link.getAttribute("href")).toBe("https://github.com/acme/app/pull/12");
+    expect(screen.getByText("Open · as of 5m ago")).toBeTruthy();
+    expect(screen.getByText("tessary/fix-case-1-1760000000")).toBeTruthy();
+    expect(screen.getByText("Tessary opened this pull request after the newest RCA, for 2 causes.")).toBeTruthy();
+    expect(screen.getByText("pnpm test")).toBeTruthy();
+    expect(screen.getByText("not run · needs a browser")).toBeTruthy();
+    expect(screen.queryByRole("img", { name: markName })).toBeNull();
+  });
+
+  // Bug: a rerun that added a commit, or found nothing new, read as a fresh pull request.
+  it.each([
+    ["commit_added", ["code:src/refunds.ts"], "Tessary added a commit after the newest RCA, for 1 new cause."],
+    ["no_change", [], "The newest RCA found no new cause to fix, so Tessary added no commit."],
+  ])("says what a rerun on an open pull request did (%s)", async (outcome, causes, said) => {
+    api.getCase.mockResolvedValue(fixCase({ pr: fixPr(), latest_run: fixRun({ outcome, causes }) }));
+    renderPage();
+
+    expect(await screen.findByText(said)).toBeTruthy();
+  });
+
+  // Bug: the newest pull request and the newest run were read as one, so a closed pull request hid why no new one opened.
+  it("shows a closed pull request beside why the newest RCA opened no other", async () => {
+    api.getCase.mockResolvedValue(fixCase({
+      pr: fixPr({ state: "closed" }),
+      latest_run: fixRun({ outcome: "skipped", reason: "declined", pr_url: null }),
+    }));
+    renderPage();
+
+    expect(await screen.findByText("Closed without merging · as of 5m ago")).toBeTruthy();
+    expect(screen.getByText(
+      "Tessary wrote no fix after the newest RCA because a reviewer closed an earlier pull request for these causes without merging it.",
+    )).toBeTruthy();
+  });
+
+  // Bug: a fix the project cannot run said nothing, or gave no way to the setting that unblocks it.
+  it.each([
+    ["no_frontier_model", "because this project has no frontier model for the fix.", "Open Models", "/settings/models"],
+    ["no_repo", "because this project has no repository connected.", "Open Git integration", "/settings/git"],
+    ["read_only", "because this project's repository connection cannot write.", "Open Git integration", "/settings/git"],
+  ])("says why there is no pull request (%s) and links the setting", async (reason, because, label, to) => {
+    api.getCase.mockResolvedValue(fixCase({ pr: null, latest_run: fixRun({ outcome: "skipped", reason, pr_url: null }) }));
+    renderPage();
+
+    expect(await screen.findByText(`Tessary wrote no fix after the newest RCA ${because}`)).toBeTruthy();
+    expect(screen.getByRole("link", { name: label }).getAttribute("href")).toBe(`/orgs/acme/projects/default${to}`);
+  });
+
+  // Bug: the agent's own reason for making no change was dropped.
+  it("gives the agent's own words when it made no change", async () => {
+    api.getCase.mockResolvedValue(fixCase({
+      pr: null,
+      latest_run: fixRun({ outcome: "no_fix", reason: "agent_declined", note: "The retry lives in a vendored client.", pr_url: null }),
+    }));
+    renderPage();
+
+    expect(await screen.findByText("Tessary wrote no fix after the newest RCA because the agent could not write a safe fix.")).toBeTruthy();
+    expect(screen.getByText("The retry lives in a vendored client.")).toBeTruthy();
+  });
+
+  it("shows no fix block on a case no fix step has looked at", async () => {
+    api.getCase.mockResolvedValue(fixCase(null));
+    renderPage();
+    await screen.findByRole("link", { name: "Read the full analysis" });
+
+    expect(screen.queryByRole("heading", { name: "Fix pull request" })).toBeNull();
+  });
+
+  // Bug: the page never re-read the case while the fix ran, so the pull request appeared only on reload; or it kept
+  // reading after the run ended.
+  it("reads the case again while the fix waits or runs, and stops once it ends", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.getCase
+        .mockResolvedValueOnce(fixCase({ pr: null, latest_run: fixRun({ status: "queued", outcome: null }) }))
+        .mockResolvedValue(fixCase({ pr: fixPr(), latest_run: fixRun() }));
+      renderPage();
+      expect(await screen.findByText("Queued. It starts when a worker is free.")).toBeTruthy();
+
+      await act(() => vi.advanceTimersByTimeAsync(RUN_POLL_MS));
+
+      expect(await screen.findByRole("link", { name: "Pull request #12" })).toBeTruthy();
+      const reads = api.getCase.mock.calls.length;
+      await act(() => vi.advanceTimersByTimeAsync(RUN_POLL_MS * 3));
+      expect(api.getCase.mock.calls.length).toBe(reads);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

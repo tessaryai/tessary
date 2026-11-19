@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn, ErrorNote, LoadingRow, Spinner } from "../../ui";
 import { brief, clock, RUN_POLL_MS } from "./runWords";
 
-/** One step of a triage or RCA run, as the steps endpoints send it. Times are offsets from the run's start. */
+/** One step of a triage, RCA or fix run, as the steps endpoints send it. Times are offsets from the run's start. */
 export type RunStep = {
   seq: number;
   words: string;
@@ -164,7 +164,7 @@ function StateMark({ state, size }: { state: RunState; size: "bar" | "list" }) {
 }
 
 /**
- * The live state of a triage or RCA run under a page header: a mark, the kind, one line of words, the step and
+ * The live state of a triage, RCA or fix run under a page header: a mark, the kind, one line of words, the step and
  * time, a toggle for the steps, the settings page that fixes a stop, and a sliding line while it runs.
  */
 export function RunBar({
@@ -175,7 +175,7 @@ export function RunBar({
   fix,
   steps,
 }: {
-  kind: "Triage" | "RCA";
+  kind: "Triage" | "RCA" | "Fix";
   state: RunState;
   line: string;
   meta?: string;

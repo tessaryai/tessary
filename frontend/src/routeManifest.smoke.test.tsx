@@ -371,6 +371,11 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   models: {
     getModelSettings: () => Promise.resolve(EMPTY_MODEL_SETTINGS),
   },
+  // The Fix PRs row says why this project cannot open a pull request.
+  features: {
+    getGitIntegration: () => Promise.resolve(null),
+    getModelSettings: () => Promise.resolve(EMPTY_MODEL_SETTINGS),
+  },
   notifications: {
     listAlertRules: EMPTY,
     listAlertChannels: EMPTY,

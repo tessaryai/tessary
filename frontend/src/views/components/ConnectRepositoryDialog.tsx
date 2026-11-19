@@ -50,12 +50,13 @@ export function tokenTemplateUrl(repo: { owner: string; name: string } | null): 
   params.set(
     "description",
     slug
-      ? `Read-only access for Tessary root-cause analysis. Under Repository access, select only ${slug}.`
-      : "Read-only access for Tessary root-cause analysis.",
+      ? `Access for Tessary root-cause analysis and fix pull requests. Under Repository access, select only ${slug}.`
+      : "Access for Tessary root-cause analysis and fix pull requests.",
   );
   if (repo) params.set("target_name", repo.owner);
   params.set("expires_in", "90");
-  params.set("contents", "read");
+  params.set("contents", "write");
+  params.set("pull_requests", "write");
   return `https://github.com/settings/personal-access-tokens/new?${params.toString()}`;
 }
 
@@ -105,7 +106,7 @@ export function ConnectRepositoryDialog({
       open={open}
       onClose={onClose}
       title="Connect repository"
-      subtitle="Tessary reads this repository during RCA (root-cause analysis) to check what changed in your code."
+      subtitle="Tessary reads this repository during RCA (root-cause analysis) to check what changed in your code, and opens fix pull requests on it."
       footer={
         <>
           {onUseGithubApp && (
@@ -143,7 +144,7 @@ export function ConnectRepositoryDialog({
       <Field
         label="Access token"
         className="mt-4"
-        hint="Tessary stores the token encrypted and uses it only to clone the repository."
+        hint="Tessary stores the token encrypted. It uses the token to clone the repository and to open fix pull requests. The sandbox that runs the agent receives the token when it clones the repository."
       >
         {(p) => (
           <Input {...p} type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="" />
@@ -182,8 +183,8 @@ export function ConnectRepositoryDialog({
                 Create a token on GitHub
               </Button>
               <div className="text-small text-subtle mt-2">
-                Opens GitHub with the resource owner, expiration, and <span className="font-mono">Contents: read</span>{" "}
-                already set.
+                Opens GitHub with the resource owner, expiration, <span className="font-mono">Contents: write</span>, and{" "}
+                <span className="font-mono">Pull requests: write</span> already set.
               </div>
             </Step>
             <Step n={2}>
@@ -201,6 +202,9 @@ export function ConnectRepositoryDialog({
           <div className="border-t border-border mt-3.5 pt-3 flex flex-col gap-2">
             <div className="text-small text-subtle">
               Tessary can't renew an expired token. RCA continues without repository access until you replace it.
+            </div>
+            <div className="text-small text-subtle">
+              A read-only token works for RCA. Fix PRs need write access to open a pull request.
             </div>
             <div className="text-small text-subtle">
               If the repository belongs to an organization, an organization owner approves the token before it works.
