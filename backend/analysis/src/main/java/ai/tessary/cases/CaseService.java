@@ -33,6 +33,7 @@ import ai.tessary.classifier.secretleak.SecretLeakDetailService;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
+import ai.tessary.fix.FixReads;
 import ai.tessary.open.errors.CaseError;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
@@ -105,6 +106,8 @@ public class CaseService {
 
     private final FindingAdapters adapters;
 
+    private final FixReads fixReads;
+
     public CaseService(
             CaseRepository cases,
             CaseLedger ledger,
@@ -128,7 +131,8 @@ public class CaseService {
             SecretLeakDetailService secretLeakDetail,
             FrustrationDetailService frustrationDetail,
             GroundednessDetailService groundednessDetail,
-            FindingAdapters adapters) {
+            FindingAdapters adapters,
+            FixReads fixReads) {
         this.cases = cases;
         this.ledger = ledger;
         this.events = events;
@@ -152,6 +156,7 @@ public class CaseService {
         this.frustrationDetail = frustrationDetail;
         this.groundednessDetail = groundednessDetail;
         this.adapters = adapters;
+        this.fixReads = fixReads;
     }
 
     /** A table read: the detectors ran on a worker, so the first screen never replays history. */
@@ -292,7 +297,8 @@ public class CaseService {
                 finding == null ? null : adapters.detail(finding).orElse(null),
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
-                detectorAvailable);
+                detectorAvailable,
+                fixReads.forCase(projectId, row.id()));
     }
 
     /** A drift finding's window is the detector's own; any other is its onset to its last sighting. */

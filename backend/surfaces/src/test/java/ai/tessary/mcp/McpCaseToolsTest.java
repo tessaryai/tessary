@@ -227,7 +227,8 @@ class McpCaseToolsTest {
                 null,
                 true,
                 true,
-                true);
+                true,
+                null);
     }
 
     private static CaseExemplarView exemplar() {

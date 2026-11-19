@@ -8,6 +8,7 @@ import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
+import ai.tessary.fix.FixDtos.FixView;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaDtos.RcaRunView;
 import ai.tessary.rca.RcaReportRepository.CaseLead;
@@ -241,7 +242,9 @@ public final class CaseDtos {
             @JsonProperty("classifier_detail") @Nullable ClassifierDetail classifierDetail,
             @JsonProperty("rca_available") boolean rcaAvailable,
             @JsonProperty("absorb_available") boolean absorbAvailable,
-            @JsonProperty("detector_available") boolean detectorAvailable) {}
+            @JsonProperty("detector_available") boolean detectorAvailable,
+            /** The case's fix pull request and newest fix run; null when no fix step has looked at the case. */
+            @Nullable FixView fix) {}
 
     /**
      * {@code disposition} only on a frustration or groundedness case: {@code false_alarm} also stops the cited

@@ -130,7 +130,7 @@ export const GROUNDEDNESS_CASE_DETAIL: CaseDetail = {
     resolved_at: null, resolved_by: null, severity: 1, state: "open", subject_id: "support-agent",
     subject_kind: "call_site", subject_label: "support-agent", windows_since_rca: 0,
   },
-  absorb_available: true, detector_available: true, events: [], exemplars: [], frustration: null,
+  absorb_available: true, detector_available: true, events: [], exemplars: [], fix: null, frustration: null,
   groundedness: GROUNDEDNESS_DETAIL, classifier_detail: null, latest_finding_id: "fnd-1", findings: [],
   worst_finding_id: null, malformed_output: null, metric: null, rca: GROUNDEDNESS_REPORT, rca_available: true,
   rca_report_id: "rca-1", ruling: null, secret_leak: null, tool_error: null,

@@ -2848,6 +2848,16 @@
             },
             "type" : "array"
           },
+          "fix" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/FixView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "frustration" : {
             "anyOf" : [
               {
@@ -2958,6 +2968,7 @@
           "events",
           "exemplars",
           "findings",
+          "fix",
           "frustration",
           "groundedness",
           "latest_finding_id",
@@ -5465,6 +5476,177 @@
           "nextCursor",
           "recordedCounts",
           "rows"
+        ],
+        "type" : "object"
+      },
+      "FixCheckView" : {
+        "properties" : {
+          "command" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "result" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "command",
+          "note",
+          "result"
+        ],
+        "type" : "object"
+      },
+      "FixPrView" : {
+        "properties" : {
+          "branch" : {
+            "type" : "string"
+          },
+          "causes" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "number" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "opened_at" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "updated_at" : {
+            "type" : "string"
+          },
+          "url" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "branch",
+          "causes",
+          "number",
+          "opened_at",
+          "state",
+          "updated_at",
+          "url"
+        ],
+        "type" : "object"
+      },
+      "FixRunView" : {
+        "properties" : {
+          "causes" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "checks" : {
+            "items" : {
+              "$ref" : "#/components/schemas/FixCheckView"
+            },
+            "type" : "array"
+          },
+          "created_at" : {
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "outcome" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "patch_files" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pr_url" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "reason" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "run" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/RcaRunView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "updated_at" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "causes",
+          "checks",
+          "created_at",
+          "id",
+          "note",
+          "outcome",
+          "patch_files",
+          "pr_url",
+          "reason",
+          "run",
+          "status",
+          "updated_at"
+        ],
+        "type" : "object"
+      },
+      "FixView" : {
+        "properties" : {
+          "latest_run" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/FixRunView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "pr" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/FixPrView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          }
+        },
+        "required" : [
+          "latest_run",
+          "pr"
         ],
         "type" : "object"
       },
@@ -15592,6 +15774,70 @@
         },
         "tags" : [
           "finding-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/fix-runs/{id}/steps" : {
+      "get" : {
+        "operationId" : "FixController_steps",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "after",
+            "required" : false,
+            "schema" : {
+              "default" : 0,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseRunStepsView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "fix-controller"
         ]
       }
     },

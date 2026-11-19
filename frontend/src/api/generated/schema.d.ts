@@ -932,6 +932,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/fix-runs/{id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["FixController_steps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/git": {
         parameters: {
             query?: never;
@@ -2486,6 +2502,7 @@ export interface components {
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
             findings: components["schemas"]["CaseFindingView"][];
+            fix: components["schemas"]["FixView"] | null;
             frustration: components["schemas"]["FrustrationDetail"] | null;
             groundedness: components["schemas"]["GroundednessDetail"] | null;
             latest_finding_id: string | null;
@@ -3062,6 +3079,40 @@ export interface components {
                 [key: string]: number;
             };
             rows: components["schemas"]["EvidenceSpanView"][];
+        };
+        FixCheckView: {
+            command: string;
+            note: string | null;
+            result: string;
+        };
+        FixPrView: {
+            branch: string;
+            causes: string[];
+            /** Format: int32 */
+            number: number;
+            opened_at: string;
+            state: string;
+            updated_at: string;
+            url: string;
+        };
+        FixRunView: {
+            causes: string[];
+            checks: components["schemas"]["FixCheckView"][];
+            created_at: string;
+            id: string;
+            note: string | null;
+            outcome: string | null;
+            /** Format: int32 */
+            patch_files: number;
+            pr_url: string | null;
+            reason: string | null;
+            run: components["schemas"]["RcaRunView"] | null;
+            status: string;
+            updated_at: string;
+        };
+        FixView: {
+            latest_run: components["schemas"]["FixRunView"] | null;
+            pr: components["schemas"]["FixPrView"] | null;
         };
         FlaggedAnswerPage: {
             nextCursor: string | null;
@@ -6391,6 +6442,33 @@ export interface operations {
         };
     };
     FindingController_triageSteps: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                after?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseRunStepsView"];
+                };
+            };
+        };
+    };
+    FixController_steps: {
         parameters: {
             query: {
                 ctx: components["schemas"]["TenantContext"];

@@ -8,6 +8,7 @@ import ai.tessary.agentrun.AgentRunRepository;
 import ai.tessary.agentrun.AgentSessionClient;
 import ai.tessary.agentrun.AgentSessionRunner;
 import ai.tessary.agentrun.ProviderStop;
+import ai.tessary.agentrun.RunSteps;
 import ai.tessary.agentrun.StepWords;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.llmspi.ModelLane;
@@ -205,28 +206,4 @@ public class E2bRcaSandbox implements RcaSandbox {
         @Override
         public void note(String words, long atMs) {}
     };
-
-    /** Writes the runner's steps to the run the worker opened for this job. */
-    private record RunSteps(AgentRunRepository runs, String runId) implements AgentSessionRunner.StepSink {
-
-        @Override
-        public void session(String sessionId) {
-            runs.attachSession(runId, sessionId);
-        }
-
-        @Override
-        public void started(String callId, StepWords.Words w, long atMs) {
-            runs.stepStarted(runId, callId, w.done(), w.doing(), atMs);
-        }
-
-        @Override
-        public void ended(String callId, long atMs, boolean ok, StepWords.Words w) {
-            runs.stepEnded(runId, callId, atMs, ok, ok ? w.done() : StepWords.failed(w));
-        }
-
-        @Override
-        public void note(String words, long atMs) {
-            runs.note(runId, words, atMs);
-        }
-    }
 }

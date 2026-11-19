@@ -36,5 +36,11 @@ public record CaseEventRow(
 
         /** See {@link CaseRow.Resolution#ABSORBED} for why this differs from resolving. */
         public static final String ABSORBED = "absorbed";
+
+        /** The fix step opened a pull request for the case's causes. */
+        public static final String FIX_PR_OPENED = "fix_pr_opened";
+
+        /** The fix step added a commit to the case's open pull request. */
+        public static final String FIX_PR_UPDATED = "fix_pr_updated";
     }
 }

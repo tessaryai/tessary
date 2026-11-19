@@ -10,10 +10,13 @@
 # reaper re-armed traces a fixture had claimed but not yet recomputed, so they never settled. The retention
 # sweeper's first pass, a minute in, deletes any row a test seeds at a fixed date past the 90-day TTL. The triage drain
 # would claim a triage job a test enqueued to claim itself (BehaviorTriageWorker#tick). Automatic RCA is on for every
-# org a fixture creates, so its tick would queue RCA on a case a test is still asserting on (RcaAutoTrigger#tick).
+# org a fixture creates, so its tick would queue RCA on a case a test is still asserting on (RcaAutoTrigger#tick). The
+# fix drain would claim a fix run a test queued to run itself (FixWorker#tick).
 tessary:
   rca:
     auto-interval-ms: 86400000
+  fix:
+    heartbeat-ms: 86400000
   classifier:
     heartbeat-ms: 86400000
     initial-delay-ms: 86400000
