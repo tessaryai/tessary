@@ -164,12 +164,14 @@ record FixRunRepositoryTest(
 
     @Test
     void theCaseReadsItsNewestRunAndAFailedRunKeepsItsReason() {
+        emptyTheQueue();
         FixSeeds.Seeded s = seed("fix-run-latest");
         String older = fixRuns.skip(s.projectId(), s.caseId(), s.reportId(), Reason.NO_REPO, List.of(), T0)
                 .orElseThrow();
         String newer = fixRuns.enqueue(
                         s.projectId(), s.caseId(), FixSeeds.rerun(trigger, s), List.of(), T0.plusSeconds(1))
                 .orElseThrow();
+        assertEquals(newer, fixRuns.claimNext(T0.plusSeconds(1)).orElseThrow().id());
         fixRuns.fail(newer, "GIT.BRANCH_MOVED", T0.plusSeconds(2));
 
         FixRunRow latest = fixRuns.latestByCase(s.projectId(), s.caseId()).orElseThrow();
@@ -180,6 +182,20 @@ record FixRunRepositoryTest(
         assertEquals(
                 List.of(newer, Status.FAILED, "GIT.BRANCH_MOVED"),
                 List.of(latest.id(), latest.status(), latest.reason()));
+    }
+
+    /** A finished run whose trail line then failed must keep how it ended, not trip the outcome check. */
+    @Test
+    void aRunThatAlreadyFinishedIsNotFailedAfterwards() {
+        FixSeeds.Seeded s = seed("fix-run-fail-after-finish");
+        String runId = fixRuns.enqueue(s.projectId(), s.caseId(), s.reportId(), List.of(), T0)
+                .orElseThrow();
+        fixRuns.finish(runId, new Finish(Outcome.NO_CHANGE, null, null, null, List.of(), 0), T0);
+
+        fixRuns.fail(runId, "AGENT_RUN.RUN_FAILED", T0.plusSeconds(1));
+
+        FixRunRow run = fixRuns.findById(s.projectId(), runId).orElseThrow();
+        assertEquals(List.of(Status.DONE, Outcome.NO_CHANGE), List.of(run.status(), run.outcome()));
     }
 
     @Test

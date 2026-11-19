@@ -159,9 +159,14 @@ public class FixRunRepository {
                 .update();
     }
 
-    /** @param reason an error code, or a {@link FixRunRow.Reason} */
+    /**
+     * Only a running run fails: a run that finished before a later step threw keeps how it ended.
+     *
+     * @param reason an error code, or a {@link FixRunRow.Reason}
+     */
     public void fail(String id, String reason, Instant now) {
-        jdbc.sql("UPDATE fix_run SET status = 'failed', reason = :reason, updated_at = :now WHERE id = :id")
+        jdbc.sql("UPDATE fix_run SET status = 'failed', reason = :reason, updated_at = :now"
+                        + " WHERE id = :id AND status = 'running'")
                 .param("reason", reason)
                 .param("now", now.toString())
                 .param("id", id)

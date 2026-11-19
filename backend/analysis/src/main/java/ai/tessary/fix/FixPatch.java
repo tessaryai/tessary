@@ -12,8 +12,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Checks a sandbox's patch again before any of it reaches the repository, with the sandbox's own rules: the sandbox is
- * the agent's machine, so its word is not enough. A patch with one path Tessary may not write is refused whole, so a
- * pull request never carries half a change.
+ * the agent's machine, so its word is not enough. A patch with one path Tessary may not write is refused whole. Paths
+ * the sandbox itself refused (its tool config, for one) never reach the patch's files, and the rest is delivered.
  */
 final class FixPatch {
 
