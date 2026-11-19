@@ -26,10 +26,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,8 +58,15 @@ public class GithubTokenService implements GitTokenService {
     private final ConcurrentMap<String, CachedToken> cache = new ConcurrentHashMap<>();
     // Collapses concurrent cache-miss mints into one GitHub request.
     private final ConcurrentMap<String, Object> mintLocks = new ConcurrentHashMap<>();
+    // The read-only clone tokens, apart from the full ones so a clone can never be handed a write token.
+    private final ConcurrentMap<String, CachedToken> cloneCache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Object> cloneMintLocks = new ConcurrentHashMap<>();
 
-    private record CachedToken(String token, Instant expiresAt) {}
+    /** What a sandbox clone may do with an App installation token. */
+    static final String CLONE_SCOPE = "{\"permissions\":{\"contents\":\"read\"}}";
+
+    /** {@code permissions} is what GitHub says the token can do, e.g. {@code contents -> write}. */
+    private record CachedToken(String token, Instant expiresAt, Map<String, String> permissions) {}
 
     @Autowired
     public GithubTokenService(GithubAppProperties props, SecretBox secretBox, ObjectMapper mapper) {
@@ -91,33 +101,60 @@ public class GithubTokenService implements GitTokenService {
 
     @Override
     public String authHeader(GitIntegrationRow integ) {
+        return "Bearer " + token(integ, cache, mintLocks, null, false).token();
+    }
+
+    /** App connections get a token that can only read contents; a PAT cannot be narrowed, so it is returned as is. */
+    @Override
+    public String cloneAuthHeader(GitIntegrationRow integ) {
+        return "Bearer "
+                + token(integ, cloneCache, cloneMintLocks, CLONE_SCOPE, false).token();
+    }
+
+    /**
+     * The permissions GitHub granted the App installation's full token, or empty for a PAT connection, which GitHub
+     * does not report. {@code refresh} mints a new token first, so a grant the owner just accepted shows at once.
+     */
+    public Optional<Map<String, String>> installationPermissions(GitIntegrationRow integ, boolean refresh) {
+        if (patToken(integ).isPresent()) return Optional.empty();
+        return Optional.of(token(integ, cache, mintLocks, null, refresh).permissions());
+    }
+
+    /** {@code scope} narrows an App token (null asks for all the installation grants). */
+    private CachedToken token(
+            GitIntegrationRow integ,
+            ConcurrentMap<String, CachedToken> tokens,
+            ConcurrentMap<String, Object> locks,
+            @Nullable String scope,
+            boolean refresh) {
         // Cache check first, so an App-mode hit returns before any AES-GCM open.
         String key = integ.id();
-        CachedToken cached = cache.get(key);
-        if (isFresh(cached)) {
-            return "Bearer " + cached.token();
+        CachedToken cached = tokens.get(key);
+        if (!refresh && isFresh(cached)) {
+            return cached;
         }
         // PAT fallback before the App-configured gate, which would reject a PAT integration.
         Optional<String> pat = patToken(integ);
         if (pat.isPresent()) {
             // No cache entry: a PAT has no expiry, so decrypting per call is the only way to honor revocation promptly.
-            return "Bearer " + pat.get();
+            return new CachedToken(pat.get(), Instant.MAX, Map.of());
         }
         if (!props.isConfigured()) {
             throw new TessaryException(GitError.MISSING_APP_CONFIG, LABEL);
         }
         // The mint runs inside the monitor on purpose to collapse a thundering herd. On JDK 25 (JEP 491) a virtual
         // thread blocking in synchronized does not pin its carrier.
-        Object lock = mintLocks.computeIfAbsent(key, k -> new Object());
+        Object lock = locks.computeIfAbsent(key, k -> new Object());
         synchronized (lock) {
-            CachedToken recheck = cache.get(key);
-            if (isFresh(recheck)) {
-                return "Bearer " + recheck.token();
+            CachedToken recheck = tokens.get(key);
+            // A refresh accepts only a token another caller minted while this one waited.
+            if (isFresh(recheck) && (!refresh || recheck != cached)) {
+                return recheck;
             }
             long installationId = installationId(integ); // AES-GCM open happens only on a real miss
-            CachedToken minted = mintInstallationToken(integ, installationId);
-            cache.put(key, minted);
-            return "Bearer " + minted.token();
+            CachedToken minted = mintInstallationToken(normHost(integ.host()), installationId, scope);
+            tokens.put(key, minted);
+            return minted;
         }
     }
 
@@ -180,7 +217,7 @@ public class GithubTokenService implements GitTokenService {
         if (!props.isConfigured()) {
             throw new TessaryException(GitError.MISSING_APP_CONFIG, LABEL);
         }
-        return mintInstallationToken(normHost(host), installationId).token();
+        return mintInstallationToken(normHost(host), installationId, null).token();
     }
 
     public java.util.List<InstalledRepo> listInstallationRepos(long installationId, String host) {
@@ -300,17 +337,18 @@ public class GithubTokenService implements GitTokenService {
         return (host == null || host.isBlank()) ? "api.github.com" : host;
     }
 
-    private CachedToken mintInstallationToken(GitIntegrationRow integ, long installationId) {
-        return mintInstallationToken(normHost(integ.host()), installationId);
-    }
-
-    private CachedToken mintInstallationToken(String host, long installationId) {
+    /** {@code scope} is the JSON body that narrows the token; null asks for all the installation grants. */
+    private CachedToken mintInstallationToken(String host, long installationId, @Nullable String scope) {
         String jwt = appJwt();
         URI uri = UrlGuard.requirePublicHttp(
                 "https://" + host + "/app/installations/" + installationId + "/access_tokens");
-        HttpRequest req = HttpRequest.newBuilder(uri)
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .header("Authorization", "Bearer " + jwt)
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri);
+        if (scope == null) {
+            builder.POST(HttpRequest.BodyPublishers.noBody());
+        } else {
+            builder.POST(HttpRequest.BodyPublishers.ofString(scope)).header("Content-Type", "application/json");
+        }
+        HttpRequest req = builder.header("Authorization", "Bearer " + jwt)
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .timeout(Duration.ofSeconds(30))
@@ -334,12 +372,20 @@ public class GithubTokenService implements GitTokenService {
             if (token == null || token.isBlank() || expiresAt == null || expiresAt.isBlank()) {
                 throw new TessaryException(GitError.TOKEN_MINT_FAILED, LABEL);
             }
-            return new CachedToken(token, Instant.parse(expiresAt));
+            return new CachedToken(token, Instant.parse(expiresAt), permissions(node.path("permissions")));
         } catch (TessaryException e) {
             throw e;
         } catch (Exception e) {
             throw new TessaryException(GitError.TOKEN_MINT_FAILED, e, LABEL);
         }
+    }
+
+    private static Map<String, String> permissions(JsonNode node) {
+        Map<String, String> out = new LinkedHashMap<>();
+        node.properties().forEach(e -> {
+            if (e.getValue().isTextual()) out.put(e.getKey(), e.getValue().asText());
+        });
+        return Map.copyOf(out);
     }
 
     private String appJwt() {

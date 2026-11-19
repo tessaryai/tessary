@@ -14,6 +14,8 @@ import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationDtos.ConnectRequest;
 import ai.tessary.git.GitIntegrationDtos.DeleteResponse;
 import ai.tessary.git.GitIntegrationDtos.GitIntegrationView;
+import ai.tessary.git.GitProviderClient.WriteAccess;
+import ai.tessary.git.GitProviderClient.WriteBlock;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.OrgMembership;
@@ -115,6 +117,57 @@ record GitIntegrationServiceTest(
         assertTrue(svc.find(pid).isEmpty(), "a refused connect leaves the project unbound");
     }
 
+    // ---- write access on the view -----------------------------------------------------------------
+
+    /** A provider whose write check answers with {@code write}, or throws {@code failure}. */
+    private record WriteStub(WriteAccess write, RuntimeException failure) implements GitProviderClient {
+        @Override
+        public GitProvider provider() {
+            return GitProvider.GITHUB;
+        }
+
+        @Override
+        public GitProviderClient.RepoAccess verifyAccess(GitIntegrationRow integ) {
+            return new GitProviderClient.RepoAccess("main");
+        }
+
+        @Override
+        public String resolveHeadSha(GitIntegrationRow integ, String branch) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public WriteAccess writeAccess(GitIntegrationRow integ) {
+            if (failure != null) throw failure;
+            return write;
+        }
+    }
+
+    @Test
+    void view_carriesTheProvidersWriteAnswer() {
+        String pid = TenantFixture.bootstrap(tenants, "git-write-yes").project().id();
+        GitIntegrationService svc = withProvider(new WriteStub(WriteAccess.granted(), null));
+
+        GitIntegrationView view = svc.view(svc.connectVerified(pid, pat(null)));
+
+        assertTrue(view.canWrite());
+        assertNull(view.writeReason());
+    }
+
+    /** The settings page and the connect answer must not fail because the write check could not run. */
+    @Test
+    void view_aWriteCheckThatThrowsReadsAsCheckFailed() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "git-write-fail").project().id();
+        GitIntegrationService svc = withProvider(
+                new WriteStub(null, new TessaryException(GitError.PROVIDER_CALL_FAILED, "github", "HTTP 502")));
+
+        GitIntegrationView view = svc.view(svc.connectVerified(pid, pat(null)));
+
+        assertEquals(false, view.canWrite());
+        assertEquals(WriteBlock.CHECK_FAILED, view.writeReason());
+    }
+
     // ---- the endpoints and the refusals behind them --------------------------------------------
 
     private static TenantContext session(Principal u) {
@@ -132,7 +185,10 @@ record GitIntegrationServiceTest(
 
         assertNull(ctl.get(owner, org, proj).data(), "nothing is connected yet");
         GitIntegrationView view = ctl.connect(owner, org, proj, pat(null)).data();
-        assertEquals(new GitIntegrationView("github", null, "acme", "web", "trunk"), view);
+        assertEquals(
+                new GitIntegrationView("github", null, "acme", "web", "trunk", false, WriteBlock.UNSUPPORTED),
+                view,
+                "a provider that cannot write says so on the view");
         assertEquals(view, ctl.get(owner, org, proj).data());
         assertEquals(new DeleteResponse(true), ctl.disconnect(owner, org, proj).data());
         assertEquals(new DeleteResponse(false), ctl.disconnect(owner, org, proj).data(), "already gone");

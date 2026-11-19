@@ -53,4 +53,35 @@ class GitCloneUrlsTest {
     void authenticated_buildsACloneUrlOnTheGitHost(String header, String host, String expected) {
         assertEquals(Optional.of(expected), url(header, host));
     }
+
+    /** A provider with a narrower clone token, or none it can mint right now. */
+    private record Narrowed(String full, String narrowed) implements GitTokenService {
+        @Override
+        public GitProvider provider() {
+            return GitProvider.GITHUB;
+        }
+
+        @Override
+        public String authHeader(GitIntegrationRow integ) {
+            return full;
+        }
+
+        @Override
+        public String cloneAuthHeader(GitIntegrationRow integ) {
+            if (narrowed == null) throw new IllegalStateException("mint failed");
+            return narrowed;
+        }
+    }
+
+    /** The clone gets the narrowed token, and no URL at all when that token cannot be minted. */
+    @ParameterizedTest
+    @CsvSource(
+            nullValues = "NULL",
+            value = {"ghs_read, https://x-access-token:ghs_read@github.com/acme/web.git", "NULL, NULL"})
+    void authenticated_usesTheCloneTokenAndNeverFallsBackToTheFullOne(String clone, String expected) {
+        Optional<String> url = GitCloneUrls.authenticated(
+                new GitProviderFactory(List.of(), List.of(new Narrowed("Bearer ghs_full", clone))), repo(null));
+
+        assertEquals(Optional.ofNullable(expected), url);
+    }
 }

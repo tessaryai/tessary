@@ -36,8 +36,7 @@ public class GitIntegrationController {
     public ApiResponse<GitIntegrationView> get(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
         Resolved r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(
-                service.find(r.project().id()).map(GitIntegrationView::from).orElse(null));
+        return ApiResponse.ok(service.find(r.project().id()).map(service::view).orElse(null));
     }
 
     @PostMapping("/connect")
@@ -47,8 +46,7 @@ public class GitIntegrationController {
             @PathVariable String projectSlug,
             @Valid @RequestBody ConnectRequest req) {
         Resolved r = requireOwner(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(
-                GitIntegrationView.from(service.connectVerified(r.project().id(), req)));
+        return ApiResponse.ok(service.view(service.connectVerified(r.project().id(), req)));
     }
 
     @DeleteMapping

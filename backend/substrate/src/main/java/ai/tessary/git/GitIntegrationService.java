@@ -3,7 +3,10 @@ package ai.tessary.git;
 
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationDtos.ConnectRequest;
+import ai.tessary.git.GitIntegrationDtos.GitIntegrationView;
 import ai.tessary.git.GitProviderClient.RepoAccess;
+import ai.tessary.git.GitProviderClient.WriteAccess;
+import ai.tessary.git.GitProviderClient.WriteBlock;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -111,6 +114,28 @@ public class GitIntegrationService {
                 row.repoOwner(),
                 row.repoName());
         return row;
+    }
+
+    /**
+     * Asks the provider live whether Tessary can push and open pull requests. Never throws: a failed check reads as
+     * {@link WriteBlock#CHECK_FAILED}, so it cannot break the settings page or a connect.
+     */
+    public WriteAccess writeAccess(GitIntegrationRow row) {
+        try {
+            GitProviderClient client = providers.client(row.providerEnum());
+            if (client == null) return WriteAccess.blocked(WriteBlock.UNSUPPORTED);
+            return client.writeAccess(row);
+        } catch (RuntimeException e) {
+            log.warn(
+                    "git write access check failed projectId={} error={}",
+                    row.projectId(),
+                    e.getClass().getSimpleName());
+            return WriteAccess.blocked(WriteBlock.CHECK_FAILED);
+        }
+    }
+
+    public GitIntegrationView view(GitIntegrationRow row) {
+        return GitIntegrationView.from(row, writeAccess(row));
     }
 
     public boolean delete(String projectId) {
