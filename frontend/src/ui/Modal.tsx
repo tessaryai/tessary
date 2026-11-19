@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "./cn";
 import { IconButton } from "./Button";
@@ -31,6 +31,7 @@ export function Modal({
   size?: Size;
 }) {
   const dlgRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     const dlg = dlgRef.current!;
@@ -58,6 +59,7 @@ export function Modal({
   return (
     <dialog
       ref={dlgRef}
+      aria-labelledby={titleId}
       className={cn(
         "p-0 m-auto rounded-modal bg-surface text-fg border border-border-strong",
         "backdrop:bg-scrim backdrop:backdrop-blur-sm",
@@ -67,7 +69,9 @@ export function Modal({
     >
       <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-3">
         <div className="min-w-0">
-          <h2 className="text-h2 text-fg">{title}</h2>
+          <h2 id={titleId} className="text-h2 text-fg">
+            {title}
+          </h2>
           {subtitle && <p className="text-small text-muted mt-1">{subtitle}</p>}
         </div>
         <IconButton label="Close" onClick={onClose} size="sm">
