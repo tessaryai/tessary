@@ -2597,6 +2597,7 @@ export interface components {
             decision: boolean;
             default_base_url: string;
             display_name: string;
+            frontier: boolean;
             model_name: string;
             /** @enum {string} */
             provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
@@ -3218,7 +3219,7 @@ export interface components {
             /** @enum {string} */
             group: "agent_vm" | "decision_calls";
             /** @enum {string} */
-            id: "rca" | "triage" | "agent_run" | "frustration";
+            id: "rca" | "triage" | "agent_run" | "fix" | "frustration";
             label: string;
             provider_options: components["schemas"]["ProviderOptionView"][];
         };
@@ -3484,6 +3485,7 @@ export interface components {
             display_name: string;
             /** @enum {string} */
             endpoint: "RUNTIME" | "MANTLE";
+            frontier: boolean;
             inference_profile_id: string;
             model_key: string;
             vendor: string;
@@ -3695,7 +3697,7 @@ export interface components {
         ProjectModelSetting: {
             created_at: string;
             /** @enum {string} */
-            lane: "rca" | "triage" | "agent_run" | "frustration";
+            lane: "rca" | "triage" | "agent_run" | "fix" | "frustration";
             model_key: string;
             project_id: string;
             updated_at: string;

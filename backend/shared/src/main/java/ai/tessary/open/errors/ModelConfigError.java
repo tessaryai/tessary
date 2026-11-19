@@ -14,6 +14,11 @@ public enum ModelConfigError implements ErrorCode {
             "Model %s cannot run the %s lane — that lane runs an agent in a sandbox, which needs a model that can drive a long tool-use loop"),
     /** Unlike {@link #MODEL_NOT_AGENTIC}, the model could do the work and is simply not offered for it. */
     MODEL_NOT_OFFERED_FOR_LANE(HttpStatus.BAD_REQUEST, "Model %s is not offered for the %s lane"),
+    /** The fix lane has no deployment default to fall back to. */
+    FRONTIER_MODEL_MISSING(
+            HttpStatus.PRECONDITION_FAILED,
+            "The %s lane runs only on a frontier model. Add a key for a provider that serves one under Settings →"
+                    + " Providers."),
     SECRET_KEY_NOT_CONFIGURED(HttpStatus.PRECONDITION_FAILED, "TESSARY_SECRET_KEY is required to store credentials"),
     MISSING_CREDENTIALS(
             HttpStatus.PRECONDITION_FAILED,

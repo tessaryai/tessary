@@ -131,7 +131,7 @@ public class ProjectModelSettingController {
         Set<ModelProvider> configured = settings.configuredProviders(r.org().id());
         boolean platformOffered = configured.contains(ModelProvider.PLATFORM);
         List<ModelCatalog.CatalogEntry> offeredCatalog = ModelCatalog.entries().stream()
-                .filter(e -> e.agentic() || e.decision())
+                .filter(e -> e.agentic() || e.decision() || e.frontier())
                 .filter(e -> platformOffered || e.provider() != ModelProvider.PLATFORM)
                 .toList();
         List<LaneView> lanes = Arrays.stream(ModelLane.values())

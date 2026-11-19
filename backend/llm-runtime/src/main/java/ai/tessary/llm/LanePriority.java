@@ -12,7 +12,8 @@ import java.util.Optional;
  * Provider first, model second: walk a lane's providers in order and take the first the org holds a key for, then that
  * provider's default. A flat model list let one provider's second-best outrank another's best. There is no per-lane
  * default model, since it would name a provider the org may not have. TRIAGE and AGENT_RUN share RCA's list. Every chat
- * provider appears on every agent lane, which requires a launcher mode for each. Model keys use the two spellings
+ * provider appears on every agent lane but FIX, which requires a launcher mode for each; FIX names only the providers
+ * of a frontier model. Model keys use the two spellings
  * {@link ProjectModelSettings} decodes.
  */
 public final class LanePriority {
@@ -36,6 +37,7 @@ public final class LanePriority {
     // OpenRouter names carry their own slash ("openai/gpt-6.1-sol" is one name); the launcher's toProviderModel handles
     // that.
     private static final String OR_SOL = "OPENROUTER:openai/gpt-6.1-sol";
+    private static final String OR_OPUS_5_5 = "OPENROUTER:anthropic/claude-opus-5.5";
     private static final String OR_LUNA = "OPENROUTER:openai/gpt-6-luna";
     private static final String KIMI_K3_1_PRO = "MOONSHOT:kimi-k3.1-pro";
     private static final String GEMINI_4_HYDROGEN = "GEMINI:gemini-4-hydrogen";
@@ -85,6 +87,14 @@ public final class LanePriority {
         m.put(ModelLane.RCA, agentVmOrder);
         m.put(ModelLane.TRIAGE, agentVmOrder);
         m.put(ModelLane.AGENT_RUN, agentVmOrder);
+        // Frontier models only, so no CUSTOM or PLATFORM: an org with neither of these keys gets no fix model.
+        m.put(
+                ModelLane.FIX,
+                List.of(
+                        new ProviderOption(ModelProvider.BEDROCK, List.of(OPUS_5_5), OPUS_5_5),
+                        new ProviderOption(ModelProvider.ANTHROPIC, List.of(ANTHROPIC_OPUS_5_5), ANTHROPIC_OPUS_5_5),
+                        new ProviderOption(ModelProvider.OPENAI, List.of(GPT_6_1_SOL), GPT_6_1_SOL),
+                        new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_OPUS_5_5, OR_SOL), OR_OPUS_5_5)));
         m.put(
                 ModelLane.FRUSTRATION,
                 List.of(

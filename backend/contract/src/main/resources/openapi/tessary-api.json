@@ -3418,6 +3418,9 @@
           "display_name" : {
             "type" : "string"
           },
+          "frontier" : {
+            "type" : "boolean"
+          },
           "model_name" : {
             "type" : "string"
           },
@@ -3447,6 +3450,7 @@
           "decision",
           "default_base_url",
           "display_name",
+          "frontier",
           "model_name",
           "provider",
           "vendor"
@@ -6121,6 +6125,7 @@
               "rca",
               "triage",
               "agent_run",
+              "fix",
               "frustration"
             ],
             "type" : "string"
@@ -7227,6 +7232,9 @@
             ],
             "type" : "string"
           },
+          "frontier" : {
+            "type" : "boolean"
+          },
           "inference_profile_id" : {
             "type" : "string"
           },
@@ -7241,6 +7249,7 @@
           "agentic",
           "display_name",
           "endpoint",
+          "frontier",
           "inference_profile_id",
           "model_key",
           "vendor"
@@ -8218,6 +8227,7 @@
               "rca",
               "triage",
               "agent_run",
+              "fix",
               "frustration"
             ],
             "type" : "string"

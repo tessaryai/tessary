@@ -134,6 +134,9 @@ class ProjectModelSettingViewTest {
 
         // The surviving lanes, the set a client may PUT.
         Set<String> laneIds = json.at("/lanes").findValuesAsText("id").stream().collect(Collectors.toSet());
-        assertEquals(Set.of("rca", "triage", "agent_run", "frustration"), laneIds);
+        assertEquals(Set.of("rca", "triage", "agent_run", "fix", "frustration"), laneIds);
+        // The settings page narrows the fix lane's picker by this flag.
+        assertTrue(json.at("/catalog_models/0/frontier").isBoolean());
+        assertTrue(json.at("/models/0/frontier").isBoolean());
     }
 }
