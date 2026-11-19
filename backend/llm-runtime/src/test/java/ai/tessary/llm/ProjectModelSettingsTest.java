@@ -31,8 +31,8 @@ class ProjectModelSettingsTest {
 
     private static final String PID = "p1";
     private static final String ORG = "org1";
-    private static final String HAIKU = "anthropic.claude-haiku-4-5";
-    private static final String TERRA = "openai.gpt-5.6-terra";
+    private static final String HAIKU = "anthropic.claude-haiku-5-5";
+    private static final String MANTLE_SOL = "openai.gpt-6.1-sol";
     private static final String SONNET = "anthropic.claude-sonnet-5-5";
     private static final String PLATFORM_SONNET = "PLATFORM:claude-sonnet-5-5";
 
@@ -121,7 +121,7 @@ class ProjectModelSettingsTest {
 
         configured(ModelProvider.GEMINI);
         assertEquals(
-                "GEMINI:gemini-3.1-pro-preview",
+                "GEMINI:gemini-4-hydrogen",
                 settings.resolve(PID, ModelLane.RCA).orElseThrow().modelKey(),
                 "with Bedrock gone, the next provider in the order supplies its own default");
     }
@@ -228,7 +228,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void aChatModelIsRefusedOnTheFrustrationLane() {
-        for (String chat : List.of(SONNET, "OPENROUTER:openai/gpt-6-sol", "GROK:grok-4.6")) {
+        for (String chat : List.of(SONNET, "OPENROUTER:openai/gpt-6.1-sol", "GROK:grok-4.7")) {
             TessaryException ex =
                     assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.FRUSTRATION, chat));
             assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), chat);
@@ -245,7 +245,7 @@ class ProjectModelSettingsTest {
     void anExplicitChoiceWhoseProviderIsGoneFallsBackToTheOrder() {
         // The credential was deleted after the choice: the lane keeps running and the row survives for when the key
         // returns.
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6")));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.7")));
         configured(ModelProvider.BEDROCK);
 
         var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
@@ -301,8 +301,8 @@ class ProjectModelSettingsTest {
      */
     @ParameterizedTest
     @CsvSource({
-        "RCA, OPENAI:gpt-5.5, anthropic.claude-sonnet-5-5",
-        "FRUSTRATION, OPENAI:gpt-5.5, TYPESAFE:jev-latest",
+        "RCA, OPENROUTER:anthropic/claude-sonnet-5.5, anthropic.claude-sonnet-5-5",
+        "FRUSTRATION, OPENROUTER:anthropic/claude-sonnet-5.5, TYPESAFE:jev-latest",
         "RCA, NOPE:some-model, anthropic.claude-sonnet-5-5",
         // A row from before Nova was removed must not pin a sandbox to a model that resolves nowhere.
         "RCA, amazon.nova-2-lite, anthropic.claude-sonnet-5-5"
@@ -319,8 +319,9 @@ class ProjectModelSettingsTest {
     @Test
     void aCatalogEntryThatIsNotAgentic_isRejectedOnTheSandboxLane() {
         // A real catalog entry, but not agentic, so not offered on a sandbox lane.
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.TRIAGE, "OPENAI:gpt-5.5"));
+        TessaryException ex = assertThrows(
+                TessaryException.class,
+                () -> settings.set(PID, ORG, ModelLane.TRIAGE, "OPENROUTER:anthropic/claude-sonnet-5.5"));
         assertEquals(ModelConfigError.MODEL_NOT_AGENTIC, ex.error());
     }
 
@@ -329,20 +330,20 @@ class ProjectModelSettingsTest {
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU)));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.BEDROCK, resolved.provider());
-        assertEquals("global.anthropic.claude-haiku-4-5-20251001-v1:0", resolved.modelId());
+        assertEquals("global.anthropic.claude-haiku-5-5", resolved.modelId());
         assertEquals(
-                "amazon-bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                "amazon-bedrock/global.anthropic.claude-haiku-5-5",
                 resolved.modelsDevId(),
                 "models.dev prices a Bedrock model under its region-scoped inference-profile id");
     }
 
     @Test
     void resolveAgenticModel_forAMantleRow_returnsBedrockMantle() {
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, TERRA)));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, MANTLE_SOL)));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.BEDROCK_MANTLE, resolved.provider());
         assertEquals(
-                "amazon-bedrock/openai.gpt-5.6-terra",
+                "amazon-bedrock/openai.gpt-6.1-sol",
                 resolved.modelsDevId(),
                 "LiteLLM's bedrock_mantle/ route prefix is not part of the models.dev id");
     }
@@ -351,11 +352,11 @@ class ProjectModelSettingsTest {
     void resolveAgenticModel_forACatalogRow_modelsDevIdNamesTheModelsDevProvider() {
         // modelId stays the name a person chose; the models.dev id carries models.dev's provider id, or the run's
         // rates are never found and it books unpriced.
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6")));
+        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.7")));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.GROK, resolved.provider());
-        assertEquals("grok-4.6", resolved.modelId());
-        assertEquals("xai/grok-4.6", resolved.modelsDevId());
+        assertEquals("grok-4.7", resolved.modelId());
+        assertEquals("xai/grok-4.7", resolved.modelsDevId());
     }
 
     @Test
