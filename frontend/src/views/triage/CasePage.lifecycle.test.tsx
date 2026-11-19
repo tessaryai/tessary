@@ -560,8 +560,13 @@ const fixPr = (over: Partial<FixPr> = {}): FixPr => ({
   updated_at: new Date(Date.now() - 5 * 60_000).toISOString(), ...over,
 });
 
-/** An analysed case, so no RCA bar competes with the fix's. */
-const fixCase = (fix: CaseDetail["fix"]) => plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1", fix });
+/** An analysed case whose RCA recorded its run, as every RCA now does, so the RCA's own run is done. */
+const fixCase = (fix: CaseDetail["fix"]) =>
+  plainCase({
+    rca: { ...ANSWER_REPORT, run: rcaRun({ state: "done", doing: null, ended_at: "2026-10-09T16:19:00Z" }) },
+    rca_report_id: "rca-1",
+    fix,
+  });
 
 describe("the fix pull request", () => {
   // Bug: a fix run waiting for a worker carries no agent run yet, and read as nothing at all.

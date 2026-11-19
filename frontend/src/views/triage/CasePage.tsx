@@ -176,12 +176,11 @@ export function CasePage() {
   const steps = run && detail.rca_report_id ? rcaSteps(api, detail.rca_report_id, run) : undefined;
   const latestFix = detail.fix?.latest_run;
   const fixSteps = fixRun && latestFix ? runSteps((after) => api.getFixSteps(latestFix.id, after), fixRun) : undefined;
-  // One bar at a time: while RCA waits, runs or stopped, the fix it would start has not begun.
-  const bar = run
-    ? runBar(run, RCA_BAR, steps, basePath, canProviders, now)
-    : fixRun
-      ? runBar(fixRun, FIX_BAR, fixSteps, basePath, canProviders, now)
-      : null;
+  // One bar at a time: while RCA waits, runs or stopped, the fix it would start has not begun. A finished RCA's run
+  // draws no bar, so the fix's shows.
+  const bar =
+    (run && runBar(run, RCA_BAR, steps, basePath, canProviders, now)) ??
+    (fixRun && runBar(fixRun, FIX_BAR, fixSteps, basePath, canProviders, now));
   const windowsSinceRca = c.windows_since_rca ?? 0;
   const frustration = detail.frustration ?? null;
   const groundedness = detail.groundedness ?? null;
