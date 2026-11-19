@@ -27,6 +27,18 @@ which its `FindingAdapter` supplies ([below](#method-text-from-a-findingadapter)
 
 A method file states facts about the instrument only. It never lists causes, examples of causes, or look-alikes: a list of candidates anchors the agent on them, and a line telling it to look further does not undo that. `RcaMethodFilesTest` holds each file to the four sections and keeps it off `get_finding`.
 
+### The fix files
+
+| file | what it holds | how it reaches the agent |
+|---|---|---|
+| `fix/system_prompt.md` | What to fix, what to read first (`dossier/causes.md`, `dossier/report.md`, the repo's `AGENTS.md` and `CLAUDE.md`), which checks to run and how to report them | The agent's system prompt |
+| `fix/prompt.md` | This run's facts, with `{placeholders}` | The first message, filled by `FixAgent` |
+| `fix/start_default.md` | The clone is at the default branch's head | In place of `{start}` on a first pull request |
+| `fix/start_branch.md` | The clone is at the open pull request's branch head, whose commits already fix some causes | In place of `{start}` when the run adds a commit |
+| `fix/response_schema.json` | The answer: `outcome` (`fixed` or `no_fix`), `title`, `why`, `causes_addressed`, `checks`, `no_fix_reason` | The run's JSON schema |
+
+The fix lane opens no MCP connection and mints no key: its inputs are the dossier files and the clone.
+
 ### Method text from a `FindingAdapter`
 
 A classifier outside the catalog has no file here. When a `FindingAdapter` owns its finding

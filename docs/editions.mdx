@@ -96,7 +96,7 @@ Nothing is lost while it is off. Classifiers keep evaluating every trace, findin
 
 ### Automatic RCA and Fix PRs
 
-Automatic RCA runs RCA on a live case when new windows join it, at most once every 6 hours for each case. Fix PRs opens or updates one pull request for each case after an RCA. Both start agent sessions on your own model provider key, and Tessary sets no spending cap on either. Fix PRs runs only on a frontier model.
+Automatic RCA runs RCA on a live case when new windows join it, at most once every 6 hours for each case. Fix PRs opens or updates one pull request for each case after an RCA. Both start agent sessions, and Tessary sets no spending cap on either. Automatic RCA runs on your own model provider key, or on Tessary Cloud, while you have none, on the model credit. Fix PRs runs only on a frontier model, so it always needs your own key.
 
 Both are on for every organization created after they shipped, in both editions. An organization that existed before keeps both off until an owner or admin turns them on under **Settings → Features**. Turning Automatic RCA on does not analyze windows that arrived earlier. [Cases](/concepts/cases#automatic-rca) and [Fix pull requests](/concepts/root-cause-analysis#fix-pull-requests) cover the rules.
 

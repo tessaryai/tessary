@@ -105,7 +105,7 @@ An owner or admin turns it on under **Settings → Features**, where the row is 
 
 ### What must be true
 
-The fix step runs only when all of these hold. When one does not, the case page says which, with a link to where you can fix it.
+The fix step runs only when all of these hold. With Fix PRs on, when another requirement does not hold, the case page says which, with a link to where you can fix it. With Fix PRs off, the step does not run and the case page shows nothing about it.
 
 | Requirement | Where you set it |
 | --- | --- |
@@ -126,7 +126,7 @@ Each fix run is an agent session on that frontier model, billed to your own prov
 | The pull request was merged, and the problem comes back. | Opens a new pull request. |
 | The pull request was closed without merging. | Treats that as a no. The same causes never go into another pull request on that case. A cause the report has not raised before can open a new one. |
 
-Tessary reads the pull request's state from GitHub before each fix run, so it needs no webhook. It sets no cap on how many pull requests are open at once on a repository. If someone pushes to the branch while Tessary writes to it, Tessary rebuilds on the new head, or reruns the agent once on it when the push touched the same files, then stops and records why.
+Tessary reads the pull request's state from GitHub before each fix run, so it needs no webhook. It sets no cap on how many pull requests are open at once on a repository. If someone pushes to the branch while Tessary writes to it, Tessary rebuilds on the new head, or reruns the agent once on it when the push touched the same files, then stops, and the run is recorded as failed.
 
 ### What the agent does
 
@@ -142,7 +142,7 @@ The pull request description starts with what happened, then gives the evidence,
 
 Fix PRs is the one feature that writes to your repository, so how Tessary holds the credential matters.
 
-- **GitHub App, recommended.** The app needs **Contents: write** and **Pull requests: write**. Tessary uses that permission to push and open pull requests. The sandbox never receives it: Tessary mints the sandbox's clone token with **Contents: read** only, so the agent holds no write access. An app installed before Fix PRs shipped asks you to accept the new permissions on its installation.
+- **GitHub App, recommended.** The app needs **Contents: write** and **Pull requests: write**. Tessary uses that permission to push and open pull requests. The sandbox never receives it: Tessary mints the sandbox's clone token with **Contents: read** only, so the agent holds no write access. An app created before Fix PRs shipped holds read-only permission until you grant **Contents: write** and **Pull requests: write** on the app in GitHub, then accept the new permissions on its installation.
 - **Personal access token.** Tessary stores one token and uses it for the clone and for the pull request. The sandbox receives that token at clone time, and it can write if you granted write access. Tessary removes the token from the clone's remote URL and git configuration straight after the clone and scrubs it from the agent's output, but the session still starts with it. Use a fine-grained token limited to the one repository, with **Contents: write** and **Pull requests: write**. A read-only token still works for RCA, and Fix PRs then report that Tessary cannot write.
 
 [Connect a GitHub repository](/self-hosting/setup#optional-connect-a-github-repository) covers both ways to connect.

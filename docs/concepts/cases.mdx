@@ -79,9 +79,9 @@ Every state change writes a line to the case's activity trail in the same transa
 
 Running RCA does not close a case to new findings. A later positive on the same cause keeps joining the case, so one problem stays one case from the first finding to the day you close it.
 
-Each RCA report records which findings it read. A report never changes after it is written, so a window that joins afterward is not in it. The case page counts those windows, for example **2 new windows since the last RCA**. Once a report exists the button reads **Re-run RCA**, and it stays disabled while a run is in progress. A re-run reads every finding the case holds when it starts and writes a new report, and the case page shows the newest one.
+Each RCA report records which findings it read. A report never changes after it is written, so a window that joins afterward, meaning a finding that joins the case, is not in it. The case page counts those windows, for example **2 new windows since the last RCA**. Once a report exists the button reads **Re-run RCA**, and it stays disabled while a run is in progress. A re-run reads every finding the case holds when it starts and writes a new report, and the case page shows the newest one.
 
-After each RCA finishes, [Fix PRs](/concepts/root-cause-analysis#fix-pull-requests) can open or update a pull request for the case. A case can be closed or absorbed whether or not it has a report.
+After each RCA finishes, [Fix PRs](/concepts/root-cause-analysis#fix-pull-requests) can open or update a pull request for the case.
 
 Cases that an earlier version locked when someone pressed **Run RCA** stay as they were: they take no new findings, and the cause's next positive opens a new case. Nothing converts them.
 
@@ -95,7 +95,7 @@ Every 15 minutes, Tessary looks for live cases that hold windows their newest RC
 - No RCA on the case is queued or running.
 - The case's newest RCA started more than 6 hours ago, or the case has none.
 
-Each run is an agent session on your organization's model provider, so it spends against your own key, with no cap. Organizations created after Automatic RCA shipped have it on, on Tessary Cloud and self-hosted alike. An older organization keeps it off until an owner or admin turns it on.
+Each run is an agent session on your organization's model provider, with no cap. It spends against your own key, or, on Tessary Cloud while you have no key, the [model credit](/cloud/usage-and-credit#the-model-credit). Organizations created after Automatic RCA shipped have it on, on Tessary Cloud and self-hosted alike. An older organization keeps it off until an owner or admin turns it on.
 
 ## Where a case reaches you
 

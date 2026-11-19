@@ -13,7 +13,6 @@ The stages are separate on purpose. Each answers a different question with a dif
 | Classifiers | Did something move? | Spans tagged with `tessary.call_site.id`, and enough traffic for `duration_drift`, `cost_drift` and `tool_error` to build a reference | A finding, plus references to the traces it was seen in |
 | Triage | Does the claim hold? | A configured LLM (large language model) provider, a running sandbox, and automatic triage turned on for your organization, which is off by default self-hosted | A case, or a closed finding |
 | Root-cause analysis | What change caused it? | A case, plus a connected repository when you want answers about the code | A verdict, a one-sentence summary, causes with cited traces, and the checks it ruled out |
-| Fix pull request | Can the cause be fixed in code? | A finished RCA, Fix PRs turned on, a repository Tessary can write to, and a frontier model | A pull request on your repository for the causes it is sure of, or the reason it opened none |
 
 <Note>
   Tessary Cloud differs from a self-hosted instance in three ways:
@@ -67,7 +66,7 @@ The run returns a verdict, a one-sentence summary, the causes it found with the 
 
 [Root-cause analysis](/concepts/root-cause-analysis) covers what the agent is given, what it is deliberately not told, and how its output is validated before it becomes a report.
 
-## A fix pull request proposes the change
+## After the fourth stage: a fix pull request
 
 A case stays live after RCA, so later windows keep joining it and a re-run reads them. When an RCA finishes, Tessary can open a pull request that fixes the causes the report is sure of: confidence `high`, a type that code can fix, and a file in your repository. It opens one pull request for each case and adds a commit when a later RCA finds a new cause. It never merges. [Fix pull requests](/concepts/root-cause-analysis#fix-pull-requests) covers what it needs and how it handles tokens.
 
