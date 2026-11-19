@@ -178,7 +178,7 @@ and keeps the span, and a dropped name drops the version with it. Attribute rows
 
 Ingest never looks a prompt up. The pair is stored as text, every read (usage, the traces and sessions
 filters) keys on the name, and a name that matches no prompt in the project is kept and linked to nothing,
-so a prompt link can never fail or slow an ingest batch. The name is trimmed the way prompt names are
+so a prompt link can never fail or slow an ingest batch. Redaction rules never rewrite the pair (`GenAiAttributes.isRedactionExempt`, beside the usage and cost keys): a name and version identify a prompt the org stored, and a phone-shaped digit run in either would otherwise break the link. The name is trimmed the way prompt names are
 (`PromptNames.lookupName`), so a span and the prompt it names compare equal.
 
 `GET .../traces` and the two `GET .../sessions` routes take `promptName` and `promptVersion` (ignored

@@ -143,6 +143,14 @@ public final class GenAiAttributes {
     }
 
     /**
+     * Keys a redaction rule never rewrites: the quantities above, and the prompt link, whose name and version identify
+     * a prompt the org stored. A phone-shaped digit run in either would otherwise break the link to that prompt.
+     */
+    public static boolean isRedactionExempt(String key) {
+        return isUsageOrCostKey(key) || PROMPT_NAME.equals(key) || PROMPT_VERSION.equals(key);
+    }
+
+    /**
      * Unknown or blank returns null, as {@link KindNormalizer}'s open enum does. CHAIN maps to {@code invoke_workflow}.
      */
     public static @org.jspecify.annotations.Nullable String operationNameForSpanKind(

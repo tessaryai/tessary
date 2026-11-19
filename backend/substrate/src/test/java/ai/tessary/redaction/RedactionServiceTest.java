@@ -233,6 +233,21 @@ class RedactionServiceTest {
     }
 
     @Test
+    void redactBatch_leavesThePromptLinkAsSentAndRedactsTheRest() {
+        // Bug: a digit run in a prompt name or version matches the phone rule, so the span no longer names its prompt.
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("tessary.prompt.name", "orders/reply-5551234567");
+        metadata.put("tessary.prompt.version", "5551234567");
+        metadata.put("note", "call 5551234567");
+
+        RawEntry out = svc.redactBatch(PID, List.of(span("hi", metadata))).getFirst();
+
+        assertEquals("orders/reply-5551234567", out.metadata().get("tessary.prompt.name"));
+        assertEquals("5551234567", out.metadata().get("tessary.prompt.version"));
+        assertEquals("call [REDACTED_PHONE]", out.metadata().get("note"));
+    }
+
+    @Test
     void redactBatch_afterThePoolIsClosedRunsOnTheCaller() {
         // @PreDestroy closes the pool while a drainer can still hold a claimed batch.
         svc.shutdownPool();
