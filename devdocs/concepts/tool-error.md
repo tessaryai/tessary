@@ -450,7 +450,7 @@ duplicate case.
 | Level | Guarantee | Enforced by |
 |---|---|---|
 | finding | one **unruled, open** row per cause | `ux_finding_live` on `(project_id, classifier_key, cause_key) WHERE status = 'open' AND triage_verdict IS NULL` |
-| case | one live case per subject | `ux_eval_case_live`, via `CaseKey(detector, subjectKind, subjectId, metric)`; `CaseLedger.openOrJoin` looks for a live, unlocked case on the key first |
+| case | one live case per subject | `ux_eval_case_live`, via `CaseKey(detector, subjectKind, subjectId, metric)`; `CaseLedger.openOrJoin` looks for a live case on the key first. Only a case RCA locked before cases stayed live carries `locked_at`, and it is skipped, so a key can hold such frozen cases beside its one live one |
 | join, not reopen | a closed case is final; a later positive on the same key joins the still-open case, or opens a fresh one if the last is resolved | `CaseLedger.openOrJoin` |
 | verdict | a ruling leaves `ux_finding_live` by construction, so no upsert can conflict onto a ruled row — the same cause firing again inserts a fresh open row instead | the unique index itself |
 

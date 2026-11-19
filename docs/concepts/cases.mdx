@@ -31,11 +31,11 @@ A ruling changes nothing about the classifier itself. It never moves a baseline 
 
 - **An LLM (large language model) provider credential**, configured in-app under **Settings → Providers**. Triage jobs park on a missing credential and re-check later rather than burning their retries, so adding the key afterward lets them proceed. On Tessary Cloud, a one-time model credit pays for triage while you have no key of your own. Once it is used up, add a key to keep triage running. See [Usage and credit](/cloud/usage-and-credit).
 - **A reachable `sandbox-runner` service**, which the self-hosting configuration starts by default. See [Set up Tessary](/self-hosting/setup#prerequisites) for the Docker socket group id it needs on Linux.
-- **Automatic triage turned on for your organization.** Self-hosted, it is off by default, because running it unattended drives model spend with no ceiling, so it is an opt-in an operator takes knowingly. An owner or admin turns it on under **Settings → Features**. With it off, findings are still filed and still visible, and nothing escalates them on its own. On Tessary Cloud, automatic triage is not available: triage starts only when you select **Run triage** on a finding.
+- **Automatic triage turned on for your organization.** Self-hosted, it is off by default, because running it unattended drives model spend with no ceiling, so it is an opt-in an operator takes knowingly. An owner or admin turns it on under **Settings → Features**. With it off, findings are still filed and still visible, and nothing escalates them on its own: select **Run triage** on a finding to start it by hand. On Tessary Cloud, automatic triage is on by default, and an owner or admin can turn it off in the same place.
 
 ## How findings collapse onto one case
 
-Three things identify a case: the classifier that noticed, the subject it fired against, and the measure. There is at most one live, unlocked case per that combination, which is what keeps a long-running problem readable.
+Three things identify a case: the classifier that noticed, the subject it fired against, and the measure. There is at most one live case per that combination, which is what keeps a long-running problem readable.
 
 The subject is the population, not the finding. A tool's failure rate rising in March and falling in April are two causes to explain and one thing to page about, so both land on the same case. The same holds for a call site whose latency moved twice.
 
@@ -73,13 +73,29 @@ A groundedness case comes through triage like most cases. Its finding says a cal
 
 Closing it restarts the call site's test the same way: the accumulator goes back to zero, and the call site learns its normal share again from the traces after the close. **Absorb** restarts the test too, because a groundedness call site has no reference to pin, only one it learns. What differs is the record: an absorbed case says the new level is correct. Either way, the answers the case cites stay flagged.
 
-Every state change writes a line to the case's activity trail in the same transaction, so a case with no trail entry cannot exist. The trail records opening, a later finding joining, escalation, RCA requests and completions, closing, and absorption. Cases that were muted before Mute was removed went back to open, with a trail line that says so.
+Every state change writes a line to the case's activity trail in the same transaction, so a case with no trail entry cannot exist. The trail records opening, a later finding joining, escalation, RCA requests and completions, fix pull requests opened or updated, closing, and absorption. Cases that were muted before Mute was removed went back to open, with a trail line that says so.
 
-## Running RCA locks the case
+## A case stays live after RCA
 
-Pressing **Run RCA** locks the case, at the moment of the press: no later finding can join a locked case, so the case an agent is reading stays exactly what the person saw when they pressed the button. The cause's next positive opens a **new** case instead of joining the locked one. Re-pressing on an already-locked case coalesces onto the same report, exactly as before locking existed. It only ever analyzes one finding, the one the case held when it was first pressed.
+Running RCA does not close a case to new findings. A later positive on the same cause keeps joining the case, so one problem stays one case from the first finding to the day you close it.
 
-A locked case is otherwise ordinary: it can still be closed or absorbed, and a person can still read it and its report at any time.
+Each RCA report records which findings it read. A report never changes after it is written, so a window that joins afterward is not in it. The case page counts those windows, for example **2 new windows since the last RCA**. Once a report exists the button reads **Re-run RCA**, and it stays disabled while a run is in progress. A re-run reads every finding the case holds when it starts and writes a new report, and the case page shows the newest one.
+
+After each RCA finishes, [Fix PRs](/concepts/root-cause-analysis#fix-pull-requests) can open or update a pull request for the case. A case can be closed or absorbed whether or not it has a report.
+
+Cases that an earlier version locked when someone pressed **Run RCA** stay as they were: they take no new findings, and the cause's next positive opens a new case. Nothing converts them.
+
+### Automatic RCA
+
+Automatic RCA runs RCA on a case without a person pressing the button. An owner or admin turns it on under **Settings → Features**. It does not need a connected repository, and it is separate from [Fix PRs](/concepts/root-cause-analysis#fix-pull-requests).
+
+Every 15 minutes, Tessary looks for live cases that hold windows their newest RCA did not read, and runs RCA on each one that meets all of these:
+
+- The window arrived after you turned Automatic RCA on. Turning it on does not analyze windows that were already there.
+- No RCA on the case is queued or running.
+- The case's newest RCA started more than 6 hours ago, or the case has none.
+
+Each run is an agent session on your organization's model provider, so it spends against your own key, with no cap. Organizations created after Automatic RCA shipped have it on, on Tessary Cloud and self-hosted alike. An older organization keeps it off until an owner or admin turns it on.
 
 ## Where a case reaches you
 

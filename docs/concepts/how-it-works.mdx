@@ -11,13 +11,14 @@ The stages are separate on purpose. Each answers a different question with a dif
 | --- | --- | --- | --- |
 | Ingest | What happened? | An ingest endpoint and a per-project bearer token | Sessions, traces, and spans in the store |
 | Classifiers | Did something move? | Spans tagged with `tessary.call_site.id`, and enough traffic for `duration_drift`, `cost_drift` and `tool_error` to build a reference | A finding, plus references to the traces it was seen in |
-| Triage | Does the claim hold? | A configured LLM (large language model) provider, a running sandbox, and automatic triage turned on for your organization, which is off by default | A case, or a closed finding |
+| Triage | Does the claim hold? | A configured LLM (large language model) provider, a running sandbox, and automatic triage turned on for your organization, which is off by default self-hosted | A case, or a closed finding |
 | Root-cause analysis | What change caused it? | A case, plus a connected repository when you want answers about the code | A verdict, a one-sentence summary, causes with cited traces, and the checks it ruled out |
+| Fix pull request | Can the cause be fixed in code? | A finished RCA, Fix PRs turned on, a repository Tessary can write to, and a frontier model | A pull request on your repository for the causes it is sure of, or the reason it opened none |
 
 <Note>
   Tessary Cloud differs from a self-hosted instance in three ways:
 
-  - Triage starts only when you select **Run triage** on a finding. Automatic triage is not available.
+  - Automatic triage is on from the start, so findings are triaged without anyone pressing **Run triage**. An owner or admin can turn it off under **Settings → Features**.
   - A one-time model credit pays for triage and RCA while you have no provider key of your own. Once it is used up, add a key under **Settings → Providers**. See [Usage and credit](/cloud/usage-and-credit).
   - The `groundedness` classifier is on by default, with nothing to set up.
 </Note>
@@ -56,19 +57,23 @@ Triage is the step in between. It runs an agent in a sandbox against the finding
 
 A case is the unit a person is meant to act on, and there is one live case per classifier, subject, and metric. Several findings about the same tool over several weeks collapse onto one case rather than opening a queue of near-duplicates.
 
-Triage needs three things the ingest and classifier stages do not: an LLM provider credential, configured in-app under **Settings → Providers**; a reachable `sandbox-runner` service; and automatic triage turned on for your organization, which is off by default on a self-hosted instance. On Tessary Cloud, automatic triage is not available: the model credit pays for triage until it is used up, and triage runs only when you select **Run triage** on a finding. [Cases](/concepts/cases) covers what triage rules on, how to turn it on, how findings collapse into one case, and the states a case moves through.
+Triage needs three things the ingest and classifier stages do not: an LLM provider credential, configured in-app under **Settings → Providers**; a reachable `sandbox-runner` service; and automatic triage turned on for your organization, which is off by default on a self-hosted instance. On Tessary Cloud, automatic triage is on by default, and the model credit pays for triage until it is used up. [Cases](/concepts/cases) covers what triage rules on, how to turn it on, how findings collapse into one case, and the states a case moves through.
 
 ## A root-cause run explains a case
 
-Detection says something moved. Root-cause analysis says what changed. Pressing **Run RCA** on a case hands the finding behind it to an agent session in a fresh sandbox, with the finding's dossier as files, a live connection back to your instance's MCP (Model Context Protocol) surface for the evidence, and a clone of your repository when one is connected.
+Detection says something moved. Root-cause analysis says what changed. Pressing **Run RCA** on a case, or Automatic RCA noticing new windows on it, hands the findings behind it to an agent session in a fresh sandbox, with the finding's dossier as files, a live connection back to your instance's MCP (Model Context Protocol) surface for the evidence, and a clone of your repository when one is connected.
 
 The run returns a verdict, a one-sentence summary, the causes it found with the traces that support each one, and an explicit assessment of every check it measured, including the ones it ruled out. Without a connected repository it still runs, with a ceiling: it can show what changed in production and not what changed in the code.
 
 [Root-cause analysis](/concepts/root-cause-analysis) covers what the agent is given, what it is deliberately not told, and how its output is validated before it becomes a report.
 
+## A fix pull request proposes the change
+
+A case stays live after RCA, so later windows keep joining it and a re-run reads them. When an RCA finishes, Tessary can open a pull request that fixes the causes the report is sure of: confidence `high`, a type that code can fix, and a file in your repository. It opens one pull request for each case and adds a commit when a later RCA finds a new cause. It never merges. [Fix pull requests](/concepts/root-cause-analysis#fix-pull-requests) covers what it needs and how it handles tokens.
+
 ## Where a case goes next
 
-Tessary explains and hands off. It does not open the fix.
+Tessary explains the issue and proposes the fix as a pull request your team reviews. It does not merge the change or change your agent's configuration.
 
 New cases wait on **Triage** for a person to pick them up. Tessary does not send notifications yet. [Cases](/concepts/cases#where-a-case-reaches-you) covers what a case carries.
 

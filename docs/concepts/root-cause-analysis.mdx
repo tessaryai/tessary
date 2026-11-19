@@ -5,7 +5,7 @@ description: "Understand what Tessary's agentic RCA run reads, what it is delibe
 
 Detection says something is wrong. RCA (root-cause analysis) says why. It is an agent session that investigates one case, and it is the reason Tessary treats identifying a problem as the beginning of the work rather than the end of it.
 
-An RCA run starts when a person presses **Run RCA** on a case. The decision to run it is a human one, made after reading the case, and the identifier of the finding under that case is the entire input: everything the run works from is read off that finding, never accepted from the caller.
+An RCA run starts when a person presses **Run RCA** on a case, or, when an owner or admin has turned on [Automatic RCA](/concepts/cases#automatic-rca), when new windows join a case. The identifier of the finding under that case is the entire input: everything the run works from is read off that finding, never accepted from the caller. A run reads every finding the case holds when it starts, and its report records which ones.
 
 ## What the agent is given
 
@@ -15,7 +15,7 @@ The run hands the investigation to an agent session with three sources of eviden
 
 **A live connection back to your instance**, over MCP (Model Context Protocol), authenticated with a short-lived key minted for the run and revoked when it ends. This is required rather than optional. The dossier states the claim, and every row of the evidence behind it is fetched on demand, so a run that cannot reach your instance cannot open a single trace it is investigating. Neither the triage agent nor the RCA agent copies trace rows into its prompt.
 
-**Your repository**, cloned at the connected integration's default-branch head, when one is connected. Connect one under **Settings → Git integration**.
+**Your repository**, cloned at the connected integration's default-branch head, when one is connected. Connect one under **Settings → Git integration**. RCA only reads it. The clone is quarantined: the agent cannot read the repository's own agent instructions or tool configuration, such as `AGENTS.md` and `.opencode`.
 
 ### What a connected repository changes
 
@@ -56,7 +56,7 @@ The `sandbox-runner` service spawns a fresh sandbox for every agentic run, and t
 
 In a default self-hosted install, the sandbox is a fresh hardened container per request: all capabilities dropped, no new privileges, and its own bridge network. That is what the read-write Docker socket mount on `sandbox-runner` is for, and it is why the [setup prerequisites](/self-hosting/setup#prerequisites) ask you to check the socket's group id as containers see it. Getting that wrong shows up as a run that never starts.
 
-The agent needs both credentials and egress, since it clones a repository and calls a model provider. A transport failure, a non-zero exit, a timeout, or malformed output all reach the backend as a classified failure, never as a silent success.
+The agent needs both credentials and egress, since it clones a repository and calls a model provider. The sandbox receives the clone credential when it clones: for a GitHub App, a short-lived token that can only read contents; for a personal access token, the token you stored. See [Fix pull requests](#fix-pull-requests) for what that means when the token can write. Straight after every clone, the sandbox removes the credential from the clone's git configuration. A transport failure, a non-zero exit, a timeout, or malformed output all reach the backend as a classified failure, never as a silent success.
 
 ## What the run returns
 
@@ -97,12 +97,62 @@ A groundedness finding cites the traces with a flagged answer. The agent reads e
 
 On the case page, each cause has a button such as **Show 12 answers** that narrows the case's **Flagged answers** list to the answers behind that cause. [Run RCA on the case](/classifiers/groundedness#run-rca-on-the-case) covers reading the report.
 
+## Fix pull requests
+
+After an RCA finishes, Tessary can open a pull request on your repository that fixes the causes the report found. Any finished RCA starts it, whether a person pressed **Run RCA**, Automatic RCA ran, or someone re-ran it. Tessary opens the pull request ready for review, never as a draft, and never merges it. Your repository's CI and your reviewers decide whether it lands.
+
+An owner or admin turns it on under **Settings → Features**, where the row is named **Fix PRs**. It is separate from Automatic RCA, so you can have either without the other. Organizations created after Fix PRs shipped have it on, on Tessary Cloud and self-hosted alike. An older organization keeps it off until an owner or admin turns it on.
+
+### What must be true
+
+The fix step runs only when all of these hold. When one does not, the case page says which, with a link to where you can fix it.
+
+| Requirement | Where you set it |
+| --- | --- |
+| Fix PRs is on. | **Settings → Features** |
+| A repository is connected and Tessary can write to it. | **Settings → Git integration** shows whether Tessary can push branches and open pull requests, and what to grant if it cannot. |
+| A frontier model is set for the **Fix** lane. | **Settings → Models**. The lane offers only models that Tessary flags as frontier, today Claude Opus 5.5 and GPT-6 Sol, and it never falls back to the deployment's default model or to a custom one. It needs a key for a provider that serves one. |
+| At least one cause is fixable. | The report. A cause is fixable when its confidence is `high`, its type is code, prompt, tool, config or data, and its attribution names a file in your repository. |
+
+Each fix run is an agent session on that frontier model, billed to your own provider key like every other run.
+
+### One pull request for each case
+
+| What happened | What Tessary does |
+| --- | --- |
+| No pull request exists for the case. | Branches from the default branch's head, commits the change, and opens a pull request. |
+| A pull request is open, and a later RCA found a new fixable cause. | Starts from the pull request branch's head and adds a commit. It builds on any commits your team pushed, and it never force-pushes. |
+| A pull request is open, and the newest report has no new fixable cause. | Adds no commit. The case page says so. |
+| The pull request was merged, and the problem comes back. | Opens a new pull request. |
+| The pull request was closed without merging. | Treats that as a no. The same causes never go into another pull request on that case. A cause the report has not raised before can open a new one. |
+
+Tessary reads the pull request's state from GitHub before each fix run, so it needs no webhook. It sets no cap on how many pull requests are open at once on a repository. If someone pushes to the branch while Tessary writes to it, Tessary rebuilds on the new head, or reruns the agent once on it when the push touched the same files, then stops and records why.
+
+### What the agent does
+
+The fix agent runs in a sandbox with a clone of your repository. It reads the repository's `AGENTS.md` and `CLAUDE.md` files, the root one and any nested ones, and follows them. Tool configuration (`.opencode`, `opencode.json`, `opencode.jsonc` and `.cursor`) stays out of its reach, and edits to it are dropped.
+
+The agent edits files in the sandbox. It never commits or pushes. Tessary reads the change with git and writes the commit itself through the GitHub API. A change is limited to 50 files and 1 MB, and Tessary refuses any path under `.git` or in the tool configuration.
+
+The agent runs the checks that `AGENTS.md` or `CLAUDE.md` names for what it changed, when they can run in the sandbox. The pull request description lists each check and its result. If a check fails because of the change, Tessary opens no pull request and records `check_failed` as the reason. A check that cannot run in the sandbox is listed as not run, so your repository's CI is the real gate.
+
+The pull request description starts with what happened, then gives the evidence, the causes, the change, the checks and a link to the case.
+
+### Access and tokens
+
+Fix PRs is the one feature that writes to your repository, so how Tessary holds the credential matters.
+
+- **GitHub App, recommended.** The app needs **Contents: write** and **Pull requests: write**. Tessary uses that permission to push and open pull requests. The sandbox never receives it: Tessary mints the sandbox's clone token with **Contents: read** only, so the agent holds no write access. An app installed before Fix PRs shipped asks you to accept the new permissions on its installation.
+- **Personal access token.** Tessary stores one token and uses it for the clone and for the pull request. The sandbox receives that token at clone time, and it can write if you granted write access. Tessary removes the token from the clone's remote URL and git configuration straight after the clone and scrubs it from the agent's output, but the session still starts with it. Use a fine-grained token limited to the one repository, with **Contents: write** and **Pull requests: write**. A read-only token still works for RCA, and Fix PRs then report that Tessary cannot write.
+
+[Connect a GitHub repository](/self-hosting/setup#optional-connect-a-github-repository) covers both ways to connect.
+
 ## What a run needs before it is useful
 
 - **A case to press it on.** RCA analyzes the finding behind a case, so the chain from [classifiers and findings](/concepts/classifiers-and-findings) through [cases](/concepts/cases) has to have produced one.
 - **An LLM (large language model) provider credential**, under **Settings → Providers**. The sandboxed agent is the only analysis path there is, so a run has nothing to fall back to without one. On Tessary Cloud, a one-time model credit pays for RCA while you have no key of your own. Once it is used up, new runs need a key, and a run already in progress can finish. See [Usage and credit](/cloud/usage-and-credit).
 - **A reachable `sandbox-runner` service.** It starts by default in the self-hosting configuration.
-- **A connected repository**, for the runs that need to name a commit rather than describe a symptom.
+- **A connected repository**, for the runs that need to name a commit rather than describe a symptom. Fix pull requests also need it to allow writes.
 
 ## Read next
 

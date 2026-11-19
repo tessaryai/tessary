@@ -57,7 +57,7 @@ Send OTLP traces to the endpoint shown during setup and add `tessary.call_site.i
 
 ### 2. Connect the repo (optional)
 
-Connect a GitHub repository under **Settings > Git integration** and both triage and RCA cite the code that produced the failing traces.
+Connect a GitHub repository under **Settings > Git integration** and RCA cites the code that produced the failing traces. Grant it write access too, and Tessary can open fix pull requests there.
 
 ## How it works
 
@@ -65,7 +65,7 @@ Connect a GitHub repository under **Settings > Git integration** and both triage
 2. **Filter cheaply.** Classifiers sweep every trace continuously and open a finding when one fires. The per-trace check stays cheap enough to afford at production volume, which is what makes reading all of it possible instead of sampling. Two classifiers are exceptions, and both are off until you turn them on: `frustration` scores eligible user messages with a hosted model on your own OpenRouter or TypeSafe key, and `groundedness` checks answers against their retrieved documents with a public model you run on a Mac with Apple silicon or a GPU instance on AWS, not an LLM call.
 3. **Group into cases.** Related findings collapse into one case, surfaced on **Triage**. An LLM triage step rules whether a finding is a real deviation rather than a legitimate change, and only a finding it rules real becomes a case. Two kinds of finding are ruled when they are filed instead, because their numbers are the claim: a high-confidence secret leak, and a rise in frustrated conversations.
 4. **Explain the case.** RCA runs an agentic session over the failing traces and, when a repo is connected, the code itself. It returns a one-sentence summary, the causes it found with the traces behind each, and the checks it ruled out.
-5. **Open the fix.** Tessary opens the fix as a pull request, with the cause and the evidence attached, for your team to review. It never merges a change on its own.
+5. **Open the fix.** After each RCA, Tessary opens one pull request for the case that fixes the causes it is sure of, with the cause and the evidence attached, for your team to review. A later RCA adds a commit to it. The step needs a repository Tessary can write to and a frontier model for the fix, and it never merges a change on its own.
 
 ## License
 
