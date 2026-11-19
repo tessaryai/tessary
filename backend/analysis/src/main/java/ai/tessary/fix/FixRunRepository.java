@@ -202,10 +202,6 @@ public class FixRunRepository {
         public Finish {
             checks = List.copyOf(checks);
         }
-
-        public static Finish of(String outcome, @Nullable String reason) {
-            return new Finish(outcome, reason, null, null, List.of(), 0);
-        }
     }
 
     private static FixRunRow map(ResultSet rs) throws SQLException {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.fix;
 
+import ai.tessary.rca.RcaDtos.Attribution;
 import ai.tessary.rca.RcaDtos.Cause;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -26,8 +27,10 @@ public record FixableCause(String key, String path, Cause cause) {
         List<FixableCause> out = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
         for (Cause c : causes) {
-            String type = c.type() == null ? "" : c.type().toLowerCase(Locale.ROOT);
-            String raw = c.attribution() == null ? null : c.attribution().path();
+            String rawType = c.type();
+            String type = rawType == null ? "" : rawType.toLowerCase(Locale.ROOT);
+            Attribution at = c.attribution();
+            String raw = at == null ? null : at.path();
             String path = raw == null ? "" : normalize(raw);
             if (!Cause.HIGH.equals(c.confidence()) || !TYPES.contains(type) || path.isEmpty()) continue;
             String key = type + ":" + path;

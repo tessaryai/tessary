@@ -10,6 +10,7 @@ import ai.tessary.config.FixProperties;
 import ai.tessary.fix.FixRunRow.FixCheck;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.prompt.PromptCraft;
+import ai.tessary.rca.RcaDtos.Attribution;
 import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -150,7 +151,8 @@ public class FixAgent {
             line(out, "what happens", c.whatChanged());
             line(out, "how it caused the failures", c.howItCausedThis());
             line(out, "what to fix", c.nextStep());
-            String excerpt = c.attribution() == null ? null : c.attribution().excerpt();
+            Attribution at = c.attribution();
+            String excerpt = at == null ? null : at.excerpt();
             if (excerpt != null && !excerpt.isBlank()) {
                 out.append("- excerpt:\n\n```\n").append(excerpt.strip()).append("\n```\n");
             }
