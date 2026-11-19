@@ -11,7 +11,8 @@ import org.springframework.stereotype.Component;
 /**
  * Pins a capability ON (or OFF) for one org, for tests whose subject sits behind one.
  *
- * <p>The default edition has every capability on except {@code triage_automatic} (opt-in). A test
+ * <p>The default edition has every capability on except {@code triage_automatic} (opt-in) and {@code alerts}; a new
+ * org also holds on-overrides for {@code rca_automatic} and {@code fix_pr}, which default off. A test
  * exercising it is testing the default rather than its own subject unless it grants the capability
  * first. {@code groundedness}
  * is on here whether or not its model answers; a test that sweeps it needs the encoder up too

@@ -2584,6 +2584,8 @@ export interface components {
             subject_kind: string;
             subject_label: string;
             title: string;
+            /** Format: int32 */
+            windows_since_rca: number | null;
         };
         CasesView: {
             /** Format: int32 */

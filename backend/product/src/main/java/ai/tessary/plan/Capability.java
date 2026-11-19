@@ -44,7 +44,19 @@ public enum Capability {
     MALFORMED_OUTPUT("malformed_output_enabled"),
 
     /** Off by default because the escalation it drives is uncapped: automatic is an opt-in an org takes knowingly. */
-    TRIAGE_AUTOMATIC("triage_automatic_enabled");
+    TRIAGE_AUTOMATIC("triage_automatic_enabled"),
+
+    /**
+     * Runs RCA on a live case when windows arrive that its newest RCA did not read. Off by default; a new org is created
+     * with it on ({@link NewOrgCapabilities}).
+     */
+    RCA_AUTOMATIC("rca_automatic_enabled"),
+
+    /**
+     * Opens a pull request after an RCA that fixes its high-confidence causes; independent of {@link #RCA_AUTOMATIC}.
+     * Off by default; a new org is created with it on ({@link NewOrgCapabilities}).
+     */
+    FIX_PR("fix_pr_enabled");
 
     private final String wire;
 

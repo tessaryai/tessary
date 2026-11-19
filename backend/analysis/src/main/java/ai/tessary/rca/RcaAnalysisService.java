@@ -69,6 +69,8 @@ public class RcaAnalysisService {
         RcaReportRow report = reports.findByJobId(job.projectId(), job.id())
                 .orElseThrow(() -> new IllegalStateException("rca job " + job.id() + " has no report row"));
         List<FindingClaim> subject = subject(job.projectId(), job.findingId());
+        reports.recordFindingIds(
+                job.id(), subject.stream().map(FindingClaim::id).toList());
 
         Map<String, EvidenceSides> sides = new LinkedHashMap<>();
         for (FindingClaim finding : subject) {
@@ -104,7 +106,10 @@ public class RcaAnalysisService {
                 result.coverage());
     }
 
-    /** The case is locked when RCA is pressed, so this set is the one the person saw. */
+    /**
+     * The case's findings at claim time. The case stays live, so windows that join it later are not in this set; the
+     * report records the set, and those windows read as unread.
+     */
     private List<FindingClaim> subject(String projectId, String findingId) {
         List<String> ids = findings.caseSiblingIds(projectId, findingId);
         List<FindingClaim> claims = new ArrayList<>();

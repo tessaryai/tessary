@@ -11,8 +11,8 @@ import java.util.List;
 public final class BedrockMantleModelLister implements ProviderModelLister {
 
     private static final List<ProviderModel> KNOWN_MANTLE_MODELS = List.of(
-            new ProviderModel("openai.gpt-5.6-luna", "GPT-5.6 Luna", "OpenAI"),
-            new ProviderModel("openai.gpt-5.6-terra", "GPT-5.6 Terra", "OpenAI"));
+            new ProviderModel("openai.gpt-6-luna", "GPT-6 Luna", "OpenAI"),
+            new ProviderModel("openai.gpt-6.1-sol", "GPT-6.1 Sol", "OpenAI"));
 
     @Override
     public List<ProviderModel> list(ResolvedCredential credential) {

@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * {@link CaseLedger#openOrJoin} against real Postgres, so the partial indexes and ISO-text comparisons run for real.
@@ -28,7 +29,8 @@ record CaseLedgerTest(
         CaseRepository cases,
         CaseEventRepository events,
         FindingRepository findings,
-        TenantService tenants) {
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     private static final String DETECTOR = CaseRow.Detector.CLASSIFIER;
 
@@ -171,12 +173,16 @@ record CaseLedgerTest(
         assertEquals(List.of(CaseEventRow.Kind.OPENED), kinds(p, second));
     }
 
+    /** Nothing locks a case now, but one RCA locked before cases stayed live stays frozen. */
     @Test
-    void aLockedCaseIsNeverJoined() {
+    void aCaseLockedBeforeCasesStayedLiveIsNeverJoined() {
         Project p = project("ledger-locked-not-joined");
         CaseRow row = ledger.openOrJoin(
                 p.id(), detection(p, "grader-a", 0.4, Instant.parse("2026-07-01T10:00:00Z")), null, now());
-        cases.lock(p.id(), row.id(), now());
+        jdbc.sql("UPDATE eval_case SET locked_at = :now WHERE id = :id")
+                .param("now", now().toString())
+                .param("id", row.id())
+                .update();
 
         CaseRow second = ledger.openOrJoin(
                 p.id(),

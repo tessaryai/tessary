@@ -345,6 +345,7 @@ class McpCaseToolsTest {
                 1L,
                 "fnd-1",
                 null,
+                null,
                 // cause, rca_verdict and the run mark: an unanalysed case, like most in the queue.
                 null,
                 null,

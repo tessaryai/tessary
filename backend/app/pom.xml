@@ -231,7 +231,8 @@
                 <!-- `tessary.plan.default-key=enterprise` used to live here, so the suite ran with
                      every capability on. It is gone along with the plan tiers: this build has no
                      tiers, and the default is already every capability
-                     ON except triage_automatic. Removing it in
+                     ON except triage_automatic, alerts, rca_automatic and fix_pr (the last two
+                     arrive as on-overrides on every org a fixture creates). Removing it in
                      the same commit is deliberate — left in place it would have kept a stale
                      property deciding nothing while looking like it decided everything, and any
                      test that had been passing behind the enterprise tier would have gone on

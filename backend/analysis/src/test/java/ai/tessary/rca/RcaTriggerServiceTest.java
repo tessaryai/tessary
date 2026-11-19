@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.cases.CaseEventRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FakeFindingAdapter;
 import ai.tessary.classifier.finding.FindingAdapters;
@@ -34,8 +35,9 @@ class RcaTriggerServiceTest {
     private final RcaJobRepository jobs = mock(RcaJobRepository.class);
     private final RcaReportRepository reports = mock(RcaReportRepository.class);
     private final RcaReportService reportReads = mock(RcaReportService.class);
+    private final CaseEventRepository caseEvents = mock(CaseEventRepository.class);
     private final RcaTriggerService trigger =
-            new RcaTriggerService(findings, jobs, reports, reportReads, FindingAdapters.of(List.of()));
+            new RcaTriggerService(findings, jobs, reports, reportReads, FindingAdapters.of(List.of()), caseEvents);
 
     @Test
     void eachClassifierGetsItsReportKind() {
@@ -148,7 +150,8 @@ class RcaTriggerServiceTest {
                         jobs,
                         reports,
                         reportReads,
-                        FindingAdapters.of(List.of(FakeFindingAdapter.owning("owned-x", null, null, null))))
+                        FindingAdapters.of(List.of(FakeFindingAdapter.owning("owned-x", null, null, null))),
+                        caseEvents)
                 .trigger("proj", "fnd_o", "user_1", null);
     }
 

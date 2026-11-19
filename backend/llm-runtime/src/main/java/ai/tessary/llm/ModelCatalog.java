@@ -46,18 +46,13 @@ public final class ModelCatalog {
     }
 
     private static final List<CatalogEntry> ENTRIES = List.of(
-            new CatalogEntry(ModelProvider.OPENAI, "OpenAI", "gpt-5.5", "GPT-5.5", "https://api.openai.com/v1", false),
-            new CatalogEntry(
-                    ModelProvider.OPENAI, "OpenAI", "gpt-5.4-mini", "GPT-5.4 mini", "https://api.openai.com/v1", false),
-            new CatalogEntry(
-                    ModelProvider.OPENAI, "OpenAI", "gpt-5.4-nano", "GPT-5.4 nano", "https://api.openai.com/v1", false),
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
                     "claude-opus-5-5",
                     "Claude Opus 5.5",
                     "https://api.anthropic.com/v1",
-                    false),
+                    true),
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
@@ -68,15 +63,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
-                    "claude-sonnet-4-6",
-                    "Claude Sonnet 4.6",
-                    "https://api.anthropic.com/v1",
-                    false),
-            new CatalogEntry(
-                    ModelProvider.ANTHROPIC,
-                    "Anthropic",
-                    "claude-haiku-4-5",
-                    "Claude Haiku 4.5",
+                    "claude-haiku-5-5",
+                    "Claude Haiku 5.5",
                     "https://api.anthropic.com/v1",
                     true),
             new CatalogEntry(
@@ -95,23 +83,9 @@ public final class ModelCatalog {
                     false),
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
-                    "Anthropic",
-                    "anthropic/claude-sonnet-4.6",
-                    "Claude Sonnet 4.6",
-                    "https://openrouter.ai/api/v1",
-                    false),
-            new CatalogEntry(
-                    ModelProvider.OPENROUTER,
-                    "OpenAI",
-                    "openai/gpt-5.5",
-                    "GPT-5.5",
-                    "https://openrouter.ai/api/v1",
-                    false),
-            new CatalogEntry(
-                    ModelProvider.OPENROUTER,
                     "Moonshot",
-                    "moonshotai/kimi-k2.6",
-                    "Kimi K2.6",
+                    "moonshotai/kimi-k3.1-pro",
+                    "Kimi K3.1 Pro",
                     "https://openrouter.ai/api/v1",
                     false),
             // Named with the route, since each route prices them separately; priced via #pricingId's "openrouter/"
@@ -119,8 +93,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "OpenAI",
-                    "openai/gpt-6-sol",
-                    "GPT-6 Sol (OpenRouter)",
+                    "openai/gpt-6.1-sol",
+                    "GPT-6.1 Sol (OpenRouter)",
                     "https://openrouter.ai/api/v1",
                     true),
             new CatalogEntry(
@@ -138,7 +112,12 @@ public final class ModelCatalog {
                     "https://openrouter.ai/api/v1",
                     false),
             new CatalogEntry(
-                    ModelProvider.MOONSHOT, "Moonshot", "kimi-k2.6", "Kimi K2.6", "https://api.moonshot.ai/v1", true),
+                    ModelProvider.MOONSHOT,
+                    "Moonshot",
+                    "kimi-k3.1-pro",
+                    "Kimi K3.1 Pro",
+                    "https://api.moonshot.ai/v1",
+                    true),
 
             // Logical ids; ARN and region are on the credential row.
             new CatalogEntry(
@@ -149,44 +128,48 @@ public final class ModelCatalog {
                     null,
                     false),
             new CatalogEntry(
-                    ModelProvider.BEDROCK,
-                    "Anthropic",
-                    "anthropic.claude-sonnet-4-6",
-                    "Claude Sonnet 4.6",
-                    null,
-                    false),
-            new CatalogEntry(
                     ModelProvider.BEDROCK, "Anthropic", "anthropic.claude-opus-5-5", "Claude Opus 5.5", null, false),
             new CatalogEntry(
-                    ModelProvider.BEDROCK, "Anthropic", "anthropic.claude-haiku-4-5", "Claude Haiku 4.5", null, false),
+                    ModelProvider.BEDROCK, "Anthropic", "anthropic.claude-haiku-5-5", "Claude Haiku 5.5", null, false),
 
-            // The only place the GPT-5.6 line exists, over the Responses API.
-            new CatalogEntry(
-                    ModelProvider.BEDROCK_MANTLE, "OpenAI", "openai.gpt-5.6-luna", "GPT-5.6 Luna", null, false),
-            new CatalogEntry(
-                    ModelProvider.BEDROCK_MANTLE, "OpenAI", "openai.gpt-5.6-terra", "GPT-5.6 Terra", null, false),
+            // Over the Responses API.
+            new CatalogEntry(ModelProvider.BEDROCK_MANTLE, "OpenAI", "openai.gpt-6.1-sol", "GPT-6.1 Sol", null, false),
+            new CatalogEntry(ModelProvider.BEDROCK_MANTLE, "OpenAI", "openai.gpt-6-luna", "GPT-6 Luna", null, false),
 
-            // The agentic entries: one current-generation model per provider the sandbox launcher can reach, checked
+            // The agentic entries: current-generation models per provider the sandbox launcher can reach, checked
             // against the vendored LiteLLM price book. Google Vertex is not covered: its auth fits none of
-            // PlatformCatalog's kinds. Sol is RCA's default here because it is half the flagship's input price.
+            // PlatformCatalog's kinds.
             new CatalogEntry(
                     ModelProvider.OPENAI,
                     "OpenAI",
-                    "gpt-6-sol",
-                    "GPT-6 Sol (OpenAI)",
+                    "gpt-6.1-sol",
+                    "GPT-6.1 Sol (OpenAI)",
                     "https://api.openai.com/v1",
                     true),
-            new CatalogEntry(ModelProvider.OPENAI, "OpenAI", "gpt-5.6", "GPT-5.6", "https://api.openai.com/v1", true),
+            new CatalogEntry(
+                    ModelProvider.OPENAI,
+                    "OpenAI",
+                    "gpt-6.1-terra",
+                    "GPT-6.1 Terra (OpenAI)",
+                    "https://api.openai.com/v1",
+                    true),
             new CatalogEntry(
                     ModelProvider.GEMINI,
                     "Google",
-                    "gemini-3.1-pro-preview",
-                    "Gemini 3.1 Pro",
+                    "gemini-4-hydrogen",
+                    "Gemini 4 Hydrogen",
+                    "https://generativelanguage.googleapis.com/v1beta/openai/",
+                    true),
+            new CatalogEntry(
+                    ModelProvider.GEMINI,
+                    "Google",
+                    "gemini-4-carbon",
+                    "Gemini 4 Carbon",
                     "https://generativelanguage.googleapis.com/v1beta/openai/",
                     true),
             new CatalogEntry(
                     ModelProvider.GLM, "Zhipu", "glm-5.3", "GLM-5.3", "https://open.bigmodel.cn/api/paas/v4", true),
-            new CatalogEntry(ModelProvider.GROK, "xAI", "grok-4.6", "Grok 4.6", "https://api.x.ai/v1", true),
+            new CatalogEntry(ModelProvider.GROK, "xAI", "grok-4.7", "Grok 4.7", "https://api.x.ai/v1", true),
 
             // One small model per provider, selectable but nobody's default, for projects that want unattended TRIAGE
             // to spend less.
@@ -200,8 +183,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.GEMINI,
                     "Google",
-                    "gemini-3.7-flash",
-                    "Gemini 3.7 Flash",
+                    "gemini-3.8-flash",
+                    "Gemini 3.8 Flash",
                     "https://generativelanguage.googleapis.com/v1beta/openai/",
                     true),
             new CatalogEntry(
@@ -252,12 +235,13 @@ public final class ModelCatalog {
     public static final String DECISION_PRICING_PREFIX = "typesafe/";
 
     /**
-     * The id this pair is priced under in the LiteLLM book, which prefixes some routes ({@code xai/}, {@code zai/},
+     * The id this pair is priced under in the LiteLLM book, which prefixes some routes ({@code gemini/}, {@code xai/}, {@code zai/},
      * {@code moonshot/}, {@code openrouter/}, TypeSafe, mantle). Rate lookup only: the agent and {@code llm_call.model}
      * keep {@code modelName}.
      */
     public static String pricingId(ModelProvider provider, String modelName) {
         return switch (provider) {
+            case GEMINI -> "gemini/" + modelName;
             case GROK -> "xai/" + modelName;
             case GLM -> "zai/" + modelName;
             case MOONSHOT -> "moonshot/" + modelName;
