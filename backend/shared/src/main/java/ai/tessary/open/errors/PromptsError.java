@@ -23,7 +23,7 @@ public enum PromptsError implements ErrorCode {
     BOTH_VERSION_AND_LABEL(HttpStatus.BAD_REQUEST, "Give version or label, not both"),
     NAME_REQUIRED(HttpStatus.BAD_REQUEST, "name is required"),
     TOKEN_REQUIRED(HttpStatus.FORBIDDEN, "the prompts API requires a project-scoped API key"),
-    WRONG_KEY_SCOPE(HttpStatus.FORBIDDEN, "this API key may not %s prompts here; a prompt write needs an admin key");
+    WRONG_KEY_SCOPE(HttpStatus.FORBIDDEN, "this API key may not %s prompts here; see the key scopes for this route");
 
     private final HttpStatus status;
     private final String template;

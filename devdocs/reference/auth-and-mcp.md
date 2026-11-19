@@ -33,13 +33,13 @@ All project-scoped bearer tokens live in the `api_key` table and are issued/veri
 |---|---|---|
 | `write` | `tsy_w_…` | Ingest (`POST /v1/traces`), plus prompt reads (`GET /v1/prompts`, `GET /v1/prompts/fetch`) |
 | `query` | `tsy_q_…` | Aggregation-first query API, plus prompt reads |
-| `admin` | `tsy_a_…` | Superset: write + query + `/mcp` tools + prompt writes (`POST`, `PATCH .../labels`, `DELETE` on `/v1/prompts`) |
+| `admin` | `tsy_a_…` | Superset: write + query + `/mcp` tools + prompt writes (`POST`, `PATCH .../labels`, `DELETE` on `/v1/prompts`) + playground runs (`POST .../prompts/playground/runs`) |
 
 Prompt reads on `/v1/prompts` are the one surface write and query keys share: an application that sends
 traces fetches its prompts with the same key. Prompt routes check the scope themselves, because every
 bearer key authenticates as role `member` and RBAC alone would let any key through: on `/v1/prompts` a read
 takes a write, query or admin key; on the Prompts page routes (`/api/.../prompts/**`) a bearer read needs a
-query or admin key; and every prompt write needs an admin key, else 403 `PROMPTS.WRONG_KEY_SCOPE`. A cookie
+query or admin key; and every prompt write, and every playground run (it spends on the org's provider key), needs an admin key, else 403 `PROMPTS.WRONG_KEY_SCOPE`. A cookie
 session passes the scope check and meets RBAC as usual, `/v1/prompts` takes no cookie session (403
 `PROMPTS.TOKEN_REQUIRED`), and the scope check runs before the `PROMPT_MANAGEMENT` capability check, so a
 key that may not read learns nothing about the org. `KeyScope` itself is unchanged.

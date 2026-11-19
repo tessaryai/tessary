@@ -18,7 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestBodyAdviceAd
  * Bounds the bytes a prompt request body may hold while it is read, so a chunked body, which declares no length and
  * passes {@link PromptBodyLimitInterceptor}, never reaches Jackson whole.
  */
-@ControllerAdvice(assignableTypes = {PromptController.class, PromptPublicController.class})
+@ControllerAdvice(assignableTypes = {PromptController.class, PromptPublicController.class, PlaygroundController.class})
 public class PromptBodyLimitAdvice extends RequestBodyAdviceAdapter {
 
     @Override

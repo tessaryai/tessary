@@ -1557,6 +1557,27 @@
         ],
         "type" : "object"
       },
+      "ApiResponsePlaygroundRunView" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/PlaygroundRunView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponsePollResponse" : {
         "properties" : {
           "data" : {
@@ -7009,6 +7030,25 @@
         ],
         "type" : "object"
       },
+      "Message" : {
+        "properties" : {
+          "content" : {
+            "maxLength" : 200000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "role" : {
+            "minLength" : 1,
+            "pattern" : "system|user|assistant",
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "content",
+          "role"
+        ],
+        "type" : "object"
+      },
       "MetricBaselineView" : {
         "properties" : {
           "bucket_key" : {
@@ -8513,6 +8553,151 @@
         ],
         "type" : "object"
       },
+      "PlaygroundRunRequest" : {
+        "properties" : {
+          "config" : {
+            "additionalProperties" : { },
+            "type" : [
+              "object",
+              "null"
+            ]
+          },
+          "messages" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Message"
+            },
+            "maxItems" : 64,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "model" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "prompt_ref" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/PromptRef"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "provider" : {
+            "enum" : [
+              "OPENAI",
+              "ANTHROPIC",
+              "OPENROUTER",
+              "MOONSHOT",
+              "BEDROCK",
+              "GEMINI",
+              "GLM",
+              "GROK",
+              "CUSTOM",
+              "BEDROCK_MANTLE",
+              "TYPESAFE",
+              "PLATFORM"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "messages",
+          "model",
+          "provider"
+        ],
+        "type" : "object"
+      },
+      "PlaygroundRunView" : {
+        "properties" : {
+          "cache_read_tokens" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "cache_write_tokens" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "content" : {
+            "type" : "string"
+          },
+          "cost_usd" : {
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "finish_reason" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "input_tokens" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "latency_ms" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "model" : {
+            "type" : "string"
+          },
+          "output_tokens" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "price_source" : {
+            "type" : "string"
+          },
+          "provider" : {
+            "enum" : [
+              "OPENAI",
+              "ANTHROPIC",
+              "OPENROUTER",
+              "MOONSHOT",
+              "BEDROCK",
+              "GEMINI",
+              "GLM",
+              "GROK",
+              "CUSTOM",
+              "BEDROCK_MANTLE",
+              "TYPESAFE",
+              "PLATFORM"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "content",
+          "cost_usd",
+          "finish_reason",
+          "input_tokens",
+          "latency_ms",
+          "model",
+          "output_tokens",
+          "price_source",
+          "provider"
+        ],
+        "type" : "object"
+      },
       "PolicyView" : {
         "properties" : {
           "cadence_seconds" : {
@@ -9060,6 +9245,24 @@
           "limit",
           "page",
           "total"
+        ],
+        "type" : "object"
+      },
+      "PromptRef" : {
+        "properties" : {
+          "prompt_id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "version" : {
+            "exclusiveMinimum" : 0,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "prompt_id",
+          "version"
         ],
         "type" : "object"
       },
@@ -18609,6 +18812,62 @@
         },
         "tags" : [
           "prompt-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/prompts/playground/runs" : {
+      "post" : {
+        "operationId" : "PlaygroundController_run",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlaygroundRunRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponsePlaygroundRunView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "playground-controller"
         ]
       }
     },

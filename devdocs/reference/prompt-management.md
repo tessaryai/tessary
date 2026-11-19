@@ -315,15 +315,19 @@ integration*.
   Anthropic Messages for Anthropic. Bedrock, Bedrock Mantle, TypeSafe and Platform are
   `PROVIDER_UNSUPPORTED`. `ChatProviderResolver` turns the org's credential into a target (a missing key
   is 412 `MODEL_CONFIG.MISSING_CREDENTIALS`), and `UrlGuard` checks the endpoint at call time.
-- Runs in flight are bounded by `tessary.playground.concurrency`; one more is 429 `PLAYGROUND.BUSY`.
-  A timeout is not retried. Keys: [config-keys.md](./config-keys.md).
+- Runs in flight are bounded by `tessary.playground.concurrency` on the instance and by half of it (at
+  least 1) for one org, so one org cannot take every slot; one more is 429 `PLAYGROUND.BUSY`.
+- `tessary.playground.timeout-ms` bounds the whole run, body and retries included. A timeout is not
+  retried, and neither is an answer cut off after the provider started sending it, since the provider may
+  have billed it. Keys: [config-keys.md](./config-keys.md).
 - Price: a target billed by OpenRouter books OpenRouter's reported `usage.cost`; any other prices from
-  the book through `PlatformCallPricer` and stamps `price_book_version`; a missing figure is unpriced. The
+  the book through `PlatformCallPricer` and stamps `price_book_version`; a missing figure is unpriced, and
+  so is a call whose provider reported no usage at all, which is never booked as free. The
   view says which (`price_source` of `book`, `openrouter` or `unpriced`).
 - Booking: one `llm_call` row under lane `playground`, funding `byo`, with subject
   `("prompt_version", <version id>)` when the run named one. A failed call books nothing.
 - Telemetry: one `playground-run` span in Tessary's own telemetry with `gen_ai.operation.name=chat` and
-  no message content ([telemetry-naming.md](./telemetry-naming.md)). Nothing is ingested into the
+  no message content; a failed run sets span status `ERROR` and the standard `error.type` to the error code ([telemetry-naming.md](./telemetry-naming.md)). Nothing is ingested into the
   project's traces, so runs do not count in prompt usage.
 
 Which keys can run it: [`../guides/provider-keys.md`](../guides/provider-keys.md).
