@@ -238,8 +238,8 @@ class ModelCatalogFetchServiceTest {
                 Arguments.of(
                         ModelProvider.BEDROCK_MANTLE,
                         List.of(
-                                new ProviderModel("openai.gpt-5.6-luna", "GPT-5.6 Luna", "OpenAI"),
-                                new ProviderModel("openai.gpt-5.6-terra", "GPT-5.6 Terra", "OpenAI"))));
+                                new ProviderModel("openai.gpt-6-luna", "GPT-6 Luna", "OpenAI"),
+                                new ProviderModel("openai.gpt-6.1-sol", "GPT-6.1 Sol", "OpenAI"))));
     }
 
     @ParameterizedTest

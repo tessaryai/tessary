@@ -35,8 +35,8 @@ public final class BedrockModelProfile {
 
     /**
      * LiteLLM's own route prefix for models served over {@code bedrock-mantle}: its own priced route,
-     * distinct from OpenAI-direct ({@code openai.gpt-5.6-luna}, a different product at a different
-     * price) and from Bedrock Converse's cross-region spellings ({@code us./global.openai.gpt-5.6-luna},
+     * distinct from OpenAI-direct ({@code openai.gpt-6-luna}, a different product at a different
+     * price) and from Bedrock Converse's cross-region spellings ({@code us./global.openai.gpt-6-luna},
      * a different Bedrock endpoint entirely). A call reported under the bare id has no scope prefix for
      * {@code pricing/ModelResolver} to strip, so without this prefix it falls through to OpenAI-direct
      * pricing.
@@ -46,13 +46,12 @@ public final class BedrockModelProfile {
     /** Rates live in {@code price_book}, so a price change never touches this table. */
     private static final List<ModelDescriptor> PROFILES = List.of(
             new ModelDescriptor(
-                    "anthropic.claude-haiku-4-5",
-                    "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "Claude Haiku 4.5",
+                    "anthropic.claude-haiku-5-5",
+                    "global.anthropic.claude-haiku-5-5",
+                    "Claude Haiku 5.5",
                     "Anthropic",
                     true,
                     Endpoint.RUNTIME),
-            // A row that still pins Sonnet 5 reads as unset and the lane runs this.
             new ModelDescriptor(
                     "anthropic.claude-sonnet-5-5",
                     "global.anthropic.claude-sonnet-5-5",
@@ -60,20 +59,27 @@ public final class BedrockModelProfile {
                     "Anthropic",
                     true,
                     Endpoint.RUNTIME),
+            new ModelDescriptor(
+                    "anthropic.claude-opus-5-5",
+                    "global.anthropic.claude-opus-5-5",
+                    "Claude Opus 5.5",
+                    "Anthropic",
+                    true,
+                    Endpoint.RUNTIME),
             // Agentic is a product choice for a cost-dominated triage lane, not a measured claim about tool-loop
             // quality.
             new ModelDescriptor(
-                    "openai.gpt-5.6-luna",
-                    MANTLE_ROUTE_PREFIX + "openai.gpt-5.6-luna",
-                    "GPT-5.6 Luna",
+                    "openai.gpt-6-luna",
+                    MANTLE_ROUTE_PREFIX + "openai.gpt-6-luna",
+                    "GPT-6 Luna",
                     "OpenAI",
                     true,
                     Endpoint.MANTLE),
             // Agentic means reachable and permitted, not better.
             new ModelDescriptor(
-                    "openai.gpt-5.6-terra",
-                    MANTLE_ROUTE_PREFIX + "openai.gpt-5.6-terra",
-                    "GPT-5.6 Terra",
+                    "openai.gpt-6.1-sol",
+                    MANTLE_ROUTE_PREFIX + "openai.gpt-6.1-sol",
+                    "GPT-6.1 Sol",
                     "OpenAI",
                     true,
                     Endpoint.MANTLE));

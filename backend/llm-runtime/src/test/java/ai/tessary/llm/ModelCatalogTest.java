@@ -44,17 +44,18 @@ class ModelCatalogTest {
 
     @Test
     void mergeLiveOverlaysDisplayNameAndVendorOntoAMatchingStaticEntry_capabilityFieldsUnchanged() {
-        // gpt-5.5's agentic flag is static; a vendor's /models carries no capability data.
+        // gpt-6.1-terra's agentic flag is static; a vendor's /models carries no capability data.
         ModelCatalog.CatalogEntry before =
-                ModelCatalog.find(ModelProvider.OPENAI, "gpt-5.5").orElseThrow();
+                ModelCatalog.find(ModelProvider.OPENAI, "gpt-6.1-terra").orElseThrow();
         List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(
-                ModelProvider.OPENAI, List.of(new ProviderModel("gpt-5.5", "GPT-5.5 (live)", "OpenAI (live)")));
+                ModelProvider.OPENAI,
+                List.of(new ProviderModel("gpt-6.1-terra", "GPT-6.1 Terra (live)", "OpenAI (live)")));
         ModelCatalog.CatalogEntry after = merged.stream()
-                .filter(e -> e.modelName().equals("gpt-5.5"))
+                .filter(e -> e.modelName().equals("gpt-6.1-terra"))
                 .findFirst()
                 .orElseThrow();
 
-        assertEquals("GPT-5.5 (live)", after.displayName(), "live display name overlays the static one");
+        assertEquals("GPT-6.1 Terra (live)", after.displayName(), "live display name overlays the static one");
         assertEquals("OpenAI (live)", after.vendor(), "live vendor label overlays the static one");
         assertEquals(before.agentic(), after.agentic(), "capability fields are NOT overlaid");
     }
@@ -74,29 +75,28 @@ class ModelCatalogTest {
     }
 
     @Test
-    void pricingIdRoutePrefixesTheSevenModelsWhoseBookKeysCarryOne() {
-        // The seven entries priced only under a route-prefixed key; everything else is bare.
-        assertEquals("xai/grok-4.6", ModelCatalog.pricingId(ModelProvider.GROK, "grok-4.6"));
+    void pricingIdRoutePrefixesTheModelsWhoseBookKeysCarryOne() {
+        // The entries priced only under a route-prefixed key; everything else is bare.
+        assertEquals("gemini/gemini-4-hydrogen", ModelCatalog.pricingId(ModelProvider.GEMINI, "gemini-4-hydrogen"));
+        assertEquals("xai/grok-4.7", ModelCatalog.pricingId(ModelProvider.GROK, "grok-4.7"));
         assertEquals("xai/grok-code-fast-1", ModelCatalog.pricingId(ModelProvider.GROK, "grok-code-fast-1"));
         assertEquals("zai/glm-5.3", ModelCatalog.pricingId(ModelProvider.GLM, "glm-5.3"));
         assertEquals("zai/glm-5.3-flash", ModelCatalog.pricingId(ModelProvider.GLM, "glm-5.3-flash"));
-        assertEquals("moonshot/kimi-k2.6", ModelCatalog.pricingId(ModelProvider.MOONSHOT, "kimi-k2.6"));
+        assertEquals("moonshot/kimi-k3.1-pro", ModelCatalog.pricingId(ModelProvider.MOONSHOT, "kimi-k3.1-pro"));
         assertEquals(
-                "openrouter/openai/gpt-5.6-terra",
-                ModelCatalog.pricingId(ModelProvider.OPENROUTER, "openai/gpt-5.6-terra"));
+                "openrouter/openai/gpt-6.1-sol",
+                ModelCatalog.pricingId(ModelProvider.OPENROUTER, "openai/gpt-6.1-sol"));
         assertEquals(
-                "openrouter/openai/gpt-5.6-luna",
-                ModelCatalog.pricingId(ModelProvider.OPENROUTER, "openai/gpt-5.6-luna"));
+                "openrouter/openai/gpt-6-luna", ModelCatalog.pricingId(ModelProvider.OPENROUTER, "openai/gpt-6-luna"));
     }
 
     @Test
     void pricingIdLeavesBareBookKeysUnchangedAndRoutesMantle() {
-        assertEquals("gpt-5.6-terra", ModelCatalog.pricingId(ModelProvider.OPENAI, "gpt-5.6-terra"));
+        assertEquals("gpt-6.1-sol", ModelCatalog.pricingId(ModelProvider.OPENAI, "gpt-6.1-sol"));
         assertEquals("claude-sonnet-5-5", ModelCatalog.pricingId(ModelProvider.ANTHROPIC, "claude-sonnet-5-5"));
-        assertEquals("gemini-3.1-pro-preview", ModelCatalog.pricingId(ModelProvider.GEMINI, "gemini-3.1-pro-preview"));
         assertEquals(
-                "bedrock_mantle/openai.gpt-5.6-luna",
-                ModelCatalog.pricingId(ModelProvider.BEDROCK_MANTLE, "openai.gpt-5.6-luna"));
+                "bedrock_mantle/openai.gpt-6-luna",
+                ModelCatalog.pricingId(ModelProvider.BEDROCK_MANTLE, "openai.gpt-6-luna"));
     }
 
     @Test

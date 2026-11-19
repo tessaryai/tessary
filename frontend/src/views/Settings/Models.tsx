@@ -191,7 +191,7 @@ function Footnote() {
       set the job back to Automatic. Triage offers the same models RCA does. A model priced above its
       own provider's default is marked <em>higher cost</em> and asks you to confirm, because triage runs
       unattended once per finding. A decision model lane offers a provider and nothing else,
-      because each provider serves one decision model. And note the region: GPT-5.6 Luna is served from{" "}
+      because each provider serves one decision model. And note the region: the Bedrock mantle models are served from{" "}
       <span className="font-mono">us-east-1</span>, which need not be the region the rest of this stack
       runs in, so a lane pointed at it can send that lane's trace content out of your region.
     </p>
