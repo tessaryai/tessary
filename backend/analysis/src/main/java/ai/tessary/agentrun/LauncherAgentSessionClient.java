@@ -656,7 +656,9 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         Clone clone = start.repo();
         if (clone != null) {
             body.put("clone_url", clone.url());
-            body.put("head_sha", clone.headSha());
+            String headSha = clone.headSha();
+            if (headSha != null) body.put("head_sha", headSha);
+            else body.put("branch", clone.branch());
             String onsetAt = clone.onsetAt();
             if (onsetAt != null) body.put("onset_at", onsetAt);
         }

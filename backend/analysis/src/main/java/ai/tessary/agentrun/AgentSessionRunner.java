@@ -92,10 +92,9 @@ public class AgentSessionRunner {
     }
 
     /**
-     * @param repo the repository the sandbox clones
-     * first, RCA only @param jsonSchema the answer's schema; its top-level {@code required} keys are checked @param
-     * deadline from the moment {@link #run} is entered, start included @param maxToolCalls the agent's step cap per
-     * reply
+     * @param repo the repository the sandbox clones first: RCA may have one, the fix lane must @param jsonSchema the
+     * answer's schema; its top-level {@code required} keys are checked @param deadline from the moment {@link #run} is
+     * entered, start included @param maxToolCalls the agent's step cap per reply
      */
     public record Task(
             String projectId,
@@ -126,9 +125,16 @@ public class AgentSessionRunner {
 
     /**
      * @param json the answer object, compact @param usage every reply's usage summed, for the span; booking is the
-     * session client's @param steps the tool calls that got a step
+     * session client's @param steps the tool calls that got a step @param patch what the agent changed in its clone,
+     * from the reply that answered; null when that reply sent none, as every lane but fix
      */
-    public record Answer(String json, AgentSpanTelemetry.AgentUsage usage, int steps) {}
+    public record Answer(
+            String json, AgentSpanTelemetry.AgentUsage usage, int steps, SessionEvent.@Nullable Patch patch) {
+
+        public Answer(String json, AgentSpanTelemetry.AgentUsage usage, int steps) {
+            this(json, usage, steps, null);
+        }
+    }
 
     /** Timers and pauses, so a test can fire the deadline without waiting for it. */
     public interface Deadlines {
@@ -298,6 +304,7 @@ public class AgentSessionRunner {
         private SessionEvent.@Nullable EndReason endReason;
         private SessionEvent.@Nullable Failure providerFailure;
         private @Nullable String failureKind;
+        private SessionEvent.@Nullable Patch patch;
 
         Run(Task task, StepSink sink, Watch watch) {
             this.task = task;
@@ -343,7 +350,7 @@ public class AgentSessionRunner {
                 Optional<ObjectNode> parsed = JsonAnswer.extract(mapper, text.toString());
                 List<String> missing = JsonAnswer.missingKeys(parsed.orElse(null), schema);
                 if (parsed.isPresent() && missing.isEmpty()) {
-                    return new Answer(parsed.get().toString(), usage(), steps);
+                    return new Answer(parsed.get().toString(), usage(), steps, patch);
                 }
                 if (corrected) {
                     throw new TessaryException(
@@ -372,6 +379,7 @@ public class AgentSessionRunner {
             endReason = null;
             providerFailure = null;
             failureKind = null;
+            patch = null;
             AgentSessionClient.SendOutcome outcome = client.send(id, message);
             if (outcome != AgentSessionClient.SendOutcome.ACCEPTED) {
                 if (watch.timedOut.get()) throw timedOut();
@@ -459,6 +467,7 @@ public class AgentSessionRunner {
                     failureKind = f.kind();
                     if (PROVIDER_KINDS.contains(f.kind())) providerFailure = f;
                 }
+                case SessionEvent.Patch p -> patch = p;
                 case SessionEvent.MessageEnd end -> {
                     replies++;
                     endReason = end.reason();
