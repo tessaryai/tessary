@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -336,7 +337,7 @@ final class FakeGithub extends HttpClient {
     }
 
     private String newSha(String kind) {
-        return String.format("%s%036d", kind.charAt(0), next++);
+        return String.format(Locale.ROOT, "%s%036d", kind.charAt(0), next++);
     }
 
     private static String branchOf(String rest, String prefix) {
