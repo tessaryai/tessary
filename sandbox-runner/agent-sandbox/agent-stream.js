@@ -219,6 +219,8 @@ function cloneRepo({ url, headSha = null, branch = null }) {
     git(['-C', REPO, 'checkout', '--quiet', headSha]);
   }
   git(['-C', REPO, 'remote', 'set-url', 'origin', withoutCredentials(url)]);
+  // The reflog's "clone: from <url>" line: current git leaves the credentials out of it, an older one may not.
+  git(['-C', REPO, 'reflog', 'expire', '--expire=now', '--all']);
   return git(['-C', REPO, 'rev-parse', 'HEAD']);
 }
 

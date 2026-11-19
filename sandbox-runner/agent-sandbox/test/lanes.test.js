@@ -107,7 +107,11 @@ test('the run lane leaves no clone token in the clone\'s git config (an agent th
   assert.equal(result.status, 0, result.stderr);
   const clone = path.join(workDir, 'repo');
   assert.equal(execFileSync('git', ['-C', clone, 'config', 'remote.origin.url']).toString().trim(), `file://localhost${repo.dir}`);
-  assert.doesNotMatch(fs.readFileSync(path.join(clone, '.git', 'config'), 'utf8'), /clonetoken|x-access-token/);
+  for (const entry of fs.readdirSync(path.join(clone, '.git'), { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    assert.doesNotMatch(fs.readFileSync(file, 'latin1'), /clonetoken|x-access-token/, file);
+  }
 });
 
 test('the run lane without a clone_url still runs, with no repo', async () => {

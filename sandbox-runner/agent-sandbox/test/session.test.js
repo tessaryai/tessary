@@ -707,7 +707,9 @@ test('every clone leaves no token in the clone\'s git config (an agent that read
 
   const clone = path.join(session.workDir, 'repo');
   assert.equal(git(clone, 'config', 'remote.origin.url'), `file://localhost${repo.dir}`);
-  assert.doesNotMatch(fs.readFileSync(path.join(clone, '.git', 'config'), 'utf8'), /clonetoken|x-access-token/);
+  for (const file of filesUnder(path.join(clone, '.git'))) {
+    assert.doesNotMatch(fs.readFileSync(file, 'latin1'), /clonetoken|x-access-token/, file);
+  }
 });
 
 test('a fix reply ends with a patch of every change since the cloned head, committed or not, just before message_end (a fix that loses the agent\'s new file, its commit or its deletion)', async (t) => {

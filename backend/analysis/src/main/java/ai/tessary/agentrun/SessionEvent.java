@@ -81,7 +81,8 @@ public sealed interface SessionEvent {
     record MessageEnd(long seq, AgentSpanTelemetry.AgentUsage usage, EndReason reason) implements SessionEvent {}
 
     /**
-     * @param kind {@code start}, {@code agent} or {@code opencode_exit}, or for a model provider that stopped the reply
+     * @param kind {@code start}, {@code agent}, {@code opencode_exit}, {@code patch} (a fix reply whose changes could
+     * not be read, sent in place of its {@link Patch}), or for a model provider that stopped the reply
      * {@code provider_rejected}, {@code request_refused} or {@code provider_unavailable}
      */
     record Failure(long seq, String kind, String detail) implements SessionEvent {}

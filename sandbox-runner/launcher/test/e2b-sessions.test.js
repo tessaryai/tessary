@@ -521,6 +521,29 @@ test('on E2B an rca session\'s clone host is in the egress allow list (a clone t
   });
 });
 
+test('on E2B a fix session clones its branch through the egress allow list and its patch reaches the reader (a fix sandbox that cannot reach the repo, or a patch dropped on E2B)', T, async () => {
+  const patch = { base_sha: 'a41c0de', files: [{ path: 'old.py', deleted: true }], refused: [], over_limit: null };
+  await withE2bLauncher({ shape: { patch } }, async ({ start, send, events, control }) => {
+    const started = await start({
+      ...START,
+      lane: 'fix',
+      system_prompt: 'You fix causes.',
+      credential: { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic' },
+      model: 'claude-sonnet-5',
+      clone_url: 'https://x-access-token:ghs_clonesecret@git.example.com/acme/app.git',
+      branch: 'tessary/fix-case-1',
+    });
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+
+    assert.deepEqual(control.calls.find((c) => c.op === 'create').network.allowOut, ['api.anthropic.com', 'models.opencode.ai', 'tessary.example.com', 'git.example.com']);
+    assert.equal(JSON.parse(control.calls.find((c) => c.op === 'write').content).clone.branch, 'tessary/fix-case-1');
+    const id = started.body.session_id;
+    assert.equal((await send(id, 'one')).status, 202);
+    const [text, toolStart, toolEnd, messageEnd] = reply(1, 'one');
+    assert.deepEqual((await events(id, { after: 0, until: 5 })).events, numbered([text, toolStart, toolEnd, { type: 'patch', data: patch }, messageEnd], 1));
+  });
+});
+
 test('an E2B session whose session.json cannot be written kills its sandbox (a half-started sandbox left running)', T, async () => {
   await withE2bLauncher({ writeFails: true }, async ({ start, control }) => {
     const failed = await start();
