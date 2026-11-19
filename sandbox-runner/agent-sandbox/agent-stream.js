@@ -97,8 +97,10 @@ const MAX_TURNS = 200;
 // our agent's config and prompt. REPO is a child of WORK, so it stays readable.
 const AGENT_CWD = WORK;
 
-// Belt and braces to AGENT_CWD: a future upstream discovery change must not reopen the hole.
-const QUARANTINED = ['.opencode', 'opencode.json', 'opencode.jsonc', 'AGENTS.md', 'CLAUDE.md', '.cursor'];
+// Belt and braces to AGENT_CWD: a future upstream discovery change must not reopen the hole. The fix
+// lane keeps the repo's AGENTS.md and CLAUDE.md, which its agent reads as the repo's own rules.
+const TOOL_CONFIG = Object.freeze(['.opencode', 'opencode.json', 'opencode.jsonc', '.cursor']);
+const QUARANTINED = Object.freeze([...TOOL_CONFIG, 'AGENTS.md', 'CLAUDE.md']);
 
 // Clone tokens and platform API keys (tsy_<scope>_<random>, the shape of the ephemeral MCP key).
 function scrubToken(s) {
@@ -129,18 +131,20 @@ function describeError(e, depth = 0) {
 }
 
 const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS || 180_000);
+const GIT_MAX_BUFFER = 64 << 20;
 
 /**
  * Run git and fail rather than wait for a human: GIT_TERMINAL_PROMPT=0 and empty askpass turn a
  * credential prompt into an exit, an empty credential.helper stops inherited helpers, and a timeout
  * covers network stalls. stderr is scrubbed into the error; args carry the clone token and are never echoed.
+ * `raw` returns stdout as an untrimmed Buffer.
  */
-function git(args) {
+function git(args, { env = {}, raw = false } = {}) {
   try {
-    return execFileSync('git', ['-c', 'credential.helper=', ...args], {
+    const out = execFileSync('git', ['-c', 'credential.helper=', ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf8',
       timeout: GIT_TIMEOUT_MS,
+      maxBuffer: GIT_MAX_BUFFER,
       killSignal: 'SIGKILL',
       env: {
         ...process.env,
@@ -148,8 +152,10 @@ function git(args) {
         GIT_ASKPASS: '',
         SSH_ASKPASS: '',
         GIT_CONFIG_NOSYSTEM: '1',
+        ...env,
       },
-    }).trim();
+    });
+    return raw ? out : out.toString('utf8').trim();
   } catch (e) {
     const verb = args[0];
     if (e && (e.code === 'ETIMEDOUT' || e.signal === 'SIGKILL')) {
@@ -166,17 +172,132 @@ function git(args) {
   }
 }
 
-/** The files stay readable as evidence; they just stop sitting where an agent harness looks for instructions. */
-function quarantineRepo() {
-  const dest = path.join(REPO, 'quarantine');
-  for (const name of QUARANTINED) {
+/**
+ * The files stay readable as evidence; they just stop sitting where an agent harness looks for
+ * instructions. Returns the names it moved.
+ */
+function quarantineRepo({ names = QUARANTINED, dest = path.join(REPO, 'quarantine') } = {}) {
+  const moved = [];
+  for (const name of names) {
     const from = path.join(REPO, name);
     if (!fs.existsSync(from)) continue;
     try {
       fs.mkdirSync(dest, { recursive: true });
       fs.renameSync(from, path.join(dest, name));
+      moved.push(name);
     } catch {
     }
+  }
+  return moved;
+}
+
+// A branch name a clone may start from: no option shape, no `..`, `@{`, `//` or `/.`, only these
+// characters, and not ending in `/`, `.` or `.lock`. The launcher repeats this check.
+const BRANCH = /^(?!-)(?!.*\.\.)(?!.*@\{)(?!.*\/\/)(?!.*\/\.)(?!.*(?:\/|\.|\.lock)$)[A-Za-z0-9._/-]{1,200}$/;
+
+function withoutCredentials(url) {
+  try {
+    const parsed = new URL(url);
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    return String(url).replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, '$1');
+  }
+}
+
+/**
+ * Clones `url` to REPO at `headSha`, or at the head of `branch`, then sets the remote URL without
+ * its token, so the token is not left in the clone's git config for the agent to read. Returns the
+ * commit it checked out.
+ */
+function cloneRepo({ url, headSha = null, branch = null }) {
+  if (branch) {
+    git(['clone', '--quiet', '--branch', branch, '--', url, REPO]);
+  } else {
+    git(['clone', '--quiet', '--', url, REPO]);
+    git(['-C', REPO, 'checkout', '--quiet', headSha]);
+  }
+  git(['-C', REPO, 'remote', 'set-url', 'origin', withoutCredentials(url)]);
+  return git(['-C', REPO, 'rev-parse', 'HEAD']);
+}
+
+const PATCH_MAX_FILES = 50;
+const PATCH_MAX_BYTES = 1 << 20;
+const PATCH_MAX_REFUSED = 50;
+const PATCH_MODES = new Set(['100644', '100755', '120000']);
+
+function patchRefusal(rel, mode, quarantined) {
+  const segments = rel.split('/');
+  if (segments.some((s) => s.toLowerCase() === '.git')) return 'git_dir';
+  if (segments.some((s) => quarantined.includes(s))) return 'quarantined';
+  if (mode === '160000') return 'submodule';
+  if (mode !== null && !PATCH_MODES.has(mode)) return 'mode';
+  return null;
+}
+
+function linkEscapesRepo(rel, target) {
+  const full = path.resolve(REPO, path.dirname(rel), target);
+  return full !== REPO && !full.startsWith(REPO + path.sep);
+}
+
+/**
+ * What the agent changed in REPO since `baseSha`, committed or not: every path git sees (ignored
+ * files left out), staged in a throwaway index so the agent's own index is untouched. The deletion
+ * of a name this lane `moved` to quarantine is not a change. A path in `.git` or under a quarantined
+ * name, a submodule, or a symlink that leaves the repo is refused and named in `refused`. Over
+ * PATCH_MAX_FILES files or PATCH_MAX_BYTES of content, `files` is empty and `over_limit` says which.
+ */
+function repoPatch({ baseSha, quarantined, moved }) {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'patch-'));
+  try {
+    const index = path.join(scratch, 'index');
+    const own = path.join(REPO, '.git', 'index');
+    if (fs.existsSync(own)) fs.copyFileSync(own, index);
+    const env = { GIT_INDEX_FILE: index };
+    git(['-C', REPO, 'add', '--all', '--', '.'], { env });
+    const raw = git(['-C', REPO, 'diff', '--cached', '--raw', '-z', '--no-renames', '--no-abbrev', baseSha], { env, raw: true })
+      .toString('utf8')
+      .split('\0');
+    const changed = [];
+    const refused = [];
+    for (let i = 0; i + 1 < raw.length; i += 2) {
+      const [, newMode, , newSha, status] = raw[i].slice(1).split(' ');
+      const rel = raw[i + 1];
+      const deleted = status === 'D';
+      if (deleted && moved.some((name) => rel === name || rel.startsWith(name + '/'))) continue;
+      const reason = patchRefusal(rel, deleted ? null : newMode, quarantined);
+      if (reason) refused.push({ path: rel, reason });
+      else changed.push({ path: rel, mode: newMode, sha: newSha, deleted });
+    }
+    const files = [];
+    let bytes = 0;
+    let overLimit = changed.length > PATCH_MAX_FILES ? 'files' : null;
+    for (const c of overLimit ? [] : changed) {
+      if (c.deleted) {
+        files.push({ path: c.path, deleted: true });
+        continue;
+      }
+      bytes += Number(git(['-C', REPO, 'cat-file', '-s', c.sha]));
+      if (bytes > PATCH_MAX_BYTES) {
+        overLimit = 'bytes';
+        break;
+      }
+      const content = git(['-C', REPO, 'cat-file', 'blob', c.sha], { raw: true });
+      if (c.mode === '120000' && linkEscapesRepo(c.path, content.toString('utf8'))) {
+        refused.push({ path: c.path, reason: 'symlink_escape' });
+        continue;
+      }
+      files.push({ path: c.path, mode: c.mode, content_base64: content.toString('base64') });
+    }
+    return {
+      base_sha: baseSha,
+      files: overLimit ? [] : files,
+      refused: refused.slice(0, PATCH_MAX_REFUSED),
+      over_limit: overLimit,
+    };
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
 }
 
@@ -195,11 +316,23 @@ function onsetCommit(onsetAt) {
  * The posture of each session.js lane. Edit is a blanket allow where allowed, because opencode
  * matches an edit glob against `/` when WORK is not a git repo. rca may clone and denies the edit
  * tool, so the cloned repo stays as checked out; its agent writes scripts to checks/ through bash.
+ * fix must clone and edits the clone. It quarantines only the repo's tool config, to WORK so the move
+ * is outside the repo, and every reply ends with a `patch` of what the agent changed.
  */
+const IN_REPO_QUARANTINE = Object.freeze({ names: QUARANTINED, dest: path.join(REPO, 'quarantine') });
 const SESSION_LANES = Object.freeze({
-  agent_run: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: null, clones: false }),
-  triage: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: 'checks', clones: false }),
-  rca: Object.freeze({ edit: { '*': 'deny' }, scratchDirs: true, checksDir: 'checks', clones: true }),
+  agent_run: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: null, clones: false, mustClone: false, quarantine: IN_REPO_QUARANTINE, patch: false }),
+  triage: Object.freeze({ edit: { '*': 'allow' }, scratchDirs: true, checksDir: 'checks', clones: false, mustClone: false, quarantine: IN_REPO_QUARANTINE, patch: false }),
+  rca: Object.freeze({ edit: { '*': 'deny' }, scratchDirs: true, checksDir: 'checks', clones: true, mustClone: false, quarantine: IN_REPO_QUARANTINE, patch: false }),
+  fix: Object.freeze({
+    edit: { '*': 'allow' },
+    scratchDirs: true,
+    checksDir: null,
+    clones: true,
+    mustClone: true,
+    quarantine: Object.freeze({ names: TOOL_CONFIG, dest: path.join(WORK, 'quarantine') }),
+    patch: true,
+  }),
 });
 
 // --- server lifecycle --------------------------------------------------------
@@ -792,6 +925,12 @@ async function runAgent(spec) {
 
 module.exports = {
   git,
+  cloneRepo,
+  repoPatch,
+  withoutCredentials,
+  BRANCH,
+  PATCH_MAX_FILES,
+  PATCH_MAX_BYTES,
   onsetCommit,
   refusalOf,
   SESSION_LANES,
