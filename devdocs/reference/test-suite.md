@@ -32,9 +32,10 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (16 checks): backend `mvn verify`, frontend, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, classifier-quality-doc, blob-links, module-hygiene, license-headers, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact. The manifest in `scripts/check.sh` is the authoritative list: 16 RUN rows of the 21 scripts it declares. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header. `docs-links`, `connect-route`, `selfhost-health`, `required-inputs` and `readme-front-door` were deleted under it, so they have no row there | yes |
+| `task check` | The full gate (17 checks): backend `mvn verify`, frontend, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, prompt-regex, classifier-quality-doc, blob-links, module-hygiene, license-headers, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact. The manifest in `scripts/check.sh` is the authoritative list: 17 RUN rows of the 22 scripts it declares. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header. `docs-links`, `connect-route`, `selfhost-health`, `required-inputs` and `readme-front-door` were deleted under it, so they have no row there | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
+| `task check -- promptlib` | spotless, compile, every test in `ai.tessary.promptlib.**`: six unit classes in `analysis` (`PromptNamesTest`, `PromptBodyTest`, `PromptServiceTest`, `PromptFetchCacheTest`, `PromptPublicControllerRaceTest`, `PlaygroundServiceTest`) and ten integration classes in `app` (`PromptRepositoryTest`, `PromptSchemaTest`, `PromptControllerTest`, `PromptPublicControllerTest` and `PromptUsageControllerTest` on the shared default context; `PlaygroundControllerTest` on its own, since it replaces `ChatClient` with a `@MockitoBean`; `PromptControllerMvcTest`, `PromptPublicControllerMvcTest`, `PromptUsageControllerMvcTest` and `PlaygroundControllerMvcTest` on `AuthEnforcedContext`), so three Spring contexts. The MCP prompt tools, the ingest link and `llm/chat/` are tested in the `mcp`, `ingest` and `llm` slices | yes |
 | `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, plus repo-wide license-headers/price-book-contract/compose-artifact | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
@@ -186,7 +187,7 @@ instrumented — there's nothing to measure.
 ## The schema-column generator
 
 `backend/core/tools/schemagen/SchemaColumnGenerator.java` runs at `generate-sources` on every Maven
-invocation and emits 61 interfaces of column constants for the open reactor. It
+invocation and emits 68 interfaces of column constants for the open reactor. It
 writes a file **only when the content
 changed**. Writing unconditionally reset every generated file's mtime, which invalidated the
 compiler's staleness check and forced a full recompile every time. Measured A/B on a

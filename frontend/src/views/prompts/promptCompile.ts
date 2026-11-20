@@ -2,9 +2,9 @@
 import type { PromptBody, PromptChatBody, PromptChatMessage, PromptPlaceholder } from "../../api/types";
 
 /**
- * Any trimmed, non-blank text with no brace between double braces. The server's PromptNames.VARIABLE and the Python
- * SDK's tessary.prompts carry the same pattern, kept in step by hand: no gate compares them. The name starts and ends
- * on a non-space so a long unclosed {{ scans in linear time.
+ * Any trimmed, non-blank text with no brace between double braces. The server's PromptNames.VARIABLE carries the same
+ * pattern, and scripts/check-prompt-variable-regex.sh fails when the two differ; the Tessary SDK's copy is kept in step
+ * by hand. The name starts and ends on a non-space so a long unclosed {{ scans in linear time.
  */
 export const VARIABLE_PATTERN = /\{\{\s*([^{}\s][^{}]*[^{}\s]|[^{}\s])\s*\}\}/g;
 export const PLACEHOLDER_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;

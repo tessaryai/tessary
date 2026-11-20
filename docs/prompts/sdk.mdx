@@ -101,6 +101,20 @@ Without a fallback, a failed fetch raises one of these errors, all subclasses of
 
 A read is retried twice on a `429`, a server error, a timeout, or a lost connection. Pass `max_retries=` (0 to 4) and `fetch_timeout_seconds=` to change that for one call.
 
+### Fetch at startup
+
+There is no separate prefetch call. To make sure a process starts with every prompt it needs, call `get` for each one at startup, without a fallback, and stop the process if a call fails. Later calls are then served from the cache.
+
+```python
+import sys
+
+for name in ("support/greeting", "support/answer"):
+    try:
+        tessary.prompts.get(name)
+    except tessary.prompts.PromptError as error:
+        sys.exit(f"cannot load prompt {name}: {error}")
+```
+
 ## Create, label, list, and delete prompts
 
 Writes need an admin key. Pass it as `admin_token=`, or set `TESSARY_ADMIN_TOKEN`, which the SDK reads at each write. The key `tessary.init()` was given is never used for a write.
