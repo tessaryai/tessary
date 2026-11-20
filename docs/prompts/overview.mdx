@@ -61,7 +61,7 @@ Deleting a version deletes the labels it carries. Deleting the version that carr
 
 ## Link calls to a version
 
-A span that names the prompt it was produced from links back to that prompt. It carries two attributes, `tessary.prompt.name` and `tessary.prompt.version`, which any OpenTelemetry setup can set and which the Python SDK sets for you. The **Metrics** tab counts the linked calls per version, and the Traces page filters by prompt. The attribute rules are in [Span requirements](/instrument/span-requirements).
+A span that names the prompt it was produced from links back to that prompt. It carries two attributes, `tessary.prompt.name` and `tessary.prompt.version`, which any OpenTelemetry setup can set and which the Python SDK sets for you. Once a trace settles, the **Metrics** tab counts its linked model calls per version, and the Traces page filters by prompt. The attribute rules are in [Span requirements](/instrument/span-requirements).
 
 ## Not supported yet
 

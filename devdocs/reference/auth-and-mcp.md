@@ -41,8 +41,10 @@ bearer key authenticates as role `member` and RBAC alone would let any key throu
 takes a write, query or admin key; on the Prompts page routes (`/api/.../prompts/**`) a bearer read needs a
 query or admin key; and every prompt write, and every playground run (it spends on the org's provider key), needs an admin key, else 403 `PROMPTS.WRONG_KEY_SCOPE`. A cookie
 session passes the scope check and meets RBAC as usual, `/v1/prompts` takes no cookie session (403
-`PROMPTS.TOKEN_REQUIRED`), and the scope check runs before the `PROMPT_MANAGEMENT` capability check, so a
-key that may not read learns nothing about the org. `KeyScope` itself is unchanged.
+`PROMPTS.TOKEN_REQUIRED`), and on `/v1/prompts` the scope check runs before the `PROMPT_MANAGEMENT` capability
+check, so a key that may not read learns nothing about the org. On the Prompts page routes the class-level
+`@RequiresCapability` interceptor runs first, so a wrong-scope key there can learn that prompt management is
+off (403 `CAPABILITY.DISABLED`) and nothing more. `KeyScope` itself is unchanged.
 
 MCP token UI (`McpTokenController`) and the plugin device-link handshake mint **admin**-scoped
 keys via `ApiKeyService.issue(...)`. So do the three agent lanes, one short-lived key per run, revoked

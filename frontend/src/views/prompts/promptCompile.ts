@@ -43,7 +43,10 @@ export function extractPlaceholders(body: PromptBody): string[] {
   return [...new Set(body.filter(isPlaceholder).map((p) => p.name))];
 }
 
-/** An unfilled placeholder stays in the result as the placeholder entry; the caller reports it. */
+/**
+ * Messages supplied for a placeholder are filled too, as the SDK fills them. An unfilled placeholder stays in the result
+ * as the placeholder entry; the caller reports it.
+ */
 export function compile(
   body: PromptBody,
   vars: Record<string, string>,
@@ -55,7 +58,7 @@ export function compile(
   return body.flatMap((e): PromptChatBody =>
     isPlaceholder(e)
       ? Object.hasOwn(placeholders, e.name)
-        ? placeholders[e.name]
+        ? placeholders[e.name].map((m) => ({ role: m.role, content: fill(m.content) }))
         : [e]
       : [{ role: e.role, content: fill(e.content) }],
   );

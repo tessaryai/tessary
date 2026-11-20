@@ -392,7 +392,7 @@ it("hands the edited template and settings to Save as new version", async () => 
 
   expect(onSaveAsVersion).toHaveBeenCalledWith({
     body: [{ role: "system", content: "You are {{tone}} today." }, { type: "placeholder", name: "history" }],
-    config: { response_format: { type: "json" }, seed: 7, temperature: 0.5, max_tokens: 100, stop: ["END"] },
+    config: { response_format: { type: "json" }, seed: 7, temperature: 0.5, maxTokens: 100, stop: ["END"] },
   });
 });
 

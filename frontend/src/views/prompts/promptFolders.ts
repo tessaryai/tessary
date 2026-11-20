@@ -28,5 +28,5 @@ export function labelsWithoutLatest(labels: string[]): string[] {
 /** A span's version string: `v3` when numeric, `(prod)` when a producer sent a label. */
 export function formatVersionRef(version: string | null): string {
   if (version === null) return "";
-  return /^\d+$/.test(version) ? `v${version}` : `(${version})`;
+  return /^[1-9]\d*$/.test(version) ? `v${version}` : `(${version})`;
 }

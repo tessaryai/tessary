@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { ApiError, PromptBody, PromptConfig, PromptDetail, PromptVersionView, VersionSummary } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { Button, Card, ErrorNote, Field, Input, Textarea, useToast } from "../../ui";
-import { parseConfig } from "./ConfigEditor";
+import { parseConfig } from "./promptConfig";
 import { ChangesPreview } from "./DiffView";
 import { LabelChecklist, labelHint } from "./LabelEditor";
 import { Note, Panel, VariableChips, VersionSelect } from "./promptBits";

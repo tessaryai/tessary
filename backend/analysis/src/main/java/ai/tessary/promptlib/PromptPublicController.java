@@ -124,9 +124,8 @@ public class PromptPublicController {
                 orEmpty(req.tags()),
                 req.commitMessage());
         try {
-            PromptService.PromptDetail created = service.create(projectId, ctx.userId(), CreateVia.API, cmd);
-            return ApiResponse.created(PublicPrompt.from(
-                    service.getVersion(projectId, created.prompt().id(), 1)));
+            return ApiResponse.created(
+                    PublicPrompt.from(service.createFirstVersion(projectId, ctx.userId(), CreateVia.API, cmd)));
         } catch (TessaryException e) {
             // Another writer created the name between the read and the insert: write the next version once.
             if (e.error() != PromptsError.NAME_EXISTS) throw e;

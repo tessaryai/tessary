@@ -39,7 +39,7 @@ The Tessary Python SDK does all of this through `tessary.prompts`. Any other lan
     A producer that sets its own span attributes can call `prompt.span_attributes()`, which returns the two attributes, or `prompt.link(span)`, which sets them on that span.
   </Tab>
   <Tab title="TypeScript">
-    There is no TypeScript SDK yet. Fetch the version over HTTP, then set the two attributes on the span of the model call:
+    There is no TypeScript SDK yet. Fetch the version over HTTP, then set the two attributes on the span of the model call. Usage counts a span only when it is a model call, so mark the span as one with `gen_ai.operation.name`, or set the pair on the span your provider's instrumentation already makes:
 
     ```typescript
     const res = await fetch(
@@ -49,7 +49,9 @@ The Tessary Python SDK does all of this through `tessary.prompts`. Any other lan
     const { data: prompt } = await res.json();
     // prompt.body holds the messages; fill {{company}} and {{question}} before the call.
 
-    await tracer.startActiveSpan("support.greeting", async (span) => {
+    await tracer.startActiveSpan("chat", async (span) => {
+      span.setAttribute("gen_ai.operation.name", "chat");
+      span.setAttribute("gen_ai.request.model", prompt.config.model ?? "your-model");
       span.setAttribute("tessary.prompt.name", prompt.name);
       span.setAttribute("tessary.prompt.version", String(prompt.version));
       try {
@@ -62,7 +64,7 @@ The Tessary Python SDK does all of this through `tessary.prompts`. Any other lan
   </Tab>
 </Tabs>
 
-<Check>Make one call, then open the prompt on the **Prompts** page. The call appears on the version's **Metrics** tab, and its trace appears under **Linked traces**.</Check>
+<Check>Make one call, then open the prompt on the **Prompts** page. Its trace appears under **Linked traces**, and once the trace settles, the call is counted on the prompt's **Metrics** tab, in the row for its version.</Check>
 
 A span links when it carries `tessary.prompt.name`. `tessary.prompt.version` is stored as the text sent, so a label such as `production` works as a version too. No other attribute links a span to a prompt. The rules are in [Span requirements](/instrument/span-requirements).
 

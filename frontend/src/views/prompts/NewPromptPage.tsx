@@ -5,7 +5,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { ApiError, CreatePromptRequest, PromptBody, PromptSummary, PromptType } from "../../api/types";
 import { useProjectApi, useTenant } from "../../tenant/TenantContext";
 import { Button, Card, ErrorNote, Field, Input, PageBody, PageHeader, SegmentedControl, Textarea, useToast } from "../../ui";
-import { parseConfig } from "./ConfigEditor";
+import { parseConfig } from "./promptConfig";
 import { LabelChecklist } from "./LabelEditor";
 import { Note, Panel, VariableChips } from "./promptBits";
 import { hasBodyErrors, NO_BODY_ERRORS, PromptBodyEditor, validateBody } from "./PromptBodyEditor";

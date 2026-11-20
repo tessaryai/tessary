@@ -18,9 +18,14 @@ export type SnippetInput = {
 /** The ingest key: an application that sends traces fetches its prompts with the same key. */
 const KEY = "tsy_w_YOUR_KEY";
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Python's keywords, which pass IDENTIFIER but cannot be a keyword argument or a variable. */
+const PY_KEYWORDS = new Set(
+  ("False None True and as assert async await break class continue def del elif else except finally for from global if " +
+    "import in is lambda nonlocal not or pass raise return try while with yield").split(" "),
+);
+const pyName = (k: string) => IDENTIFIER.test(k) && !PY_KEYWORDS.has(k);
 /** JSON string syntax is valid in both Python and TypeScript for the text a name can hold. */
 const str = (s: string) => JSON.stringify(s);
-const spanName = (name: string) => name.replaceAll("/", ".");
 
 function fetchUrl(i: SnippetInput): string {
   const query = new URLSearchParams({ name: i.name });
@@ -32,9 +37,9 @@ function fetchUrl(i: SnippetInput): string {
 function python(i: SnippetInput): string {
   const selector = "label" in i.selector ? `label=${str(i.selector.label)}` : `version=${i.selector.version}`;
   const vars = i.variables.map((v) => [v, '"..."'] as const);
-  const holes = i.placeholders.map((p) => [p, IDENTIFIER.test(p) ? p : "[]"] as const);
+  const holes = i.placeholders.map((p) => [p, pyName(p) ? p : "[]"] as const);
   const all = [...vars, ...holes];
-  const args = all.every(([k]) => IDENTIFIER.test(k))
+  const args = all.every(([k]) => pyName(k))
     ? all.map(([k, v]) => `${k}=${v}`).join(", ")
     : `**{${all.map(([k, v]) => `${str(k)}: ${v}`).join(", ")}}`;
   const out = i.type === "chat" ? "messages" : "text";
@@ -57,7 +62,8 @@ function python(i: SnippetInput): string {
 
 /**
  * No TypeScript SDK yet, so the snippet is what any OpenTelemetry setup can do: fetch the version over HTTP and set
- * the two documented `tessary.prompt.*` attributes on the span of the call.
+ * the two documented `tessary.prompt.*` attributes on the model-call span, which usage counts only when it is a chat
+ * span.
  */
 function typescript(i: SnippetInput): string {
   const holes = i.placeholders.map((p) => `the ${p} placeholder`);
@@ -73,7 +79,10 @@ function typescript(i: SnippetInput): string {
     "const { data: prompt } = await res.json();",
     `// prompt.body holds ${what}${fill ? `; fill ${fill}` : ""}.`,
     "",
-    `await tracer.startActiveSpan(${str(spanName(i.name))}, async (span) => {`,
+    "// The pair goes on the span of the model call; usage counts only chat spans.",
+    'await tracer.startActiveSpan("chat", async (span) => {',
+    '  span.setAttribute("gen_ai.operation.name", "chat");',
+    '  span.setAttribute("gen_ai.request.model", prompt.config.model ?? "your-model");',
     '  span.setAttribute("tessary.prompt.name", prompt.name);',
     `  span.setAttribute("tessary.prompt.version", String(prompt.version)); // version ${i.version}`,
     "  try {",

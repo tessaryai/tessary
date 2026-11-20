@@ -146,6 +146,8 @@ When to add one: root [`AGENTS.md`](../AGENTS.md#tests). The backend rules on ex
 - **Absence needs a settled query.** `await` something rendered from the same response, then assert
   `queryBy…` is null.
 - **No real waiting.** `await findBy…` for appearance; `vi.useFakeTimers()` for timed UI.
+- **Dates render the same everywhere.** `pnpm test` and `pnpm run coverage` pin `TZ=UTC` and the `en_US` locale, so a
+  formatted date in an assertion does not depend on the machine running it.
 
 ## Before you commit
 

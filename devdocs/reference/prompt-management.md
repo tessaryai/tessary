@@ -106,16 +106,17 @@ own 60-second cache. Bounds: `tessary.prompts.fetch-cache.*` in
 | Body | Text: a non-empty string. Chat: a non-empty list. A message needs string `role` and `content`, may carry `type: "message"` on input, and any other key is dropped; it is stored as `{role, content}`. A placeholder is exactly `{type: "placeholder", name}`. No size cap of its own. |
 | Config | A JSON object; `null` means `{}`. No size cap of its own. |
 | Commit message | At most 500 characters. |
-| NUL | U+0000 is refused in a name, folder, tag, body, config (keys and nested strings too) and commit message, because Postgres stores it in neither text nor jsonb, and a looked-up name holding it names no prompt. An integrity error from the version insert or the tag update is still a 400 `COMMON.INVALID_BODY`, with no SQL cause attached, because the database's error context would quote the stored JSON. |
+| NUL | U+0000 is refused in a name, folder, tag, body, config (keys and nested strings too) and commit message, because Postgres stores it in neither text nor jsonb, and a read never sends it to the database: a looked-up name holding it names no prompt (`NOT_FOUND`), a fetch label holding it names no label (`LABEL_NOT_FOUND`), and a list or folder filter holding it matches nothing. An integrity error from the version insert or the tag update is still a 400 `COMMON.INVALID_BODY`, with no SQL cause attached, because the database's error context would quote the stored JSON. |
 | Request lists | `labels`, `tags`, `new_labels`, `remove_labels`: at most 50 non-blank strings. |
 | Request body | The only size bound on a body or config. A declared `Content-Length` over 1048576 bytes on `/api/orgs/*/projects/*/prompts/**` and `/v1/prompts/**` is 400 `COMMON.INVALID_BODY` from `PromptBodyLimitInterceptor`, before binding. A chunked body declares no length, so `PromptBodyLimitAdvice` reads at most 1048577 bytes of it before Jackson runs and answers the same 400 past 1048576. |
+| Playground request | At most 64 `messages`, each `content` at most 200,000 characters; `model` at most 200 characters. Past either is 400 `COMMON.VALIDATION_FAILED`. |
 | Pages | 1-based. UI default 50, max 200; public default 10, max 100. A page whose offset would overflow is 400 `COMMON.INVALID_PARAMETER`. |
 
 The variable regex has one copy per implementation: `PromptNames.VARIABLE`, `VARIABLE_PATTERN` in the
-frontend's `promptCompile.ts`, and `VARIABLE_PATTERN` in the SDK's `tessary.prompts`. They agree by cases,
-not by text: one shared case file lists templates and the variables each one names, and the backend,
-frontend and SDK tests all read it. The SDK keeps a copy of the file while it lives in the
-private repo; the copies are compared when the SDK moves here.
+frontend's `promptCompile.ts`, and `VARIABLE_PATTERN` in the SDK's `tessary.prompts`. They agree by text.
+`scripts/check-prompt-variable-regex.sh` (the `prompt-regex` gate in `task check`) reads the two copies in
+this tree and fails when they differ. The SDK's copy lives in the private repo and is compared by hand;
+it joins the gate when the SDK moves here.
 
 ## Routes and key scopes
 
@@ -125,7 +126,7 @@ The literal segments `usage`, `folders`, `level`, `facets` and `playground` win 
 The list page reads one folder level at a time: `GET .../prompts/level?folder&label&tag&page&limit`
 returns every child folder of `folder` (the root when absent) with its prompt count and newest update,
 and one page of the prompts directly in it, ordered by name; `total` counts those prompts only, and
-`label` and `tag` narrow both. A search uses the flat `GET .../prompts?q`. `GET .../prompts/facets` returns
+`label` and `tag` narrow both. A search uses the flat `GET .../prompts?q`, which also takes `name` (exact), `folder`, `label`, `tag`, `type`, `page` and `limit`. `GET .../prompts/facets` returns
 every deployment label and tag in the project, sorted, for the list's filter pickers.
 A version on these routes and on MCP `get_prompt` carries `created_by` (a principal id) and
 `created_by_label`: the principal's display name, else its email, else `Unknown`, read in one
@@ -178,7 +179,7 @@ and keeps the span, and a dropped name drops the version with it. Attribute rows
 
 Ingest never looks a prompt up. The pair is stored as text, every read (usage, the traces and sessions
 filters) keys on the name, and a name that matches no prompt in the project is kept and linked to nothing,
-so a prompt link can never fail or slow an ingest batch. Redaction rules never rewrite the pair (`GenAiAttributes.isRedactionExempt`, beside the usage and cost keys): a name and version identify a prompt the org stored, and a phone-shaped digit run in either would otherwise break the link. The name is trimmed the way prompt names are
+so a prompt link can never fail or slow an ingest batch. Redaction rules never rewrite a name or version of at most 512 characters (`GenAiAttributes.isRedactionExempt`, beside the usage and cost keys): it identifies a prompt the org stored, and a phone-shaped digit run in it would otherwise break the link. A longer value never links, so it is redacted like any other attribute. The name is trimmed the way prompt names are
 (`PromptNames.lookupName`), so a span and the prompt it names compare equal.
 
 `GET .../traces` and the two `GET .../sessions` routes take `promptName` and `promptVersion` (ignored
@@ -237,8 +238,8 @@ their spans unchanged and a pair the producer set itself is never overwritten. `
 also takes a `(name, version)` tuple for prompts kept elsewhere. A fallback links nothing and masks an
 outer prompt. A span that already carries either half of the Tessary pair keeps it, and the scope adds
 nothing. `prompt.span_attributes()` returns
-the pair (the version as a string) for a producer that
-sets attributes itself. There is no separate span processor to add.
+the pair (the version as a string), and `prompt.link(span)` sets it on that span (or the current one), for
+a producer that sets attributes itself. There is no separate span processor to add.
 
 Compile. A supplied value becomes `str(value)`; `None` becomes an empty string; a name not supplied
 stays literal. `{{}}`, `{{   }}` and inner text that holds a brace (`{{a{b}}`) are not variables;
@@ -272,6 +273,10 @@ Validation is raised as `ValueError` before any I/O: an empty or blank name, a c
 not `{role, content}` messages or `{type: placeholder, name}` placeholders, a version that is not an integer of at
 least 1, version together with label, a negative TTL or retry count, a timeout that is not positive, a
 fallback that is neither a string nor a list, and a create type that is not `text` or `chat`.
+
+Errors are `tessary.prompts.PromptError` and its three subclasses: `PromptNotFound` (no such prompt,
+version or label), `PromptApiError` (any other refusal, with the status, the error code and the message) and
+`PromptTransportError` (no answer, a timeout, or an answer the SDK could not read).
 
 Wire. Headers are `Authorization: Bearer`, `Accept: application/json`, a `User-Agent` of
 `tessary-python/<v>`, and `Content-Type: application/json` on a body. With neither version nor label the
@@ -326,8 +331,11 @@ integration*.
   view says which (`price_source` of `book`, `openrouter` or `unpriced`).
 - Booking: one `llm_call` row under lane `playground`, funding `byo`, with subject
   `("prompt_version", <version id>)` when the run named one. A failed call books nothing.
-- Telemetry: one `playground-run` span in Tessary's own telemetry with `gen_ai.operation.name=chat` and
-  no message content; a failed run sets span status `ERROR` and the standard `error.type` to the error code ([telemetry-naming.md](./telemetry-naming.md)). Nothing is ingested into the
+- Telemetry: one `playground-run` span in Tessary's own telemetry per call sent to a provider, with
+  `gen_ai.operation.name=chat` and no message content. A request refused before the call (validation, a
+  missing credential, an unsupported provider, `BUSY`) opens no span. A failed call sets span status `ERROR`
+  and the standard `error.type` to the error's enum name (for example `TIMEOUT`); a finished one adds
+  `gen_ai.response.model`, the token counts, `tessary.latency_ms` and the cost ([telemetry-naming.md](./telemetry-naming.md)). Nothing is ingested into the
   project's traces, so runs do not count in prompt usage.
 
 Which keys can run it: [`../guides/provider-keys.md`](../guides/provider-keys.md).

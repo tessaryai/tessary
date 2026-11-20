@@ -224,6 +224,25 @@ class PromptServiceTest {
         assertEquals(List.of("old"), kept.prompt().tags());
     }
 
+    /**
+     * Bug: the public create committed version 1 and read it back in a second transaction, so a delete between the two
+     * turned a committed create into a 404 and the client's retry wrote a duplicate.
+     */
+    @Test
+    void createFirstVersion_returnsWhatItWrote_withoutReadingItBack() {
+        CreatePromptCommand cmd = new CreatePromptCommand(
+                " p ", PromptType.TEXT, "hi", null, List.of("production"), List.of("t"), "first");
+
+        ResolvedVersion v = service().createFirstVersion(PID, BY, CreateVia.API, cmd);
+
+        assertEquals("p", v.prompt().name());
+        assertEquals(1, v.version().version());
+        assertEquals(List.of("production", "latest"), v.labels());
+        assertTrue(v.isLatest());
+        verify(repo, never()).findVersion(anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt());
+        verify(repo, never()).findById(anyString(), anyString());
+    }
+
     @Test
     void create_duplicateNameIsNameExists_integrityIsInvalidName() {
         CreatePromptCommand cmd = new CreatePromptCommand("p", PromptType.TEXT, "hi", null, List.of(), List.of(), null);
@@ -245,16 +264,32 @@ class PromptServiceTest {
         when(repo.findVersion(PID, ID, 2)).thenReturn(Optional.of(version(2)));
         when(repo.labelsOf(PID, List.of(ID)))
                 .thenReturn(List.of(label("dev", 1), label("production", 2), label("staging", 2)));
-        when(repo.labelVersion(PID, ID, "production")).thenReturn(Optional.of(2));
         when(repo.maxVersion(PID, ID)).thenReturn(3);
 
         ResolvedVersion v = service().setLabels(PID, ID, 2, BY, Set.of("production"), LabelMode.REPLACE);
 
+        verify(repo, never()).upsertLabel(anyString(), anyString(), eq("production"), anyString(), anyString(), any());
         verify(repo).deleteLabel(PID, ID, "staging");
         verify(repo, never()).deleteLabel(PID, ID, "dev");
         verify(repo).touchPrompt(PID, ID, NOW);
         assertEquals(List.of("production"), v.labels());
         assertFalse(v.isLatest());
+    }
+
+    /** Bug: a retried promote rewrote who promoted the version and when, and logged a move from a version to itself. */
+    @Test
+    void setLabels_aLabelAlreadyOnTheVersionIsLeftAsItIs_andAnIdenticalRetryWritesNothing() {
+        when(repo.lockPrompt(PID, ID)).thenReturn(Optional.of(ID));
+        when(repo.findById(PID, ID)).thenReturn(Optional.of(TEXT_PROMPT));
+        when(repo.findVersion(PID, ID, 2)).thenReturn(Optional.of(version(2)));
+        when(repo.labelsOf(PID, List.of(ID))).thenReturn(List.of(label("production", 2)));
+        when(repo.maxVersion(PID, ID)).thenReturn(2);
+
+        ResolvedVersion v = service().setLabels(PID, ID, 2, BY, Set.of("production"), LabelMode.ADD);
+
+        verify(repo, never()).upsertLabel(anyString(), anyString(), anyString(), anyString(), anyString(), any());
+        verify(repo, never()).touchPrompt(anyString(), anyString(), any());
+        assertEquals(List.of("production", "latest"), v.labels());
     }
 
     @Test
@@ -436,6 +471,49 @@ class PromptServiceTest {
         assertEquals(CommonError.INVALID_PARAMETER, e.error());
         assertEquals("Invalid parameter: page", e.getMessage());
         verifyNoInteractions(repo);
+    }
+
+    /** Bug: the driver refuses U+0000 in a parameter, so a NUL in a label or a filter reached it and answered 500. */
+    @Test
+    void resolve_aLabelHoldingNulNamesNoLabel_withoutAQuery() {
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> service().resolve(PID, "p", null, "prod\u0000"));
+
+        assertEquals(PromptsError.LABEL_NOT_FOUND, e.error());
+        verifyNoInteractions(repo);
+    }
+
+    static Stream<PromptListQuery> filtersHoldingNul() {
+        PromptListQuery.Order o = PromptListQuery.Order.NAME;
+        return Stream.of(
+                new PromptListQuery("a\u0000", null, null, null, null, null, null, null, o, 1, 10),
+                new PromptListQuery(null, "f\u0000", null, null, null, null, null, null, o, 1, 10),
+                new PromptListQuery(null, null, "q\u0000", null, null, null, null, null, o, 1, 10),
+                new PromptListQuery(null, null, null, "l\u0000", null, null, null, null, o, 1, 10),
+                new PromptListQuery(null, null, null, null, "\u0000", null, null, null, o, 1, 10));
+    }
+
+    @ParameterizedTest
+    @MethodSource("filtersHoldingNul")
+    void list_andFolders_aFilterHoldingNulMatchesNothing_withoutAQuery(PromptListQuery q) {
+        PromptService.PromptPage page = service().list(PID, q);
+
+        assertEquals(List.of(), page.items());
+        assertEquals(0, page.total());
+        assertEquals(List.of(), service().folders(PID, q));
+        verifyNoInteractions(repo);
+    }
+
+    /** Bug: {@code ?label=} named the label "" (LABEL_NOT_FOUND), and beside a version was BOTH_VERSION_AND_LABEL. */
+    @Test
+    void resolve_aBlankLabelIsNoLabel() {
+        when(repo.resolve(PID, "p", new PromptSelector.Label("production")))
+                .thenReturn(Optional.of(new PromptResolveRow(TEXT_PROMPT, version(2), List.of("production"), 3)));
+        when(repo.resolve(PID, "p", new PromptSelector.Version(3)))
+                .thenReturn(Optional.of(new PromptResolveRow(TEXT_PROMPT, version(3), List.of(), 3)));
+
+        assertEquals(2, service().resolve(PID, "p", null, " ").version().version());
+        assertEquals(3, service().resolve(PID, "p", 3, "").version().version());
     }
 
     @Test

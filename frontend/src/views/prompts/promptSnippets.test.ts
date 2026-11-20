@@ -52,6 +52,12 @@ describe("python", () => {
     expect(text).toContain("reply = client.complete(prompt=text, **prompt.config)");
   });
 
+  // Bug: a variable named after a Python keyword passed the identifier test, so the snippet was a SyntaxError.
+  it("passes a Python keyword as a dict key and never as a bare name", () => {
+    const text = fetchSnippet("python", { ...CHAT, variables: ["from"], placeholders: ["class"] });
+    expect(text).toContain('messages = prompt.compile(**{"from": "...", "class": []})');
+  });
+
   it("escapes a quote in the prompt name", () => {
     expect(fetchSnippet("python", { ...CHAT, name: 'say "hi"' })).toContain('tessary.prompts.get("say \\"hi\\"", label="staging")');
   });
@@ -69,7 +75,10 @@ describe("typescript", () => {
         "const { data: prompt } = await res.json();",
         "// prompt.body holds the messages; fill {{customer}}, {{plan}} and the history placeholder.",
         "",
-        'await tracer.startActiveSpan("support.greeting", async (span) => {',
+        "// The pair goes on the span of the model call; usage counts only chat spans.",
+        'await tracer.startActiveSpan("chat", async (span) => {',
+        '  span.setAttribute("gen_ai.operation.name", "chat");',
+        '  span.setAttribute("gen_ai.request.model", prompt.config.model ?? "your-model");',
         '  span.setAttribute("tessary.prompt.name", prompt.name);',
         '  span.setAttribute("tessary.prompt.version", String(prompt.version)); // version 3',
         "  try {",

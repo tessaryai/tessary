@@ -233,18 +233,34 @@ class RedactionServiceTest {
     }
 
     @Test
-    void redactBatch_leavesThePromptLinkAsSentAndRedactsTheRest() {
+    void redactBatch_leavesThePromptLinkAndCallSiteAsSentAndRedactsTheRest() {
         // Bug: a digit run in a prompt name or version matches the phone rule, so the span no longer names its prompt.
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("tessary.prompt.name", "orders/reply-5551234567");
         metadata.put("tessary.prompt.version", "5551234567");
+        metadata.put("tessary.call_site.id", "checkout-5551234567");
         metadata.put("note", "call 5551234567");
 
         RawEntry out = svc.redactBatch(PID, List.of(span("hi", metadata))).getFirst();
 
         assertEquals("orders/reply-5551234567", out.metadata().get("tessary.prompt.name"));
         assertEquals("5551234567", out.metadata().get("tessary.prompt.version"));
+        assertEquals("checkout-5551234567", out.metadata().get("tessary.call_site.id"));
         assertEquals("call [REDACTED_PHONE]", out.metadata().get("note"));
+    }
+
+    @Test
+    void redactBatch_redactsAPromptLinkValueTooLongToLink() {
+        // Bug: the exemption went by key alone, so a value too long ever to link was stored with no rule applied.
+        String longName = "call 5551234567 " + "x".repeat(600);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("tessary.prompt.name", longName);
+
+        RawEntry out = svc.redactBatch(PID, List.of(span("hi", metadata))).getFirst();
+
+        assertEquals(
+                longName.replace("5551234567", "[REDACTED_PHONE]"),
+                out.metadata().get("tessary.prompt.name"));
     }
 
     @Test

@@ -126,7 +126,7 @@ export function PromptBodyEditor({
         </Button>
       </div>
       {errors.body && <Note tone="error">{errors.body}</Note>}
-      <p className="text-small text-subtle">
+      <p className="text-small text-muted">
         Write a variable as {"{{name}}"}. A placeholder takes a list of messages when the prompt is compiled.
       </p>
     </div>

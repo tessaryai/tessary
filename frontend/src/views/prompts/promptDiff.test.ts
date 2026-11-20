@@ -5,7 +5,7 @@
  * prompt shown as two whole sides, and an inserted chat message marking every later message as changed.
  */
 import { describe, expect, it } from "vitest";
-import { canonicalJson, diffBody, diffChat, diffConfig, diffConfigKeys, tokenize, wordDiff } from "./promptDiff";
+import { canonicalJson, diffBody, diffChat, diffConfigKeys, tokenize, wordDiff } from "./promptDiff";
 
 describe("wordDiff", () => {
   // Bug: identical text split into many ops, or two empty bodies drawn as one empty change.
@@ -126,7 +126,7 @@ describe("canonicalJson", () => {
     const b = { a: { c: "s", d: [{ x: null, y: 1 }] }, b: 1 };
 
     expect(canonicalJson(a)).toBe(JSON.stringify({ a: { c: "s", d: [{ x: null, y: 1 }] }, b: 1 }, null, 2));
-    expect(diffConfig(a, b)).toEqual([{ kind: "same", text: canonicalJson(a) }]);
+    expect(canonicalJson(b)).toBe(canonicalJson(a));
   });
 });
 
@@ -227,5 +227,13 @@ describe("diffConfigKeys", () => {
       { key: "a", kind: "same", left: canonicalJson({ x: 2, y: 1 }), right: canonicalJson({ x: 2, y: 1 }) },
       { key: "gone", kind: "removed", left: "true" },
     ]);
+  });
+});
+
+describe("diffConfigKeys and inherited names", () => {
+  // Bug: `key in config` saw Object.prototype, so a dropped "toString" key threw and an added one never showed.
+  it("treats a key named after an Object method as a plain key", () => {
+    expect(diffConfigKeys({ toString: 1 }, {})).toEqual([{ key: "toString", kind: "removed", left: "1" }]);
+    expect(diffConfigKeys({}, { constructor: "x" })).toEqual([{ key: "constructor", kind: "added", right: '"x"' }]);
   });
 });

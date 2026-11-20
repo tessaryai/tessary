@@ -258,7 +258,7 @@ export function TreeView({
 /** `name v3` for a version number, `name (prod)` for a label the producer sent, `name` when it sent none. */
 function promptLabel(name: string, version: string | null): string {
   if (!version) return name;
-  return /^\d+$/.test(version) ? `${name} v${version}` : `${name} (${version})`;
+  return /^[1-9]\d*$/.test(version) ? `${name} v${version}` : `${name} (${version})`;
 }
 
 /**
@@ -283,7 +283,7 @@ function PromptChip({ name, version }: { name: string; version: string | null })
   if (!id) return <span title="No prompt with this name in the project">{badge}</span>;
   const number = !version
     ? undefined
-    : /^\d+$/.test(version)
+    : /^[1-9]\d*$/.test(version)
       ? version
       : prompts.data.items[0].labels.find((l) => l.label === version)?.version;
   const query = number === undefined ? "" : `?version=${number}`;

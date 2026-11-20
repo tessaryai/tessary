@@ -9,13 +9,12 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Resolves the managed prompt a span was produced from: {@code tessary.prompt.name} and {@code tessary.prompt.version}.
- * This reads attributes only; {@link PromptLinkIds} resolves the name to a prompt id once per batch, and the producer's
- * text is kept either way.
+ * This reads attributes only: ingest never looks a prompt up, and the producer's text is stored as sent.
  */
 public final class PromptRefResolver {
 
     /** Longer than this and the link is dropped, the span kept: ix_span_prompt is a btree on producer text. */
-    static final int MAX_CHARS = 512;
+    public static final int MAX_CHARS = 512;
 
     private PromptRefResolver() {}
 

@@ -174,7 +174,7 @@ public class RedactionService {
         Map<String, Object> metadata = e.metadata();
         if (metadata != null) {
             for (Map.Entry<String, Object> kv : metadata.entrySet()) {
-                if (kv.getValue() instanceof String v && !GenAiAttributes.isRedactionExempt(kv.getKey())) {
+                if (kv.getValue() instanceof String v && !GenAiAttributes.isRedactionExempt(kv.getKey(), v)) {
                     total += v.length();
                 }
             }
@@ -276,7 +276,7 @@ public class RedactionService {
         boolean changed = false;
         for (Map.Entry<String, Object> kv : metadata.entrySet()) {
             Object v = kv.getValue();
-            if (v instanceof String s && !GenAiAttributes.isRedactionExempt(kv.getKey())) {
+            if (v instanceof String s && !GenAiAttributes.isRedactionExempt(kv.getKey(), s)) {
                 String r = RedactionEngine.applyToJson(s, rules, matched);
                 if (!s.equals(r)) changed = true;
                 out.put(kv.getKey(), r);

@@ -188,8 +188,9 @@ Deleting the last version of a prompt deletes the prompt. Deleting the version t
 | `400` | `PROMPTS.INVALID_LABEL` | A label is not 1 to 36 characters from `a-z`, `0-9`, `_`, `.`, and `-` |
 | `400` | `PROMPTS.LATEST_RESERVED` | A write named `latest` |
 | `400` | `PROMPTS.INVALID_BODY` | The body does not fit the prompt's type; the message names the first problem |
-| `400` | `PROMPTS.INVALID_TAG` | A tag holds whitespace or is longer than 64 characters, or there are more than 50 |
+| `400` | `PROMPTS.INVALID_TAG` | A tag holds whitespace or is longer than 64 characters |
 | `400` | `PROMPTS.TYPE_MISMATCH` | A new version names a different type than the prompt has |
+| `400` | `COMMON.VALIDATION_FAILED` | More than 50 labels or tags in one request, a blank one, or another field outside its bounds |
 | `400` | `COMMON.INVALID_BODY` | Malformed JSON, or a request body larger than 1 MiB |
 | `400` | `COMMON.INVALID_PARAMETER` | `fromUpdatedAt` or `toUpdatedAt` is not an ISO-8601 instant, or a label is in both `new_labels` and `remove_labels` |
 | `404` | `PROMPTS.NOT_FOUND` | No prompt with that name in the key's project |

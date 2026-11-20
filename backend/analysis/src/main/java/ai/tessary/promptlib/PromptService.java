@@ -211,6 +211,21 @@ public class PromptService {
     /** Stores the trimmed name. */
     @Transactional
     public PromptDetail create(String projectId, String principalId, CreateVia via, CreatePromptCommand cmd) {
+        return get(
+                projectId, insertNew(projectId, principalId, via, cmd).prompt().id());
+    }
+
+    /**
+     * {@link #create}, answering version 1 as written in the same transaction, as {@link #createVersion} answers the
+     * next one, so a delete that lands after the commit cannot turn a committed create into a 404.
+     */
+    @Transactional
+    public ResolvedVersion createFirstVersion(
+            String projectId, String principalId, CreateVia via, CreatePromptCommand cmd) {
+        return insertNew(projectId, principalId, via, cmd);
+    }
+
+    private ResolvedVersion insertNew(String projectId, String principalId, CreateVia via, CreatePromptCommand cmd) {
         String name = PromptNames.requireName(cmd.name());
         PromptBody body = PromptBody.parse(cmd.type(), cmd.body());
         String configJson = configJson(cmd.config());
@@ -226,10 +241,12 @@ public class PromptService {
         } catch (DataIntegrityViolationException e) {
             throw new TessaryException(PromptsError.INVALID_NAME, name);
         }
-        writeVersion(
+        PromptVersionRow written = writeVersion(
                 row, row.lastVersion(), principalId, via, body, configJson, cmd.labels(), cmd.commitMessage(), now);
         fetchCache.invalidate(projectId);
-        return get(projectId, row.id());
+        List<String> labels = new ArrayList<>(new TreeSet<>(cmd.labels()));
+        labels.add(PromptNames.LATEST);
+        return new ResolvedVersion(row, written, body, PromptJson.readObject(configJson), List.copyOf(labels), true);
     }
 
     /** Non-null {@code tags} replace the prompt's tags in the same transaction; null keeps them. */
@@ -290,11 +307,19 @@ public class PromptService {
             if (l.versionId().equals(target.id())) onVersion.add(l.label());
         }
         Instant now = now();
-        for (String label : new TreeSet<>(labels)) moveLabel(row, label, target, principalId, now);
+        boolean changed = false;
+        for (String label : new TreeSet<>(labels)) {
+            if (onVersion.contains(label)) continue;
+            moveLabel(row, label, target, principalId, now);
+            changed = true;
+        }
         Set<String> result = new TreeSet<>(labels);
         if (mode == LabelMode.REPLACE) {
             for (String stale : onVersion) {
-                if (!labels.contains(stale)) repo.deleteLabel(projectId, promptId, stale);
+                if (!labels.contains(stale)) {
+                    repo.deleteLabel(projectId, promptId, stale);
+                    changed = true;
+                }
             }
         } else {
             result.addAll(onVersion);
@@ -303,8 +328,12 @@ public class PromptService {
             if (onVersion.contains(gone)) {
                 repo.deleteLabel(projectId, promptId, gone);
                 result.remove(gone);
+                changed = true;
             }
         }
+        // A label already where it was asked to be keeps who moved it and when; a retry that changes nothing writes
+        // nothing.
+        if (!changed) return resolved(row, target, result);
         repo.touchPrompt(projectId, promptId, now);
         fetchCache.invalidate(projectId);
         return resolved(row.writtenAt(now, null), target, result);
@@ -338,9 +367,15 @@ public class PromptService {
      * statement reads the version, its labels and the highest number, so they come from one snapshot. A found version
      * is served from {@link PromptFetchCache} until a prompt write in the project or the TTL drops it.
      */
-    public ResolvedVersion resolve(String projectId, String name, @Nullable Integer version, @Nullable String label) {
+    public ResolvedVersion resolve(
+            String projectId, String name, @Nullable Integer version, @Nullable String rawLabel) {
+        // A blank label is no label, as on the list routes.
+        String label = rawLabel == null || rawLabel.isBlank() ? null : rawLabel;
         if (version != null && label != null) throw new TessaryException(PromptsError.BOTH_VERSION_AND_LABEL);
         if (PromptBody.holdsNul(name)) throw new TessaryException(PromptsError.NOT_FOUND, name);
+        if (label != null && PromptBody.holdsNul(label)) {
+            throw new TessaryException(PromptsError.LABEL_NOT_FOUND, PromptNames.lookupName(name), label);
+        }
         String wanted = label == null ? PromptNames.PRODUCTION : label;
         PromptSelector selector = version != null
                 ? new PromptSelector.Version(version)
@@ -396,6 +431,7 @@ public class PromptService {
         int page = Math.max(1, q.page());
         long offset = (page - 1L) * q.limit();
         if (offset > Integer.MAX_VALUE) throw new TessaryException(CommonError.INVALID_PARAMETER, "page");
+        if (filterHoldsNul(q)) return new PromptPage(List.of(), Map.of(), Map.of(), page, q.limit(), 0);
         long total = repo.count(projectId, q);
         List<PromptListRow> items = repo.list(projectId, q, (int) offset, q.limit());
         List<String> ids = items.stream().map(i -> i.prompt().id()).toList();
@@ -410,7 +446,16 @@ public class PromptService {
 
     /** The child folders of {@code q.folder()}, or of the root, under the same filters as the list. */
     public List<PromptFolderRow> folders(String projectId, PromptListQuery q) {
+        if (filterHoldsNul(q)) return List.of();
         return repo.childFolders(projectId, q);
+    }
+
+    /** No stored name, folder, label or tag holds U+0000, and the driver refuses it as a parameter. */
+    private static boolean filterHoldsNul(PromptListQuery q) {
+        for (String v : new String[] {q.name(), q.folder(), q.q(), q.label(), q.tag()}) {
+            if (v != null && PromptBody.holdsNul(v)) return true;
+        }
+        return false;
     }
 
     /** Every deployment label in the project, sorted, each once. */

@@ -16,6 +16,7 @@ export function parseTags(text: string): { ok: true; tags: string[] } | { ok: fa
 export function TagsEditor({ tags, onSave }: { tags: string[]; onSave: (tags: string[]) => Promise<unknown> }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   if (draft === null) {
     return (
@@ -31,9 +32,18 @@ export function TagsEditor({ tags, onSave }: { tags: string[]; onSave: (tags: st
   }
 
   const save = () => {
+    if (saving) return;
     const parsed = parseTags(draft);
     setError(!parsed.ok);
-    if (parsed.ok) onSave(parsed.tags).then(() => setDraft(null), () => {});
+    if (!parsed.ok) return;
+    setSaving(true);
+    onSave(parsed.tags).then(
+      () => {
+        setSaving(false);
+        setDraft(null);
+      },
+      () => setSaving(false),
+    );
   };
 
   return (
@@ -46,7 +56,7 @@ export function TagsEditor({ tags, onSave }: { tags: string[]; onSave: (tags: st
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
         />
-        <Button size="sm" variant="primary" onClick={save}>
+        <Button size="sm" variant="primary" loading={saving} onClick={save}>
           Save
         </Button>
         <Button

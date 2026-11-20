@@ -47,7 +47,7 @@ class PromptPublicControllerRaceTest {
         PromptVersionRow v2 =
                 new PromptVersionRow("v2", "proj-1", "prompt-1", 2, "\"b\"", "{}", null, "user-1", CreateVia.API, NOW);
         when(service.findByName("proj-1", "p")).thenReturn(Optional.empty(), Optional.of(raced));
-        when(service.create(eq("proj-1"), eq("user-1"), eq(CreateVia.API), any()))
+        when(service.createFirstVersion(eq("proj-1"), eq("user-1"), eq(CreateVia.API), any()))
                 .thenThrow(new TessaryException(PromptsError.NAME_EXISTS, "p"));
         when(service.createVersion(eq("proj-1"), eq("prompt-1"), eq("user-1"), eq(CreateVia.API), any()))
                 .thenReturn(

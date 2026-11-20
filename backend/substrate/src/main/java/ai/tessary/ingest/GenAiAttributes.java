@@ -143,11 +143,15 @@ public final class GenAiAttributes {
     }
 
     /**
-     * Keys a redaction rule never rewrites: the quantities above, and the prompt link, whose name and version identify
-     * a prompt the org stored. A phone-shaped digit run in either would otherwise break the link to that prompt.
+     * Values a redaction rule never rewrites: the quantities above, and the identifiers a span is bound by, the call site
+     * and the prompt link, while short enough to be one (at most {@link PromptRefResolver#MAX_CHARS}). They name things
+     * the org defined, and a phone-shaped digit run in one would otherwise bind the span to nothing. A longer value is
+     * redacted like any other.
      */
-    public static boolean isRedactionExempt(String key) {
-        return isUsageOrCostKey(key) || PROMPT_NAME.equals(key) || PROMPT_VERSION.equals(key);
+    public static boolean isRedactionExempt(String key, String value) {
+        if (isUsageOrCostKey(key)) return true;
+        boolean identifier = TESSARY_CALL_SITE_ID.equals(key) || PROMPT_NAME.equals(key) || PROMPT_VERSION.equals(key);
+        return identifier && value.length() <= PromptRefResolver.MAX_CHARS;
     }
 
     /**

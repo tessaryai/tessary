@@ -632,7 +632,7 @@ public class McpToolRegistry {
         add(new McpTool(
                 "get_prompt",
                 "Fetch one version of a managed prompt with its body, config, labels and commit message. Pick the"
-                        + " version by number or by label; with neither, the production label is read. Pass exactly"
+                        + " version by number or by label; with neither, the production label is read. Pass at most"
                         + " one of version and label.",
                 schema(
                         Map.of(

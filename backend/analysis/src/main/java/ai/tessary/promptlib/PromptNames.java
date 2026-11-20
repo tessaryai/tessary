@@ -12,11 +12,11 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Name, label, tag and variable rules. A name is trimmed, then checked: inner whitespace is allowed, as in another
- * prompt tool. The trim takes every character Java or Postgres counts as a space, so a trimmed name always passes the
+ * Name, label, tag and variable rules. A name is trimmed, then checked: inner whitespace is allowed. The trim takes every character Java or Postgres counts as a space, so a trimmed name always passes the
  * {@code ck_prompt_name} CHECK's edge rule. A {@link #VARIABLE} name is any trimmed, non-blank text with no brace; it
- * starts and ends on a non-space so a long body with an unclosed opening pair of braces scans in linear time. It has three copies (the frontend
- * and both SDKs) that a parity gate compares with this literal.
+ * starts and ends on a non-space so a long body with an unclosed opening pair of braces scans in linear time. The Prompts page's
+ * promptCompile.ts holds a copy that scripts/check-prompt-variable-regex.sh compares with this literal, and the SDK
+ * holds one kept in step by hand.
  */
 public final class PromptNames {
 

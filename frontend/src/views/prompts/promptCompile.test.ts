@@ -71,7 +71,7 @@ describe("compile", () => {
 
     expect(compile(body, { tone: "kind" }, { history })).toEqual([
       { role: "system", content: "Be kind." },
-      { role: "user", content: "Hi {{tone}}" },
+      { role: "user", content: "Hi kind" },
       { role: "assistant", content: "Hello" },
       { type: "placeholder", name: "examples" },
     ]);
@@ -109,4 +109,14 @@ it("tokenizes a body into text and variables that join back into the input", () 
     { kind: "text", text: " end" },
   ]);
   expect(tokenizeVariables("")).toEqual([]);
+});
+
+describe("compile and placeholder messages", () => {
+  // Bug: messages supplied for a placeholder kept their {{variables}}, which the SDK fills, so a playground run
+  // sent the model text that production never would.
+  it("fills variables inside the messages a placeholder takes", () => {
+    expect(
+      compile([{ type: "placeholder", name: "history" }], { company: "Acme" }, { history: [{ role: "user", content: "Hi from {{company}}" }] }),
+    ).toEqual([{ role: "user", content: "Hi from Acme" }]);
+  });
 });

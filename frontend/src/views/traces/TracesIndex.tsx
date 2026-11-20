@@ -687,7 +687,7 @@ function useInfiniteScroll(onHit: () => void, enabled: boolean) {
 /** ` v3` for a version number, ` (prod)` for a label a producer sent, nothing when there is no version. */
 function versionSuffix(version: string | null): string {
   if (!version) return "";
-  return /^\d+$/.test(version) ? ` v${version}` : ` (${version})`;
+  return /^[1-9]\d*$/.test(version) ? ` v${version}` : ` (${version})`;
 }
 
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {

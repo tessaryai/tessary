@@ -157,10 +157,6 @@ export function diffBody(type: PromptType, a: PromptBody, b: PromptBody): DiffOp
   return type === "text" ? wordDiff(a as string, b as string) : wordDiff(canonicalJson(a), canonicalJson(b));
 }
 
-export function diffConfig(a: PromptConfig, b: PromptConfig): DiffOp[] {
-  return wordDiff(canonicalJson(a), canonicalJson(b));
-}
-
 type ChatEntry = PromptChatBody[number];
 
 /** One message or placeholder in a compare; a `changed` row pairs an edited message with a word diff of its content. */
@@ -221,10 +217,10 @@ export type ConfigRow =
 
 /** One row per top-level key, in the old config's order with new keys last; values compare as canonical JSON. */
 export function diffConfigKeys(a: PromptConfig, b: PromptConfig): ConfigRow[] {
-  const keys = [...Object.keys(a), ...Object.keys(b).filter((k) => !(k in a))];
+  const keys = [...Object.keys(a), ...Object.keys(b).filter((k) => !Object.hasOwn(a, k))];
   return keys.map((key): ConfigRow => {
-    const left = key in a ? canonicalJson(a[key]) : null;
-    const right = key in b ? canonicalJson(b[key]) : null;
+    const left = Object.hasOwn(a, key) ? canonicalJson(a[key]) : null;
+    const right = Object.hasOwn(b, key) ? canonicalJson(b[key]) : null;
     if (left === null) return { key, kind: "added", right: right as string };
     if (right === null) return { key, kind: "removed", left };
     if (left === right) return { key, kind: "same", left, right };

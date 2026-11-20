@@ -66,6 +66,18 @@ function forwarded(s: Settings, stored: unknown, stopEdited: boolean): PromptCon
   return out;
 }
 
+/** The forwarded settings in the spelling the version already used, so a saved version keeps `maxTokens` or `topP`. */
+function spelledAs(stored: PromptConfig, settings: PromptConfig): PromptConfig {
+  const out: PromptConfig = { ...settings };
+  for (const [snake, camel] of [["max_tokens", "maxTokens"], ["top_p", "topP"]] as const) {
+    if (Object.hasOwn(out, snake) && Object.hasOwn(stored, camel) && !Object.hasOwn(stored, snake)) {
+      out[camel] = out[snake];
+      delete out[snake];
+    }
+  }
+  return out;
+}
+
 const isMessage = (v: unknown): v is PromptChatMessage =>
   typeof v === "object" && v !== null && typeof (v as PromptChatMessage).role === "string" &&
   typeof (v as PromptChatMessage).content === "string";
@@ -237,7 +249,7 @@ function Playground({
       body: edited,
       config: {
         ...Object.fromEntries(Object.entries(config).filter(([k]) => !FORWARDED.has(k))),
-        ...forwarded(settings, config.stop, stopEdited),
+        ...spelledAs(config, forwarded(settings, config.stop, stopEdited)),
       },
     });
 
@@ -368,7 +380,7 @@ function Playground({
             )}
           </Field>
           {notForwarded.length > 0 && (
-            <p className="text-small text-subtle">Not forwarded by the playground: {notForwarded.join(", ")}</p>
+            <p className="text-small text-muted">Not forwarded by the playground: {notForwarded.join(", ")}</p>
           )}
           <p className="text-small text-muted">
             The settings start from the version's config. A run uses your organization's provider key and counts toward

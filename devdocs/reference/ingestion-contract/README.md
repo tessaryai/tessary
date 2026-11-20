@@ -101,6 +101,8 @@ never a `tessary.*` attribute.
 
 ## Do not emit (no readers exist)
 
+Redaction rules never rewrite these three while a value is at most 512 characters (`GenAiAttributes.isRedactionExempt`): they name a call site or a prompt the org defined, and a phone-shaped digit run would otherwise bind the span to nothing. A longer value is redacted like any other attribute.
+
 The consumed `tessary.*` surface is `tessary.call_site.id` and the `tessary.prompt.*` pair. Any other
 `tessary.*` attribute has no reader; the content belongs on the standard field instead:
 

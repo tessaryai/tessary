@@ -108,7 +108,7 @@ function ChatCell({ row, side, version }: { row: ChatRow; side: "left" | "right"
   const whole = row.kind === "removed" || row.kind === "added";
   return (
     <div className={cn(CARD, "flex flex-col gap-1.5")}>
-      <div className="text-label uppercase text-subtle">{`${entry.role} · version ${version}`}</div>
+      <div className="text-label uppercase text-muted">{`${entry.role} · version ${version}`}</div>
       <pre className={BLOCK}>
         {row.kind === "changed" ? (
           <Side ops={row.ops} side={side} />
@@ -200,7 +200,7 @@ export function ChangesPreview({
           const head = isPlaceholder(entry) ? `placeholder ${entry.name} · ${what}` : `${entry.role} · ${what}`;
           return (
             <div key={i} className={cn(CARD, "flex flex-col gap-1.5")}>
-              <div className="text-label uppercase text-subtle">{head}</div>
+              <div className="text-label uppercase text-muted">{head}</div>
               {row.kind === "changed" ? (
                 <DiffInline ops={row.ops} />
               ) : isPlaceholder(entry) ? null : (

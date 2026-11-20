@@ -42,7 +42,7 @@ export function PromptBodyView({ type, body }: { type: PromptType; body: PromptB
           </div>
         ) : (
           <div key={i} className={`${BLOCK} flex flex-col gap-1.5`}>
-            <div className="text-label uppercase text-subtle">{entry.role}</div>
+            <div className="text-label uppercase text-muted">{entry.role}</div>
             <Tokenized text={entry.content} />
           </div>
         ),

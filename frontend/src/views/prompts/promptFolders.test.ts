@@ -43,5 +43,8 @@ it("strips latest from a label list", () => {
 it("formats a version a span sent", () => {
   expect(formatVersionRef("3")).toBe("v3");
   expect(formatVersionRef("prod")).toBe("(prod)");
+  // A padded number is not a version the server knows: it is shown as the text the producer sent.
+  expect(formatVersionRef("03")).toBe("(03)");
+  expect(formatVersionRef("0")).toBe("(0)");
   expect(formatVersionRef(null)).toBe("");
 });

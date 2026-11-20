@@ -467,6 +467,18 @@ record TracesControllerTest(
     }
 
     @Test
+    void promptName_isTrimmedLikeTheStoredLink() {
+        // Bug: the stored link is trimmed and the filter value was not, so " p " matched nothing.
+        Tenant t = tenant("traces-prompt-filter-trim");
+        SpanRow linked = fx.spanSeed(t.pid())
+                .prompt("p", "1")
+                .at(Instant.parse("2026-10-01T12:00:00Z"))
+                .write();
+
+        assertEquals(List.of(linked.traceId()), listByPrompt(t, " p\t", null));
+    }
+
+    @Test
     @DisplayName("the prompt name and version must sit on the same span")
     void nameAndVersionMustSitOnOneSpan() {
         // Bug: two EXISTS clauses let a trace match on one span's name and another span's version.
