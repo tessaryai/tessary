@@ -32,15 +32,15 @@ record ApiKeyScopeEnforcementTest(OtlpTraceController otlp, QueryController quer
 
     @Test
     void ingest_rejectsQueryScopedKey() {
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> otlp.export(keyCtx(KeyScope.QUERY), new byte[] {1, 2, 3}));
+        TessaryException ex = assertThrows(
+                TessaryException.class, () -> otlp.export(keyCtx(KeyScope.QUERY), null, new byte[] {1, 2, 3}));
         assertEquals(IngestError.OTLP_WRONG_KEY_SCOPE, ex.error());
     }
 
     @Test
     void ingest_acceptsMcpSupersetKey_pastTheScopeGate() {
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> otlp.export(keyCtx(KeyScope.ADMIN), new byte[] {1, 2, 3}));
+        TessaryException ex = assertThrows(
+                TessaryException.class, () -> otlp.export(keyCtx(KeyScope.ADMIN), null, new byte[] {1, 2, 3}));
         assertEquals(IngestError.OTLP_MALFORMED_BODY, ex.error());
     }
 

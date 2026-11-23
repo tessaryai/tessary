@@ -19344,6 +19344,14 @@
             "schema" : {
               "$ref" : "#/components/schemas/TenantContext"
             }
+          },
+          {
+            "in" : "header",
+            "name" : "Content-Encoding",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
           }
         ],
         "requestBody" : {
