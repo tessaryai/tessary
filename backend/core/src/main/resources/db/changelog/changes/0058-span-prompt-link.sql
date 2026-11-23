@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0057-span-prompt-link-columns
+--changeset evals:0058-span-prompt-link-columns
 -- A span produced from a managed prompt carries the prompt's name and the version string the producer sent, read from
 -- tessary.prompt.*. Text, not integer: a producer may send a label such as production. No foreign key and no id:
 -- spans predate and outlive prompts, retention deletes spans by age, never by prompt, every read keys on the name, and
@@ -8,7 +8,7 @@
 ALTER TABLE span ADD COLUMN prompt_name text, ADD COLUMN prompt_version text;
 --rollback ALTER TABLE span DROP COLUMN prompt_version, DROP COLUMN prompt_name;
 
---changeset evals:0057-span-prompt-index runInTransaction:false
+--changeset evals:0058-span-prompt-index runInTransaction:false
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'ix_span_prompt' AND NOT i.indisvalid
 -- One prompt's spans over a window: its per-version usage and the traces filter by prompt. Partial, because linked
@@ -20,7 +20,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_span_prompt ON span (project_id, prom
     INCLUDE (prompt_version) WHERE prompt_name IS NOT NULL;
 --rollback DROP INDEX CONCURRENTLY IF EXISTS ix_span_prompt;
 
---changeset evals:0057-span-prompt-window-index runInTransaction:false
+--changeset evals:0058-span-prompt-window-index runInTransaction:false
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'ix_span_prompt_window' AND NOT i.indisvalid
 -- Every prompt's calls over a window, which has no name to seek on, so this one is keyed by time. Its predicate is

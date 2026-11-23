@@ -83,7 +83,7 @@ by hand before you upgrade; the changesets then find nothing to do.
    then `DROP INDEX CONCURRENTLY ix_span_payload_project_fts;` and build again.
 4. Once the new index is valid: `DROP INDEX CONCURRENTLY IF EXISTS ix_span_payload_fts;`
 
-`0057-span-prompt-link.sql` builds `ix_span_prompt` and `ix_span_prompt_window` over `span` the same
+`0058-span-prompt-link.sql` builds `ix_span_prompt` and `ix_span_prompt_window` over `span` the same
 way. Each reads only linked llm spans into the index, but each build still reads the whole `span` table:
 about 3 s for 6,000,000 spans (a 3.9 GB table, 1,000,000 spans linked) on a laptop with the table in
 cache. When `SELECT pg_size_pretty(pg_relation_size('span'));` is above about 30 GB, or the disk is

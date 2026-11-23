@@ -200,8 +200,8 @@ databaseChangeLog:
       file: db/changelog/changes/0056-fix-pr.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0056-prompt-library.sql
+      file: db/changelog/changes/0057-prompt-library.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0057-span-prompt-link.sql
+      file: db/changelog/changes/0058-span-prompt-link.sql
       relativeToChangelogFile: false
