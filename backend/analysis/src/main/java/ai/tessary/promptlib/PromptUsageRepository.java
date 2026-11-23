@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.promptlib;
 
+import ai.tessary.open.errors.PromptsError;
+import ai.tessary.open.errors.TessaryException;
 import ai.tessary.storage.Timestamps;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
@@ -13,9 +15,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Grouped reads over the llm spans linked to a prompt. Only a settled, live trace counts, so a trace still receiving
@@ -24,6 +30,11 @@ import org.springframework.stereotype.Repository;
  * from {@code ix_span_prompt_window}, whose predicate repeats this read's llm and live-span filter word for word. The
  * per-version read uses that index or {@code ix_span_prompt}; both bound it to the window. The prompt's own rows are read
  * only for the versions the usage rows name, so a prompt with many versions costs no more than one with few.
+ *
+ * <p>The two span reads grow with call volume over the window, so each runs in its own read-only transaction under a
+ * transaction-local {@code statement_timeout}; a read cancelled by it is {@code PROMPTS.USAGE_TIMED_OUT}, never a 500
+ * and never a connection held while the read runs on. Call them through the Spring proxy: a self-call skips the
+ * transaction, and the setting would then bind to nothing.
  */
 @Repository
 public class PromptUsageRepository {
@@ -76,32 +87,67 @@ public class PromptUsageRepository {
             + " WHERE v.project_id = :pid AND v.prompt_id = :promptId AND v.version = ANY(:versions)"
             + " GROUP BY v.version";
 
-    private final JdbcClient jdbc;
+    /** Far above the default 7-day read on the window index, which measured about 80 ms on a million linked spans. */
+    static final long STATEMENT_TIMEOUT_MS = 5_000;
 
+    /** Postgres's SQLSTATE for a statement cancelled by {@code statement_timeout}. */
+    private static final String QUERY_CANCELED = "57014";
+
+    private final JdbcClient jdbc;
+    private final long statementTimeoutMs;
+
+    @Autowired
     public PromptUsageRepository(JdbcClient jdbc) {
+        this(jdbc, STATEMENT_TIMEOUT_MS);
+    }
+
+    PromptUsageRepository(JdbcClient jdbc, long statementTimeoutMs) {
         this.jdbc = jdbc;
+        this.statementTimeoutMs = statementTimeoutMs;
     }
 
     /** Every prompt name with at least one call since {@code since}, in name order. */
+    @Transactional(readOnly = true)
     public Map<String, Long> callsByName(String projectId, Instant since) {
-        Map<String, Long> calls = new LinkedHashMap<>();
-        for (Map.Entry<String, Long> row : jdbc.sql(CALLS_BY_NAME)
-                .param("pid", projectId)
-                .param("since", since.toString())
-                .query((rs, n) -> Map.entry(rs.getString("prompt_name"), rs.getLong("calls")))
-                .list()) {
-            calls.put(row.getKey(), row.getValue());
-        }
-        return calls;
+        return timed(() -> {
+            Map<String, Long> calls = new LinkedHashMap<>();
+            for (Map.Entry<String, Long> row : jdbc.sql(CALLS_BY_NAME)
+                    .param("pid", projectId)
+                    .param("since", since.toString())
+                    .query((rs, n) -> Map.entry(rs.getString("prompt_name"), rs.getLong("calls")))
+                    .list()) {
+                calls.put(row.getKey(), row.getValue());
+            }
+            return calls;
+        });
     }
 
+    @Transactional(readOnly = true)
     public List<VersionUsageRow> byVersion(String projectId, String promptName, Instant since) {
-        return jdbc.sql(BY_VERSION)
+        return timed(() -> jdbc.sql(BY_VERSION)
                 .param("pid", projectId)
                 .param("name", promptName)
                 .param("since", since.toString())
                 .query((rs, n) -> versionRow(rs))
-                .list();
+                .list());
+    }
+
+    /** Runs {@code read} under the timeout; the caller's transaction scopes the setting to it. */
+    <T> T timed(Supplier<T> read) {
+        jdbc.sql("SELECT set_config('statement_timeout', :ms, true)")
+                .param("ms", Long.toString(statementTimeoutMs))
+                .query()
+                .listOfRows();
+        try {
+            return read.get();
+        } catch (DataAccessException failure) {
+            for (Throwable t = failure; t != null; t = t.getCause()) {
+                if (t instanceof SQLException sql && QUERY_CANCELED.equals(sql.getSQLState())) {
+                    throw new TessaryException(PromptsError.USAGE_TIMED_OUT, failure);
+                }
+            }
+            throw failure;
+        }
     }
 
     public Optional<PromptHead> head(String projectId, String promptId) {

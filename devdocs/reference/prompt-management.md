@@ -189,7 +189,9 @@ without `promptName`); the Traces page's facet keys are `prompt` and `prompt_ver
 
 `PromptUsageRepository` reads `span` directly, never through `PromptService`, and counts only live llm
 spans inside settled, live traces, so a trace still receiving spans is not counted twice between two
-reads. Both routes need `ORG_VIEW`; `days` defaults to 7 and is capped at 90.
+reads. Both routes need `ORG_VIEW`; `days` defaults to 7 and is capped at 90. Each span read runs in its own
+read-only transaction under a 5-second `statement_timeout`; a read it cancels answers
+`422 PROMPTS.USAGE_TIMED_OUT` ("pick a shorter window"), never a 500.
 
 - `GET .../prompts/usage/summary?days`: every prompt name with a call in the window, in name order.
 - `GET .../prompts/{promptId}/usage?days`: one row per version string the spans sent (a null version
