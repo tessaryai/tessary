@@ -83,6 +83,14 @@ by hand before you upgrade; the changesets then find nothing to do.
    then `DROP INDEX CONCURRENTLY ix_span_payload_project_fts;` and build again.
 4. Once the new index is valid: `DROP INDEX CONCURRENTLY IF EXISTS ix_span_payload_fts;`
 
+`0058-span-prompt-link.sql` builds `ix_span_prompt` and `ix_span_prompt_window` over `span` the same
+way. Each reads only linked llm spans into the index, but each build still reads the whole `span` table:
+about 3 s for 6,000,000 spans (a 3.9 GB table, 1,000,000 spans linked) on a laptop with the table in
+cache. When `SELECT pg_size_pretty(pg_relation_size('span'));` is above about 30 GB, or the disk is
+slow, run its two `CREATE INDEX CONCURRENTLY` statements by hand with `psql` before you upgrade,
+exactly as the changeset spells them. A failed build leaves an invalid index: drop it with
+`DROP INDEX CONCURRENTLY <name>;` and build again.
+
 If the backend was killed during the build (out of memory, a manual restart), two things can be left
 behind. The build itself usually goes on inside Postgres and ends valid; while it runs, the backend
 halts on the invalid index and restarts until it finishes. The Liquibase lock stays held, and every

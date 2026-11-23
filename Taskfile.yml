@@ -232,6 +232,11 @@ tasks:
     cmds:
       - bash scripts/check-price-book-contract.sh
 
+  check:prompt-regex:
+    desc: "The prompt variable regex is the same in both copies this tree holds: PromptNames.VARIABLE and the Prompts page's promptCompile.ts. Runs in `task check`."
+    cmds:
+      - bash scripts/check-prompt-variable-regex.sh
+
   migrations:populated:
     desc: "Run the migrations a release adds against ROWS: apply the chain through the pinned baseline to a throwaway Postgres, load scripts/lib/populated-fixture.sql, apply everything after it, and assert every renamed value moved. Deliberately NOT in `task check` — `task check` migrates EMPTY Testcontainers databases, where a failing ADD CONSTRAINT and a zero-row UPDATE both pass. Run it before merging a migration that renames or narrows a persisted value. With no migration after the baseline it still runs end to end and reports that, which is how the fixture stays proven loadable between releases."
     cmds:

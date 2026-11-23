@@ -53,6 +53,18 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- The OTel SDK is a TEST dependency: production code emits through the API, and the
+             tests assert on what was emitted with an in-memory exporter. -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-trace</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-common</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- THREE dependencies were here and are not any more, so that a `git log -p` on this
              file answers the question rather than a `git log` on the whole reactor.

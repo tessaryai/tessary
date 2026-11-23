@@ -10,7 +10,7 @@ ingest-time processing.
 > removes a consumed field must update this table in the same change.
 
 Governing rules: [the principles](../principles.md) — OTEL-native hierarchy (standard attributes
-only; the sole consumed `tessary.*` attribute is `tessary.call_site.id`), explicit call-site
+only; the consumed `tessary.*` surface is `tessary.call_site.id` and the `tessary.prompt.*` pair), explicit call-site
 tagging, and canonical gen_ai normalization at the edge. Deeper mapping detail:
 [trace-schema.md](../trace-schema.md).
 
@@ -65,7 +65,8 @@ tagging, and canonical gen_ai normalization at the edge. Deeper mapping detail:
 | Cost | `llm.cost.prompt` / `.completion` / `.prompt_details.cache_read` / `.prompt_details.cache_write` | the producer's own per-bucket USD cost, stored verbatim with `cost_source='provided'` and never re-priced (`IngestPricer.providedCost`). Per-bucket figures win over any total | llm-family | OpenInference |
 | Cost | `gen_ai.usage.cost` / `gen_ai.usage.total_cost` / `llm.cost.total` | the producer's own TOTAL cost, read in that precedence when no per-bucket figure is present. A lone total lands in `input_cost`, because `span.total_cost` is generated from the four buckets and splitting it ourselves would be a derivation | llm-family | gen_ai semconv · Traceloop · OpenInference |
 | Retrieval | `retrieval.documents.<N>.document.id` / `.content` / `.score` / `.metadata` | first-class `retrieved_doc` rows (1-based rank) | spans carrying these OI-indexed attributes (no kind gate — extraction runs on every span and is a no-op absent the prefix) | OpenInference |
-| Call site | `tessary.call_site.id` | binds the span to its call site (and is denormalized onto its trace); auto-materializes unseen call sites. The dotted spelling roots the `tessary.call_site.*` namespace we will expand. Settable by ANY producer (plain attr) or a Collector attributes/transform rule — no SDK required | always | **Tessary (the ONLY sanctioned overlay)** |
+| Call site | `tessary.call_site.id` | binds the span to its call site (and is denormalized onto its trace); auto-materializes unseen call sites. The dotted spelling roots the `tessary.call_site.*` namespace we will expand. Settable by any producer as a plain attribute, or by a Collector attributes or transform rule, with no SDK required | always | **Tessary (sanctioned overlay 1 of 2)** |
+| Prompt | `tessary.prompt.name` / `tessary.prompt.version` | `span.prompt_name` / `span.prompt_version` as the producer's text (a version may be a label) ([prompt-management.md](../prompt-management.md)); ingest never looks the prompt up. Over 512 characters drops that part of the link, not the span; a dropped name drops the version. The SDK sets it inside `tessary.context(prompt=...)` on Tessary's copy only | always (usage counts read `llm` spans only) | **Tessary (sanctioned overlay 2 of 2)** |
 | Bag | *(all remaining attributes, resource + span)* | carried **verbatim** into `span_payload.attributes` (never clipped) — queryable, but drives no processing | always | any |
 
 ## Handoffs are structural, not an attribute
@@ -100,7 +101,9 @@ never a `tessary.*` attribute.
 
 ## Do not emit (no readers exist)
 
-The consumed `tessary.*` surface is exactly one attribute: `tessary.call_site.id`. Any other
+Redaction rules never rewrite these three while a value is at most 512 characters (`GenAiAttributes.isRedactionExempt`): they name a call site or a prompt the org defined, and a phone-shaped digit run would otherwise bind the span to nothing. A longer value is redacted like any other attribute.
+
+The consumed `tessary.*` surface is `tessary.call_site.id` and the `tessary.prompt.*` pair. Any other
 `tessary.*` attribute has no reader; the content belongs on the standard field instead:
 
 - `tessary.session.id` → use `session.id`

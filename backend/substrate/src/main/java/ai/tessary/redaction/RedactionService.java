@@ -174,7 +174,7 @@ public class RedactionService {
         Map<String, Object> metadata = e.metadata();
         if (metadata != null) {
             for (Map.Entry<String, Object> kv : metadata.entrySet()) {
-                if (kv.getValue() instanceof String v && !GenAiAttributes.isUsageOrCostKey(kv.getKey())) {
+                if (kv.getValue() instanceof String v && !GenAiAttributes.isRedactionExempt(kv.getKey(), v)) {
                     total += v.length();
                 }
             }
@@ -254,7 +254,8 @@ public class RedactionService {
     }
 
     /**
-     * Redact the string-valued attributes, EXCEPT the ones that are quantities.
+     * Redact the string-valued attributes, EXCEPT the ones that are quantities and the prompt link
+     * ({@link GenAiAttributes#isRedactionExempt}).
      *
      * <p>A producer may send a token count or a cost as a string, and a redaction rule cannot tell that
      * string from free text: {@code gen_ai.usage.cost = "0.0123456789"} matches a phone-number rule on
@@ -275,7 +276,7 @@ public class RedactionService {
         boolean changed = false;
         for (Map.Entry<String, Object> kv : metadata.entrySet()) {
             Object v = kv.getValue();
-            if (v instanceof String s && !GenAiAttributes.isUsageOrCostKey(kv.getKey())) {
+            if (v instanceof String s && !GenAiAttributes.isRedactionExempt(kv.getKey(), s)) {
                 String r = RedactionEngine.applyToJson(s, rules, matched);
                 if (!s.equals(r)) changed = true;
                 out.put(kv.getKey(), r);

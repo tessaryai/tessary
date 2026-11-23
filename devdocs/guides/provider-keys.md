@@ -114,6 +114,28 @@ the key is deleted, the classifier pauses (`readiness` reads `provider_rejected`
 the key the lane runs on lifts the pause at once, as does the configure page's Retry or any re-enable; otherwise
 the sweep re-checks every `tessary.frustration.credential-retry-seconds`.
 
+## Playground keys
+
+The prompt playground sends one chat call, started by a person on a prompt's page, on a key the
+organization already holds. It reaches the OpenAI, Anthropic, OpenRouter, Moonshot, Gemini, GLM, Grok
+and Custom keys: Anthropic over its Messages API, the others over OpenAI chat completions at the key's
+base URL. A Custom run uses the credential's custom model name. Bedrock, Bedrock Mantle and TypeSafe
+keys do not run it: Bedrock and Bedrock Mantle sign with AWS credentials on other APIs, and TypeSafe
+serves decision models, not chat. A run on one of them fails with `PLAYGROUND.PROVIDER_UNSUPPORTED`.
+
+A run needs `BYO_PROVIDER_KEYS` as well as `PROMPT_MANAGEMENT`, a caller who can manage the org, and,
+for an API key, the admin scope. With no key for the chosen provider it fails with
+`MODEL_CONFIG.MISSING_CREDENTIALS` (412). The base URL passes the same private-address guard as other
+provider calls, so a private host fails with `INGEST.INVALID_BASE_URL`.
+
+Each run is booked in the usage ledger under lane `playground` as the org's own spend, with the prompt
+version it ran as its subject. An OpenRouter run books OpenRouter's reported cost; any other run is
+priced from the price book, or stays unpriced. A run is not recorded as a trace and does not count in
+prompt usage. A rejected key (HTTP 401 or 403) fails with `PLAYGROUND.PROVIDER_REJECTED`, as a 502 so
+the app does not read it as a sign-out, and a key with no funds (HTTP 402) with
+`PLAYGROUND.PROVIDER_NO_CREDIT`. Neither is retried. The timeout, retry and concurrency bounds are the
+`tessary.playground.*` keys in [`config-keys.md`](../reference/config-keys.md).
+
 ## The `auth_mode=iam_role` opt-in — what it does and does not cover
 
 A Bedrock or Bedrock-mantle credential can opt into `auth_mode=iam_role`: the backend's own direct

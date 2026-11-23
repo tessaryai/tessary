@@ -11,11 +11,11 @@ There is one key store behind all of them. The keys on **Settings → API keys**
 
 | Scope | Wire value | Token prefix | Reaches |
 | --- | --- | --- | --- |
-| Write | `write` | `tsy_w_` | Trace ingest: `POST /v1/traces` over HTTP, and `TraceService/Export` over gRPC |
-| Query | `query` | `tsy_q_` | The aggregation-first read API: `POST /v1/query/count`, `/timeseries`, `/facets`, `/search` |
-| Admin | `admin` | `tsy_a_` | Everything above, plus tool access over `POST /mcp` |
+| Write | `write` | `tsy_w_` | Trace ingest: `POST /v1/traces` over HTTP, and `TraceService/Export` over gRPC. Also reads managed prompts: `GET /v1/prompts` and `GET /v1/prompts/fetch` |
+| Query | `query` | `tsy_q_` | The aggregation-first read API: `POST /v1/query/count`, `/timeseries`, `/facets`, `/search`. Also reads managed prompts |
+| Admin | `admin` | `tsy_a_` | Everything above, plus tool access over `POST /mcp` and prompt writes: `POST /v1/prompts`, `PATCH /v1/prompts/labels`, `DELETE /v1/prompts` |
 
-Admin is the superset family. Write and query are strictly least privilege: the query API refuses a write key, and ingest refuses a query key. Only an admin key satisfies `/mcp`, and it satisfies the other two surfaces as well, so a single `tsy_a_` key works when an application wants one credential instead of three.
+Admin is the superset family. Write and query are least privilege apart from one shared read: the query API refuses a write key and ingest refuses a query key, but both read managed prompts, because an application that sends traces fetches its prompts with the same key. Only an admin key changes a prompt. Only an admin key satisfies `/mcp`, and it satisfies the other two surfaces as well, so a single `tsy_a_` key works when an application wants one credential instead of three.
 
 <Note>
   The scope letter in the prefix is a readability aid so a write-only key is recognizable at a glance. The stored `scope` column is what the server enforces.

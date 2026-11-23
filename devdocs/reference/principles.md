@@ -126,6 +126,10 @@ a design posture new work must honor. Every entry is the rule plus the one-line 
   with no matching `call_site` row materializes a minimal call site, so tagged spans
   are immediately attributable and visible; the metric-drift baselines are keyed on the stamped
   `call_site_id`.
+- **Prompt links are the second overlay, and also a plain attribute.** `tessary.prompt.name` and
+  `tessary.prompt.version` name the managed prompt a span came from, because no semantic convention
+  names a managed prompt version. No other vendor's prompt attribute is read as a link. A link never
+  gates ingestion: a name that matches no prompt is kept as text.
 - **Untagged spans still ingest fully.** Only call-site-scoped features (per-call-site baselines,
   behaviour profiles) skip them — degradation, not rejection.
 
@@ -172,6 +176,9 @@ never really about grading:
   and the other limits of the call.
   A new per-event model call that does not meet every condition of one of these two records is the
   thing this rule forbids.
+  A model call a person starts by hand in the product, such as a prompt playground run, is outside
+  this rule, because people bound it, not ingest volume. It runs on the org's own provider key and is
+  booked in the usage ledger ([prompt-management.md](./prompt-management.md) § *Playground*).
 
 ## Signals & subsystems
 

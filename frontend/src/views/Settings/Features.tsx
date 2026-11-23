@@ -39,6 +39,13 @@ const FEATURES: Feature[] = [
       "After each RCA, open or update one pull request for each case that fixes the high-confidence causes RCA found in your repository. Tessary never merges it. Each run is an agent session on a frontier model from your organization's provider, and there is no spending cap.",
     said: ["Fix PRs are on", "Fix PRs are off", "Could not change Fix PRs"],
   },
+  {
+    capability: "prompt_management_enabled",
+    label: "Prompt management",
+    description:
+      "Prompts, versions, and deployment labels for this organization, with the Prompts page, the /v1/prompts API, and the playground. Off hides the page and returns 403 on every prompt route.",
+    said: ["Prompt management is on", "Prompt management is off", "Could not change prompt management"],
+  },
 ];
 
 type Blocked = { text: string; link: { label: string; to: string } };
@@ -73,8 +80,6 @@ function useFixBlocked(): Blocked | null {
 export function Features() {
   const { orgSlug } = useTenant();
   const { user } = useAuth();
-  const qc = useQueryClient();
-  const toast = useToast();
   const fixBlocked = useFixBlocked();
 
   const overrides = useQuery({
@@ -89,17 +94,6 @@ export function Features() {
   const me = members.data?.find((m) => m.user_id === user?.id);
   // Affordance only: the backend re-checks CAPABILITIES_MANAGE on every write.
   const canManage = me?.role === "owner" || me?.role === "admin";
-
-  const set = useMutation({
-    mutationFn: ({ feature, enabled }: { feature: Feature; enabled: boolean }) =>
-      auth.setCapabilityOverride(orgSlug, feature.capability, enabled),
-    onSuccess: (view, { feature }) => {
-      toast.success(view.enabled ? feature.said[0] : feature.said[1]);
-      qc.invalidateQueries({ queryKey: ["capability-overrides", orgSlug] });
-      qc.invalidateQueries({ queryKey: ["capabilities", orgSlug] });
-    },
-    onError: (err, { feature }) => toast.error(feature.said[2], (err as ApiError).message),
-  });
 
   const rows = FEATURES.flatMap((feature) => {
     const view = overrides.data?.find((o) => o.capability === feature.capability);
@@ -130,8 +124,7 @@ export function Features() {
                 feature={feature}
                 view={view}
                 blocked={feature.capability === "fix_pr_enabled" ? fixBlocked : null}
-                disabled={!canManage || set.isPending}
-                onChange={(enabled) => set.mutate({ feature, enabled })}
+                canManage={canManage}
               />
             ))}
           </div>
@@ -142,22 +135,35 @@ export function Features() {
 }
 
 /**
- * One feature. `blocked` is a fact about this project, not the organization, so it never disables the switch: an
- * owner can still turn the feature off, or on before the project is ready.
+ * One feature, with its own write, so one row's pending change never disables another row. `blocked` is a fact about
+ * this project, not the organization, so it never disables the switch: an owner can still turn the feature off, or on
+ * before the project is ready.
  */
 function FeatureRow({
   feature,
   view,
   blocked,
-  disabled,
-  onChange,
+  canManage,
 }: {
   feature: Feature;
   view: CapabilityOverrideView;
   blocked: Blocked | null;
-  disabled: boolean;
-  onChange: (enabled: boolean) => void;
+  canManage: boolean;
 }) {
+  const { orgSlug } = useTenant();
+  const qc = useQueryClient();
+  const toast = useToast();
+
+  const set = useMutation({
+    mutationFn: (enabled: boolean) => auth.setCapabilityOverride(orgSlug, feature.capability, enabled),
+    onSuccess: (next) => {
+      toast.success(next.enabled ? feature.said[0] : feature.said[1]);
+      qc.invalidateQueries({ queryKey: ["capability-overrides", orgSlug] });
+      qc.invalidateQueries({ queryKey: ["capabilities", orgSlug] });
+    },
+    onError: (err) => toast.error(feature.said[2], (err as ApiError).message),
+  });
+
   return (
     <div className="rounded-card border border-border px-4 py-4 flex items-start justify-between gap-4">
       <div className="min-w-0">
@@ -175,7 +181,12 @@ function FeatureRow({
           </div>
         )}
       </div>
-      <Toggle checked={view.enabled} disabled={disabled} onChange={onChange} label={feature.label} />
+      <Toggle
+        checked={view.enabled}
+        disabled={!canManage || set.isPending}
+        onChange={(enabled) => set.mutate(enabled)}
+        label={feature.label}
+      />
     </div>
   );
 }

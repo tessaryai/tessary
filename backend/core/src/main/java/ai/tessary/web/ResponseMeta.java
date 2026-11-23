@@ -11,6 +11,10 @@ public record ResponseMeta(
         return new ResponseMeta(200, true, null);
     }
 
+    public static ResponseMeta created() {
+        return new ResponseMeta(201, true, null);
+    }
+
     public static ResponseMeta failure(int status, ErrorBody error) {
         return new ResponseMeta(status, false, error);
     }

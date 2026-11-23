@@ -60,6 +60,9 @@ const ClassifierConfigurePage = named(
 );
 const FindingPage = named(() => import("./views/classifiers/FindingPage"), "FindingPage");
 const MetricsPage = named(() => import("./views/metrics/MetricsPage"), "MetricsPage", "metrics");
+const PromptsPage = named(() => import("./views/prompts/PromptsPage"), "PromptsPage", "prompts");
+const PromptDetailPage = named(() => import("./views/prompts/PromptDetailPage"), "PromptDetailPage");
+const NewPromptPage = named(() => import("./views/prompts/NewPromptPage"), "NewPromptPage");
 
 const Sources = named(() => import("./views/Sources"), "Sources");
 const Concepts = named(() => import("./views/Concepts"), "Concepts");
@@ -217,6 +220,19 @@ function ProjectShell() {
         <Route path="metrics/:dashboardId" element={<MetricsPage />} />
         {/* Renamed from "vitals": redirect old bookmarks. */}
         <Route path="vitals" element={<Navigate to="../metrics" replace />} />
+        {/* The prompt id, not the name, so a name with a / never meets the router. */}
+        <Route
+          path="prompts"
+          element={<CapabilityGate capability="prompt_management_enabled"><PromptsPage /></CapabilityGate>}
+        />
+        <Route
+          path="prompts/new"
+          element={<CapabilityGate capability="prompt_management_enabled"><NewPromptPage /></CapabilityGate>}
+        />
+        <Route
+          path="prompts/:promptId"
+          element={<CapabilityGate capability="prompt_management_enabled"><PromptDetailPage /></CapabilityGate>}
+        />
 
         <Route path="rca/:reportId" element={<RcaReport />} />
         <Route path="concepts" element={<Concepts />} />

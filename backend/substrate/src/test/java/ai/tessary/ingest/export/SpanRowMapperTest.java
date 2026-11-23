@@ -69,6 +69,8 @@ class SpanRowMapperTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 null);
         SpanPayloadRow payload =
                 new SpanPayloadRow("p", "t", "s", "in", "out", attributes, null, "2026-08-12T10:00:01Z", null);

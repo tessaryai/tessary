@@ -56,7 +56,10 @@ public enum Capability {
      * Opens a pull request after an RCA that fixes its high-confidence causes; independent of {@link #RCA_AUTOMATIC}.
      * Off by default; a new org is created with it on ({@link NewOrgCapabilities}).
      */
-    FIX_PR("fix_pr_enabled");
+    FIX_PR("fix_pr_enabled"),
+
+    /** On by default. Gates the Prompts page, /v1/prompts, the two prompt MCP tools, and the playground. */
+    PROMPT_MANAGEMENT("prompt_management_enabled");
 
     private final String wire;
 

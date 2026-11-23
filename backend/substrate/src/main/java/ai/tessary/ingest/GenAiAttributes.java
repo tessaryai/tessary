@@ -82,6 +82,14 @@ public final class GenAiAttributes {
     /** The authoritative call site and the ONLY spelling read; settable by any OTLP producer as one span attribute. */
     public static final String TESSARY_CALL_SITE_ID = "tessary.call_site.id";
 
+    /**
+     * The second sanctioned overlay: the managed prompt a span was produced from. Not gen_ai.prompt.*, which is the
+     * flattened dialect's indexed message prefix.
+     */
+    public static final String PROMPT_NAME = "tessary.prompt.name";
+
+    public static final String PROMPT_VERSION = "tessary.prompt.version";
+
     // Correlation rides ONLY the standard attributes; there are no tessary.* correlation overlays.
 
     // Traceloop's indexed, flattened message keys: INGEST-ONLY, not canonical. Reconstructed into [{role, content}]
@@ -132,6 +140,18 @@ public final class GenAiAttributes {
      */
     public static boolean isUsageOrCostKey(String key) {
         return key.startsWith("gen_ai.usage.") || key.startsWith("llm.token_count.") || key.startsWith("llm.cost.");
+    }
+
+    /**
+     * Values a redaction rule never rewrites: the quantities above, and the identifiers a span is bound by, the call site
+     * and the prompt link, while short enough to be one (at most {@link PromptRefResolver#MAX_CHARS}). They name things
+     * the org defined, and a phone-shaped digit run in one would otherwise bind the span to nothing. A longer value is
+     * redacted like any other.
+     */
+    public static boolean isRedactionExempt(String key, String value) {
+        if (isUsageOrCostKey(key)) return true;
+        boolean identifier = TESSARY_CALL_SITE_ID.equals(key) || PROMPT_NAME.equals(key) || PROMPT_VERSION.equals(key);
+        return identifier && value.length() <= PromptRefResolver.MAX_CHARS;
     }
 
     /**

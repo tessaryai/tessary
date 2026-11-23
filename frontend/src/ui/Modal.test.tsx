@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The modal. The bug worth catching: a click inside the dialog's content closing it, when only a click
- * on the backdrop around it should.
+ * The modal. The bugs worth catching: a click inside the dialog's content closing it, when only a click
+ * on the backdrop around it should, and a dialog a screen reader announces with no name.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -35,5 +35,16 @@ describe("Modal", () => {
 
     expect(cancel.defaultPrevented).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Bug: a screen reader announces the dialog with no name.
+  it("is named by its title", () => {
+    render(
+      <Modal open onClose={() => {}} title="Delete version 3?">
+        body
+      </Modal>,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Delete version 3?" })).toBeTruthy();
   });
 });

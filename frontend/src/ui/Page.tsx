@@ -42,11 +42,14 @@ export function PageHeader({
   subtitle,
   breadcrumb,
   actions,
+  titleAside,
   className,
 }: {
   kicker?: ReactNode;
   eyebrow?: ReactNode;
   title: ReactNode;
+  /** Beside the title, outside the heading, so badges never become part of its accessible name. */
+  titleAside?: ReactNode;
   subtitle?: ReactNode;
   breadcrumb?: Crumb[];
   actions?: ReactNode;
@@ -61,9 +64,18 @@ export function PageHeader({
           {kick && (
             <div className="font-mono text-label uppercase text-muted mb-1.5">{kick}</div>
           )}
-          <h1 className="text-h1 text-fg" style={{ textWrap: "pretty" }}>
-            {title}
-          </h1>
+          {titleAside ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <h1 className="text-h1 text-fg" style={{ textWrap: "pretty" }}>
+                {title}
+              </h1>
+              {titleAside}
+            </div>
+          ) : (
+            <h1 className="text-h1 text-fg" style={{ textWrap: "pretty" }}>
+              {title}
+            </h1>
+          )}
           {subtitle && (
             <div className="text-body text-muted mt-1.5" style={{ maxWidth: 620 }}>
               {subtitle}

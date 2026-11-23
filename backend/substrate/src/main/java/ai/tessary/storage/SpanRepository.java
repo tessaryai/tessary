@@ -32,7 +32,7 @@ public class SpanRepository {
             + "provided_model_name, model_id, input_tokens, output_tokens, cache_read_tokens, "
             + "cache_write_tokens, reasoning_tokens, total_tokens, input_cost, output_cost, cache_read_cost, "
             + "cache_write_cost, total_cost, cost_source, price_book_version, input_preview, output_preview, "
-            + "correlation_state, path_state, event_ts, is_deleted, created_at";
+            + "correlation_state, path_state, event_ts, is_deleted, created_at, prompt_name, prompt_version";
 
     private final JdbcClient jdbc;
 
@@ -58,7 +58,8 @@ public class SpanRepository {
                                           output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
                                           input_cost, output_cost, cache_read_cost, cache_write_cost,
                                           cost_source, price_book_version, input_preview, output_preview,
-                                          correlation_state, path_state, event_ts, is_deleted)
+                                          correlation_state, path_state, event_ts, is_deleted, prompt_name,
+                                          prompt_version)
                         VALUES (:pid, :traceId, :id, :parentSpanId, :path::ltree, :sessionId, :userId,
                                 :pvid, :callSiteId, :traceName, :kind, :name, :isLogicalRoot, :status, :level,
                                 :errorType, :errorMessage, :startedAt::timestamptz, :endedAt::timestamptz,
@@ -67,7 +68,7 @@ public class SpanRepository {
                                 :cacheWriteTokens, :reasoningTokens, :inputCost::numeric, :outputCost::numeric,
                                 :cacheReadCost::numeric, :cacheWriteCost::numeric, :costSource,
                                 :priceBookVersion, :inputPreview, :outputPreview, :correlationState, :pathState,
-                                :eventTs::timestamptz, :isDeleted)
+                                :eventTs::timestamptz, :isDeleted, :promptName, :promptVersion)
                         ON CONFLICT (project_id, trace_id, id) DO UPDATE
                            SET parent_span_id      = excluded.parent_span_id,
                                session_id          = excluded.session_id,
@@ -102,7 +103,9 @@ public class SpanRepository {
                                input_preview       = excluded.input_preview,
                                output_preview      = excluded.output_preview,
                                event_ts            = excluded.event_ts,
-                               is_deleted          = excluded.is_deleted
+                               is_deleted          = excluded.is_deleted,
+                               prompt_name         = excluded.prompt_name,
+                               prompt_version      = excluded.prompt_version
                          WHERE excluded.event_ts >= span.event_ts
                         """;
 
@@ -148,6 +151,8 @@ public class SpanRepository {
         source.addValue("pathState", row.pathState());
         source.addValue("eventTs", row.eventTs());
         source.addValue("isDeleted", row.isDeleted());
+        source.addValue("promptName", row.promptName());
+        source.addValue("promptVersion", row.promptVersion());
         return source;
     }
 
@@ -475,6 +480,8 @@ public class SpanRepository {
                 intOrNull(rs, "depth"),
                 longOrNull(rs, "total_tokens"),
                 numericOrNull(rs, "total_cost"),
-                Timestamps.iso(rs, "created_at"));
+                Timestamps.iso(rs, "created_at"),
+                rs.getString("prompt_name"),
+                rs.getString("prompt_version"));
     }
 }

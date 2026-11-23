@@ -73,13 +73,14 @@ from standard attributes — `session.id` → `kind='session'` root, `gen_ai.con
 (one per provider trace, `seq` numbered per parent), `user.id` → the denormalized `user_id` column on
 session/trace/span.
 
-The consumed overlay is exactly ONE attribute: `tessary.call_site.id`. Every other `tessary.*`
-name is unread — the [ingestion contract](./ingestion-contract/README.md) carries the full
+The consumed overlays are `tessary.call_site.id` and the `tessary.prompt.name` / `tessary.prompt.version`
+pair. Every other `tessary.*` name is unread — the [ingestion contract](./ingestion-contract/README.md) carries the full
 do-not-emit list and the standard field each one's content belongs on.
 
 | Overlay attribute | Why no gen_ai standard | Future standard to track |
 |---|---|---|
-| `tessary.call_site.id` | the ONE consumed overlay: linkage from a span to a project-defined call site (the dotted spelling roots the expandable `tessary.call_site.*` namespace and is the only spelling read) | — |
+| `tessary.call_site.id` | linkage from a span to a project-defined call site (the dotted spelling roots the expandable `tessary.call_site.*` namespace and is the only spelling read) | — |
+| `tessary.prompt.name`, `tessary.prompt.version` | linkage from a span to the managed prompt version it came from, into `span.prompt_name` and `span.prompt_version` ([prompt-management.md](./prompt-management.md)) | none yet: GenAI semconv has no managed-prompt reference |
 
 ### Call-site & code provenance — emitted by producers
 
