@@ -61,7 +61,6 @@ public enum Capability {
     /** On by default. Gates the Prompts page, /v1/prompts, the two prompt MCP tools, and the playground. */
     PROMPT_MANAGEMENT("prompt_management_enabled");
 
-
     private final String wire;
 
     Capability(String wire) {
