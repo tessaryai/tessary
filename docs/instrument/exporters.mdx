@@ -133,6 +133,7 @@ Nothing arriving is an exporter problem, not a tagging problem. [Instrumentation
 | --- | --- |
 | Route | `POST /v1/traces` |
 | Body | An OTLP `ExportTraceServiceRequest`, `application/x-protobuf` |
+| Compression | None, or `Content-Encoding: gzip`, so `OTEL_EXPORTER_OTLP_COMPRESSION=gzip` works. Any other encoding is refused with `415`. |
 | Success | `200`. A partial success is reported in the response when a batch was clamped. |
 | Backpressure | `503` with `Retry-After`. Nothing was persisted. Stock exporters resend on their own, and the write path is idempotent. |
 | Refusal | `401` when the token is missing or fails verification. `403` when it is not project-scoped, or is query-scoped. Write and admin keys both ingest. |

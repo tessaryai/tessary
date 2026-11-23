@@ -11,7 +11,9 @@ public enum IngestError implements ErrorCode {
     OTLP_TOKEN_REQUIRED(HttpStatus.FORBIDDEN, "OTLP ingest requires a project-scoped token"),
     OTLP_WRONG_KEY_SCOPE(HttpStatus.FORBIDDEN, "this API key is not scoped for ingest (needs a write or mcp key)"),
     OTLP_MALFORMED_BODY(HttpStatus.BAD_REQUEST, "Malformed OTLP protobuf body"),
-    OTLP_BODY_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "OTLP request body exceeds %d bytes");
+    OTLP_BODY_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "OTLP request body exceeds %d bytes"),
+    OTLP_UNSUPPORTED_ENCODING(
+            HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported Content-Encoding '%s': send gzip or no encoding");
 
     private final HttpStatus status;
     private final String template;
