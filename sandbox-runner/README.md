@@ -1,7 +1,7 @@
 # sandbox-runner
 
-Runs the platform's own **agent** in an isolated sandbox: agentic RCA and Layer-2 triage as
-[launcher sessions](#launcher-sessions) (the `rca` and `triage` lanes), and the generic agent run
+Runs the platform's own **agent** in an isolated sandbox: agentic RCA, Layer-2 triage and fix
+PRs as [launcher sessions](#launcher-sessions) (the `rca`, `triage` and `fix` lanes), and the generic agent run
 behind `AgentRunService` as one request to `/runs`. The Java backend has no E2B SDK and no Docker
 client, so it calls this Node sidecar over HTTP and the sidecar owns the sandbox lifecycle. A `/runs`
 request gets one fresh sandbox, torn down after. Its `timeout_ms` is a positive integer of at most
@@ -85,7 +85,10 @@ narrower.
   event at the end of the reply (see [Events](#events)), and the backend maps each kind to the
   lane's own code.
 - **Token scrubbing:** the short-lived clone token rides in the clone URL and is scrubbed from every
-  line this launcher logs, and from the scripts' own output before it leaves the sandbox.
+  line this launcher logs, and from the scripts' own output before it leaves the sandbox. The
+  sandbox gets the token at clone time: after every clone, on every lane, the script sets the
+  clone's remote URL without it, so the token is not left in the clone's git config. The agent
+  never pushes; a fix lane sends its change back as a `patch` event and the backend writes it.
 - **Sessions:** a session sandbox serves `session.js` on `SESSION_PORT`, behind its own 32-byte
   `SESSION_SECRET`. The script reads it from its env at start, and no child inherits the secret. On
   Docker it runs from an execute-only `node` (`/usr/local/bin/node-sealed`), which makes it
@@ -103,7 +106,7 @@ narrower.
 
 `agent-sandbox/session.js` keeps one OpenCode session alive for many messages, where the lane
 scripts run one prompt and exit. It knows a lane, a system prompt, files, a model, named MCP
-servers and, for RCA, a repository to clone, and nothing about what the caller builds with them. A launcher runs it once per
+servers and, for RCA and fix, a repository to clone, and nothing about what the caller builds with them. A launcher runs it once per
 session as `/usr/local/bin/node-sealed session.js /home/user/session.json` (E2B) or
 `/usr/local/bin/node-sealed session.js /work/session.json` (Docker), with the copy of `node`
 both recipes make (execute-only on Docker only; see Sessions under the security notes above), and
@@ -114,15 +117,15 @@ drives it over HTTP.
 | Item | Value |
 |---|---|
 | `session.json` | `{ lane, system_prompt, files, model, mcp_servers: [ { name, url, token } ], max_tool_calls_per_message, clone? }`. The script reads it and deletes it before anything else runs, so no token is on disk while the agent runs. |
-| `lane` | `agent_run`, `triage` or `rca`; it sets the posture below (`SESSION_LANES` in `agent-stream.js`). Another value is a start failure. |
+| `lane` | `agent_run`, `triage`, `rca` or `fix`; it sets the posture below (`SESSION_LANES` in `agent-stream.js`). Another value is a start failure. |
 | `system_prompt` | A non-empty string on every lane, run as the session agent `tessary-session`. |
-| `clone` | `rca` only: `{ url, head_sha, onset_at? }`, `head_sha` matching `^[0-9a-f]{7,64}$`. Before the session reports ready, the script clones `url` to `<WORK>/repo`, checks out `head_sha` and moves the repo's agent config (`AGENTS.md`, `.opencode`, ...) to `repo/quarantine/`. `url` carries a short-lived token: git runs with it kept out of errors, and every error is scrubbed. It then resolves the onset commit once (the newest commit on `HEAD` committed before `onset_at`, or `unknown`) and replaces `{onset_commit}` in the text of every message it forwards. A clone git refuses is a start failure with git's scrubbed reason. |
+| `clone` | `rca` and `fix` only, and `fix` must have one: `{ url, head_sha?, branch?, onset_at? }`, with exactly one of `head_sha` (matching `^[0-9a-f]{7,64}$`) and `branch` (a branch name: letters, digits, `.`, `_`, `-` and `/`, at most 200 characters, not starting with `-`, with no `..`, `//`, `/.` or `@{`, and not ending in `/`, `.` or `.lock`). Before the session reports ready, the script clones `url` to `<WORK>/repo` and checks out `head_sha`, or the head of `branch`, then sets the clone's remote URL without its credentials. `rca` moves the repo's agent config (`AGENTS.md`, `CLAUDE.md`, `.opencode`, `opencode.json`, `opencode.jsonc`, `.cursor`) to `repo/quarantine/`. `fix` moves only the tool config (`.opencode`, `opencode.json`, `opencode.jsonc`, `.cursor`), to `<WORK>/quarantine/`, outside the repo, and keeps `AGENTS.md` and `CLAUDE.md` for its agent to read. `url` carries a short-lived token: git runs with it kept out of errors, and every error is scrubbed. It then resolves the onset commit once (the newest commit on `HEAD` committed before `onset_at`, or `unknown`) and replaces `{onset_commit}` in the text of every message it forwards. A clone git refuses is a start failure with git's scrubbed reason. |
 | `files` | Relative path to content, written under `<WORK>/dossier/` (the lanes' layout). A path that escapes is a start failure. |
 | `mcp_servers` | Names match `^[a-z][a-z0-9-]{0,31}$` and are unique. The tokens go only to the relay (`mcp-relay.js`), which serves each name at `http://127.0.0.1:<port>/mcp/<name>`; OpenCode's config gets one remote entry per name with no headers. |
 | `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent gets `steps = max_tool_calls_per_message + 1`, and the script aborts a reply whose tool calls go past it (see `reason` below). |
 | `SESSION_SECRET` | Env var, at least 32 characters (the launcher sends 32 random bytes as hex). The script reads it, then removes it from its env before it spawns `opencode serve`, so no child inherits it; on Docker the script's own start-time environment stays unreadable to the agent only because the script runs from the execute-only `node`, and on E2B the agent can read it. Missing or short: `SESSION_SECRET is required` on stderr, exit 2, nothing listens. |
 | `SESSION_PORT` | Env var, default `9400`. The launcher sets it from `SANDBOX_SESSION_PORT`, default 9400; the tests use free ports. The session server binds `0.0.0.0`; OpenCode and the relay stay on `127.0.0.1`. |
-| Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied. Every lane: outside directories denied except OpenCode's own scratch folders. `agent_run` and `triage`: `edit` a blanket allow. `rca`: `edit` denied everywhere, so the cloned repo stays as checked out. `triage` and `rca` also get `checks/` for the agent's scripts; `rca` writes them through bash. |
+| Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied. Every lane: outside directories denied except OpenCode's own scratch folders. `agent_run`, `triage` and `fix`: `edit` a blanket allow. `rca`: `edit` denied everywhere, so the cloned repo stays as checked out. `triage` and `rca` also get `checks/` for the agent's scripts; `rca` writes them through bash. |
 
 ### Routes
 
@@ -143,6 +146,7 @@ with a wrong one: `401 { "kind": "unauthorized" }`. Another path or method: `404
 | `text` | `{ delta }` | Live text of the reply. Reasoning text, user text and synthetic parts are never sent. |
 | `tool_start` | `{ call_id, server, tool, input_summary }` | Once per OpenCode call id, when the call is first seen running or done. `server` is the configured name, or `null` for OpenCode's own tools; `tool` has no server prefix. |
 | `tool_end` | `{ call_id, result_summary, bytes, duration_ms, ok }` | Once per call id, when the call completes (`ok: true`) or fails (`ok: false`). |
+| `patch` | `{ base_sha, files: [ { path, mode, content_base64 } \| { path, deleted: true } ], refused: [ { path, reason } ], over_limit }` | `fix` only, once per reply, just before its `message_end`. See [Patch](#patch). |
 | `message_end` | `{ usage: { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cost_usd }, reason }` | Once per accepted message. `usage` sums every model step of the reply. |
 | `error` | `{ kind, detail }` | See the kinds below. |
 | `closed` | `{ reason: "failed" }` | Only after a start failure or an OpenCode exit. `idle` and `stopped` are the launcher's. |
@@ -165,6 +169,26 @@ OpenCode's instruction ends on the last step in text, also with `limit`.
 | `agent` | An OpenCode `session.error` during a reply, other than an abort. `detail` is `<name>: <message>`, scrubbed and cut to 500 characters. | The reply still ends with one `message_end`, so its spend is booked once. |
 | `provider_rejected`, `request_refused`, `provider_unavailable` | At the end of a reply, the reply's last assistant message holds the provider error OpenCode gave up on (`refusalOf` in `agent-stream.js`, as the `run` lane reads it): a rejected key (`ProviderAuthError`, HTTP 401 or 403), a request the provider will not take (`isRetryable: false`), or an outage OpenCode already retried. `detail` is `model provider: <message> (HTTP <status>)`, scrubbed and cut to 500 characters; the status is left out when the error has none. An aborted reply never reports one. | Sent after any `agent` error of the same reply and just before its `message_end`, so the spend is still booked. A caller takes the provider kind over `agent`. |
 | `opencode_exit` | `opencode serve` exited after the session was ready. `detail` is `exit code <n>` or `signal <s>`. | `closed { failed }`; open `/events` responses end; exit 1 after 5 s. |
+| `patch` | `fix` only: git could not read the clone at the end of a reply. `detail` is git's scrubbed reason, cut to 500 characters. | Sent in place of that reply's `patch`; the reply still ends with its `message_end`. |
+
+### Patch
+
+At the end of every `fix` reply the script reads what the agent changed in the clone since the
+commit it checked out, `base_sha`, committed or not. It stages the work tree in a throwaway index,
+so the agent's own index is untouched, and compares it with `base_sha`; files the repo's ignore
+rules leave out are not part of it, and neither is the move of the tool config to quarantine.
+
+- `files`: one entry per changed path, sorted by path. A file that is new or changed has `mode`
+  (`100644`, `100755`, or `120000` for a symlink, whose content is its target) and its content as
+  base64. A deleted file has `deleted: true`.
+- `refused`: paths the patch leaves out, each with a `reason`: `git_dir` (a path in `.git`),
+  `quarantined` (a path with a segment named `.opencode`, `opencode.json`, `opencode.jsonc` or
+  `.cursor`), `submodule` (a nested repository), `mode` (another file mode) or `symlink_escape` (a
+  symlink whose target is outside the repo). At most 50 are named.
+- `over_limit`: `null`, or `files` when more than 50 files changed, or `bytes` when their content is
+  more than 1 MiB. Then `files` is empty: a partial change is never sent.
+
+The caller writes the commit; nothing in the sandbox pushes.
 
 SIGTERM or SIGINT stops OpenCode (awaited), the relay and the HTTP server, and exits 0 with no event.
 
@@ -197,8 +221,8 @@ which sends `server.heartbeat` about every 10 s). Three facts of the 1.18.35 bin
 The launcher owns long-lived agent sessions: `POST /sessions` starts one sandbox that runs
 `session.js` (see [Agent sessions](#agent-sessions-sessionjs)), and the routes below forward
 messages to it and stream its events. The launcher knows a lane, files, a system prompt, a model,
-named MCP servers and, for RCA, a repository to clone, and nothing about what the caller builds with
-them.
+named MCP servers and, for RCA and fix, a repository to clone, and nothing about what the caller
+builds with them.
 The registry lives in the launcher's memory, so after a launcher restart every session is unknown.
 
 ### Routes
@@ -221,25 +245,28 @@ sandbox exists); its `detail` is launcher-authored, never script output, a token
 
 `POST /sessions` takes `{ lane, system_prompt, files, model, model_cost?, provider, credential,
 mcp_servers: [ { name, url, token } ], idle_timeout_ms, max_tool_calls_per_message, clone_url?,
-head_sha?, onset_at? }`. The launcher checks the body in this order, each a `bad_request` with this
+head_sha?, branch?, onset_at? }`. The launcher checks the body in this order, each a `bad_request` with this
 `detail`:
 
 | Check | `detail` |
 |---|---|
 | JSON, at most 8 MiB | `invalid json body` / `body too large` |
 | `lane` non-empty string | `session.js: lane must be a non-empty string` |
-| `lane` one of `agent_run`, `triage`, `rca` | `session.js: lane must be one of agent_run, triage, rca` |
+| `lane` one of `agent_run`, `triage`, `rca`, `fix` | `session.js: lane must be one of agent_run, triage, rca, fix` |
 | `credential`, as on `/runs` | `session.js: missing or invalid credential (<why>)` |
 | `model` non-empty string | `session.js: model must be a non-empty string` |
 | `idle_timeout_ms` positive integer | `session.js: idle_timeout_ms must be a positive integer` |
 | `idle_timeout_ms` at most 24 hours | `session.js: idle_timeout_ms must be at most 86400000` |
 | an `egress_secret` credential on docker | `session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)` |
 | `system_prompt` non-empty string | `session.js: system_prompt must be a non-empty string` |
-| `clone_url`, `head_sha`, `onset_at` only on `rca` | `session.js: clone_url, head_sha and onset_at are for the rca lane only` |
-| `clone_url` and `head_sha` both or neither | `session.js: clone_url and head_sha go together` |
-| `onset_at` only with them | `session.js: onset_at needs clone_url and head_sha` |
+| `fix` has `clone_url` | `session.js: the fix lane needs clone_url` |
+| `clone_url`, `head_sha`, `branch`, `onset_at` only on `rca` and `fix` | `session.js: clone_url, head_sha, branch and onset_at are for the rca and fix lanes only` |
+| not both `head_sha` and `branch` | `session.js: head_sha and branch do not go together` |
+| `clone_url` with `head_sha` or `branch`, or none of them | `session.js: clone_url goes with head_sha or branch` |
+| `onset_at` only with them | `session.js: onset_at needs clone_url` |
 | `clone_url` non-empty string | `session.js: clone_url must be a non-empty string` |
 | `head_sha` matches `^[0-9a-f]{7,64}$` | `session.js: head_sha must match ^[0-9a-f]{7,64}$` |
+| `branch` a branch name, as `session.js` checks it (see `clone` under [Start](#start)) | `session.js: branch must be a valid branch name` |
 | `onset_at` an ISO 8601 time | `session.js: onset_at must be an ISO 8601 time` |
 | `files`, if present, an object of strings | `session.js: files must map relative paths to strings` |
 | `mcp_servers` an array | `session.js: mcp_servers must be an array` |
@@ -254,7 +281,7 @@ These are the script's own checks of `session.json`, made here as well so a call
 as an outage. A dossier path that escapes is still found only by the script. `provider` is ignored, as on `/runs`: `credential.provider`
 decides. `session.json` holds exactly `{ lane, system_prompt, files, model, mcp_servers,
 max_tool_calls_per_message }`, with `clone: {
-url, head_sha, onset_at }` added for a clone, and the model qualified as on `/runs`; the
+url, head_sha or branch, onset_at }` added for a clone, and the model qualified as on `/runs`; the
 credential reaches the sandbox only through its env, with `model_cost` declared in
 `OPENCODE_CONFIG_CONTENT`. The clone URL carries a short-lived token, so it is in `session.json` only
 until the script reads and deletes it, and the launcher never logs it.

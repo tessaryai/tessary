@@ -17,19 +17,28 @@ Triage and RCA hand your evidence to an agent that runs on a large language mode
 
 Everything the agent reads during a run, trace content included, becomes part of the model's context. It therefore reaches whichever provider serves that run. If you want your trace content to reach only a provider you have an agreement with, store a key for that provider before you run triage or RCA.
 
+Fix runs are the exception to the table. They run only on a frontier model, so they use your own key and never the credit.
+
 The `frustration` classifier is separate. It scores user messages on your own OpenRouter or TypeSafe key and never falls back to the credit. See [Watch for frustrated users](/classifiers/frustration).
 
 ## Where the agent runs
 
-Every triage and RCA run gets a fresh sandbox of its own, which is torn down when the run ends. A sandbox is never reused across runs or across organizations.
+Every triage, RCA and fix run gets a fresh sandbox of its own, which is torn down when the run ends. A sandbox is never reused across runs or across organizations.
 
 The agent works from three inputs:
 
 - **The finding's dossier**, written into the sandbox as files.
 - **Evidence read on demand** over MCP (Model Context Protocol), with a short-lived key minted for the run and revoked when it ends. The agent fetches the traces it needs rather than receiving trace rows in its prompt.
-- **Your repository**, for RCA only, when the project has one connected. Triage never receives a clone.
+- **Your repository**, for RCA and fix runs only, when the project has one connected. Triage never receives a clone.
 
-RCA clones the repository at the default branch's head and only reads it. Tessary writes nothing back to your repository.
+RCA clones the repository at the default branch's head and only reads it. Its clone is quarantined, so the agent does not read the repository's own agent instructions or tool configuration.
+
+A fix run, which only happens when an owner or admin has turned on Fix PRs, clones the default branch's head, or the head of the case's open pull request branch. It reads the repository's `AGENTS.md` and `CLAUDE.md` files and edits files in the sandbox. The agent never pushes. Tessary reads its change with git and writes it to a new branch, or to the case's open pull request branch, through the GitHub API, then opens or updates the pull request. It never merges, never force-pushes, and never writes to your default branch.
+
+What the sandbox holds depends on how you connected:
+
+- **GitHub App.** The sandbox clones with a short-lived token that can only read contents. The write permission stays with Tessary.
+- **Personal access token.** The sandbox receives your token at clone time, and it can write if you granted write access. Tessary removes it from the clone's remote URL and git configuration straight after the clone and scrubs it from the agent's output.
 
 The provider credential travels with the run request and reaches the agent as environment configuration. It is not written into the sandbox's input files, not added to the agent's prompt, and not logged.
 
@@ -39,7 +48,7 @@ The provider credential travels with the run request and reaches the agent as en
 
 **Model provider keys.** Keys you add under **Settings → Providers** belong to the organization, and every project in it shares them. Tessary seals each key with AES-256-GCM before storing it and uses it only to call that provider. Once a key is stored, the page shows **Key stored** but never displays the key again.
 
-**Repository access.** You connect a repository under **Settings → Git integration**, either with a GitHub access token or through a GitHub App installation. Tessary seals what it stores the same way: the access token, or the installation reference. With a GitHub App, Tessary asks GitHub for a short-lived installation token when it needs repository access and caches that token only until it expires. The token used to clone a repository for RCA is scrubbed from the agent's output.
+**Repository access.** You connect a repository under **Settings → Git integration**, either with a GitHub access token or through a GitHub App installation. Tessary seals what it stores the same way: the access token, or the installation reference. With a GitHub App, Tessary asks GitHub for a short-lived installation token when it needs repository access and caches that token only until it expires. It keeps two tokens apart: one that can write, which only Tessary uses to open pull requests, and one narrowed to read contents, which is the only one a sandbox clone receives. The token used to clone a repository is scrubbed from the agent's output.
 
 **API keys.** Tessary stores a bcrypt hash of each project API key, never the secret itself. [API keys](/reference/api-keys) covers scopes, rotation, and revocation.
 

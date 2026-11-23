@@ -13,11 +13,13 @@ public interface CapabilityDefaults {
     boolean defaultFor(Capability capability);
 
     /**
-     * On, except automatic Layer-2 triage, which drives LLM escalation with no ceiling and so is a knowing opt-in, and
-     * alerts, which are not shipping in this build.
+     * On, except automatic Layer-2 triage, which drives LLM escalation with no ceiling and so is a knowing opt-in,
+     * alerts, which are not shipping in this build, and automatic RCA and fix PRs. Orgs created after those two shipped
+     * hold explicit on-overrides for them ({@link NewOrgCapabilities}), so this off default only holds older orgs.
      */
     static CapabilityDefaults open() {
-        Set<Capability> offByDefault = EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS);
+        Set<Capability> offByDefault =
+                EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS, Capability.RCA_AUTOMATIC, Capability.FIX_PR);
         return capability -> !offByDefault.contains(capability);
     }
 }

@@ -22,7 +22,20 @@ public final class BedrockModelProfile {
             @JsonProperty("display_name") String displayName,
             String vendor,
             @JsonProperty("agentic") boolean agentic,
-            @JsonProperty("endpoint") Endpoint endpoint) {}
+            @JsonProperty("endpoint") Endpoint endpoint,
+            /** Mirrors {@link ModelCatalog.CatalogEntry#frontier()}. */
+            @JsonProperty("frontier") boolean frontier) {
+
+        public ModelDescriptor(
+                String modelKey,
+                String inferenceProfileId,
+                String displayName,
+                String vendor,
+                boolean agentic,
+                Endpoint endpoint) {
+            this(modelKey, inferenceProfileId, displayName, vendor, agentic, endpoint, false);
+        }
+    }
 
     /**
      * The endpoints differ in host, SigV4 service, protocol, id shape and region, so the provider is derived from this
@@ -65,7 +78,8 @@ public final class BedrockModelProfile {
                     "Claude Opus 5.5",
                     "Anthropic",
                     true,
-                    Endpoint.RUNTIME),
+                    Endpoint.RUNTIME,
+                    true),
             // Agentic is a product choice for a cost-dominated triage lane, not a measured claim about tool-loop
             // quality.
             new ModelDescriptor(

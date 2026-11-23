@@ -190,7 +190,8 @@ function Footnote() {
       organization holds a key for, and that provider's default model; picking one pins it until you
       set the job back to Automatic. Triage offers the same models RCA does. A model priced above its
       own provider's default is marked <em>higher cost</em> and asks you to confirm, because triage runs
-      unattended once per finding. A decision model lane offers a provider and nothing else,
+      unattended once per finding. Fix offers only frontier models and never falls back to another
+      model, because it writes code you merge. A decision model lane offers a provider and nothing else,
       because each provider serves one decision model. And note the region: the Bedrock mantle models are served from{" "}
       <span className="font-mono">us-east-1</span>, which need not be the region the rest of this stack
       runs in, so a lane pointed at it can send that lane's trace content out of your region.
@@ -309,6 +310,12 @@ function LaneRow({
       <div className="min-w-0 flex-1">
         <div className="text-body font-medium text-fg">{lane.label}</div>
         <div className="mt-0.5 text-label text-subtle">{lane.description}</div>
+        {/* The fix lane never falls back to another model, so with no key for it the feature does nothing. */}
+        {lane.id === "fix" && noProvider && (
+          <div className="mt-1 text-label text-warning">
+            Fix PRs stay off until this organization adds a key for a provider that serves a frontier model.
+          </div>
+        )}
       </div>
 
       <div className="flex shrink-0 flex-col gap-1 sm:flex-row sm:items-center">

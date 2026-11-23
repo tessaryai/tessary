@@ -7,6 +7,10 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CaseDetail,
+  CaseFix,
+  FixCheck,
+  FixPr,
+  FixRun,
   FrustrationDetail,
   GroundednessDetail,
   RcaCause,
@@ -16,7 +20,7 @@ import type {
 import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
-import { Button, ErrorNote, Modal, PageHeader, Table, TableSkeleton, TBody, TD, TH, THead, TR } from "../../ui";
+import { Button, Card, ErrorNote, Modal, PageHeader, Table, TableSkeleton, TBody, TD, TH, THead, TR } from "../../ui";
 import { rcaRunning, shiftKind, shownAsCause, RCA_VERDICT_LABEL, type CauseKind } from "../rcaLabels";
 import { CauseCard } from "../components/CauseCard";
 import { RateChart, RatePins } from "../classifiers/rateStory";
@@ -42,7 +46,17 @@ import { useRepoPrompt } from "../components/useRepoPrompt";
 import { traceLinker } from "../traceLinker";
 import { stamp, useNow } from "../classifiers/shared";
 import { RunBar, type StepsSource } from "../components/RunBar";
-import { clock, elapsed, liveLine, QUEUED_LINE, RUN_POLL_MS, stepMeta, stopFix, stopReason } from "../components/runWords";
+import {
+  clock,
+  elapsed,
+  liveLine,
+  QUEUED_LINE,
+  RUN_POLL_MS,
+  stepMeta,
+  stopFix,
+  stopReason,
+  type RunLane,
+} from "../components/runWords";
 import type { ProjectApi } from "../../api/client";
 import { useEffect, useRef, type ComponentProps } from "react";
 
@@ -56,6 +70,8 @@ export function CasePage() {
     queryKey: ["case", api.base, caseId],
     queryFn: () => api.getCase(caseId ?? ""),
     enabled: caseId != null,
+    // The fix run is read on the case, so the case is read again while it waits or runs.
+    refetchInterval: (q) => (fixLive(q.state.data?.fix) ? RUN_POLL_MS : false),
   });
 
   const detail: CaseDetail | undefined = detailQ.data;
@@ -84,7 +100,10 @@ export function CasePage() {
     void qc.invalidateQueries({ queryKey: ["cases", api.base] });
     void qc.invalidateQueries({ queryKey: ["case", api.base, caseId] });
   }, [qc, api.base, caseId, polledState]);
-  const now = useNow(run?.state === "queued" || run?.state === "running");
+  const fixRun = fixRunOf(detail?.fix?.latest_run);
+  const now = useNow(
+    run?.state === "queued" || run?.state === "running" || fixRun?.state === "queued" || fixRun?.state === "running",
+  );
 
 
   const capabilities = useCapabilities();
@@ -155,7 +174,14 @@ export function CasePage() {
 
   const live = c.state !== "resolved";
   const steps = run && detail.rca_report_id ? rcaSteps(api, detail.rca_report_id, run) : undefined;
-  const bar = run ? rcaBar(run, steps, basePath, canProviders, now) : null;
+  const latestFix = detail.fix?.latest_run;
+  const fixSteps = fixRun && latestFix ? runSteps((after) => api.getFixSteps(latestFix.id, after), fixRun) : undefined;
+  // One bar at a time: while RCA waits, runs or stopped, the fix it would start has not begun. A finished RCA's run
+  // draws no bar, so the fix's shows.
+  const bar =
+    (run && runBar(run, RCA_BAR, steps, basePath, canProviders, now)) ??
+    (fixRun && runBar(fixRun, FIX_BAR, fixSteps, basePath, canProviders, now));
+  const windowsSinceRca = c.windows_since_rca ?? 0;
   const frustration = detail.frustration ?? null;
   const groundedness = detail.groundedness ?? null;
   const classifierDetail = detail.classifier_detail ?? null;
@@ -233,7 +259,7 @@ export function CasePage() {
               )}
               <Button
                 size="sm"
-                variant={analysed ? "secondary" : "primary"}
+                variant={analysed && windowsSinceRca === 0 ? "secondary" : "primary"}
                 onClick={() => rcaM.mutate()}
                 disabled={analysing}
               >
@@ -261,6 +287,14 @@ export function CasePage() {
             <>
               <Dot />
               <span>analyzed {timeAgo(report.completed_at ?? report.created_at)}</span>
+            </>
+          )}
+          {windowsSinceRca > 0 && (
+            <>
+              <Dot />
+              <span>
+                {windowsSinceRca} new {windowsSinceRca === 1 ? "window" : "windows"} since the last RCA
+              </span>
             </>
           )}
         </div>
@@ -341,6 +375,9 @@ export function CasePage() {
           }
         />
       )}
+
+      {/* ------------------------------------------------------- the fix */}
+      {detail.fix && <FixBlock fix={detail.fix} basePath={basePath} />}
 
       {/* -------------------------------------------------------------- how big */}
       <Magnitude detail={detail} basis={c.basis} basePath={basePath} />
@@ -683,6 +720,125 @@ function Why({
   );
 }
 
+/**
+ * The case's fix: its newest pull request, with the state Tessary last read, and what the newest fix run did. The
+ * two are apart: a closed pull request and a run that opened no other both belong here. A run still waiting,
+ * running or stopped is the bar's.
+ */
+function FixBlock({ fix, basePath }: { fix: CaseFix; basePath: string }) {
+  const run = fix.latest_run?.status === "done" ? fix.latest_run : null;
+  if (!fix.pr && !run) return null;
+  const outcome = run ? fixOutcome(run, basePath) : null;
+
+  return (
+    <Block label="Fix pull request">
+      <div className="flex flex-col gap-3">
+        {fix.pr && <PrCard pr={fix.pr} />}
+        {outcome && run && (
+          <div className="flex flex-col gap-2" style={{ maxWidth: 720 }}>
+            <p className="m-0 text-body text-fg">
+              {outcome.text}
+              {outcome.link && (
+                <>
+                  {" "}
+                  <Link to={outcome.link.to} className="text-link hover:text-link-hover">
+                    {outcome.link.label}
+                  </Link>
+                </>
+              )}
+            </p>
+            {run.note && <p className="m-0 text-small text-muted">{run.note}</p>}
+            {run.checks.length > 0 && <FixChecks checks={run.checks} />}
+          </div>
+        )}
+      </div>
+    </Block>
+  );
+}
+
+const PR_STATE: Record<string, string> = { open: "Open", merged: "Merged", closed: "Closed without merging" };
+
+function PrCard({ pr }: { pr: FixPr }) {
+  return (
+    <Card className="border border-border flex flex-col gap-3 p-5">
+      <div className="flex flex-wrap items-baseline gap-2.5">
+        <a
+          href={pr.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="m-0 min-w-0 flex-1 text-body font-medium text-link hover:text-link-hover"
+        >
+          Pull request #{pr.number}
+        </a>
+        {/* Read from the provider before each fix run, never live. */}
+        <span className="text-small text-muted whitespace-nowrap">
+          {PR_STATE[pr.state] ?? pr.state} · as of {timeAgo(pr.updated_at)}
+        </span>
+      </div>
+      <p className="m-0 font-mono text-small text-muted wrap-anywhere">{pr.branch}</p>
+    </Card>
+  );
+}
+
+/** What each check the repository names did on the change. */
+function FixChecks({ checks }: { checks: FixCheck[] }) {
+  return (
+    <ListChassis>
+      {checks.map((check) => (
+        <div
+          key={check.command}
+          className="grid items-baseline bg-surface gap-4 py-2.75 px-3.5"
+          style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}
+        >
+          <span className="font-mono text-small text-fg wrap-anywhere">{check.command}</span>
+          <span className="text-small" style={{ color: check.result === "failed" ? "var(--color-error)" : "var(--color-muted)" }}>
+            {[check.result.replace(/_/g, " "), check.note].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+      ))}
+    </ListChassis>
+  );
+}
+
+const NO_FIX_BECAUSE: Record<string, string> = {
+  fix_pr_off: "Fix PRs were turned off before the run started",
+  no_repo: "this project has no repository connected",
+  read_only: "this project's repository connection cannot write",
+  no_frontier_model: "this project has no frontier model for the fix",
+  no_fixable_cause: "the RCA found no high-confidence cause tied to a file in your repository",
+  declined: "a reviewer closed an earlier pull request for these causes without merging it",
+  agent_declined: "the agent could not write a safe fix",
+  check_failed: "a check failed on the change",
+  empty_patch: "the agent changed no file Tessary can write",
+  patch_over_limit: "the change was over the limit of 50 files or 1 MB",
+  patch_refused: "the change touched a path Tessary never writes, such as one under .git",
+};
+
+/** What a finished fix run did, in a sentence, with the setting that unblocks a fix the project cannot run. */
+function fixOutcome(run: FixRun, basePath: string): { text: string; link?: { label: string; to: string } } {
+  const n = run.causes.length;
+  if (run.outcome === "pr_opened") {
+    return { text: `Tessary opened this pull request after the newest RCA, for ${n} ${n === 1 ? "cause" : "causes"}.` };
+  }
+  if (run.outcome === "commit_added") {
+    return { text: `Tessary added a commit after the newest RCA, for ${n} new ${n === 1 ? "cause" : "causes"}.` };
+  }
+  if (run.outcome === "no_change") {
+    return { text: "The newest RCA found no new cause to fix, so Tessary added no commit." };
+  }
+  const because = run.reason ? NO_FIX_BECAUSE[run.reason] : undefined;
+  const text = because
+    ? `Tessary wrote no fix after the newest RCA because ${because}.`
+    : "Tessary wrote no fix after the newest RCA.";
+  if (run.reason === "no_repo" || run.reason === "read_only") {
+    return { text, link: { label: "Open Git integration", to: `${basePath}/settings/git` } };
+  }
+  if (run.reason === "no_frontier_model") {
+    return { text, link: { label: "Open Models", to: `${basePath}/settings/models` } };
+  }
+  return { text };
+}
+
 /** What else was checked: the candidates the analysis ruled out, below the figure since none is the conclusion. */
 function Checks({ report, analysing }: { report: RcaReport | undefined; analysing: boolean }) {
   // The bar under the header owns the in-flight and failed states, and there is nothing to say before a run.
@@ -807,13 +963,45 @@ function runOf(report: RcaReport | undefined, c: CaseDetail["case"] | undefined)
 
 /** The steps of a report's newest run, once the run has any; read only when someone opens them. */
 function rcaSteps(api: ProjectApi, reportId: string, run: RcaRun): StepsSource | undefined {
-  if (!run.run_id) return undefined;
-  return { load: (after) => api.getRcaSteps(reportId, after), live: run.state === "running" };
+  return runSteps((after) => api.getRcaSteps(reportId, after), run);
 }
 
-/** The bar after the header while an RCA waits, runs or stopped; a finished one has none. */
-function rcaBar(
+function runSteps(load: StepsSource["load"], run: RcaRun): StepsSource | undefined {
+  if (!run.run_id) return undefined;
+  return { load, live: run.state === "running" };
+}
+
+/** A fix run waits or runs until it ends; the case read says which. */
+function fixLive(fix: CaseFix | null | undefined): boolean {
+  const status = fix?.latest_run?.status;
+  return status === "queued" || status === "running";
+}
+
+/**
+ * Where the case's newest fix run stands, in the RCA run's shape so the same bar draws it. A run carries no agent
+ * run until a worker starts it, and one that failed before that has none at all, so the status decides.
+ */
+function fixRunOf(fix: FixRun | null | undefined): RcaRun | null {
+  if (!fix || fix.status === "done") return null;
+  const state = fix.status === "failed" ? "stopped" : fix.status === "running" ? "running" : "queued";
+  // The fix run's own reason first: an interrupted run ends with a reason its agent run never saw.
+  const stopCode = state === "stopped" ? (fix.reason ?? fix.run?.stop_code ?? null) : null;
+  if (fix.run) return { ...fix.run, state, stop_code: stopCode };
+  return {
+    state, queued_at: fix.created_at, run_id: null, started_at: state === "running" ? fix.updated_at : null,
+    ended_at: state === "stopped" ? fix.updated_at : null, step_count: 0, doing: null, last_step: null,
+    last_step_ms: null, note: null, note_ms: null, stop_code: stopCode,
+  };
+}
+
+type BarKind = { kind: ComponentProps<typeof RunBar>["kind"]; lane: RunLane; unknownStop: string };
+const RCA_BAR: BarKind = { kind: "RCA", lane: "RCA", unknownStop: "RCA.UPSTREAM_FAILED" };
+const FIX_BAR: BarKind = { kind: "Fix", lane: "fix", unknownStop: "AGENT_RUN.RUN_FAILED" };
+
+/** The bar after the header while an RCA or a fix waits, runs or stopped; a finished one has none. */
+function runBar(
   run: RcaRun,
+  { kind, lane, unknownStop }: BarKind,
   steps: StepsSource | undefined,
   basePath: string,
   canProviders: boolean,
@@ -822,12 +1010,12 @@ function rcaBar(
   const since = (iso: string | null) => (iso ? now - Date.parse(iso) : null);
   if (run.state === "queued") {
     const waited = since(run.queued_at);
-    return { kind: "RCA", state: "queued", line: QUEUED_LINE, meta: waited == null ? undefined : clock(waited) };
+    return { kind, state: "queued", line: QUEUED_LINE, meta: waited == null ? undefined : clock(waited) };
   }
   if (run.state === "running") {
     const ran = since(run.started_at);
     return {
-      kind: "RCA",
+      kind,
       state: "running",
       line: liveLine({
         doing: run.doing, lastStep: run.last_step, lastStepMs: run.last_step_ms, note: run.note, noteMs: run.note_ms,
@@ -837,9 +1025,9 @@ function rcaBar(
     };
   }
   if (run.state !== "stopped") return null;
-  const reason = stopReason(run.stop_code ?? "RCA.UPSTREAM_FAILED", "RCA");
+  const reason = stopReason(run.stop_code ?? unknownStop, lane);
   return {
-    kind: "RCA",
+    kind,
     state: "stopped",
     line: run.step_count > 0 ? `Stopped at step ${run.step_count}: ${reason}` : `Stopped: ${reason}`,
     fix: stopFix(run.stop_code, basePath, canProviders),

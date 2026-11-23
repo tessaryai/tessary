@@ -111,7 +111,7 @@ const SESSION_TEXT_MAX_BYTES = 1 << 20;
 const SESSION_E2B_GRACE_MS = 60_000;
 const SESSION_E2B_HOME = '/home/user';
 const E2B_DEBUG = (process.env.E2B_DEBUG || 'false').toLowerCase() === 'true';
-const SESSION_EVENT_TYPES = new Set(['text', 'tool_start', 'tool_end', 'message_end', 'error', 'closed']);
+const SESSION_EVENT_TYPES = new Set(['text', 'tool_start', 'tool_end', 'patch', 'message_end', 'error', 'closed']);
 
 // bedrock-mantle is a different host and SigV4 service from bedrock-runtime, speaks the OpenAI
 // Responses API, and is the only route to the GPT-5.6 line; a GPT request on mantle's plain /v1 404s.
@@ -1083,9 +1083,11 @@ function newSessionRecord({ lane, idleTimeoutMs, createdAt }) {
 }
 
 // session.js's own checks, repeated so a bad session.json spends no sandbox; the two images share no code.
-const SESSION_LANES = ['agent_run', 'triage', 'rca'];
-const SESSION_CLONES = new Set(['rca']);
+const SESSION_LANES = ['agent_run', 'triage', 'rca', 'fix'];
+const SESSION_CLONES = new Set(['rca', 'fix']);
+const SESSION_MUST_CLONE = new Set(['fix']);
 const SESSION_HEAD_SHA = /^[0-9a-f]{7,64}$/;
+const SESSION_BRANCH = /^(?!-)(?!.*\.\.)(?!.*@\{)(?!.*\/\/)(?!.*\/\.)(?!.*(?:\/|\.|\.lock)$)[A-Za-z0-9._/-]{1,200}$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 const SESSION_SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 const SESSION_MAX_TOOL_CALLS = 1000;
@@ -1093,19 +1095,30 @@ const SESSION_MAX_TOOL_CALLS = 1000;
 const SESSION_MAX_IDLE_MS = 24 * 60 * 60 * 1000;
 
 function parseSessionClone(body, bad) {
-  const present = ['clone_url', 'head_sha', 'onset_at'].filter((k) => body[k] !== undefined && body[k] !== null);
-  if (present.length === 0) return null;
-  if (!SESSION_CLONES.has(body.lane)) bad('clone_url, head_sha and onset_at are for the rca lane only');
+  const present = ['clone_url', 'head_sha', 'branch', 'onset_at'].filter((k) => body[k] !== undefined && body[k] !== null);
+  if (present.length === 0) {
+    if (SESSION_MUST_CLONE.has(body.lane)) bad(`the ${body.lane} lane needs clone_url`);
+    return null;
+  }
+  if (!SESSION_CLONES.has(body.lane)) bad('clone_url, head_sha, branch and onset_at are for the rca and fix lanes only');
   const hasUrl = present.includes('clone_url');
-  if (hasUrl !== present.includes('head_sha')) bad('clone_url and head_sha go together');
-  if (!hasUrl) bad('onset_at needs clone_url and head_sha');
+  const hasSha = present.includes('head_sha');
+  const hasBranch = present.includes('branch');
+  if (hasSha && hasBranch) bad('head_sha and branch do not go together');
+  if (hasUrl !== (hasSha || hasBranch)) bad('clone_url goes with head_sha or branch');
+  if (!hasUrl) bad('onset_at needs clone_url');
   if (typeof body.clone_url !== 'string' || !body.clone_url) bad('clone_url must be a non-empty string');
-  if (typeof body.head_sha !== 'string' || !SESSION_HEAD_SHA.test(body.head_sha)) bad(`head_sha must match ${SESSION_HEAD_SHA.source}`);
+  if (hasSha && (typeof body.head_sha !== 'string' || !SESSION_HEAD_SHA.test(body.head_sha))) bad(`head_sha must match ${SESSION_HEAD_SHA.source}`);
+  if (hasBranch && (typeof body.branch !== 'string' || !SESSION_BRANCH.test(body.branch))) bad('branch must be a valid branch name');
   const onsetAt = present.includes('onset_at') ? body.onset_at : null;
   if (onsetAt !== null && (typeof onsetAt !== 'string' || !ISO_TIME.test(onsetAt) || Number.isNaN(Date.parse(onsetAt)))) {
     bad('onset_at must be an ISO 8601 time');
   }
-  return { url: body.clone_url, head_sha: body.head_sha, onset_at: onsetAt };
+  return {
+    url: body.clone_url,
+    ...(hasSha ? { head_sha: body.head_sha } : { branch: body.branch }),
+    onset_at: onsetAt,
+  };
 }
 
 // The credential reaches the sandbox through its env alone. The clone URL carries a token: it lives in

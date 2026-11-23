@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
  * The JSON object a reply answers with, read as {@code agent-stream.js} reads a one-shot run's reply: a markdown fence
  * and prose on either side are tolerated, since "ONLY JSON" is an instruction, not a guarantee.
  */
-final class JsonAnswer {
+public final class JsonAnswer {
 
     /** A reply with five candidate objects is not a schema reply. */
     private static final int MAX_SPANS = 4;
@@ -22,7 +22,7 @@ final class JsonAnswer {
     private JsonAnswer() {}
 
     /** The first balanced object that parses; a reply truncated mid-object yields nothing. */
-    static Optional<ObjectNode> extract(ObjectMapper mapper, String text) {
+    public static Optional<ObjectNode> extract(ObjectMapper mapper, String text) {
         for (String span : balancedSpans(text)) {
             try {
                 return Optional.of(mapper.readValue(span, ObjectNode.class));

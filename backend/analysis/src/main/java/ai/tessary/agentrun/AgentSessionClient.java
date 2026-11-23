@@ -45,7 +45,7 @@ public interface AgentSessionClient {
      * @param files relative path to content, written under the sandbox's {@code dossier/} @param mcpServers their tokens go to the launcher only
      * @param idleTimeoutMs the launcher closes the session after this long with no message; no default @param
      * maxToolCallsPerMessage the agent's step cap per reply @param repo the repository the sandbox clones before it is
-     * ready, RCA only
+     * ready: RCA may have one, the fix lane must
      */
     record Start(
             String projectId,
@@ -81,13 +81,36 @@ public interface AgentSessionClient {
     }
 
     /**
+     * The sandbox checks out {@code headSha}, or the head of {@code branch}; exactly one is set. Its {@code patch}
+     * event names the commit it checked out.
+     *
      * @param url embeds a short-lived token: never logged, never in {@code toString} @param onsetAt when the movement
      * began, so the sandbox can name the commit live then
      */
-    record Clone(String url, String headSha, @Nullable String onsetAt) {
+    record Clone(
+            String url,
+            @Nullable String headSha,
+            @Nullable String onsetAt,
+            @Nullable String branch) {
+
+        public Clone {
+            if ((headSha == null) == (branch == null)) {
+                throw new IllegalArgumentException("a clone names exactly one of a head sha and a branch");
+            }
+        }
+
+        public Clone(String url, String headSha, @Nullable String onsetAt) {
+            this(url, headSha, onsetAt, null);
+        }
+
+        /** A clone at the head of {@code branch}, as the fix lane starts from an open pull request's branch. */
+        public static Clone atBranch(String url, String branch) {
+            return new Clone(url, null, null, branch);
+        }
+
         @Override
         public String toString() {
-            return "Clone[headSha=" + headSha + ", onsetAt=" + onsetAt + "]";
+            return "Clone[headSha=" + headSha + ", branch=" + branch + ", onsetAt=" + onsetAt + "]";
         }
     }
 

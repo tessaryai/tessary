@@ -24,6 +24,7 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.fix.FixTrigger;
 import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.testsupport.Props;
@@ -53,6 +54,7 @@ class RcaWorkerTickTest {
     private final RcaProperties props = Props.of(RcaProperties.class);
     private final AgentRunRepository runs = mock(AgentRunRepository.class);
     private final AgentSessionClient sessions = mock(AgentSessionClient.class);
+    private final FixTrigger fixes = mock(FixTrigger.class);
     private final RcaWorker worker = new RcaWorker(
             jobs,
             reports,
@@ -63,7 +65,8 @@ class RcaWorkerTickTest {
             caseEvents,
             new SyncTaskExecutor(),
             runs,
-            sessions);
+            sessions,
+            fixes);
 
     /**
      * The exhaustion sweep's outcome, success or failure, never gates the claim: due jobs are claimed round after

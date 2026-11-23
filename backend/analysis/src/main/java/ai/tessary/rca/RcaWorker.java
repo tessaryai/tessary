@@ -10,6 +10,7 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.fix.FixTrigger;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
@@ -22,6 +23,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +60,9 @@ public class RcaWorker {
     /** Stops the session a crashed attempt left open, so it cannot keep spending. */
     private final AgentSessionClient sessions;
 
+    /** Every finished RCA, pressed or automatic, may open or update its case's fix pull request. */
+    private final FixTrigger fixes;
+
     private final String leaseOwner =
             LeasedJobSql.leaseOwner(() -> InetAddress.getLocalHost().getHostName());
 
@@ -71,7 +76,8 @@ public class RcaWorker {
             CaseEventRepository caseEvents,
             @Qualifier("rcaTaskExecutor") TaskExecutor executor,
             AgentRunRepository runs,
-            AgentSessionClient sessions) {
+            AgentSessionClient sessions,
+            FixTrigger fixes) {
         this.jobs = jobs;
         this.reports = reports;
         this.analysis = analysis;
@@ -82,6 +88,7 @@ public class RcaWorker {
         this.executor = executor;
         this.runs = runs;
         this.sessions = sessions;
+        this.fixes = fixes;
     }
 
     @Scheduled(fixedDelayString = "${tessary.rca.heartbeat-ms:15000}")
@@ -128,13 +135,14 @@ public class RcaWorker {
         String runId = null;
         try (LogContext ignored = LogContext.put(ctx)) {
             abandonOrphans(job);
-            runId = reports.findByJobId(job.projectId(), job.id())
-                    .map(report -> runs.open(job.projectId(), AgentRunRepository.Lane.RCA, report.id(), job.id(), null))
+            Optional<RcaReportRow> report = reports.findByJobId(job.projectId(), job.id());
+            runId = report.map(r -> runs.open(job.projectId(), AgentRunRepository.Lane.RCA, r.id(), job.id(), null))
                     .orElse(null);
             analysis.analyze(job);
             jobs.markDone(job.id());
             close(runId, Outcome.DONE, null);
             appendRcaCompleted(job);
+            report.ifPresent(r -> fixes.afterRca(job.projectId(), r.id(), job.findingId()));
         } catch (TessaryException e) {
             if (RcaError.SANDBOX_BUSY.equals(e.error()) && e instanceof Retryable busy) {
                 // Nothing failed and the report stays unstamped, so the case still reads Queued.

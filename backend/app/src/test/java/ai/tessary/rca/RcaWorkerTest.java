@@ -543,6 +543,54 @@ record RcaWorkerTest(
         assertEquals(Set.of(olderTrace, newerTrace), capturedEvidence().flaggedTraceIds());
     }
 
+    /**
+     * A finished RCA never reaching the fix step: a run on a case leaves its fix run, here skipped because the project
+     * has no repository, with the report's fixable causes.
+     */
+    @Test
+    void aFinishedRcaOnACaseLeavesItsFixRun() {
+        String pid = TenantFixture.bootstrap(tenants, "rca-fix-run").project().id();
+        String trace = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(1)));
+        String findingId = seedFinding(pid, List.of(), List.of(trace));
+        CaseRow row = cases.open(pid, detection(findingId), Instant.now()).orElseThrow();
+        RcaDtos.Cause cause = new RcaDtos.Cause(
+                "Search is never retried",
+                "high",
+                "standing",
+                "code",
+                "It gives up.",
+                "Every flagged trace gave up.",
+                "Retry it.",
+                new RcaDtos.Attribution(null, "src/agent.py", null, null),
+                List.of(trace),
+                List.of(),
+                1,
+                1);
+        when(engine.run(any(), any(), any(), anyMap(), any()))
+                .thenReturn(new AgenticRcaEngine.Result(
+                        RcaReportRow.Verdict.CAUSES_IDENTIFIED, "s", List.of(cause), List.of(), "## r", true, null));
+
+        RcaJobRow job = enqueue(pid, findingId);
+        worker.run(job);
+
+        Map<String, Object> run = jdbc.sql(
+                        "SELECT case_id, rca_report_id, status, outcome, reason, causes::text AS causes"
+                                + " FROM fix_run WHERE project_id = :pid")
+                .param("pid", pid)
+                .query()
+                .singleRow();
+        assertEquals(
+                Map.of(
+                        "case_id", row.id(),
+                        "rca_report_id",
+                                reports.findByJobId(pid, job.id()).orElseThrow().id(),
+                        "status", "done",
+                        "outcome", "skipped",
+                        "reason", "no_repo",
+                        "causes", "[\"code:src/agent.py\"]"),
+                run);
+    }
+
     private static CaseDetection detection(String findingId) {
         return new CaseDetection(
                 new CaseKey(CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "secret_leak", "count"),

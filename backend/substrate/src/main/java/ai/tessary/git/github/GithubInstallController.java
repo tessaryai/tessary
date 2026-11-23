@@ -150,7 +150,7 @@ public class GithubInstallController {
                 r.project().id(),
                 new ConnectRequest(
                         "github", repo.owner(), repo.name(), null, repo.defaultBranch(), req.installationId(), null));
-        return ApiResponse.ok(GitIntegrationView.from(row));
+        return ApiResponse.ok(integrations.view(row));
     }
 
     private SelectionPayload requireSelectionFor(String token, Resolved r) {

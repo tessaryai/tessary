@@ -32,7 +32,12 @@ public final class ModelCatalog {
              * A hosted decision model answers typed questions over {@code llm/decisions/}, never through a chat model,
              * so no chat or agent lane may run it.
              */
-            @JsonProperty("decision") boolean decision) {
+            @JsonProperty("decision") boolean decision,
+            /**
+             * Kept by Tessary, not read from a provider: the only models {@link ai.tessary.llmspi.ModelLane#FIX} may
+             * run. FIX checks this instead of {@code agentic}, and no other lane reads it.
+             */
+            @JsonProperty("frontier") boolean frontier) {
 
         public CatalogEntry(
                 ModelProvider provider,
@@ -41,12 +46,33 @@ public final class ModelCatalog {
                 String displayName,
                 String defaultBaseUrl,
                 boolean agentic) {
-            this(provider, vendor, modelName, displayName, defaultBaseUrl, agentic, false);
+            this(provider, vendor, modelName, displayName, defaultBaseUrl, agentic, false, false);
+        }
+
+        public CatalogEntry(
+                ModelProvider provider,
+                String vendor,
+                String modelName,
+                String displayName,
+                String defaultBaseUrl,
+                boolean agentic,
+                boolean decision) {
+            this(provider, vendor, modelName, displayName, defaultBaseUrl, agentic, decision, false);
         }
     }
 
+    private static CatalogEntry frontier(
+            ModelProvider provider,
+            String vendor,
+            String modelName,
+            String displayName,
+            String defaultBaseUrl,
+            boolean agentic) {
+        return new CatalogEntry(provider, vendor, modelName, displayName, defaultBaseUrl, agentic, false, true);
+    }
+
     private static final List<CatalogEntry> ENTRIES = List.of(
-            new CatalogEntry(
+            frontier(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
                     "claude-opus-5-5",
@@ -67,7 +93,8 @@ public final class ModelCatalog {
                     "Claude Haiku 5.5",
                     "https://api.anthropic.com/v1",
                     true),
-            new CatalogEntry(
+            // Frontier but not agentic: it runs the fix lane only.
+            frontier(
                     ModelProvider.OPENROUTER,
                     "Anthropic",
                     "anthropic/claude-opus-5.5",
@@ -90,7 +117,7 @@ public final class ModelCatalog {
                     false),
             // Named with the route, since each route prices them separately; priced via #pricingId's "openrouter/"
             // prefix.
-            new CatalogEntry(
+            frontier(
                     ModelProvider.OPENROUTER,
                     "OpenAI",
                     "openai/gpt-6.1-sol",
@@ -139,7 +166,7 @@ public final class ModelCatalog {
             // The agentic entries: current-generation models per provider the sandbox launcher can reach, checked
             // against the vendored LiteLLM price book. Google Vertex is not covered: its auth fits none of
             // PlatformCatalog's kinds.
-            new CatalogEntry(
+            frontier(
                     ModelProvider.OPENAI,
                     "OpenAI",
                     "gpt-6.1-sol",
@@ -312,7 +339,8 @@ public final class ModelCatalog {
                                     overlay.displayName(),
                                     e.defaultBaseUrl(),
                                     e.agentic(),
-                                    e.decision()));
+                                    e.decision(),
+                                    e.frontier()));
         }
         // Left only in the live listing: synthesize fail-closed.
         for (ProviderModel m : liveByName.values()) {

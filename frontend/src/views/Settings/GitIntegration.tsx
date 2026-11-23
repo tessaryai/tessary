@@ -7,7 +7,7 @@ import { searchPatch } from "../../lib/searchPatch";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { useProjectApi } from "../../tenant/TenantContext";
-import type { InstallationOption } from "../../api/types";
+import type { GitIntegration as GitIntegrationView, InstallationOption } from "../../api/types";
 import { Button, ErrorNote, Modal, PageBody, PageHeader, Skeleton, useToast } from "../../ui";
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 
@@ -136,7 +136,7 @@ export function GitIntegration() {
         <PageHeader
           eyebrow="Data & ingestion"
           title="Git integration"
-          subtitle="The repository Tessary reads when it runs RCA (root-cause analysis). Without one, RCA still runs, but it rules on trace evidence alone and cannot say what changed in your code."
+          subtitle="The repository Tessary reads when it runs RCA (root-cause analysis), and where Fix PRs open their pull requests. Without one, RCA still runs, but it rules on trace evidence alone and cannot say what changed in your code."
         />
         {integrationQ.isLoading && <Skeleton className="h-16 w-full" />}
         {integrationQ.isError && <ErrorNote error={integrationQ.error} />}
@@ -155,6 +155,7 @@ export function GitIntegration() {
                 {integ.provider}
                 {integ.host ? ` · ${integ.host}` : ""}
               </div>
+              <WriteAccess integ={integ} />
             </div>
             <Button variant="ghost" size="sm" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>
               {disconnect.isPending ? "Disconnecting…" : "Disconnect"}
@@ -259,3 +260,27 @@ export function GitIntegration() {
     </>
   );
 }
+
+/**
+ * Whether Fix PRs can write here, and what to grant when they cannot. Tessary asks the provider on each read, so a
+ * fixed grant shows on the next load.
+ */
+function WriteAccess({ integ }: { integ: GitIntegrationView }) {
+  if (integ.canWrite) {
+    return (
+      <div className="text-muted mt-1.25 text-small">
+        Tessary can push branches and open fix pull requests on this repository.
+      </div>
+    );
+  }
+  return <div className="text-warning mt-1.25 text-small">{WRITE_BLOCKED[integ.writeReason ?? "CHECK_FAILED"]}</div>;
+}
+
+const WRITE_BLOCKED: Record<NonNullable<GitIntegrationView["writeReason"]>, string> = {
+  APP_PERMISSION_MISSING:
+    "Read-only, so Fix PRs cannot open a pull request. Grant the GitHub App Contents: write and Pull requests: write, then accept the new permissions on its installation.",
+  TOKEN_CANNOT_PUSH:
+    "Read-only, so Fix PRs cannot open a pull request. Disconnect, then connect again with a token that grants Contents: write and Pull requests: write.",
+  CHECK_FAILED: "Tessary could not check whether it can write to this repository. Reload the page to try again.",
+  UNSUPPORTED: "Read-only. Tessary cannot open pull requests on this provider.",
+};

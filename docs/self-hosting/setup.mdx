@@ -190,7 +190,11 @@ Once you are past the gate, Tessary tracks the project's progress through a mile
 
 ## Optional: connect a GitHub repository
 
-Connecting a GitHub repository is optional and not required to complete setup. It gives Tessary source code to ground root-cause analysis and triage in, which improves both. Connect one from **Settings > Git integration**, either through the in-app manifest wizard or with a personal access token.
+Connecting a GitHub repository is optional and not required to complete setup. It gives Tessary source code to ground root-cause analysis in, which improves it, and it is where Tessary opens fix pull requests. Connect one from **Settings > Git integration**, either through the in-app manifest wizard or with a personal access token.
+
+The manifest wizard creates a GitHub App that asks for **Contents: write**, **Pull requests: write**, and **Metadata: read**. A personal access token needs **Contents: write** and **Pull requests: write** on the one repository. Without the write permissions, RCA still works, and Fix PRs cannot open a pull request. **Settings > Git integration** shows whether Tessary can write to the repository, and what to grant if it cannot.
+
+Write access has a cost you should weigh. With a GitHub App, Tessary keeps the write permission and gives the sandbox a clone token that can only read contents. With a personal access token, the sandbox receives the token at clone time, so the agent session starts with a token that can write. Tessary removes it from the clone's remote URL and git configuration straight after the clone. If you do not want that, connect with a GitHub App, or give the token **Contents: read** only. [Fix pull requests](/concepts/root-cause-analysis#fix-pull-requests) covers the rest.
 
 ## Groundedness needs a GPU
 

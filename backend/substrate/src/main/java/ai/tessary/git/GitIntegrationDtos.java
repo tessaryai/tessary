@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git;
 
+import ai.tessary.git.GitProviderClient.WriteAccess;
+import ai.tessary.git.GitProviderClient.WriteBlock;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 public final class GitIntegrationDtos {
 
@@ -21,10 +24,24 @@ public final class GitIntegrationDtos {
             Long installationId,
             String token) {}
 
+    /** {@code writeReason} says why Tessary cannot open pull requests; null when {@code canWrite}. */
     public record GitIntegrationView(
-            String provider, String host, String repoOwner, String repoName, String defaultBranch) {
-        public static GitIntegrationView from(GitIntegrationRow r) {
-            return new GitIntegrationView(r.provider(), r.host(), r.repoOwner(), r.repoName(), r.defaultBranch());
+            String provider,
+            String host,
+            String repoOwner,
+            String repoName,
+            String defaultBranch,
+            boolean canWrite,
+            @Nullable WriteBlock writeReason) {
+        public static GitIntegrationView from(GitIntegrationRow r, WriteAccess write) {
+            return new GitIntegrationView(
+                    r.provider(),
+                    r.host(),
+                    r.repoOwner(),
+                    r.repoName(),
+                    r.defaultBranch(),
+                    write.canWrite(),
+                    write.reason());
         }
     }
 

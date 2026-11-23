@@ -9,6 +9,7 @@ import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -34,18 +35,56 @@ class LanePriorityTest {
         }
     }
 
+    /** The fix lane permits frontier models instead of agentic ones, so it is checked against that rule. */
     @ParameterizedTest
     @EnumSource(ModelLane.class)
     void everyLaneNamesExactlyTheModelsItsGroupPermits(ModelLane lane) {
         Set<String> permitted = new LinkedHashSet<>();
         for (BedrockModelProfile.ModelDescriptor d : BedrockModelProfile.platformModels()) {
-            if (lane.group() == LaneGroup.AGENT_VM && d.agentic()) permitted.add(d.modelKey());
+            boolean fits = lane.frontierOnly() ? d.frontier() : lane.group() == LaneGroup.AGENT_VM && d.agentic();
+            if (fits) permitted.add(d.modelKey());
         }
         for (ModelCatalog.CatalogEntry e : ModelCatalog.entries()) {
-            boolean fits = lane.group() == LaneGroup.AGENT_VM ? e.agentic() : e.decision();
+            boolean fits = lane.frontierOnly()
+                    ? e.frontier()
+                    : lane.group() == LaneGroup.AGENT_VM ? e.agentic() : e.decision();
             if (fits) permitted.add(ModelCatalog.key(e));
         }
 
         assertEquals(permitted, new LinkedHashSet<>(LanePriority.modelKeys(lane)));
+    }
+
+    /**
+     * The bug: a model joins the frontier set by accident (a copied row, a flag left on) and starts writing pull
+     * requests on a customer's repository. The set is a product decision, so it is pinned here key by key.
+     */
+    @Test
+    void theFrontierSetIsOpusAndSolOnTheirNamedRoutesOnly() {
+        Set<String> frontier = new LinkedHashSet<>();
+        BedrockModelProfile.platformModels().stream()
+                .filter(BedrockModelProfile.ModelDescriptor::frontier)
+                .forEach(d -> frontier.add(d.modelKey()));
+        ModelCatalog.entries().stream()
+                .filter(ModelCatalog.CatalogEntry::frontier)
+                .forEach(e -> frontier.add(ModelCatalog.key(e)));
+
+        assertEquals(
+                Set.of(
+                        "anthropic.claude-opus-5-5",
+                        "ANTHROPIC:claude-opus-5-5",
+                        "OPENROUTER:anthropic/claude-opus-5.5",
+                        "OPENAI:gpt-6.1-sol",
+                        "OPENROUTER:openai/gpt-6.1-sol"),
+                frontier);
+    }
+
+    /** The bug: an org with only a Custom endpoint or the deployment's provider gets a fix model it never chose. */
+    @Test
+    void theFixLaneOffersNeitherCustomNorThePlatformProvider() {
+        Set<ModelProvider> providers = new LinkedHashSet<>();
+        LanePriority.of(ModelLane.FIX).forEach(o -> providers.add(o.provider()));
+
+        assertFalse(providers.contains(ModelProvider.CUSTOM));
+        assertFalse(providers.contains(ModelProvider.PLATFORM));
     }
 }

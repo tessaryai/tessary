@@ -105,8 +105,10 @@ Each organization starts with a model credit, so triage and RCA work before you 
 
 Two things spend the credit, and only when you have not stored your own key:
 
-- **Triage**, when you select **Run triage** on a finding. On Tessary Cloud, triage runs only when you start it.
-- **RCA**, when you select **Run RCA** on a case.
+- **Triage**, which runs automatically on a finding unless an owner or admin turned automatic triage off, and when you select **Run triage**.
+- **RCA**, when you select **Run RCA** on a case, and when Automatic RCA runs it on a case that new windows joined.
+
+Fix pull requests never spend the credit. They run only on a frontier model, so they use your own key.
 
 The `frustration` classifier never spends the credit. It always needs your own OpenRouter or TypeSafe key, as it does when you self-host. See [Watch for frustrated users](/classifiers/frustration).
 

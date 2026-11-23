@@ -4,8 +4,9 @@ package ai.tessary.git;
 import java.util.Optional;
 
 /**
- * Builds a clone URL with a short-lived installation token embedded. Empty when no token can be minted. The URL must
- * never be logged.
+ * Builds a clone URL with the provider's clone credential embedded: for a GitHub App, a short-lived token that can only
+ * read contents. Empty when no such token can be minted; it never falls back to the write token. The URL must never be
+ * logged.
  */
 public final class GitCloneUrls {
 
@@ -14,7 +15,7 @@ public final class GitCloneUrls {
     public static Optional<String> authenticated(GitProviderFactory providers, GitIntegrationRow integ) {
         String token;
         try {
-            String header = providers.tokenService(integ.providerEnum()).authHeader(integ);
+            String header = providers.tokenService(integ.providerEnum()).cloneAuthHeader(integ);
             token = header.startsWith("Bearer ") ? header.substring("Bearer ".length()) : header;
         } catch (RuntimeException e) {
             return Optional.empty();

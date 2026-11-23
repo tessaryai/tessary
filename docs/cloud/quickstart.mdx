@@ -56,17 +56,19 @@ When a classifier detects a change, it creates a **finding** on the **Classifier
 
 ## Triage a finding and investigate the case
 
-On Tessary Cloud, triage starts when you start it. Automatic triage is not available, so open a finding and select **Run triage**. Triage reviews the finding's evidence and rules whether it is a real issue. A positive ruling opens a case, or joins the case already open for that cause.
+On Tessary Cloud, automatic triage is on from the start, so a finding is triaged without anyone starting it. An owner or admin can turn it off under **Settings → Features**, and you can always open a finding and select **Run triage**. Triage reviews the finding's evidence and rules whether it is a real issue. A positive ruling opens a case, or joins the case already open for that cause.
 
 A high-confidence secret leak and a frustration finding skip triage. Each opens its case as soon as it is filed, because its numbers are the claim.
 
-On a case, select **Run RCA** to start the investigation. The report gives a one-sentence summary, the causes it found with the traces it cites for each, and the checks it ruled out. Connect a repository under **Settings → Git integration** so the run can read the code that changed.
+On a case, select **Run RCA** to start the investigation, or leave Automatic RCA on, as it is for a new organization, and it runs when new windows join the case. The report gives a one-sentence summary, the causes it found with the traces it cites for each, and the checks it ruled out. Connect a repository under **Settings → Git integration** so the run can read the code that changed.
+
+With a repository Tessary can write to and Fix PRs on, which it is for a new organization, a finished RCA can also open a pull request that fixes the causes it is sure of. Tessary never merges it. [Fix pull requests](/concepts/root-cause-analysis#fix-pull-requests) covers what it needs.
 
 ### What pays for triage and RCA
 
 Your organization starts with a model credit that pays for triage and RCA. It is granted once and does not renew. When it is used up, add your own model provider key under **Settings → Providers**, and triage and RCA run on that key from then on. Nothing else depends on the credit: traces keep arriving, classifiers keep running, and findings keep being filed.
 
-A key you add before the credit runs out is used first. [Usage and credit](/cloud/usage-and-credit) covers the credit and your limits in detail.
+A key you add before the credit runs out is used first. The credit does not pay for fix pull requests. They run only on a frontier model, so they need your own key for a provider that serves one, chosen for the **Fix** lane under **Settings → Models**. [Usage and credit](/cloud/usage-and-credit) covers the credit and your limits in detail.
 
 ## Read next
 

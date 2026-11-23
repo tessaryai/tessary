@@ -651,6 +651,145 @@ test('a triage session has a checks/ dir and allows edits (a triage agent whose 
   assert.equal(record.prompts[0].agent, 'tessary-session');
 });
 
+const FIX_BRANCH = 'tessary/fix-case-1';
+const ONE_REPLY = { replies: [{ steps: [{ text: ['Fixed.'], usage: usage(1, 1, 0, 0, 0) }] }] };
+
+/** A repository with agent rules, tool config, an ignore file and a fix branch one commit ahead of the default branch. */
+function makeFixRepo(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-fix-repo-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  git(dir, 'init', '--quiet', '--initial-branch=main');
+  fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'run make test');
+  fs.writeFileSync(path.join(dir, 'opencode.json'), '{"agent":{}}');
+  fs.mkdirSync(path.join(dir, '.opencode'));
+  fs.writeFileSync(path.join(dir, '.opencode', 'plugin.js'), 'evil()');
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n');
+  fs.writeFileSync(path.join(dir, 'app.py'), 'v1');
+  fs.writeFileSync(path.join(dir, 'old.py'), 'gone soon');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '--quiet', '-m', 'first');
+  git(dir, 'checkout', '--quiet', '-b', FIX_BRANCH);
+  fs.writeFileSync(path.join(dir, 'app.py'), 'v2');
+  git(dir, 'commit', '--quiet', '-am', 'earlier fix');
+  const branchHead = git(dir, 'rev-parse', 'HEAD');
+  git(dir, 'checkout', '--quiet', 'main');
+  return { dir, branchHead };
+}
+
+async function fixSession(t, repo, clone = {}) {
+  return readySession(t, { script: ONE_REPLY, input: { lane: 'fix', clone: { url: `file://${repo.dir}`, branch: FIX_BRANCH, ...clone } } });
+}
+
+async function replyPatches(session) {
+  await send(session, 'fix it');
+  return (await session.readEvents(0, 'message_end', 1)).filter((e) => e.type === 'patch').map((e) => e.data);
+}
+
+test('a fix session starts at the branch head, keeps the repo\'s AGENTS.md and moves only its tool config out of the repo (a fix agent blind to the repo\'s rules, or one that runs its plugins)', async (t) => {
+  const repo = makeFixRepo(t);
+  const { session } = await fixSession(t, repo);
+
+  const clone = path.join(session.workDir, 'repo');
+  assert.equal(git(clone, 'rev-parse', 'HEAD'), repo.branchHead);
+  assert.equal(fs.readFileSync(path.join(clone, 'app.py'), 'utf8'), 'v2');
+  assert.equal(fs.readFileSync(path.join(clone, 'AGENTS.md'), 'utf8'), 'run make test');
+  assert.deepEqual([fs.existsSync(path.join(clone, 'opencode.json')), fs.existsSync(path.join(clone, '.opencode'))], [false, false]);
+  assert.equal(fs.readFileSync(path.join(session.workDir, 'quarantine', '.opencode', 'plugin.js'), 'utf8'), 'evil()');
+  assert.equal(fs.existsSync(path.join(clone, 'quarantine')), false);
+  await send(session, 'fix it');
+  await session.readEvents(0, 'message_end', 1);
+  assert.deepEqual(session.records()[0].config.permission.edit, { '*': 'allow' });
+});
+
+test('every clone leaves no token in the clone\'s git config (an agent that reads the write token from .git/config)', async (t) => {
+  const repo = makeFixRepo(t);
+  const { session } = await fixSession(t, repo, { url: `file://x-access-token:tsy_a_clonetoken@localhost${repo.dir}` });
+
+  const clone = path.join(session.workDir, 'repo');
+  assert.equal(git(clone, 'config', 'remote.origin.url'), `file://localhost${repo.dir}`);
+  for (const file of filesUnder(path.join(clone, '.git'))) {
+    assert.doesNotMatch(fs.readFileSync(file, 'latin1'), /clonetoken|x-access-token/, file);
+  }
+});
+
+test('a fix reply ends with a patch of every change since the cloned head, committed or not, just before message_end (a fix that loses the agent\'s new file, its commit or its deletion)', async (t) => {
+  const repo = makeFixRepo(t);
+  const { session } = await fixSession(t, repo);
+  const clone = path.join(session.workDir, 'repo');
+  fs.writeFileSync(path.join(clone, 'app.py'), 'v3');
+  git(clone, 'commit', '--quiet', '-am', 'agent commit');
+  fs.writeFileSync(path.join(clone, 'app.py'), 'v4');
+  fs.mkdirSync(path.join(clone, 'tools'));
+  fs.writeFileSync(path.join(clone, 'tools', 'run.sh'), '#!/bin/sh\n');
+  fs.chmodSync(path.join(clone, 'tools', 'run.sh'), 0o755);
+  fs.symlinkSync('app.py', path.join(clone, 'current'));
+  fs.rmSync(path.join(clone, 'old.py'));
+  fs.mkdirSync(path.join(clone, 'node_modules'));
+  fs.writeFileSync(path.join(clone, 'node_modules', 'dep.js'), 'ignored');
+
+  await send(session, 'fix it');
+  const events = await session.readEvents(0, 'message_end', 1);
+
+  assert.deepEqual(events.slice(-2).map((e) => e.type), ['patch', 'message_end']);
+  const b64 = (s) => Buffer.from(s).toString('base64');
+  assert.deepEqual(events.at(-2).data, {
+    base_sha: repo.branchHead,
+    files: [
+      { path: 'app.py', mode: '100644', content_base64: b64('v4') },
+      { path: 'current', mode: '120000', content_base64: b64('app.py') },
+      { path: 'old.py', deleted: true },
+      { path: 'tools/run.sh', mode: '100755', content_base64: b64('#!/bin/sh\n') },
+    ],
+    refused: [],
+    over_limit: null,
+  });
+  assert.equal(git(clone, 'status', '--porcelain', '--', 'app.py'), 'M app.py', 'the agent\'s own index is untouched');
+});
+
+test('a fix patch refuses tool config, a nested repo and a symlink that leaves the repo, and names each (a patch that commits a plugin or a link to the host)', async (t) => {
+  const repo = makeFixRepo(t);
+  const { session } = await fixSession(t, repo);
+  const clone = path.join(session.workDir, 'repo');
+  fs.writeFileSync(path.join(clone, 'opencode.json'), '{"agent":{"x":{}}}');
+  fs.mkdirSync(path.join(clone, 'pkg', '.cursor'), { recursive: true });
+  fs.writeFileSync(path.join(clone, 'pkg', '.cursor', 'rules'), 'obey');
+  fs.symlinkSync('../../etc/passwd', path.join(clone, 'passwd'));
+  fs.mkdirSync(path.join(clone, 'vendored'));
+  git(path.join(clone, 'vendored'), 'init', '--quiet');
+  git(path.join(clone, 'vendored'), 'commit', '--quiet', '--allow-empty', '-m', 'nested');
+  fs.writeFileSync(path.join(clone, 'app.py'), 'v3');
+
+  const [patch] = await replyPatches(session);
+
+  assert.deepEqual(patch.files, [{ path: 'app.py', mode: '100644', content_base64: Buffer.from('v3').toString('base64') }]);
+  assert.deepEqual(patch.refused, [
+    { path: 'opencode.json', reason: 'quarantined' },
+    { path: 'pkg/.cursor/rules', reason: 'quarantined' },
+    { path: 'vendored', reason: 'submodule' },
+    { path: 'passwd', reason: 'symlink_escape' },
+  ]);
+});
+
+test('a fix patch over 50 files or 1 MiB carries no file and says which limit (a partial fix committed as if whole)', async (t) => {
+  const repo = makeFixRepo(t);
+  const many = await fixSession(t, repo);
+  for (let i = 0; i < 51; i++) fs.writeFileSync(path.join(many.session.workDir, 'repo', `f${String(i).padStart(2, '0')}.txt`), 'x');
+  const big = await fixSession(t, repo);
+  fs.writeFileSync(path.join(big.session.workDir, 'repo', 'big.bin'), Buffer.alloc((1 << 20) + 1));
+
+  const [[overFiles], [overBytes]] = await Promise.all([replyPatches(many.session), replyPatches(big.session)]);
+
+  assert.deepEqual([overFiles.files, overFiles.over_limit], [[], 'files']);
+  assert.deepEqual([overBytes.files, overBytes.over_limit], [[], 'bytes']);
+});
+
+test('an unchanged fix repo still ends the reply with an empty patch (a missing patch read as a failed run)', async (t) => {
+  const repo = makeFixRepo(t);
+  const { session } = await fixSession(t, repo);
+
+  assert.deepEqual(await replyPatches(session), [{ base_sha: repo.branchHead, files: [], refused: [], over_limit: null }]);
+});
+
 /** A reply whose only step fails with `error`, as opencode records a provider error it gave up on. */
 const failing = (error) => ({ replies: [{ steps: [{ usage: usage(5, 0, 0, 0, 0.5) }], error }] });
 const SPENT = { input_tokens: 5, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.5 };
@@ -721,15 +860,20 @@ describe('session starts that fail on the exit timer', { concurrency: true }, ()
   test('a session.json with a bad lane, system prompt or clone fails the start (a session that runs with another lane\'s posture)', async (t) => {
     const clone = { url: 'file:///nowhere', head_sha: 'abcdef1' };
     await Promise.all([
-      [{ lane: undefined }, 'session.json: lane must be one of agent_run, triage, rca'],
-      [{ lane: 'review' }, 'session.json: lane must be one of agent_run, triage, rca'],
+      [{ lane: undefined }, 'session.json: lane must be one of agent_run, triage, rca, fix'],
+      [{ lane: 'review' }, 'session.json: lane must be one of agent_run, triage, rca, fix'],
       [{ lane: 'triage', system_prompt: undefined }, 'session.json: system_prompt must be a non-empty string'],
       [{ lane: 'rca', system_prompt: undefined }, 'session.json: system_prompt must be a non-empty string'],
       [{ lane: 'rca', system_prompt: null }, 'session.json: system_prompt must be a non-empty string'],
       [{ lane: 'rca', system_prompt: '' }, 'session.json: system_prompt must be a non-empty string'],
-      [{ lane: 'triage', clone }, 'session.json: only the rca lane clones'],
-      [{ lane: 'rca', clone: { ...clone, head_sha: '--upload-pack=x' } }, 'session.json: clone needs a url and a head_sha matching ^[0-9a-f]{7,64}$'],
-      [{ lane: 'rca', clone: { head_sha: 'abcdef1' } }, 'session.json: clone needs a url and a head_sha matching ^[0-9a-f]{7,64}$'],
+      [{ lane: 'triage', clone }, 'session.json: only the rca and fix lanes clone'],
+      [{ lane: 'rca', clone: { ...clone, head_sha: '--upload-pack=x' } }, 'session.json: clone.head_sha must match ^[0-9a-f]{7,64}$'],
+      [{ lane: 'rca', clone: { head_sha: 'abcdef1' } }, 'session.json: clone needs a url and either a head_sha or a branch'],
+      [{ lane: 'fix', clone: { ...clone, branch: 'main' } }, 'session.json: clone needs a url and either a head_sha or a branch'],
+      [{ lane: 'fix', clone: { url: clone.url } }, 'session.json: clone needs a url and either a head_sha or a branch'],
+      ...['--upload-pack=x', 'a..b', 'a b', 'fix/', 'fix.lock', 'x@{1}', 7].map((branch) =>
+        [{ lane: 'fix', clone: { url: clone.url, branch } }, 'session.json: clone.branch must be a valid branch name']),
+      [{ lane: 'fix' }, 'session.json: the fix lane needs a clone'],
       [{ lane: 'rca', clone: { ...clone, onset_at: 7 } }, 'session.json: clone.onset_at must be a string'],
     ].map(async ([input, detail]) => {
       const session = await startSession({ input });

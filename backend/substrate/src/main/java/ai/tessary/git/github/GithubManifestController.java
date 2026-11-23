@@ -76,9 +76,11 @@ public class GithubManifestController {
         Map<String, Object> hookAttributes = new LinkedHashMap<>();
         hookAttributes.put("active", false);
 
+        // Write is for fix pull requests. Sandbox clones still get a token narrowed to contents: read.
         Map<String, Object> permissions = new LinkedHashMap<>();
-        permissions.put("contents", "read");
+        permissions.put("contents", "write");
         permissions.put("metadata", "read");
+        permissions.put("pull_requests", "write");
 
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("name", "Tessary (" + orgSlug + ")");

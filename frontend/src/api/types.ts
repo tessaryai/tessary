@@ -174,6 +174,15 @@ export type RcaRuledOutCheck = S["RuledOutCheck"];
 /** One cause an RCA found, the same shape for every case type: what changed, how it caused this, what next. */
 export type RcaCause = S["Cause"];
 
+// ---- Fix: the pull request Tessary opens for a case's fixable causes ----
+/** The case's newest pull request and newest fix run; null on a case no fix step has looked at. */
+export type CaseFix = S["FixView"];
+/** `state` is what Tessary last read from the provider: `open`, `merged` or `closed`. */
+export type FixPr = S["FixPrView"];
+/** `status` is `queued`, `running`, `done` or `failed`; `outcome` and `reason` are stable codes. */
+export type FixRun = S["FixRunView"];
+export type FixCheck = S["FixCheckView"];
+
 // ---- PII redaction ----
 export type RedactionRuleView = S["RuleView"];
 /** Settings → Data retention: one row per data class the hourly sweep enforces. */

@@ -2,6 +2,8 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,6 +30,7 @@ import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaJobRepository;
 import ai.tessary.rca.RcaReportRepository;
 import ai.tessary.rca.RcaReportRow;
+import ai.tessary.rca.RcaTriggerService;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
@@ -37,6 +40,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -45,12 +49,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** Case lifecycle as a human drives it: resolve, mute, unmute, lookup, and pressing RCA (1c). */
-// batch-size=0 parks RcaWorker's drain so this class reads locked_at and the trail itself.
+// batch-size=0 parks RcaWorker's drain so this class reads the report and the trail itself.
 @RcaParkedSpringBootTest
 record CaseServiceTest(
         FindingRepository findings,
         CaseService service,
         CaseRepository cases,
+        CaseLedger ledger,
+        RcaTriggerService rcaTrigger,
         CaseEventRepository events,
         RcaJobRepository rcaJobs,
         RcaReportRepository rcaReports,
@@ -272,24 +278,143 @@ record CaseServiceTest(
         return cases.open(p.id(), detection, Instant.now()).orElseThrow();
     }
 
-    /** Re-pressing a locked case must not re-stamp the lock or narrate the press twice. */
+    /**
+     * One trail line per new report: a re-press that coalesces narrates nothing, a re-run that makes a new report
+     * narrates it. Pressing never locks the case.
+     */
     @Test
-    void rePressingALockedCaseCoalescesOntoTheSameReportAndDoesNotReLockOrReNarrate() {
+    void eachNewReportIsNarratedOnceAndPressingNeverLocks() {
         Project p = project("svc-rca-re-press");
         CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
 
         RcaReportView first = service.runRca(p.id(), row.id(), "priya@example.com");
-        String lockedAt = cases.findById(p.id(), row.id()).orElseThrow().lockedAt();
         RcaReportView second = service.runRca(p.id(), row.id(), "priya@example.com");
+        rcaJobs.markDone(first.jobId());
+        RcaReportView rerun = rcaTrigger.trigger(
+                p.id(), Objects.requireNonNull(row.latestFindingId()), "priya@example.com", Ids.ulid());
 
         assertEquals(first.id(), second.id(), "the same finding coalesces onto one report");
-        assertEquals(lockedAt, cases.findById(p.id(), row.id()).orElseThrow().lockedAt(), "the lock does not move");
+        assertNotEquals(first.id(), rerun.id());
+        assertNull(cases.findById(p.id(), row.id()).orElseThrow().lockedAt());
+        List<CaseEventRow> requested = events.listByCase(p.id(), row.id()).stream()
+                .filter(e -> CaseEventRow.Kind.RCA_REQUESTED.equals(e.kind()))
+                .toList();
+        assertEquals(
+                List.of("priya@example.com", "priya@example.com"),
+                requested.stream().map(CaseEventRow::actor).toList());
+        assertEquals(
+                List.of("Requested.", "Requested."),
+                requested.stream().map(CaseEventRow::summary).toList());
+    }
+
+    /**
+     * The living case: a window that arrives after an RCA joins the same case, the case page still shows that RCA
+     * (it is anchored on an older finding than the case's newest), and the page counts the window as unread.
+     */
+    @Test
+    void aWindowAfterAnRcaJoinsTheSameCaseAndReadsAsUnread() {
+        Project p = project("svc-rca-living");
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
+        String firstFinding = Objects.requireNonNull(row.latestFindingId());
+        RcaReportView report = service.runRca(p.id(), row.id(), "priya@example.com");
+        rcaReports.recordFindingIds(report.jobId(), List.of(firstFinding));
+        rcaJobs.markDone(report.jobId());
+        assertEquals(0, service.detail(p.id(), row.id()).caseView().windowsSinceRca());
+
+        CaseDetection again = new CaseDetection(
+                new CaseKey(
+                        CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "subject-classifier", "pass_rate"),
+                "subject label",
+                null,
+                findingBehind(p, "classifier-again"),
+                "something happened again",
+                "because the detector said so",
+                0.5,
+                Instant.parse("2026-07-02T10:00:00Z"),
+                0.5,
+                0.95,
+                -0.45);
+        CaseRow joined = ledger.openOrJoin(p.id(), again, null, Instant.now());
+
+        assertEquals(row.id(), joined.id(), "the case stays live after an RCA");
+        CaseDetailView detail = service.detail(p.id(), row.id());
+        assertEquals(report.id(), detail.rcaReportId(), "the case's newest report, not the newest finding's");
+        assertEquals(1, detail.caseView().windowsSinceRca());
         assertEquals(
                 1,
-                kinds(p, row).stream()
-                        .filter(CaseEventRow.Kind.RCA_REQUESTED::equals)
-                        .count(),
-                "only the locking press narrates the request");
+                service.triage(p.id()).cases().stream()
+                        .filter(c -> c.id().equals(row.id()))
+                        .findFirst()
+                        .orElseThrow()
+                        .windowsSinceRca(),
+                "the list row carries the same count");
+    }
+
+    /**
+     * The tick's path acts as the owner (whom the run's key is issued to) but is narrated as automatic, with no
+     * person as actor. A second tick while the first run is queued requests nothing and narrates nothing.
+     */
+    @Test
+    void anAutomaticRunActsAsTheOwnerAndIsNarratedAsAutomatic() {
+        Project p = project("svc-rca-auto");
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
+
+        RcaReportView first =
+                service.runRcaAutomatically(p.id(), row.id(), "user-owner").orElseThrow();
+        Optional<RcaReportView> second = service.runRcaAutomatically(p.id(), row.id(), "user-owner");
+
+        assertEquals(Optional.empty(), second, "the first run is still queued");
+        assertEquals(
+                "user-owner",
+                jdbc.sql("SELECT payload->>'created_by' FROM job WHERE id = :id")
+                        .param("id", first.jobId())
+                        .query(String.class)
+                        .single());
+        List<CaseEventRow> requested = events.listByCase(p.id(), row.id()).stream()
+                .filter(e -> CaseEventRow.Kind.RCA_REQUESTED.equals(e.kind()))
+                .toList();
+        assertEquals(1, requested.size());
+        assertNull(requested.get(0).actor());
+        assertEquals(
+                "Requested automatically for windows that no RCA has read.",
+                requested.get(0).summary());
+    }
+
+    /**
+     * A window can join after the run with an older {@code created_at} than the case's newest finding (its ruling came
+     * late), so the newest finding is still the one the last automatic run was anchored on. The bug: that run's job is
+     * found again and nothing new runs, on every tick.
+     */
+    @Test
+    void anAutomaticRunStartsForALateWindowWhenTheNewestFindingWasAlreadyAnalysed() {
+        Project p = project("svc-rca-auto-late");
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
+        RcaReportView first =
+                service.runRcaAutomatically(p.id(), row.id(), "user-owner").orElseThrow();
+        rcaReports.recordFindingIds(first.jobId(), List.of(Objects.requireNonNull(row.latestFindingId())));
+        rcaJobs.markDone(first.jobId());
+        String late = "2026-01-01T00:00:00Z";
+        String lateFinding = Objects.requireNonNull(findings.recordArmedWindow(
+                        Ids.ulid(),
+                        p.id(),
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-late",
+                        "cause-late",
+                        1,
+                        "cs-a",
+                        ARMED_PAYLOAD,
+                        late,
+                        late,
+                        late,
+                        late))
+                .findingId();
+        findings.attachToCase(p.id(), lateFinding, row.id(), Instant.now().toString());
+
+        RcaReportView second =
+                service.runRcaAutomatically(p.id(), row.id(), "user-owner").orElseThrow();
+
+        assertNotEquals(first.id(), second.id());
+        assertEquals(JobRow.Status.PENDING, second.status());
     }
 
     @Test
@@ -333,7 +458,7 @@ record CaseServiceTest(
                 .update();
 
         assertError(RcaError.SUBJECT_NOT_FOUND, () -> service.runRca(p.id(), row.id(), "priya@example.com"));
-        assertNull(cases.findById(p.id(), row.id()).orElseThrow().lockedAt(), "a refused press locks nothing");
+        assertFalse(kinds(p, row).contains(CaseEventRow.Kind.RCA_REQUESTED), "a refused press narrates nothing");
     }
 
     /**

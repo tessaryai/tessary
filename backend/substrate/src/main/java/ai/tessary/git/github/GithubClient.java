@@ -10,6 +10,8 @@ import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -17,6 +19,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,6 +97,251 @@ public class GithubClient implements GitProviderClient {
         String b = (branch != null && !branch.isBlank()) ? branch : integ.defaultBranch();
         JsonNode res = get(integ, "/repos/" + integ.repoOwner() + "/" + integ.repoName() + "/branches/" + enc(b));
         return res.path("commit").path("sha").asText();
+    }
+
+    // ---- write access ----------------------------------------------------------------------------
+
+    /**
+     * An App connection reads the permissions GitHub returned with its installation token. A PAT connection reads the
+     * repository's {@code permissions.push}, which reflects the user's role and not always the token's grants, so for a
+     * PAT this is best effort and a refused write still fails with {@link GitError#WRITE_ACCESS_MISSING}.
+     */
+    @Override
+    public WriteAccess writeAccess(GitIntegrationRow integ) {
+        Optional<Map<String, String>> granted = tokenService.installationPermissions(integ, false);
+        if (granted.isPresent()) {
+            if (appCanWrite(granted.get())) return WriteAccess.granted();
+            // The cached token can predate a grant the owner accepted since; ask once more with a new one.
+            boolean now = tokenService
+                    .installationPermissions(integ, true)
+                    .map(GithubClient::appCanWrite)
+                    .orElse(false);
+            return now ? WriteAccess.granted() : WriteAccess.blocked(WriteBlock.APP_PERMISSION_MISSING);
+        }
+        HttpResponse<String> res = call(integ, "GET", repoPath(integ), null);
+        TessaryException refusal = verifyRefusal(res.statusCode(), slug(integ));
+        if (refusal != null) throw refusal;
+        boolean push = validateAndParse(res).path("permissions").path("push").asBoolean(false);
+        return push ? WriteAccess.granted() : WriteAccess.blocked(WriteBlock.TOKEN_CANNOT_PUSH);
+    }
+
+    private static boolean appCanWrite(Map<String, String> permissions) {
+        return "write".equals(permissions.get("contents")) && "write".equals(permissions.get("pull_requests"));
+    }
+
+    // ---- commits and refs ------------------------------------------------------------------------
+
+    @Override
+    public String createBlob(GitIntegrationRow integ, byte[] content) {
+        ObjectNode body = mapper.createObjectNode()
+                .put("content", Base64.getEncoder().encodeToString(content))
+                .put("encoding", "base64");
+        return request(integ, "POST", repoPath(integ) + "/git/blobs", body)
+                .path("sha")
+                .asText();
+    }
+
+    @Override
+    public String commitTreeSha(GitIntegrationRow integ, String commitSha) {
+        return request(integ, "GET", repoPath(integ) + "/git/commits/" + enc(commitSha), null)
+                .path("tree")
+                .path("sha")
+                .asText();
+    }
+
+    @Override
+    public String createTree(GitIntegrationRow integ, String baseTreeSha, List<TreeEntry> entries) {
+        ObjectNode body = mapper.createObjectNode().put("base_tree", baseTreeSha);
+        ArrayNode tree = body.putArray("tree");
+        for (TreeEntry e : entries) {
+            ObjectNode n =
+                    tree.addObject().put("path", e.path()).put("mode", e.mode()).put("type", "blob");
+            // GitHub deletes a path only on an explicit null sha, so it is written even if the mapper drops nulls.
+            if (e.blobSha() == null) n.putNull("sha");
+            else n.put("sha", e.blobSha());
+        }
+        return request(integ, "POST", repoPath(integ) + "/git/trees", body)
+                .path("sha")
+                .asText();
+    }
+
+    @Override
+    public String createCommit(GitIntegrationRow integ, String message, String treeSha, String parentSha) {
+        ObjectNode body = mapper.createObjectNode().put("message", message).put("tree", treeSha);
+        body.putArray("parents").add(parentSha);
+        return request(integ, "POST", repoPath(integ) + "/git/commits", body)
+                .path("sha")
+                .asText();
+    }
+
+    @Override
+    public Optional<String> branchSha(GitIntegrationRow integ, String branch) {
+        HttpResponse<String> res = call(integ, "GET", repoPath(integ) + "/git/ref/heads/" + refPath(branch), null);
+        if (res.statusCode() == 404) return Optional.empty();
+        return Optional.of(parse(integ, res).path("object").path("sha").asText());
+    }
+
+    @Override
+    public void createBranch(GitIntegrationRow integ, String branch, String sha) {
+        ObjectNode body = mapper.createObjectNode()
+                .put("ref", "refs/heads/" + validBranch(branch))
+                .put("sha", sha);
+        HttpResponse<String> res = call(integ, "POST", repoPath(integ) + "/git/refs", body);
+        // 422 is "Reference already exists": another writer created it first.
+        if (res.statusCode() == 422) throw new TessaryException(GitError.BRANCH_MOVED, branch, slug(integ));
+        parse(integ, res);
+    }
+
+    @Override
+    public void updateBranch(GitIntegrationRow integ, String branch, String sha) {
+        ObjectNode body = mapper.createObjectNode().put("sha", sha).put("force", false);
+        HttpResponse<String> res = call(integ, "PATCH", repoPath(integ) + "/git/refs/heads/" + refPath(branch), body);
+        // 422 is "Update is not a fast forward": a push landed first.
+        if (res.statusCode() == 422) throw new TessaryException(GitError.BRANCH_MOVED, branch, slug(integ));
+        parse(integ, res);
+    }
+
+    @Override
+    public List<String> changedPaths(GitIntegrationRow integ, String baseSha, String headSha) {
+        JsonNode cmp = request(integ, "GET", repoPath(integ) + "/compare/" + enc(baseSha) + "..." + enc(headSha), null);
+        Set<String> paths = new LinkedHashSet<>();
+        for (JsonNode f : cmp.path("files")) {
+            String name = f.path("filename").asText("");
+            String previous = f.path("previous_filename").asText("");
+            if (!name.isEmpty()) paths.add(name);
+            if (!previous.isEmpty()) paths.add(previous);
+        }
+        return List.copyOf(paths);
+    }
+
+    // ---- pull requests ---------------------------------------------------------------------------
+
+    @Override
+    public PullRequest createPullRequest(GitIntegrationRow integ, String head, String base, String title, String body) {
+        ObjectNode req = mapper.createObjectNode()
+                .put("title", title)
+                .put("head", head)
+                .put("base", base)
+                .put("body", body)
+                .put("draft", false);
+        return pullRequest(request(integ, "POST", repoPath(integ) + "/pulls", req));
+    }
+
+    @Override
+    public Optional<PullRequest> findPullRequest(GitIntegrationRow integ, String head) {
+        String query =
+                "?head=" + enc(integ.repoOwner() + ":" + head) + "&state=all&sort=created&direction=desc&per_page=1";
+        JsonNode list = request(integ, "GET", repoPath(integ) + "/pulls" + query, null);
+        if (!list.isArray() || list.isEmpty()) return Optional.empty();
+        return Optional.of(pullRequest(list.get(0)));
+    }
+
+    @Override
+    public PullRequest pullRequest(GitIntegrationRow integ, int number) {
+        HttpResponse<String> res = call(integ, "GET", repoPath(integ) + "/pulls/" + number, null);
+        if (res.statusCode() == 404) throw new TessaryException(GitError.PR_NOT_FOUND, number, slug(integ));
+        return pullRequest(parse(integ, res));
+    }
+
+    @Override
+    public void updatePullRequestBody(GitIntegrationRow integ, int number, String body) {
+        ObjectNode req = mapper.createObjectNode().put("body", body);
+        HttpResponse<String> res = call(integ, "PATCH", repoPath(integ) + "/pulls/" + number, req);
+        if (res.statusCode() == 404) throw new TessaryException(GitError.PR_NOT_FOUND, number, slug(integ));
+        parse(integ, res);
+    }
+
+    /** {@code merged_at} is set in both the list and the single answer, unlike {@code merged}. */
+    private static PullRequest pullRequest(JsonNode pr) {
+        JsonNode mergedAt = pr.path("merged_at");
+        return new PullRequest(
+                pr.path("number").asInt(),
+                pr.path("html_url").asText(""),
+                pr.path("state").asText(""),
+                mergedAt.isTextual() && !mergedAt.asText().isBlank(),
+                pr.path("head").path("ref").asText(""),
+                pr.path("head").path("sha").asText(""),
+                pr.path("base").path("ref").asText(""));
+    }
+
+    // ---- transport -------------------------------------------------------------------------------
+
+    /** Sends and maps the answer: a refusal is typed, any other non-2xx is a provider failure. */
+    private JsonNode request(GitIntegrationRow integ, String method, String path, @Nullable JsonNode body) {
+        return parse(integ, call(integ, method, path, body));
+    }
+
+    private JsonNode parse(GitIntegrationRow integ, HttpResponse<String> res) {
+        TessaryException refusal = refusal(res, slug(integ));
+        if (refusal != null) throw refusal;
+        return validateAndParse(res);
+    }
+
+    /**
+     * For the commit, ref and pull request calls. 401 is a dead credential. 403 is a missing grant, unless GitHub says
+     * it is a rate limit (no requests left, or a {@code retry-after}), which is a provider failure like 429. Null means
+     * not a refusal.
+     */
+    static @Nullable TessaryException refusal(HttpResponse<?> res, String slug) {
+        int status = res.statusCode();
+        boolean limited = status == 429
+                || (status == 403
+                        && (res.headers().firstValue("retry-after").isPresent()
+                                || "0"
+                                        .equals(res.headers()
+                                                .firstValue("x-ratelimit-remaining")
+                                                .orElse(null))));
+        if (limited) return new TessaryException(GitError.PROVIDER_CALL_FAILED, LABEL, "rate limited");
+        return switch (status) {
+            case 401 -> new TessaryException(GitError.CREDENTIALS_REJECTED, LABEL_TITLE);
+            case 403 -> new TessaryException(GitError.WRITE_ACCESS_MISSING, slug);
+            default -> null;
+        };
+    }
+
+    /** Same guards as every read: public host only, bounded body, the integration's own credential. */
+    private HttpResponse<String> call(GitIntegrationRow integ, String method, String path, @Nullable JsonNode body) {
+        URI uri = UrlGuard.requirePublicHttp(baseUrl(integ) + path);
+        HttpRequest.Builder req = baseRequest(integ, uri);
+        if (body == null) {
+            req.method(method, HttpRequest.BodyPublishers.noBody());
+        } else {
+            req.method(method, HttpRequest.BodyPublishers.ofString(body.toString()))
+                    .header("Content-Type", "application/json");
+        }
+        return exchange(req.build());
+    }
+
+    private static String repoPath(GitIntegrationRow integ) {
+        return "/repos/" + enc(integ.repoOwner()) + "/" + enc(integ.repoName());
+    }
+
+    private static String slug(GitIntegrationRow integ) {
+        return integ.repoOwner() + "/" + integ.repoName();
+    }
+
+    // Git's own ref-name rules, enough that no segment can climb out of the refs path.
+    private static final Pattern BAD_BRANCH = Pattern.compile(
+            "(^[/.])|(/$)|(\\.$)|(\\.lock$)|(//)|(\\.\\.)|(/\\.)|(@\\{)|[\\x00-\\x20\\x7f~^:?*\\[\\\\]");
+
+    static String validBranch(String branch) {
+        if (branch == null || branch.isBlank() || BAD_BRANCH.matcher(branch).find()) {
+            throw new IllegalArgumentException("not a valid branch name");
+        }
+        return branch;
+    }
+
+    /**
+     * A branch inside a refs path keeps its slashes (refs/heads/a/b), unlike {@code /branches/{b}}, which takes it as
+     * one segment. Each segment is encoded.
+     */
+    static String refPath(String branch) {
+        StringBuilder out = new StringBuilder();
+        for (String seg : validBranch(branch).split("/")) {
+            if (!out.isEmpty()) out.append('/');
+            out.append(enc(seg));
+        }
+        return out.toString();
     }
 
     private JsonNode get(GitIntegrationRow integ, String path) {
