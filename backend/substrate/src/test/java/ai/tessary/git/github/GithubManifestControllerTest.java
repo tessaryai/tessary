@@ -73,8 +73,11 @@ class GithubManifestControllerTest {
         assertEquals(
                 "https://app.example.com/git/github/manifest/callback",
                 manifest.path("redirect_url").asText());
-        assertEquals(
-                "read", manifest.path("default_permissions").path("contents").asText());
+        // Fix pull requests need contents and pull requests write; sandbox clones narrow back to contents: read.
+        JsonNode permissions = manifest.path("default_permissions");
+        assertEquals("write", permissions.path("contents").asText());
+        assertEquals("write", permissions.path("pull_requests").asText());
+        assertEquals("read", permissions.path("metadata").asText());
         assertTrue(manifest.path("request_oauth_on_install").asBoolean());
         assertEquals(false, manifest.path("public").asBoolean(true));
     }

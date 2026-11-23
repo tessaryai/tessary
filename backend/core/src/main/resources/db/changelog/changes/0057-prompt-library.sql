@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0055-prompt-library
+--changeset evals:0057-prompt-library
 -- A prompt is an authored object: a name per project, immutable numbered versions, and deployment labels that each
 -- point at one version. latest is derived from MAX(version), never stored, so deleting the top version moves it with
 -- no write. last_version is the highest number ever handed out and only grows, so a deleted number is never reused.

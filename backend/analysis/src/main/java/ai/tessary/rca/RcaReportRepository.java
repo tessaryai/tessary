@@ -42,8 +42,10 @@ public class RcaReportRepository {
     /**
      * No-op when a concurrent trigger already inserted it. {@code engine} is stamped at trigger time so the UI can
      * describe the running lane.
+     *
+     * @return true when this call wrote the shell, false when the job already had one
      */
-    public void insertPendingIfAbsent(
+    public boolean insertPendingIfAbsent(
             String projectId,
             String jobId,
             String findingId,
@@ -60,7 +62,7 @@ public class RcaReportRepository {
             double priorValue,
             double delta,
             String engine) {
-        jdbc.sql("""
+        return jdbc.sql("""
                 INSERT INTO rca_report (id, project_id, job_id, finding_id, subject_kind, subject_id,
                     subject_label, call_site_id, metric, report_kind, window_from, window_split, window_to,
                     current_value, prior_value, delta, status, engine, created_at)
@@ -69,25 +71,105 @@ public class RcaReportRepository {
                     :currentValue, :priorValue, :delta, 'pending', :engine, :now)
                 ON CONFLICT (job_id) DO NOTHING
                 """)
-                .param("id", Ids.ulid())
-                .param("pid", projectId)
+                        .param("id", Ids.ulid())
+                        .param("pid", projectId)
+                        .param("jobId", jobId)
+                        .param("findingId", findingId)
+                        .param("subjectKind", subjectKind)
+                        .param("subjectId", subjectId)
+                        .param("subjectLabel", subjectLabel)
+                        .param("callSiteId", callSiteId)
+                        .param("metric", metric)
+                        .param("reportKind", reportKind)
+                        .param("windowFrom", windowFrom.toString())
+                        .param("windowSplit", windowSplit.toString())
+                        .param("windowTo", windowTo.toString())
+                        .param("currentValue", currentValue)
+                        .param("priorValue", priorValue)
+                        .param("delta", delta)
+                        .param("engine", engine)
+                        .param("now", Instant.now().toString())
+                        .update()
+                > 0;
+    }
+
+    /** Written on every claim, since a retried claim can read windows that joined the case after the first. */
+    public void recordFindingIds(String jobId, List<String> findingIds) {
+        jdbc.sql("UPDATE rca_report SET finding_ids = :ids::jsonb WHERE job_id = :jobId")
+                .param("ids", json(findingIds))
                 .param("jobId", jobId)
-                .param("findingId", findingId)
-                .param("subjectKind", subjectKind)
-                .param("subjectId", subjectId)
-                .param("subjectLabel", subjectLabel)
-                .param("callSiteId", callSiteId)
-                .param("metric", metric)
-                .param("reportKind", reportKind)
-                .param("windowFrom", windowFrom.toString())
-                .param("windowSplit", windowSplit.toString())
-                .param("windowTo", windowTo.toString())
-                .param("currentValue", currentValue)
-                .param("priorValue", priorValue)
-                .param("delta", delta)
-                .param("engine", engine)
-                .param("now", Instant.now().toString())
                 .update();
+    }
+
+    /** The case's newest report, any status, across every finding it was anchored on. */
+    public Optional<RcaReportRow> latestByCase(String projectId, String caseId) {
+        return jdbc.sql("SELECT " + COLS + " " + FROM + " JOIN finding f ON f.id = r.finding_id"
+                        + " WHERE r.project_id = :pid AND f.case_id = :caseId ORDER BY r.created_at DESC, r.id DESC"
+                        + " LIMIT 1")
+                .param("pid", projectId)
+                .param("caseId", caseId)
+                .query((rs, n) -> map(rs))
+                .optional();
+    }
+
+    /**
+     * Per case, how many of its findings the newest {@code done} report did not read. A case with no done report is
+     * absent. {@link #READ_BY} is the read rule.
+     */
+    public Map<String, Integer> windowsSinceRca(String projectId, Collection<String> caseIds) {
+        if (caseIds.isEmpty()) return Map.of();
+        Map<String, Integer> out = new HashMap<>();
+        jdbc.sql("SELECT n.case_id, (SELECT COUNT(*) FROM finding x WHERE x.project_id = :pid AND x.case_id = n.case_id"
+                        + " AND NOT " + READ_BY + ") AS unread"
+                        + " FROM (SELECT DISTINCT ON (f.case_id) f.case_id, r.finding_ids, r.created_at " + FROM
+                        + " JOIN finding f ON f.id = r.finding_id"
+                        + " WHERE r.project_id = :pid AND f.case_id IN (:caseIds) AND j.status = 'done'"
+                        + " ORDER BY f.case_id, r.created_at DESC, r.id DESC) n")
+                .param("pid", projectId)
+                .param("caseIds", caseIds)
+                .query((rs, n) -> out.put(rs.getString("case_id"), rs.getInt("unread")))
+                .list();
+        return out;
+    }
+
+    /**
+     * Live cases automatic RCA runs on now, worst first: a finding created after {@code windowsAfter} that the case's
+     * newest report of any status did not read, no report of the case queued or running, and the newest one requested
+     * before {@code lastRequestedBefore}. Any status, so a failed run waits for a new window rather than retrying on
+     * every tick.
+     */
+    public List<String> dueForAutomaticRca(
+            String projectId, Instant windowsAfter, Instant lastRequestedBefore, int limit) {
+        return jdbc.sql("SELECT c.id FROM eval_case c"
+                        + " LEFT JOIN LATERAL (SELECT r.finding_ids, r.created_at FROM rca_report r"
+                        + " JOIN finding a ON a.id = r.finding_id WHERE r.project_id = c.project_id"
+                        + " AND a.case_id = c.id ORDER BY r.created_at DESC, r.id DESC LIMIT 1) n ON TRUE"
+                        + " WHERE c.project_id = :pid AND c.state <> 'resolved'"
+                        + " AND (n.created_at IS NULL OR n.created_at < :lastRequestedBefore)"
+                        + " AND NOT EXISTS (SELECT 1 " + FROM + " JOIN finding a ON a.id = r.finding_id"
+                        + " WHERE r.project_id = c.project_id AND a.case_id = c.id"
+                        + " AND j.status IN ('pending', 'claimed'))"
+                        + " AND EXISTS (SELECT 1 FROM finding x WHERE x.project_id = c.project_id"
+                        + " AND x.case_id = c.id AND x.created_at > :windowsAfter"
+                        + " AND (n.created_at IS NULL OR NOT " + READ_BY + "))"
+                        + " ORDER BY c.severity DESC, c.opened_at DESC LIMIT :limit")
+                .param("pid", projectId)
+                .param("windowsAfter", windowsAfter.toString())
+                .param("lastRequestedBefore", lastRequestedBefore.toString())
+                .param("limit", limit)
+                .query(String.class)
+                .list();
+    }
+
+    /**
+     * Whether report {@code n} read finding {@code x}: listed in its {@code finding_ids}, or, on a report from before
+     * that column, created no later than the report.
+     */
+    private static final String READ_BY = "(CASE WHEN n.finding_ids IS NULL THEN x.created_at <= n.created_at"
+            + " ELSE n.finding_ids @> jsonb_build_array(x.id) END)";
+
+    private String json(List<String> values) {
+        return mapper.valueToTree(values).toString();
     }
 
     public Optional<RcaReportRow> findById(String projectId, String id) {
@@ -105,16 +187,6 @@ public class RcaReportRepository {
                 .param("jobId", jobId)
                 .query(String.class)
                 .optional();
-    }
-
-    public List<RcaReportRow> listByFinding(String projectId, String findingId, int limit) {
-        return jdbc.sql("SELECT " + COLS + " " + FROM
-                        + " WHERE r.project_id = :pid AND r.finding_id = :fid ORDER BY r.created_at DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("fid", findingId)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
     }
 
     public record CaseLead(

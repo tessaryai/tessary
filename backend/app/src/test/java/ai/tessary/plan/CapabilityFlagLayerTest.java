@@ -15,6 +15,7 @@ import ai.tessary.plan.CapabilityController.OverrideView;
 import ai.tessary.plan.CapabilityController.SetOverrideRequest;
 import ai.tessary.tenant.OrgMembership;
 import ai.tessary.tenant.OrgMembershipRepository;
+import ai.tessary.tenant.OrganizationCreatedEvent;
 import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -23,6 +24,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -46,10 +48,66 @@ record CapabilityFlagLayerTest(
         OrgFeatureFlagRepository overrides,
         DbFeatureFlags flags,
         CapabilityController controller,
-        OrgMembershipRepository memberships) {
+        OrgMembershipRepository memberships,
+        NewOrgCapabilities newOrgCapabilities) {
 
     /** What an open build serves before anybody touches it. Mirrors CapabilityService's private set. */
-    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS);
+    private static final Set<Capability> OFF_BY_DEFAULT =
+            EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS, Capability.RCA_AUTOMATIC, Capability.FIX_PR);
+
+    /** What an org created now holds as explicit overrides, whatever the build's default says. */
+    private static final Set<Capability> ON_FOR_NEW_ORGS = EnumSet.of(Capability.RCA_AUTOMATIC, Capability.FIX_PR);
+
+    /**
+     * Automatic RCA and fix PRs are on for every org created from now on, as stated overrides, while the build default
+     * stays off so orgs that existed before keep them off. The bug: a default flip (every old org turned on) or no
+     * override (new orgs off).
+     */
+    @Test
+    void aNewOrgHoldsOnOverridesForAutomaticRcaAndFixPrsWhileTheDefaultStaysOff() {
+        var fix = TenantFixture.bootstrap(tenants, "cap-new-org");
+        String orgId = fix.org().id();
+
+        assertEquals(Map.of("rca_automatic_enabled", true, "fix_pr_enabled", true), overrides.findByOrg(orgId));
+        assertTrue(capabilities.isEnabled(orgId, Capability.RCA_AUTOMATIC));
+        assertTrue(capabilities.isEnabled(orgId, Capability.FIX_PR));
+        assertFalse(capabilities.defaultFor(Capability.RCA_AUTOMATIC));
+        assertFalse(capabilities.defaultFor(Capability.FIX_PR));
+    }
+
+    /** The creation event can arrive again on a sign-in path; it must not turn back on what an owner turned off. */
+    @Test
+    void aReplayedCreationEventLeavesTheOwnersChoiceAlone() {
+        var fix = TenantFixture.bootstrap(tenants, "cap-new-org-replay");
+        String orgId = fix.org().id();
+        set(orgId, Capability.RCA_AUTOMATIC, false);
+
+        newOrgCapabilities.onOrganizationCreated(new OrganizationCreatedEvent(orgId));
+
+        assertFalse(capabilities.isEnabled(orgId, Capability.RCA_AUTOMATIC));
+    }
+
+    /**
+     * Automatic RCA counts only windows after the flag turned on, read off the row's {@code updated_at}. The bug: a
+     * write of the value already held moving that time, so re-saving the settings page would hide windows.
+     */
+    @Test
+    void enabledSinceMovesOnlyWhenTheFlagTurnsOn() {
+        var fix = TenantFixture.bootstrap(tenants, "cap-enabled-since");
+        String orgId = fix.org().id();
+        String key = Capability.RCA_AUTOMATIC.wire();
+        Instant created = overrides.enabledSince(orgId, key).orElseThrow();
+
+        overrides.upsert(orgId, key, true);
+        assertEquals(Optional.of(created), overrides.enabledSince(orgId, key), "re-writing on is not turning it on");
+
+        overrides.upsert(orgId, key, false);
+        assertEquals(Optional.empty(), overrides.enabledSince(orgId, key), "off has no since");
+
+        overrides.upsert(orgId, key, true);
+        Instant again = overrides.enabledSince(orgId, key).orElseThrow();
+        assertTrue(again.isAfter(created), again + " is not after " + created);
+    }
 
     @Test
     void anOrgOverrideWinsInBothDirections() {
@@ -87,7 +145,10 @@ record CapabilityFlagLayerTest(
 
         Map<String, Boolean> expected = new LinkedHashMap<>();
         for (Capability capability : Capability.values()) {
-            expected.put(capability.wire(), capability != Capability.SLACK && !OFF_BY_DEFAULT.contains(capability));
+            expected.put(
+                    capability.wire(),
+                    capability != Capability.SLACK
+                            && (ON_FOR_NEW_ORGS.contains(capability) || !OFF_BY_DEFAULT.contains(capability)));
         }
         var payload = controller
                 .capabilities(session(fix.user()), fix.org().slug())
@@ -146,7 +207,10 @@ record CapabilityFlagLayerTest(
 
         assertEquals(CapabilityError.UNKNOWN, set.error());
         assertEquals(CapabilityError.UNKNOWN, clear.error());
-        assertEquals(Map.of(), overrides.findByOrg(fix.org().id()), "nothing was written for a key nobody reads");
+        assertEquals(
+                Map.of("rca_automatic_enabled", true, "fix_pr_enabled", true),
+                overrides.findByOrg(fix.org().id()),
+                "nothing was written for a key nobody reads");
     }
 
     @Test

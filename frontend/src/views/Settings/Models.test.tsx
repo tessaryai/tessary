@@ -16,7 +16,7 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 function entry(provider: CatalogEntry["provider"], modelName: string, flags: Partial<CatalogEntry>): CatalogEntry {
   return {
     provider, vendor: "Vendor", model_name: modelName, display_name: modelName,
-    default_base_url: "https://example.invalid", agentic: false, decision: false, ...flags,
+    default_base_url: "https://example.invalid", agentic: false, decision: false, frontier: false, ...flags,
   };
 }
 
@@ -109,9 +109,9 @@ const TRIAGE: ModelSettingsResponse = {
     },
   ],
   models: [
-    { model_key: "claude-haiku", display_name: "Claude Haiku", vendor: "Anthropic", agentic: true, endpoint: "RUNTIME", inference_profile_id: "p1" },
-    { model_key: "claude-opus", display_name: "Claude Opus", vendor: "Anthropic", agentic: true, endpoint: "RUNTIME", inference_profile_id: "p2" },
-    { model_key: "gpt-luna", display_name: "GPT Luna", vendor: "OpenAI", agentic: true, endpoint: "MANTLE", inference_profile_id: "p3" },
+    { model_key: "claude-haiku", display_name: "Claude Haiku", vendor: "Anthropic", agentic: true, frontier: false, endpoint: "RUNTIME", inference_profile_id: "p1" },
+    { model_key: "claude-opus", display_name: "Claude Opus", vendor: "Anthropic", agentic: true, frontier: false, endpoint: "RUNTIME", inference_profile_id: "p2" },
+    { model_key: "gpt-luna", display_name: "GPT Luna", vendor: "OpenAI", agentic: true, frontier: false, endpoint: "MANTLE", inference_profile_id: "p3" },
   ],
   rates: [
     { model_key: "claude-haiku", input_rate_per_million: 1, output_rate_per_million: 5 },
@@ -234,6 +234,33 @@ describe("choosing a model", () => {
     expect(Array.from(provider.options).map((o) => o.textContent)).toEqual(["No provider configured"]);
     expect(provider.disabled).toBe(true);
     expect(within(lane("Triage model")).getByRole("option", { name: "No model" })).toBeTruthy();
+  });
+
+  // Bug: the fix lane read "No key runs this job" like any other lane, so nobody learned that Fix PRs stay off, or
+  // that warning stayed once a key served a frontier model.
+  it("says Fix PRs stay off while no key serves the fix lane, and not once one does", async () => {
+    const fix = {
+      id: "fix" as const, label: "Fix", description: "Writes a fix.", group: "agent_vm" as const,
+      provider_options: [
+        { provider: "ANTHROPIC" as const, label: "Anthropic", model_keys: ["ANTHROPIC:frontier"], default_model_key: "ANTHROPIC:frontier" },
+      ],
+      effective_model_key: null, automatic: true,
+    };
+    const said = "Fix PRs stay off until this organization adds a key for a provider that serves a frontier model.";
+    api.getModelSettings.mockResolvedValue({ ...SETTINGS, lanes: [...SETTINGS.lanes, fix] });
+    renderModels();
+    expect(await screen.findByText(said)).toBeTruthy();
+    cleanup();
+
+    api.getModelSettings.mockResolvedValue({
+      ...SETTINGS,
+      lanes: [...SETTINGS.lanes, { ...fix, effective_model_key: "ANTHROPIC:frontier" }],
+      catalog_models: [...SETTINGS.catalog_models, entry("ANTHROPIC", "frontier", { frontier: true })],
+      configured_providers: [...SETTINGS.configured_providers, "ANTHROPIC"],
+    });
+    renderModels();
+    await screen.findByLabelText("Fix provider");
+    expect(screen.queryByText(said)).toBeNull();
   });
 
   it("shows the read loading and failing", async () => {

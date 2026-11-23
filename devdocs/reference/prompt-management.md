@@ -97,7 +97,7 @@ own 60-second cache. Bounds: `tessary.prompts.fetch-cache.*` in
 
 | Rule | Value |
 |---|---|
-| Name | Trimmed first (`PromptNames.lookupName`: every character `Character.isWhitespace` or `Character.isSpaceChar` accepts, which covers what Postgres `[[:space:]]` matches), then `^(?!/)(?!.*//)(?!.*/$)[^\|]{1,255}$` with `DOTALL`, no `<[^<>]*>` (an HTML tag), no NUL. Inner whitespace is allowed. The trimmed name is stored, and every lookup by name trims the same way. The Java rule is the real guard; the SQL CHECK (`0057`) is a backstop that refuses edge whitespace. A `/` makes a folder, and a folder path follows the name rule but is not trimmed, because `team /a` sits in the folder `team ` (with the space). No name is reserved: pages route by prompt id. |
+| Name | Trimmed first (`PromptNames.lookupName`: every character `Character.isWhitespace` or `Character.isSpaceChar` accepts, which covers what Postgres `[[:space:]]` matches), then `^(?!/)(?!.*//)(?!.*/$)[^\|]{1,255}$` with `DOTALL`, no `<[^<>]*>` (an HTML tag), no NUL. Inner whitespace is allowed. The trimmed name is stored, and every lookup by name trims the same way. The Java rule is the real guard; the SQL CHECK (`0059`) is a backstop that refuses edge whitespace. A `/` makes a folder, and a folder path follows the name rule but is not trimmed, because `team /a` sits in the folder `team ` (with the space). No name is reserved: pages route by prompt id. |
 | Label | `^[a-z0-9_.-]{1,36}$`. `latest` is reserved (`LATEST_RESERVED`). `production` is the label a read with neither version nor label resolves. No trimming, no lowercasing. |
 | Tag | `^\S{1,64}$`, at most 50 per prompt, order kept, duplicates dropped. |
 | Variable | `\{\{\s*([^{}\s][^{}]*[^{}\s]|[^{}\s])\s*\}\}`: any trimmed, non-blank text with no brace, so dots, hyphens and inner spaces are allowed; first-appearance order, deduplicated. The name starts and ends on a non-space so a long unclosed `{{` scans in linear time. Java's `\s` is ASCII only and JavaScript's and Python's are Unicode, so a non-breaking space at a name's edge is trimmed by the SDKs and the page but kept by the server's list. Placeholders hold none. |
@@ -180,7 +180,7 @@ version may be a label such as `prod`. A name or version over 512 characters dro
 span. Attribute rows: [ingestion-contract](./ingestion-contract/README.md) and
 [trace-schema.md](./trace-schema.md).
 
-Ingest also resolves the name to the project's prompt and stores its id in `span.prompt_id` (`0058`).
+Ingest also resolves the name to the project's prompt and stores its id in `span.prompt_id` (`0060`).
 `SpanBatchWriter` collects the distinct names of one batch and asks `ingest/PromptLinkIds` once, before
 the batch transaction, so a linked span adds no read of its own. `PromptLinkIds` keeps found names for
 60 seconds in a bounded in-process map (10,000 entries) and reads the rest in one statement. A name that
@@ -211,7 +211,7 @@ reads. Both routes need `ORG_VIEW`; `days` defaults to 7 and is capped at 90.
   numbers the spans sent, so the Metrics tab labels and links a version below the detail page's first
   100, and its cost does not grow with the version count.
 
-The summary has no name to seek on, so it reads `ix_span_prompt_window` (`0059`), keyed
+The summary has no name to seek on, so it reads `ix_span_prompt_window` (`0061`), keyed
 `(project_id, started_at DESC, prompt_name)` with `trace_id` included. That index holds only linked,
 live llm spans, so the summary reads its window from the index alone and then looks up each span's
 trace. The per-prompt read can use either that index or `ix_span_prompt`, keyed
@@ -220,7 +220,7 @@ window, and in both the prompt name is a key column, so the read skips other pro
 without reading their rows.
 
 Measured on Postgres 16 with one project of 1,000,000 linked llm spans and 5,000,000 other spans over
-90 days, warm cache: the summary over 7 days takes about 80 ms (220 ms before `0059`), and the
+90 days, warm cache: the summary over 7 days takes about 80 ms (220 ms before `0061`), and the
 per-prompt read over 90 days takes under 0.1 s for a prompt with 17,000 calls and about 0.5 to 0.7 s
 for one with 360,000 calls. Both reads join `trace` once per span, so their cost grows with the
 calls in the window; the 90-day read of the large prompt reads about 2.5 GB of `span` pages, so on a

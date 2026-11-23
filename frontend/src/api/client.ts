@@ -599,6 +599,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     rerunRca: (id: string) => send<RcaReport>("POST", `${base}/rca/${enc(id)}/rerun`),
     getRcaSteps: (id: string, after: number) =>
       http<RunSteps>(withQuery(`${base}/rca/${enc(id)}/steps`, { after })),
+    getFixSteps: (id: string, after: number) =>
+      http<RunSteps>(withQuery(`${base}/fix-runs/${enc(id)}/steps`, { after })),
 
     getModelSettings: () => http<ModelSettingsResponse>(`${base}/model-settings`),
 

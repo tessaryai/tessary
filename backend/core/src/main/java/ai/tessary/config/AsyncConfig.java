@@ -51,6 +51,16 @@ public class AsyncConfig {
         return ex;
     }
 
+    /** Separate so a fix run, the longest agent lane, never holds an RCA's slot. */
+    @Bean(name = "fixTaskExecutor")
+    public SimpleAsyncTaskExecutor fixTaskExecutor() {
+        SimpleAsyncTaskExecutor ex = new SimpleAsyncTaskExecutor("fix-");
+        ex.setVirtualThreads(true);
+        ex.setConcurrencyLimit(2);
+        ex.setTaskDecorator(new MdcTaskDecorator("fix"));
+        return ex;
+    }
+
     /**
      * Separate because two 20-minute triages in {@code signalTaskExecutor} would stall the classifier sweep for the
      * whole agent timeout.

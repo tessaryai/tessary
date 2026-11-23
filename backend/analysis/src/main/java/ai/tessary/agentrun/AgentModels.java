@@ -7,13 +7,16 @@ import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.errors.ModelConfigError;
+import ai.tessary.open.errors.TessaryException;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
  * The model an agent lane runs, its models.dev rates and its provider: the project's agentic model, else the observer's
- * on Bedrock. One answer so one-shot runs and sessions bill the same way.
+ * on Bedrock, except on a frontier-only lane, which has no fallback. One answer so one-shot runs and sessions bill the
+ * same way.
  */
 @Component
 public class AgentModels {
@@ -31,6 +34,9 @@ public class AgentModels {
     public Choice resolve(String projectId, ModelLane lane) {
         Optional<ProjectModelSettings.ResolvedAgenticModel> resolved =
                 modelSettings.resolveAgenticModel(projectId, lane);
+        if (resolved.isEmpty() && lane.frontierOnly()) {
+            throw new TessaryException(ModelConfigError.FRONTIER_MODEL_MISSING, lane.label());
+        }
         String model = resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
                 .orElseGet(() -> observerProps.getAgentic().getModel());
         // The deployment default is a Bedrock inference-profile id.

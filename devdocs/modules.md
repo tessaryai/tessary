@@ -12,7 +12,7 @@ said it twice.
 ```
 app          TessaryApplication, application.yaml, integration tests, ArchitectureRulesTest
 surfaces     query, search, mcp, metering, metrics, billing, telemetry
-analysis     classifier, rca, cases, alert, onboarding, prompt, promptlib
+analysis     classifier, rca, fix, cases, alert, onboarding, prompt, promptlib
 llm-runtime  llm (incl. llm/decisions, llm/chat), sandbox   (the ONLY module declaring a provider SDK or AWS client)
 product      pipeline, plan
 substrate    storage, ingest, redaction, retention, pricing, sources, traces, git, usage

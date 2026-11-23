@@ -191,17 +191,26 @@ databaseChangeLog:
       file: db/changelog/changes/0054-model-lineup-2026-11.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0055-prompt-library.sql
+      file: db/changelog/changes/0054-rca-report-finding-ids.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0056-span-prompt-link.sql
+      file: db/changelog/changes/0055-fix-lane.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0057-prompt-name-spaces.sql
+      file: db/changelog/changes/0056-fix-pr.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0058-span-prompt-id.sql
+      file: db/changelog/changes/0057-prompt-library.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0059-span-prompt-window-index.sql
+      file: db/changelog/changes/0058-span-prompt-link.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0059-prompt-name-spaces.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0060-span-prompt-id.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0061-span-prompt-window-index.sql
       relativeToChangelogFile: false

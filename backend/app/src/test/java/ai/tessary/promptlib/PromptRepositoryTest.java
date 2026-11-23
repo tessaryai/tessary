@@ -428,7 +428,7 @@ record PromptRepositoryTest(PromptRepository repo, TenantService tenants) {
     }
 
     /**
-     * 0057 widens the CHECK to inner whitespace and still refuses it at either edge, which the Java rule trims. The
+     * 0059 widens the CHECK to inner whitespace and still refuses it at either edge, which the Java rule trims. The
      * bugs: the SQL backstop still refuses {@code Support Agent}, or stores an untrimmed name.
      */
     @Test

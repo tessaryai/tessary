@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0058-span-prompt-id
+--changeset evals:0060-span-prompt-id
 -- The prompt row a linked span names, resolved at ingest from prompt_name, as another prompt tool does. Null when the
 -- name matched no prompt of the project when the span arrived. No foreign key and no index: spans outlive prompts and
 -- retention deletes spans by age, so a deleted prompt leaves its id behind, and prompt_name and prompt_version keep

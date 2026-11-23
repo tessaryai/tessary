@@ -37,6 +37,16 @@ public enum ModelLane {
                     + " project has one, its repository.",
             LaneGroup.AGENT_VM),
 
+    /**
+     * Writes code the customer merges, so it offers only {@link LaneGroup#AGENT_VM} models flagged
+     * frontier, never Custom or the deployment default.
+     */
+    FIX(
+            "fix",
+            "Fix",
+            "Writes a fix for the causes an RCA found and opens a pull request. Runs only on a frontier model.",
+            LaneGroup.AGENT_VM),
+
     /** Runs once per eligible user turn, so price per thousand turns is what matters. */
     FRUSTRATION(
             "frustration",
@@ -77,6 +87,11 @@ public enum ModelLane {
     /** A model that is fine elsewhere can be unrunnable here; the validator rejects the pairing. */
     public boolean agentic() {
         return group == LaneGroup.AGENT_VM;
+    }
+
+    /** Replaces the agentic check: a frontier model may run here without the agentic flag. */
+    public boolean frontierOnly() {
+        return this == FIX;
     }
 
     /** The validator enforces both directions. */

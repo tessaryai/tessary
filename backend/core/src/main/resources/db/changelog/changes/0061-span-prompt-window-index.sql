@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0059-span-prompt-window-index runInTransaction:false
+--changeset evals:0061-span-prompt-window-index runInTransaction:false
 --preconditions onFail:HALT onError:HALT
 --precondition-sql-check expectedResult:0 SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'ix_span_prompt_window' AND NOT i.indisvalid
 -- The Prompts list counts each prompt's calls over a window. ix_span_prompt leads with prompt_name, and that read has

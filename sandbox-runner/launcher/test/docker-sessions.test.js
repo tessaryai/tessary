@@ -656,10 +656,30 @@ test('a clone field on a triage or agent_run session is bad_request and spends n
         const res = await start({ ...START, lane, ...clone });
         assert.equal(res.status, 502, `${lane} ${JSON.stringify(clone)}`);
         assert.equal(res.body.kind, 'bad_request');
-        assert.equal(res.body.detail, 'session.js: clone_url, head_sha and onset_at are for the rca lane only');
+        assert.equal(res.body.detail, 'session.js: clone_url, head_sha, branch and onset_at are for the rca and fix lanes only');
       }
     }
     assert.ok(!daemon.calls.includes('POST /containers/create'), JSON.stringify(daemon.calls));
+  });
+});
+
+const FIX_START = { ...START, lane: 'fix', system_prompt: 'You fix causes.', clone_url: CLONE_URL, branch: 'tessary/fix-case-1' };
+const PATCH = { base_sha: 'a41c0de', files: [{ path: 'app.py', mode: '100644', content_base64: 'djI=' }], refused: [], over_limit: null };
+
+test('a fix session\'s session.json carries the branch to start from, and its patch reaches the reader before message_end (a fix that starts at the default branch, or a patch the launcher drops)', T, async () => {
+  await withSessionLauncher({ shape: { patch: PATCH } }, async ({ start, send, events, daemon }) => {
+    const started = await start(FIX_START);
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+    assert.deepEqual(JSON.parse(daemon.sessionFiles.c1).clone, { url: CLONE_URL, branch: 'tessary/fix-case-1', onset_at: null });
+    assert.equal(JSON.parse(daemon.sessionFiles.c1).lane, 'fix');
+
+    const id = started.body.session_id;
+    assert.equal((await send(id, 'one')).status, 202);
+    const [text, toolStart, toolEnd, messageEnd] = reply(1, 'one');
+    assert.deepEqual(
+      (await events(id, { after: 0, until: 5 })).events,
+      numbered([text, toolStart, toolEnd, { type: 'patch', data: PATCH }, messageEnd], 1),
+    );
   });
 });
 

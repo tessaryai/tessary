@@ -208,6 +208,8 @@ export type CapabilityWire =
   | "secret_leak_enabled"
   | "malformed_output_enabled"
   | "triage_automatic_enabled"
+  | "rca_automatic_enabled"
+  | "fix_pr_enabled"
   | "prompt_management_enabled";
 
 /** Every capability is present, so an absent key is version skew rather than "off". */

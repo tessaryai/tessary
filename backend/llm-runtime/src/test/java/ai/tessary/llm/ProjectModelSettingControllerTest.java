@@ -82,12 +82,14 @@ class ProjectModelSettingControllerTest {
     void getOffersEveryAgenticCatalogEntryOnBothAgentVmLanes() {
         var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
 
-        // The non-Bedrock half of the union, the field that did not exist before the fix.
+        // The non-Bedrock half of the union, the field that did not exist before the fix. The first OPENROUTER is Opus,
+        // offered on the fix lane only.
         assertEquals(
                 List.of(
                         "ANTHROPIC",
                         "ANTHROPIC",
                         "ANTHROPIC",
+                        "OPENROUTER",
                         "OPENROUTER",
                         "OPENROUTER",
                         "MOONSHOT",
@@ -140,11 +142,11 @@ class ProjectModelSettingControllerTest {
     }
 
     @Test
-    void getOffersOnlyAgenticAndDecisionCatalogEntries() {
+    void getOffersOnlyAgenticDecisionAndFrontierCatalogEntries() {
         var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
 
         assertTrue(
-                view.catalogModels().stream().allMatch(e -> e.agentic() || e.decision()),
+                view.catalogModels().stream().allMatch(e -> e.agentic() || e.decision() || e.frontier()),
                 "catalog_models must never carry a chat entry no lane offers (the older OpenAI-direct models, "
                         + "Anthropic-direct, OpenRouter, Moonshot, Bedrock): "
                         + view.catalogModels());

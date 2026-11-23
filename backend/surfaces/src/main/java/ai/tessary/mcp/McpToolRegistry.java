@@ -1276,7 +1276,8 @@ public class McpToolRegistry {
                     classifierDetail == null ? null : withoutIds(classifierDetail),
                     detail.rcaAvailable(),
                     detail.absorbAvailable(),
-                    detail.detectorAvailable());
+                    detail.detectorAvailable(),
+                    detail.fix());
         } catch (TessaryException e) {
             throw toolError(e);
         }

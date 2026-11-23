@@ -4,6 +4,7 @@ package ai.tessary.agentrun;
 import static ai.tessary.agentrun.FakeAgentSessionClient.CUT;
 import static ai.tessary.agentrun.FakeAgentSessionClient.end;
 import static ai.tessary.agentrun.FakeAgentSessionClient.failure;
+import static ai.tessary.agentrun.FakeAgentSessionClient.patch;
 import static ai.tessary.agentrun.FakeAgentSessionClient.text;
 import static ai.tessary.agentrun.FakeAgentSessionClient.toolEnd;
 import static ai.tessary.agentrun.FakeAgentSessionClient.toolStart;
@@ -620,5 +621,41 @@ class AgentSessionRunnerTest {
 
         assertEquals(RULING, runner().run(task(ModelLane.RCA), noting).json());
         assertEquals(List.of("note Writing the analysis @0"), sink);
+    }
+
+    /** A fix run whose live line says it is ruling: a fix run's answer reads "Writing the fix". */
+    @Test
+    void aFixAnswerReadsWritingTheFix() {
+        client.reply(text(RULING), end());
+
+        assertEquals(RULING, runner().run(task(ModelLane.FIX), noting).json());
+        assertEquals(List.of("note Writing the fix @0"), sink);
+    }
+
+    /**
+     * A fix committed from what the agent changed before it was corrected: the answer carries the patch of the reply
+     * that answered, and a corrected reply's patch replaces the first reply's.
+     */
+    @Test
+    void theAnswerCarriesThePatchOfTheReplyThatAnswered() {
+        client.reply(patch("app.py", "djE="), text("{\"verdict\":\"real\"}"), end())
+                .reply(text(RULING), patch("app.py", "djI="), end());
+
+        AgentSessionRunner.Answer answer = run();
+
+        assertEquals(RULING, answer.json());
+        assertEquals(
+                new SessionEvent.Patch(
+                        5, "a41c0de", List.of(new SessionEvent.PatchFile("app.py", "100644", "djI=")), List.of(), null),
+                answer.patch());
+    }
+
+    /** A first reply's patch handed back for a corrected reply that sent none: the answer then has no patch. */
+    @Test
+    void aCorrectedReplyWithoutAPatchAnswersWithNone() {
+        client.reply(patch("app.py", "djE="), text("{\"verdict\":\"real\"}"), end())
+                .reply(text(RULING), end());
+
+        assertEquals(null, run().patch());
     }
 }

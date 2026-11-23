@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": ["fixed", "no_fix"]
+    },
+    "title": {
+      "type": "string",
+      "description": "The pull request title, imperative, under 70 characters. Empty on no_fix."
+    },
+    "why": {
+      "type": "string",
+      "description": "1-3 plain sentences: what the change does and why it fixes the causes."
+    },
+    "causes_addressed": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "The keys from dossier/causes.md that the change fixes."
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "command": {"type": "string"},
+          "result": {"type": "string", "enum": ["passed", "failed", "not_run"]},
+          "note": {"type": ["string", "null"], "description": "Why it did not run, or what failed."}
+        },
+        "required": ["command", "result", "note"]
+      }
+    },
+    "no_fix_reason": {
+      "type": ["string", "null"],
+      "description": "One plain sentence on why there is no fix. Null on fixed."
+    }
+  },
+  "required": ["outcome", "title", "why", "causes_addressed", "checks", "no_fix_reason"]
+}

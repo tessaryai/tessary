@@ -35,11 +35,12 @@ class ModelsDevCatalogTest {
     void everySandboxModelHasAnInputAndAnOutputRateInModelsDev() {
         List<String> unpriced = new ArrayList<>();
         for (ModelCatalog.CatalogEntry e : ModelCatalog.entries()) {
-            if (!e.agentic() || UNKNOWABLE.contains(e.provider())) continue;
+            // A frontier row runs on the fix lane without the agentic flag.
+            if (!(e.agentic() || e.frontier()) || UNKNOWABLE.contains(e.provider())) continue;
             check(e.provider() + ":" + e.modelName(), e.provider(), e.modelName(), unpriced);
         }
         for (BedrockModelProfile.ModelDescriptor d : BedrockModelProfile.platformModels()) {
-            if (!d.agentic()) continue;
+            if (!(d.agentic() || d.frontier())) continue;
             ModelProvider provider = d.endpoint() == BedrockModelProfile.Endpoint.MANTLE
                     ? ModelProvider.BEDROCK_MANTLE
                     : ModelProvider.BEDROCK;

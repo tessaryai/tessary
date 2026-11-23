@@ -327,6 +327,47 @@ class LauncherAgentSessionClientTest {
         assertEquals("The agent run hit its 120000ms wall clock", without.getMessage());
     }
 
+    /**
+     * A fix that starts from the default branch instead of its open pull request's branch, or that sends both refs
+     * the launcher refuses together: a clone at a branch sends clone_url and branch, and no head_sha.
+     */
+    @Test
+    void aStartWithABranchCloneSendsTheBranchAndNoHeadSha() throws Exception {
+        aGrokLaneWithItsCredential(ModelLane.RCA);
+        fake.answer("POST", "/sessions", 201, "{\"session_id\":\"s-1\"}");
+        AgentSessionClient.Start start = rcaStart();
+
+        client().start(new AgentSessionClient.Start(
+                start.projectId(),
+                start.lane(),
+                start.systemPrompt(),
+                start.files(),
+                start.mcpServers(),
+                start.idleTimeoutMs(),
+                start.maxToolCallsPerMessage(),
+                start.subject(),
+                AgentSessionClient.Clone.atBranch(CLONE_URL, "tessary/fix-case-1")));
+
+        ObjectNode body = (ObjectNode) MAPPER.readTree(fake.seen().getFirst().body());
+        assertEquals(
+                List.of(CLONE_URL, "tessary/fix-case-1", false, false),
+                List.of(
+                        body.path("clone_url").asText(),
+                        body.path("branch").asText(),
+                        body.has("head_sha"),
+                        body.has("onset_at")));
+    }
+
+    /** A clone that names both refs or neither reaches the launcher as a bad request: it is refused before it is sent. */
+    @Test
+    void aCloneNamesExactlyOneOfAHeadShaAndABranch() {
+        assertThrows(
+                IllegalArgumentException.class, () -> new AgentSessionClient.Clone(CLONE_URL, "a41c0de", null, "main"));
+        assertThrows(IllegalArgumentException.class, () -> new AgentSessionClient.Clone(CLONE_URL, null, null, null));
+        assertFalse(
+                AgentSessionClient.Clone.atBranch(CLONE_URL, "main").toString().contains("ghs_clonetoken"));
+    }
+
     /** A start without a clone sends no clone field, so the launcher never treats a triage session as an RCA one. */
     @Test
     void aStartWithoutACloneSendsNoCloneField() throws Exception {
@@ -424,6 +465,50 @@ class LauncherAgentSessionClientTest {
                 events);
     }
 
+    /**
+     * Catches a fix's patch skipped as an unknown event, a deleted file read as an empty one, or a file's mode, bytes,
+     * a refusal or the over-limit flag dropped.
+     */
+    @Test
+    void aPatchEventYieldsItsBaseFilesRefusalsAndLimit() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(
+                        1,
+                        "patch",
+                        "{\"base_sha\":\"a41c0de\",\"files\":["
+                                + "{\"path\":\"app.py\",\"mode\":\"100644\",\"content_base64\":\"djI=\"},"
+                                + "{\"path\":\"run.sh\",\"mode\":\"100755\",\"content_base64\":\"\"},"
+                                + "{\"path\":\"old.py\",\"deleted\":true}],"
+                                + "\"refused\":[{\"path\":\"opencode.json\",\"reason\":\"quarantined\"}],"
+                                + "\"over_limit\":null}"),
+                FakeLauncher.frame(
+                        2, "patch", "{\"base_sha\":\"a41c0de\",\"files\":[],\"refused\":[],\"over_limit\":\"bytes\"}"));
+
+        List<SessionEvent> events = read(client, 0);
+
+        assertEquals(
+                List.of(
+                        new SessionEvent.Patch(
+                                1,
+                                "a41c0de",
+                                List.of(
+                                        new SessionEvent.PatchFile("app.py", "100644", "djI="),
+                                        new SessionEvent.PatchFile("run.sh", "100755", ""),
+                                        new SessionEvent.PatchFile("old.py", null, null)),
+                                List.of(new SessionEvent.Refusal("opencode.json", "quarantined")),
+                                null),
+                        new SessionEvent.Patch(2, "a41c0de", List.of(), List.of(), "bytes")),
+                events);
+        SessionEvent.Patch patch = (SessionEvent.Patch) events.getFirst();
+        assertEquals("v2", new String(patch.files().getFirst().content(), java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(
+                List.of(false, false, true),
+                patch.files().stream().map(SessionEvent.PatchFile::deleted).toList());
+    }
+
     /** Catches a reconnect that replays from the start or ignores {@code after}. */
     @Test
     void eventsResumeAfterTheGivenSequence() {
@@ -515,6 +600,26 @@ class LauncherAgentSessionClientTest {
                 FakeLauncher.frame(1, "text", "{\"delta\":5}"),
                 FakeLauncher.frame(1, "message_end", "{\"usage\":{\"input_tokens\":1},\"reason\":\"crashed\"}"),
                 FakeLauncher.frame(1, "closed", "{\"reason\":\"evicted\"}"),
+                FakeLauncher.frame(1, "patch", "{\"files\":[],\"refused\":[],\"over_limit\":null}"),
+                FakeLauncher.frame(1, "patch", "{\"base_sha\":\"a41c0de\",\"files\":{},\"refused\":[]}"),
+                FakeLauncher.frame(1, "patch", "{\"base_sha\":\"a41c0de\",\"files\":[]}"),
+                FakeLauncher.frame(
+                        1,
+                        "patch",
+                        "{\"base_sha\":\"a41c0de\",\"files\":[{\"path\":\"a\",\"mode\":\"160000\","
+                                + "\"content_base64\":\"\"}],\"refused\":[]}"),
+                FakeLauncher.frame(
+                        1,
+                        "patch",
+                        "{\"base_sha\":\"a41c0de\",\"files\":[{\"path\":\"a\",\"mode\":\"100644\","
+                                + "\"content_base64\":\"not base64!\"}],\"refused\":[]}"),
+                FakeLauncher.frame(
+                        1, "patch", "{\"base_sha\":\"a41c0de\",\"files\":[],\"refused\":[{\"path\":\"a\"}]}"),
+                FakeLauncher.frame(
+                        1,
+                        "patch",
+                        "{\"base_sha\":\"a41c0de\",\"files\":[{\"path\":\"a\",\"deleted\":true}],\"refused\":[],"
+                                + "\"over_limit\":\"files\"}"),
                 "event: text\ndata: {\"delta\":\"a\"}\n\n");
     }
 

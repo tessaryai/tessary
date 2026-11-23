@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.cases.CaseEventRepository;
+import ai.tessary.cases.CaseEventRow;
 import ai.tessary.classifier.finding.FindingAdapters;
 import ai.tessary.classifier.finding.FindingClaim;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -33,22 +35,42 @@ public class RcaTriggerService {
     private final RcaReportRepository reports;
     private final RcaReportService reportReads;
     private final FindingAdapters adapters;
+    private final CaseEventRepository caseEvents;
 
     public RcaTriggerService(
             FindingRepository findings,
             RcaJobRepository jobs,
             RcaReportRepository reports,
             RcaReportService reportReads,
-            FindingAdapters adapters) {
+            FindingAdapters adapters,
+            CaseEventRepository caseEvents) {
         this.findings = findings;
         this.jobs = jobs;
         this.reports = reports;
         this.reportReads = reportReads;
         this.adapters = adapters;
+        this.caseEvents = caseEvents;
     }
 
-    /** {@code runNonce} is null for a first trigger (re-presses coalesce) and fresh for an explicit re-run. */
+    /** Who asked: a person's press, or the automatic-RCA tick, which acts as the org owner but is narrated as itself. */
+    public enum Origin {
+        PERSON,
+        AUTOMATIC
+    }
+
+    /** A person's press. */
     public RcaReportView trigger(String projectId, String findingId, String userId, @Nullable String runNonce) {
+        return trigger(projectId, findingId, userId, runNonce, Origin.PERSON);
+    }
+
+    /**
+     * {@code runNonce} is null for a first trigger (re-presses coalesce) and fresh for an explicit re-run. The case
+     * trail gets one {@code rca_requested} line per new report, never one for a press that coalesced.
+     *
+     * @param userId the job's {@code created_by}, whom the run's MCP key is issued to
+     */
+    public RcaReportView trigger(
+            String projectId, String findingId, String userId, @Nullable String runNonce, Origin origin) {
         FindingClaim finding = findings.findClaim(projectId, findingId).orElseThrow(() -> {
             // GlobalExceptionHandler logs 4xx at DEBUG, invisible in prod. Codes only: bounded and PII-free.
             log.info(Markers.OPS, "rca rejected project={} code=SUBJECT_NOT_FOUND", projectId);
@@ -105,7 +127,7 @@ public class RcaTriggerService {
                 to,
                 userId,
                 runNonce);
-        reports.insertPendingIfAbsent(
+        boolean created = reports.insertPendingIfAbsent(
                 projectId,
                 jobId,
                 finding.id(),
@@ -122,7 +144,23 @@ public class RcaTriggerService {
                 prior,
                 current - prior,
                 RcaReportRow.Engine.AGENTIC);
+        if (created) narrate(projectId, finding.id(), userId, origin);
         return reportReads.getByJobId(projectId, jobId);
+    }
+
+    private void narrate(String projectId, String findingId, String userId, Origin origin) {
+        findings.findById(projectId, findingId)
+                .map(FindingRow::caseId)
+                .ifPresent(caseId -> caseEvents.append(
+                        projectId,
+                        caseId,
+                        CaseEventRow.Kind.RCA_REQUESTED,
+                        origin == Origin.PERSON ? userId : null,
+                        origin == Origin.PERSON
+                                ? "Requested."
+                                : "Requested automatically for windows that no RCA has read.",
+                        null,
+                        Instant.now()));
     }
 
     private static Instant max(Instant a, Instant b) {

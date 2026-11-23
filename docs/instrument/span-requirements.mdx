@@ -177,6 +177,7 @@ When a span carries both the structured `gen_ai.input.messages` array and the fl
 | --- | --- |
 | Endpoint | Your Tessary origin plus `/v1/traces` |
 | Method and content type | `POST`, `application/x-protobuf`, an OTLP `ExportTraceServiceRequest` |
+| Compression | None, or `Content-Encoding: gzip` |
 | Authentication | `Authorization: Bearer <token>`, a project-scoped key with write or admin scope |
 
 A missing token, or one that fails verification, is refused with `401`. A token that is not project-scoped, or is query-scoped, is refused with `403`. Write and admin keys both ingest, because admin is the superset family: see [API keys](/reference/api-keys) for the three scopes and the errors each one returns. [Ingestion contract](/reference/ingestion-contract#limits) carries the batch, body, and payload limits, and the `503` the receiver answers under buffer pressure.

@@ -30,8 +30,8 @@ public class CaseLedger {
     }
 
     /**
-     * Severity only rises; the onset never moves. A locked case is invisible to {@link CaseRepository#findLive}, so
-     * this opens a fresh case rather than joining one an agent may be analysing.
+     * Severity only rises; the onset never moves. A live case keeps taking windows after an RCA. Only a case locked
+     * before cases stayed live is invisible to {@link CaseRepository#findLive}, so its cause opens a fresh case.
      */
     @Transactional
     public CaseRow openOrJoin(String projectId, CaseDetection detection, @Nullable String actor, Instant now) {

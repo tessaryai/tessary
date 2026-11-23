@@ -932,6 +932,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/fix-runs/{id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["FixController_steps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/git": {
         parameters: {
             query?: never;
@@ -2754,6 +2770,7 @@ export interface components {
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
             findings: components["schemas"]["CaseFindingView"][];
+            fix: components["schemas"]["FixView"] | null;
             frustration: components["schemas"]["FrustrationDetail"] | null;
             groundedness: components["schemas"]["GroundednessDetail"] | null;
             latest_finding_id: string | null;
@@ -2852,6 +2869,8 @@ export interface components {
             subject_kind: string;
             subject_label: string;
             title: string;
+            /** Format: int32 */
+            windows_since_rca: number | null;
         };
         CasesView: {
             /** Format: int32 */
@@ -2863,6 +2882,7 @@ export interface components {
             decision: boolean;
             default_base_url: string;
             display_name: string;
+            frontier: boolean;
             model_name: string;
             /** @enum {string} */
             provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
@@ -3348,6 +3368,40 @@ export interface components {
             };
             rows: components["schemas"]["EvidenceSpanView"][];
         };
+        FixCheckView: {
+            command: string;
+            note: string | null;
+            result: string;
+        };
+        FixPrView: {
+            branch: string;
+            causes: string[];
+            /** Format: int32 */
+            number: number;
+            opened_at: string;
+            state: string;
+            updated_at: string;
+            url: string;
+        };
+        FixRunView: {
+            causes: string[];
+            checks: components["schemas"]["FixCheckView"][];
+            created_at: string;
+            id: string;
+            note: string | null;
+            outcome: string | null;
+            /** Format: int32 */
+            patch_files: number;
+            pr_url: string | null;
+            reason: string | null;
+            run: components["schemas"]["RcaRunView"] | null;
+            status: string;
+            updated_at: string;
+        };
+        FixView: {
+            latest_run: components["schemas"]["FixRunView"] | null;
+            pr: components["schemas"]["FixPrView"] | null;
+        };
         FlaggedAnswerPage: {
             nextCursor: string | null;
             rows: components["schemas"]["FlaggedAnswerView"][];
@@ -3421,11 +3475,14 @@ export interface components {
             scorerVersion: string | null;
         };
         GitIntegrationView: {
+            canWrite: boolean;
             defaultBranch: string;
             host: string;
             provider: string;
             repoName: string;
             repoOwner: string;
+            /** @enum {string|null} */
+            writeReason: "APP_PERMISSION_MISSING" | "TOKEN_CANNOT_PUSH" | "CHECK_FAILED" | "UNSUPPORTED" | null;
         };
         GlobalSearchView: {
             hits: components["schemas"]["SearchHit"][];
@@ -3520,7 +3577,7 @@ export interface components {
             /** @enum {string} */
             group: "agent_vm" | "decision_calls";
             /** @enum {string} */
-            id: "rca" | "triage" | "agent_run" | "frustration";
+            id: "rca" | "triage" | "agent_run" | "fix" | "frustration";
             label: string;
             provider_options: components["schemas"]["ProviderOptionView"][];
         };
@@ -3800,6 +3857,7 @@ export interface components {
             display_name: string;
             /** @enum {string} */
             endpoint: "RUNTIME" | "MANTLE";
+            frontier: boolean;
             inference_profile_id: string;
             model_key: string;
             vendor: string;
@@ -4040,7 +4098,7 @@ export interface components {
         ProjectModelSetting: {
             created_at: string;
             /** @enum {string} */
-            lane: "rca" | "triage" | "agent_run" | "frustration";
+            lane: "rca" | "triage" | "agent_run" | "fix" | "frustration";
             model_key: string;
             project_id: string;
             updated_at: string;
@@ -6945,6 +7003,33 @@ export interface operations {
             };
         };
     };
+    FixController_steps: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                after?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseRunStepsView"];
+                };
+            };
+        };
+    };
     GitIntegrationController_get: {
         parameters: {
             query: {
@@ -9430,7 +9515,9 @@ export interface operations {
             query: {
                 ctx: components["schemas"]["TenantContext"];
             };
-            header?: never;
+            header?: {
+                "Content-Encoding"?: string;
+            };
             path?: never;
             cookie?: never;
         };

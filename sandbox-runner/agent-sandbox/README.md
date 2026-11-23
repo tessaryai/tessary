@@ -27,9 +27,11 @@ as the Docker backend's agent image.
   `POST /abort`, `GET /events` and `GET /healthz` to the launcher behind a per-session secret. It
   maps OpenCode's event stream to `text`, `tool_start`, `tool_end`, `message_end`, `error` and
   `closed` events. `session.json` names its lane: `agent_run`; `triage`, which never clones, may
-  edit, and gets `checks/` for its scripts; or `rca`, which may clone the repo at a commit, denies
+  edit, and gets `checks/` for its scripts; `rca`, which may clone the repo at a commit, denies
   the edit tool, gets `checks/` for scripts it writes through bash, and puts the commit live at the
-  onset into each message's `{onset_commit}`. The contract
+  onset into each message's `{onset_commit}`; or `fix`, which clones the repo at a commit or a
+  branch head, keeps its `AGENTS.md` and `CLAUDE.md`, may edit it, and ends each reply with a
+  `patch` event of what the agent changed. The contract
   is in [`sandbox-runner/README.md`](../README.md#agent-sessions-sessionjs).
   The launcher runs it with `/usr/local/bin/node-sealed`, a copy of `node` both recipes make. In
   the Docker image the copy is execute-only: a process started from a binary its user cannot read

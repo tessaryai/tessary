@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest.otlp;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -19,13 +20,18 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
@@ -65,7 +71,7 @@ class OtlpTraceControllerTest {
         // Not a protobuf message: decoding it would throw OTLP_MALFORMED_BODY, so a 503 proves the gate ran first.
         byte[] undecodable = "not a protobuf body".getBytes(StandardCharsets.UTF_8);
 
-        ResponseEntity<byte[]> response = controller.export(WRITE_TOKEN, undecodable);
+        ResponseEntity<byte[]> response = controller.export(WRITE_TOKEN, null, undecodable);
 
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
         assertEquals(
@@ -81,7 +87,9 @@ class OtlpTraceControllerTest {
         OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest());
 
         ResponseEntity<byte[]> response = controller.export(
-                WRITE_TOKEN, ExportTraceServiceRequest.getDefaultInstance().toByteArray());
+                WRITE_TOKEN,
+                null,
+                ExportTraceServiceRequest.getDefaultInstance().toByteArray());
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
@@ -92,7 +100,8 @@ class OtlpTraceControllerTest {
                 Props.of(OtlpReceiverProperties.class, "transport", OtlpReceiverProperties.Transport.GRPC);
         OtlpTraceController controller = new OtlpTraceController(props, ingest());
 
-        TessaryException e = assertThrows(TessaryException.class, () -> controller.export(WRITE_TOKEN, new byte[0]));
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> controller.export(WRITE_TOKEN, null, new byte[0]));
         assertEquals(IngestError.OTLP_DISABLED, e.error());
     }
 
@@ -110,7 +119,7 @@ class OtlpTraceControllerTest {
     void aPushWithoutAProjectScopedTokenIsRefused(TenantContext caller) {
         OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest());
 
-        TessaryException e = assertThrows(TessaryException.class, () -> controller.export(caller, new byte[0]));
+        TessaryException e = assertThrows(TessaryException.class, () -> controller.export(caller, null, new byte[0]));
         assertEquals(IngestError.OTLP_TOKEN_REQUIRED, e.error());
         verify(substrateWriter, never()).enqueue(anyString(), any());
     }
@@ -120,7 +129,8 @@ class OtlpTraceControllerTest {
         OtlpReceiverProperties props = Props.of(OtlpReceiverProperties.class, "max-body-bytes", 4);
         OtlpTraceController controller = new OtlpTraceController(props, ingest());
 
-        TessaryException e = assertThrows(TessaryException.class, () -> controller.export(WRITE_TOKEN, new byte[5]));
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> controller.export(WRITE_TOKEN, null, new byte[5]));
         assertEquals(IngestError.OTLP_BODY_TOO_LARGE, e.error());
     }
 
@@ -131,9 +141,80 @@ class OtlpTraceControllerTest {
         OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest());
 
         ResponseEntity<byte[]> response = controller.export(
-                WRITE_TOKEN, ExportTraceServiceRequest.getDefaultInstance().toByteArray());
+                WRITE_TOKEN,
+                null,
+                ExportTraceServiceRequest.getDefaultInstance().toByteArray());
 
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
         assertEquals(List.of("1"), response.getHeaders().get(HttpHeaders.RETRY_AFTER));
+    }
+
+    private static byte[] gzip(byte[] raw) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (GZIPOutputStream zip = new GZIPOutputStream(out)) {
+            zip.write(raw);
+        }
+        return out.toByteArray();
+    }
+
+    /** OTEL_EXPORTER_OTLP_COMPRESSION=gzip is a stock exporter setting; its batches must land, not 400. */
+    @ParameterizedTest
+    @ValueSource(strings = {"gzip", "GZIP", " gzip "})
+    void aGzipBodyIsDecompressedAndAccepted(String encoding) throws IOException {
+        when(substrateWriter.enqueue(eq("proj-http"), any())).thenReturn(true);
+        OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest());
+
+        ResponseEntity<byte[]> response = controller.export(
+                WRITE_TOKEN,
+                encoding,
+                gzip(ExportTraceServiceRequest.getDefaultInstance().toByteArray()));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    void anIdentityOrAbsentEncodingPassesTheBodyThroughUnchanged() {
+        byte[] body = {1, 2, 3};
+        assertArrayEquals(body, OtlpTraceController.decode(null, body, 0));
+        assertArrayEquals(body, OtlpTraceController.decode("identity", body, 0));
+        assertArrayEquals(body, OtlpTraceController.decode("", body, 0));
+    }
+
+    /** The cap is on the decompressed size: a body under it that inflates past it is refused while inflating. */
+    @Test
+    void aGzipBodyThatExpandsPastTheByteCapIsRefused() throws IOException {
+        byte[] zeros = new byte[64 * 1024];
+        byte[] compressed = gzip(zeros);
+        int cap = 1024;
+        assertEquals(true, compressed.length < cap, "the compressed body alone is under the cap");
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> OtlpTraceController.decode("gzip", compressed, cap));
+        assertEquals(IngestError.OTLP_BODY_TOO_LARGE, e.error());
+    }
+
+    @Test
+    void aGzipBodyThatInflatesToExactlyTheCapIsAccepted() throws IOException {
+        byte[] raw = new byte[1024];
+        Arrays.fill(raw, (byte) 7);
+        assertArrayEquals(raw, OtlpTraceController.decode("gzip", gzip(raw), raw.length));
+    }
+
+    @Test
+    void aBodyLabelledGzipThatIsNotGzipIsMalformed() {
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> OtlpTraceController.decode("gzip", new byte[] {1, 2, 3}, 0));
+        assertEquals(IngestError.OTLP_MALFORMED_BODY, e.error());
+    }
+
+    @Test
+    void anEncodingTheReceiverCannotDecodeIsRefusedWith415() {
+        OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest());
+
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> controller.export(WRITE_TOKEN, "br", new byte[] {1}));
+        assertEquals(IngestError.OTLP_UNSUPPORTED_ENCODING, e.error());
+        assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, e.error().status());
+        verify(substrateWriter, never()).enqueue(anyString(), any());
     }
 }

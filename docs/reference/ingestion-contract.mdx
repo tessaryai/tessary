@@ -16,6 +16,7 @@ The contract is standard first. The platform reads OTel (OpenTelemetry) and gen_
 | Property | Value |
 | --- | --- |
 | HTTP endpoint | `POST /v1/traces`, content type `application/x-protobuf` |
+| Compression | None, or `Content-Encoding: gzip`. Any other encoding is refused with `415` and `Unsupported Content-Encoding` |
 | gRPC service | `TraceService/Export`, on the port `TESSARY_INGEST_OTLP_GRPC_PORT` names (default `4317`) |
 | Which transports run | `TESSARY_INGEST_OTLP_TRANSPORT`: `HTTP` (the default), `GRPC`, or `BOTH` |
 | Credential | A write- or admin-scoped project API key, as `Authorization: Bearer` |
@@ -218,7 +219,7 @@ Ad-hoc alias spellings of canonical fields are never read either. `sessionId`, `
 | Limit | Value | What happens past it |
 | --- | --- | --- |
 | Spans per export request | `2,000` | Spans beyond the cap are dropped, and the response carries a partial-success count |
-| Decoded request body | `20 MiB` | The request is rejected with `413` and `OTLP request body exceeds <n> bytes`, checked before the protobuf is parsed |
+| Decoded request body | `20 MiB` | The request is rejected with `413` and `OTLP request body exceeds <n> bytes`, checked before the protobuf is parsed. A gzip body counts at its decompressed size, and is refused as soon as it inflates past the limit |
 | Single span payload | `8,000,000` characters | The whole span is dropped rather than clipped |
 | Live buffer pressure | The ingest buffer's byte budget, `64 MiB` by default; the receiver refuses above 80% of it. See [Ingest buffer](/self-hosting/configuration#ingest-buffer) | The request is refused with `503` and a `Retry-After` header, before the body is decoded. Stock exporters retry a `503`, so a shed costs latency rather than data |
 

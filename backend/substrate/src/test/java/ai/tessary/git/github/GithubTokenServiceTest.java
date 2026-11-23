@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -243,6 +244,121 @@ class GithubTokenServiceTest {
         TessaryException e = assertThrows(
                 TessaryException.class, () -> service(configuredApp()).authHeader(integration(enc)));
         assertEquals(GitError.INSTALLATION_NOT_FOUND, e.error());
+        assertTrue(http.sent().isEmpty());
+    }
+
+    // ---- read-only clone tokens ----------------------------------------------------------------
+
+    /**
+     * A sandbox clone gets its own token, narrowed to contents: read, cached apart from the full token. Both
+     * mints hit one URL, so they are told apart by the body.
+     */
+    @Test
+    void appMode_theCloneTokenIsNarrowedToContentsReadAndCachedApartFromTheFullOne() {
+        http.on(
+                MINT,
+                response(201, tokenJson("ghs_read", Instant.now().plusSeconds(3600))),
+                response(201, tokenJson("ghs_full", Instant.now().plusSeconds(3600))));
+        GithubTokenService svc = service(configuredApp());
+
+        assertEquals("Bearer ghs_read", svc.cloneAuthHeader(appIntegration()));
+        assertEquals("Bearer ghs_full", svc.authHeader(appIntegration()));
+        assertEquals("Bearer ghs_read", svc.cloneAuthHeader(appIntegration()), "the clone never gets the full token");
+        assertEquals("Bearer ghs_full", svc.authHeader(appIntegration()), "the API never gets the narrowed token");
+
+        assertEquals(2, http.sent().size(), "each token is minted once and then served from its own cache");
+        HttpRequest clone = http.sent().get(0);
+        assertEquals("{\"permissions\":{\"contents\":\"read\"}}", ScriptedHttpClient.body(clone));
+        assertEquals(
+                "application/json", clone.headers().firstValue("Content-Type").orElseThrow());
+        assertEquals("", ScriptedHttpClient.body(http.sent().get(1)), "the full token asks for no narrowing");
+    }
+
+    /** A failed narrowed mint fails the clone; a cached full token is never handed out in its place. */
+    @Test
+    void appMode_aFailedCloneMintDoesNotFallBackToTheFullToken() {
+        http.on(MINT, response(201, tokenJson("ghs_full", Instant.now().plusSeconds(3600))), response(500, "{}"));
+        GithubTokenService svc = service(configuredApp());
+        assertEquals("Bearer ghs_full", svc.authHeader(appIntegration()));
+
+        TessaryException e = assertThrows(TessaryException.class, () -> svc.cloneAuthHeader(appIntegration()));
+        assertEquals(GitError.TOKEN_MINT_FAILED, e.error());
+    }
+
+    /**
+     * GitHub answers a narrowed mint with the grants it gave. Any grant beyond read fails the clone and is not cached,
+     * so a server that ignored the scope never hands the sandbox a write token; metadata: read is always there.
+     */
+    @Test
+    void appMode_aCloneTokenThatCameBackWiderThanReadIsRefused() {
+        String expires = Instant.now().plusSeconds(3600).toString();
+        http.on(
+                MINT,
+                response(
+                        201,
+                        "{\"token\":\"ghs_wide\",\"expires_at\":\"" + expires
+                                + "\",\"permissions\":{\"contents\":\"write\",\"metadata\":\"read\"}}"),
+                response(
+                        201,
+                        "{\"token\":\"ghs_read\",\"expires_at\":\"" + expires
+                                + "\",\"permissions\":{\"contents\":\"read\",\"metadata\":\"read\"}}"));
+        GithubTokenService svc = service(configuredApp());
+
+        TessaryException e = assertThrows(TessaryException.class, () -> svc.cloneAuthHeader(appIntegration()));
+        assertEquals(GitError.TOKEN_MINT_FAILED, e.error());
+        assertEquals("Bearer ghs_read", svc.cloneAuthHeader(appIntegration()), "the wide token was not cached");
+        assertEquals(2, http.sent().size());
+    }
+
+    /** A personal access token cannot be narrowed, so the clone gets it as is. */
+    @Test
+    void patMode_theCloneGetsTheTokenItself() throws Exception {
+        GithubTokenService svc = service(new GithubAppProperties());
+
+        assertEquals("Bearer ghp_x", svc.cloneAuthHeader(patIntegration("ghp_x")));
+        assertTrue(http.sent().isEmpty());
+    }
+
+    // ---- what the installation token may do ----------------------------------------------------
+
+    @Test
+    void installationPermissions_readsTheMintAnswer_andARefreshMintsAgain() {
+        String expires = Instant.now().plusSeconds(3600).toString();
+        http.on(
+                MINT,
+                response(
+                        201,
+                        "{\"token\":\"ghs_1\",\"expires_at\":\"" + expires
+                                + "\",\"permissions\":{\"contents\":\"read\",\"metadata\":\"read\"}}"),
+                response(
+                        201,
+                        "{\"token\":\"ghs_2\",\"expires_at\":\"" + expires
+                                + "\",\"permissions\":{\"contents\":\"write\",\"pull_requests\":\"write\","
+                                + "\"nested\":{\"x\":1}}}"));
+        GithubTokenService svc = service(configuredApp());
+
+        assertEquals(
+                Optional.of(Map.of("contents", "read", "metadata", "read")),
+                svc.installationPermissions(appIntegration(), false));
+        assertEquals(
+                Optional.of(Map.of("contents", "read", "metadata", "read")),
+                svc.installationPermissions(appIntegration(), false),
+                "served from the cached token");
+        assertEquals(1, http.sent().size());
+
+        assertEquals(
+                Optional.of(Map.of("contents", "write", "pull_requests", "write")),
+                svc.installationPermissions(appIntegration(), true),
+                "a refresh sees a grant accepted since; a non-text value is not a permission");
+        assertEquals("Bearer ghs_2", svc.authHeader(appIntegration()), "the refreshed token replaces the cached one");
+        assertEquals(2, http.sent().size());
+    }
+
+    @Test
+    void installationPermissions_isEmptyForAPat() throws Exception {
+        assertEquals(
+                Optional.empty(),
+                service(new GithubAppProperties()).installationPermissions(patIntegration("p"), true));
         assertTrue(http.sent().isEmpty());
     }
 

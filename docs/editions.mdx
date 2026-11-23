@@ -23,7 +23,7 @@ Tessary comes in two editions. Open Source is free: you self-host it, or you use
 
 The Open Source edition runs two ways. Tessary Cloud is the hosted service: Tessary runs it, and you sign up at [app.tessary.ai](https://app.tessary.ai). The open edition is the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE), and it is the build you get when you self-host.
 
-Every stage of the pipeline runs on both. Traces arrive over the OTLP (OpenTelemetry Protocol) endpoint, classifiers evaluate them and create findings, triage validates findings into cases (a high-confidence secret leak and a frustration finding open their case without it), and an agentic RCA (root-cause analysis) run investigates a case. What differs is who runs the stack, what pays for the model work, and what is switched on from the start.
+Every stage of the pipeline runs on both. Traces arrive over the OTLP (OpenTelemetry Protocol) endpoint, classifiers evaluate them and create findings, triage validates findings into cases (a high-confidence secret leak and a frustration finding open their case without it), an agentic RCA (root-cause analysis) run investigates a case, and a fix step can open a pull request for the causes RCA found. What differs is who runs the stack, what pays for the model work, and what is switched on from the start.
 
 Tessary Cloud's usage limits and model credit are not part of the repository. The pages under Tessary Cloud document how they behave.
 
@@ -32,7 +32,8 @@ Tessary Cloud's usage limits and model credit are not part of the repository. Th
 | Hosting | Tessary runs it. Sign up and connect traces; there is nothing to deploy. | You run a single-node Docker Compose stack and replace three placeholder secrets. See [Set up Tessary](/self-hosting/setup). |
 | Cost | Free, with no payment method. | Free under the Apache License 2.0. You pay for your own infrastructure. |
 | Model work for triage and RCA | A one-time model credit per organization pays for it. When the credit is used up, add your own model provider key. | Your own model provider credential from the start. |
-| Triage | Started by hand: select **Run triage** on a finding. Automatic triage is not available. | Started by hand, or automatically once an owner or admin turns automatic triage on. It starts off. |
+| Triage | Automatic from the start, and an owner or admin can turn it off. You can also select **Run triage** on a finding. | Started by hand, or automatically once an owner or admin turns automatic triage on. It starts off. |
+| Automatic RCA and Fix PRs | On for every organization created after they shipped. An owner or admin can turn either off. | The same. |
 | `groundedness` | On by default, with nothing to set up. | Off by default. Its model needs a Mac with Apple silicon or a GPU instance on AWS. |
 | `frustration` | Off by default. Needs your own OpenRouter or TypeSafe key. | The same. |
 | [Prompt management](/prompts/overview) | On by default. An owner or admin can turn it off per organization under **Settings → Features**. | The same. |
@@ -71,7 +72,9 @@ These wait on something from you. A requirement marked self-hosted applies only 
 | Triage, and everything downstream of it | Self-hosted, a model provider credential, stored under **Settings** then **Providers**. Without one, findings accumulate and none of them becomes a case. On Tessary Cloud, nothing until the model credit is used up, then your own key in the same place. |
 | `frustration` | An OpenRouter or TypeSafe key, on both. It is present on every project and starts switched off, because each eligible user message it scores is a call on your own key. Turning it on under **Classifiers** asks which provider to use and takes the key there. See [Watch for frustrated users](/classifiers/frustration). |
 | The `groundedness` classifier | Self-hosted only. A GPU for its model: a Mac with Apple silicon for development, or a GPU instance on AWS for production. It is present on every project and starts switched off. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). |
-| Automatic triage | Self-hosted only. An owner or admin turns it on per organization under **Settings → Features**. It starts switched off. See [Automatic triage starts off](#automatic-triage-starts-off). |
+| Automatic triage | Self-hosted: an owner or admin turns it on per organization under **Settings → Features**. It starts switched off. See [Automatic triage starts off](#automatic-triage-starts-off). On Tessary Cloud it is on from the start. |
+| Automatic RCA | Nothing beyond a model provider credential. It needs no repository. See [Automatic RCA and Fix PRs](#automatic-rca-and-fix-prs). |
+| Fix PRs | A repository Tessary can write to, and a key for a provider that serves a frontier model. See [Automatic RCA and Fix PRs](#automatic-rca-and-fix-prs). |
 | Root-cause analysis grounded in your code | A connected repository, under **Settings** then **Git integration**. RCA runs without one, but it cannot reason about the code that changed. |
 
 Self-hosted, replacing the three placeholder secrets is not on this list, because it is not optional. [Secure the instance](/self-hosting/setup#secure-the-instance) covers it.
@@ -80,17 +83,23 @@ Self-hosted, replacing the three placeholder secrets is not on this list, becaus
 
 These apply to Tessary Cloud and self-hosted alike.
 
-### Tessary explains and hands off
+### Tessary proposes the fix and never merges it
 
-Tessary reports what it found, the evidence behind it, and what it believes caused it. It does not open the fix, change your code, or change your agent's configuration. New cases are listed on **Triage**. Tessary does not send notifications yet. [Cases](/concepts/cases) covers what a case carries.
+Tessary reports what it found, the evidence behind it, and what it believes caused it. When Fix PRs is on, it can also open a pull request that fixes the causes it is sure of. A person reviews and merges it. Tessary never merges a change, never pushes to your default branch, and never changes your agent's configuration. New cases are listed on **Triage**. Tessary does not send notifications yet. [Cases](/concepts/cases) covers what a case carries.
 
 ### Automatic triage starts off
 
 Triage escalates a finding to a large language model to decide whether it is a real issue. Self-hosted, that work runs on the model provider credential you stored, and Tessary applies no ceiling of its own to how much of it runs. Automatic triage is therefore switched off by default, so that turning it on is a decision an operator makes knowingly rather than a default they inherit.
 
-On Tessary Cloud, automatic triage is not available. Triage runs when a person selects **Run triage** on a finding.
+On Tessary Cloud, automatic triage is on from the start, and an owner or admin can turn it off under **Settings → Features**. Without it, triage runs when a person selects **Run triage** on a finding.
 
 Nothing is lost while it is off. Classifiers keep evaluating every trace, findings keep being filed, and the evidence stays on each one. What waits is the escalation that turns a finding into a case.
+
+### Automatic RCA and Fix PRs
+
+Automatic RCA runs RCA on a live case when new windows join it, at most once every 6 hours for each case. Fix PRs opens or updates one pull request for each case after an RCA. Both start agent sessions, and Tessary sets no spending cap on either. Automatic RCA runs on your own model provider key, or on Tessary Cloud, while you have none, on the model credit. Fix PRs runs only on a frontier model, so it always needs your own key.
+
+Both are on for every organization created after they shipped, in both editions. An organization that existed before keeps both off until an owner or admin turns them on under **Settings → Features**. Turning Automatic RCA on does not analyze windows that arrived earlier. [Cases](/concepts/cases#automatic-rca) and [Fix pull requests](/concepts/root-cause-analysis#fix-pull-requests) cover the rules.
 
 ### Baselines are per project
 

@@ -22,13 +22,14 @@ const {
   remoteMcp,
   writeDossier,
   describeError,
-  git,
+  cloneRepo,
+  repoPatch,
   quarantineRepo,
+  BRANCH,
   onsetCommit,
   refusalOf,
   SESSION_LANES,
   WORK,
-  REPO,
 } = require('./agent-stream');
 const { startMcpRelay } = require('./mcp-relay');
 
@@ -46,6 +47,7 @@ const MAX_TOOL_CALLS = 1000;
 const SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 const HEAD_SHA = /^[0-9a-f]{7,64}$/;
 const LANE_NAMES = Object.keys(SESSION_LANES).join(', ');
+const CLONING_LANES = Object.keys(SESSION_LANES).filter((l) => SESSION_LANES[l].clones).join(' and ');
 
 function readSessionFile(file) {
   if (!file) throw new Error('session.json: no path given');
@@ -68,14 +70,24 @@ function readSessionFile(file) {
   if (typeof systemPrompt !== 'string' || !systemPrompt) {
     throw new Error('session.json: system_prompt must be a non-empty string');
   }
-  if (clone !== undefined && clone !== null) {
-    if (!posture.clones) throw new Error('session.json: only the rca lane clones');
-    if (typeof clone !== 'object' || typeof clone.url !== 'string' || !clone.url || typeof clone.head_sha !== 'string' || !HEAD_SHA.test(clone.head_sha)) {
-      throw new Error(`session.json: clone needs a url and a head_sha matching ${HEAD_SHA.source}`);
+  const hasClone = clone !== undefined && clone !== null;
+  if (hasClone) {
+    if (!posture.clones) throw new Error(`session.json: only the ${CLONING_LANES} lanes clone`);
+    const given = (v) => v !== undefined && v !== null;
+    if (typeof clone !== 'object' || typeof clone.url !== 'string' || !clone.url || given(clone.head_sha) === given(clone.branch)) {
+      throw new Error('session.json: clone needs a url and either a head_sha or a branch');
+    }
+    if (given(clone.head_sha) && (typeof clone.head_sha !== 'string' || !HEAD_SHA.test(clone.head_sha))) {
+      throw new Error(`session.json: clone.head_sha must match ${HEAD_SHA.source}`);
+    }
+    if (given(clone.branch) && (typeof clone.branch !== 'string' || !BRANCH.test(clone.branch))) {
+      throw new Error('session.json: clone.branch must be a valid branch name');
     }
     if (clone.onset_at !== undefined && clone.onset_at !== null && typeof clone.onset_at !== 'string') {
       throw new Error('session.json: clone.onset_at must be a string');
     }
+  } else if (posture.mustClone) {
+    throw new Error(`session.json: the ${lane} lane needs a clone`);
   }
   if (!files || typeof files !== 'object' || Array.isArray(files) || Object.values(files).some((c) => typeof c !== 'string')) {
     throw new Error('session.json: files must map relative paths to strings');
@@ -103,7 +115,7 @@ function readSessionFile(file) {
     model,
     servers,
     maxToolCalls,
-    clone: clone ? { url: clone.url, headSha: clone.head_sha, onsetAt: clone.onset_at || null } : null,
+    clone: hasClone ? { url: clone.url, headSha: clone.head_sha || null, branch: clone.branch || null, onsetAt: clone.onset_at || null } : null,
   };
 }
 
@@ -178,7 +190,7 @@ function createEventLog() {
  * assistant message of it is complete, because after an abort or a provider error OpenCode reports
  * idle before it settles the running tool and the message.
  */
-function createReplyTracker({ log, serverNames, steps, maxToolCalls }) {
+function createReplyTracker({ log, serverNames, steps, maxToolCalls, beforeEnd = () => {} }) {
   const userIds = new Set();
   let reply = null;
 
@@ -336,6 +348,7 @@ function createReplyTracker({ log, serverNames, steps, maxToolCalls }) {
       }
       const refusal = refusalOf(own);
       if (refusal) log.emit('error', { kind: refusal.kind, detail: providerDetail(refusal) });
+      beforeEnd();
       const usage = sumUsage(own.map((m) => ({ usage: usageOf(m.info) })));
       const stepsTaken = own.filter((m) => !m.info.summary).length;
       const reason = reply.limitHit ? 'limit' : reply.abortRequested ? 'aborted' : stepsTaken >= steps ? 'limit' : 'done';
@@ -343,6 +356,15 @@ function createReplyTracker({ log, serverNames, steps, maxToolCalls }) {
       reply = null;
     },
   };
+}
+
+/** The reply's `patch`, or an `error` of kind `patch` when git cannot read the repo; the reply still ends. */
+function patchOf({ log, baseSha, quarantined, moved }) {
+  try {
+    log.emit('patch', repoPatch({ baseSha, quarantined, moved }));
+  } catch (e) {
+    log.emit('error', { kind: 'patch', detail: scrubToken(describeError(e)).slice(0, DETAIL_CHARS) });
+  }
 }
 
 function providerDetail({ kind, message, status }) {
@@ -613,11 +635,12 @@ async function main() {
     if (loaded.error) throw loaded.error;
     const { input } = loaded;
     const { posture } = input;
+    let emitPatch = () => {};
     if (input.clone) {
-      git(['clone', '--quiet', '--', input.clone.url, REPO]);
-      git(['-C', REPO, 'checkout', '--quiet', input.clone.headSha]);
-      quarantineRepo();
+      const baseSha = cloneRepo(input.clone);
+      const moved = quarantineRepo(posture.quarantine);
       onset = onsetCommit(input.clone.onsetAt);
+      if (posture.patch) emitPatch = () => patchOf({ log, baseSha, quarantined: posture.quarantine.names, moved });
     }
     writeDossier(path.join(WORK, 'dossier'), input.files);
     if (posture.checksDir) fs.mkdirSync(path.join(WORK, posture.checksDir), { recursive: true });
@@ -631,7 +654,13 @@ async function main() {
     });
     const { createOpencodeClient } = await import('@opencode-ai/sdk');
     client = createOpencodeClient({ baseUrl: server.url, fetch: makeFetch(REQUEST_MS), throwOnError: true });
-    tracker = createReplyTracker({ log, serverNames: new Set(input.servers.map((s) => s.name)), steps, maxToolCalls: input.maxToolCalls });
+    tracker = createReplyTracker({
+      log,
+      serverNames: new Set(input.servers.map((s) => s.name)),
+      steps,
+      maxToolCalls: input.maxToolCalls,
+      beforeEnd: emitPatch,
+    });
     void runEventLoop();
     await Promise.race([
       connected,

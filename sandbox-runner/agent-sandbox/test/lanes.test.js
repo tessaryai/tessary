@@ -100,6 +100,20 @@ test('the run lane checks out the requested commit, quarantines agent config, an
   assert.equal(configs[0].agent['tessary-triage'].prompt, 'You write classifiers.', 'the caller\'s system prompt replaces the default');
 });
 
+test('the run lane leaves no clone token in the clone\'s git config (an agent that reads the token from .git/config)', async () => {
+  const repo = makeRepo();
+  const { result, workDir } = await runLane('run', { clone_url: `file://x-access-token:tsy_a_clonetoken@localhost${repo.dir}`, head_sha: repo.first });
+
+  assert.equal(result.status, 0, result.stderr);
+  const clone = path.join(workDir, 'repo');
+  assert.equal(execFileSync('git', ['-C', clone, 'config', 'remote.origin.url']).toString().trim(), `file://localhost${repo.dir}`);
+  for (const entry of fs.readdirSync(path.join(clone, '.git'), { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    assert.doesNotMatch(fs.readFileSync(file, 'latin1'), /clonetoken|x-access-token/, file);
+  }
+});
+
 test('the run lane without a clone_url still runs, with no repo', async () => {
   const { result, workDir } = await runLane('run', { files: { 'brief.md': 'x' }, system_prompt: 'sys' });
 

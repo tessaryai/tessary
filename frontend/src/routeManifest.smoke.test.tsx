@@ -59,7 +59,12 @@ import {
 // ---- api/client mock -------------------------------------------------------------------------
 
 // Mirrors CapabilityDefaults.open(): every wire key is on except these.
-const OFF_IN_OPEN_EDITION: CapabilityWire[] = ["triage_automatic_enabled", "alerts_enabled"];
+const OFF_IN_OPEN_EDITION: CapabilityWire[] = [
+  "triage_automatic_enabled",
+  "alerts_enabled",
+  "rca_automatic_enabled",
+  "fix_pr_enabled",
+];
 const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "ci_integration_enabled",
   "rca_enabled",
@@ -76,6 +81,8 @@ const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "secret_leak_enabled",
   "malformed_output_enabled",
   "triage_automatic_enabled",
+  "rca_automatic_enabled",
+  "fix_pr_enabled",
   "prompt_management_enabled",
 ];
 const OPEN_EDITION_CAPABILITIES: Record<CapabilityWire, boolean> = Object.fromEntries(
@@ -376,6 +383,11 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     getGitIntegration: () => Promise.resolve(null),
   },
   models: {
+    getModelSettings: () => Promise.resolve(EMPTY_MODEL_SETTINGS),
+  },
+  // The Fix PRs row says why this project cannot open a pull request.
+  features: {
+    getGitIntegration: () => Promise.resolve(null),
     getModelSettings: () => Promise.resolve(EMPTY_MODEL_SETTINGS),
   },
   notifications: {

@@ -42,6 +42,11 @@ class PromptResourceParityTest {
         constant(m, ai.tessary.agentrun.AgentSessionRunner.class, "CORRECTION_NO_TOOL_BUDGET");
         constant(m, ai.tessary.agentrun.AgentSessionRunner.class, "CORRECTION_MISSING_KEYS");
         constant(m, ai.tessary.agentrun.AgentSessionRunner.class, "CORRECTION_UNPARSEABLE");
+        constant(m, ai.tessary.fix.FixAgent.class, "SYSTEM_PROMPT");
+        constant(m, ai.tessary.fix.FixAgent.class, "PROMPT");
+        constant(m, ai.tessary.fix.FixAgent.class, "START_DEFAULT");
+        constant(m, ai.tessary.fix.FixAgent.class, "START_BRANCH");
+        constant(m, ai.tessary.fix.FixAgent.class, "JSON_SCHEMA");
         for (String method : List.of(
                 "tool_error", "metric_drift", "secret_leak", "malformed_output", "frustration", "groundedness")) {
             m.put("rca.methods." + method, () -> PromptCraft.text("rca", "methods/" + method + ".md"));
