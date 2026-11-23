@@ -185,6 +185,9 @@ record FixPrEndToEndTest(
      */
     @Test
     void aCaseGetsAPullRequestThenACommitOnItThenANewOneAfterTheMerge() {
+        // The queue is global: a run another test left queued would be claimed first.
+        jdbc.sql("UPDATE fix_run SET status = 'failed' WHERE status IN ('queued', 'running')")
+                .update();
         var tenant = TenantFixture.bootstrap(tenants, "fix-e2e");
         String pid = tenant.project().id();
         connectRepository(pid);
