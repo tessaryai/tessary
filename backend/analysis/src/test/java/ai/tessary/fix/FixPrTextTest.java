@@ -165,14 +165,14 @@ class FixPrTextTest {
 
     /**
      * The words come from model output over production traces: an {@code @name} in them must not notify anyone on
-     * GitHub, and a title must stay one line. An email address and a scoped package path keep their {@code @}.
+     * GitHub, even after a slash or a dot, and a title must stay one line. An email address keeps its {@code @}.
      */
     @Test
     void modelTextNeverMentionsAnyoneAndTheTitleStaysOneLine() {
         FixAnswer loud = new FixAnswer(
                 true,
                 "Retry the search tool\nso @octocat sees it",
-                "Ask @acme/security or mail ops@example.com; see node_modules/@scope/pkg.",
+                "Ask @acme/security or mail ops@example.com; see.@octocat and x/@octocat.",
                 List.of("code:src/agent.py"),
                 List.of(),
                 null);
@@ -189,7 +189,9 @@ class FixPrTextTest {
         String body = FixPrText.body(facts);
         assertTrue(body.contains("Ping @\u200Beveryone now."), body);
         assertTrue(
-                body.contains("Ask @\u200Bacme/security or mail ops@example.com; see node_modules/@scope/pkg."), body);
+                body.contains(
+                        "Ask @\u200Bacme/security or mail ops@example.com; see.@\u200Boctocat and x/@\u200Boctocat."),
+                body);
         assertTrue(FixPrText.commitMessage(facts)
                 .startsWith("Retry the search tool so @\u200Boctocat sees it\n\nAsk @\u200Bacme"));
         assertEquals(

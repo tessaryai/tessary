@@ -33,8 +33,11 @@ final class FixPrText {
     /** GitHub refuses a title over 256 characters; the agent is asked for under 70. */
     static final int TITLE_MAX = 200;
 
-    /** An {@code @} that would mention a GitHub user or team; not one inside a word or a path. */
-    private static final Pattern MENTION = Pattern.compile("(?<![\\w`/.])@(?=[A-Za-z0-9_-])");
+    /**
+     * An {@code @} that could mention a GitHub user or team: any one not inside a word, as in an email address. A path
+     * such as {@code node_modules/@scope} is quieted too, since a slash or a dot does not stop a mention.
+     */
+    private static final Pattern MENTION = Pattern.compile("(?<![\\w`])@(?=[A-Za-z0-9_-])");
 
     /** One line, so a model's newline cannot spill into the description. */
     static String title(Facts f) {
