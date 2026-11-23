@@ -8333,7 +8333,9 @@ export interface operations {
             query: {
                 ctx: components["schemas"]["TenantContext"];
             };
-            header?: never;
+            header?: {
+                "Content-Encoding"?: string;
+            };
             path?: never;
             cookie?: never;
         };
