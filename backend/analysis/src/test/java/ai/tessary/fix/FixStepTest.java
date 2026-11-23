@@ -4,6 +4,7 @@ package ai.tessary.fix;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -28,6 +29,8 @@ import ai.tessary.fix.FixRunRow.Outcome;
 import ai.tessary.fix.FixRunRow.Reason;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.plan.Capability;
+import ai.tessary.plan.CapabilityService;
 import ai.tessary.rca.RcaReportRepository;
 import ai.tessary.rca.RcaReportRow;
 import ai.tessary.tenant.Organization;
@@ -45,6 +48,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -98,6 +102,19 @@ class FixStepTest {
     @Mock
     private AgentSessionRunner.StepSink steps;
 
+    @Mock
+    private CapabilityService capabilities;
+
+    /** Fix PRs are on unless a test turns them off. */
+    @BeforeEach
+    void fixPrsOn() {
+        lenient().when(projects.findById("proj-1")).thenReturn(Optional.of(PROJECT));
+        lenient().when(capabilities.isEnabled("org-1", Capability.FIX_PR)).thenReturn(true);
+    }
+
+    private static final Project PROJECT =
+            new Project("proj-1", "org-1", "agent", "Agent", null, "t", null, null, true, null);
+
     private final ScriptedDestination destination = new ScriptedDestination();
 
     /** Answers {@code start} with one result and each {@code deliver} with the next scripted delivery. */
@@ -137,6 +154,7 @@ class FixStepTest {
                 destination,
                 agent,
                 new ObjectMapper(),
+                capabilities,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -221,6 +239,18 @@ class FixStepTest {
         return new SessionEvent.Patch(5, "base", List.of(files), List.of(), null);
     }
 
+    /** A run queued while Fix PRs were on, claimed after the owner turned them off, opens nothing. */
+    @Test
+    void aRunClaimedAfterFixPrsWereTurnedOffIsSkippedWithoutTheDestinationOrAnAgent() {
+        when(capabilities.isEnabled("org-1", Capability.FIX_PR)).thenReturn(false);
+
+        step("").run(RUN, steps);
+
+        verify(fixRuns).finish("run-1", new Finish(Outcome.SKIPPED, Reason.FIX_PR_OFF, null, null, List.of(), 0), NOW);
+        assertEquals(List.of(), destination.startedWith);
+        verify(agent, never()).run(any(), any());
+    }
+
     @Test
     void aStopFromTheDestinationFinishesTheRunWithoutAnAgent() {
         seedReportAndCase();
@@ -299,9 +329,6 @@ class FixStepTest {
     @Test
     void aDeliveredFixRecordsThePullRequestAndAddsALineToTheCase() {
         seedReportAndCase();
-        when(projects.findById("proj-1"))
-                .thenReturn(Optional.of(
-                        new Project("proj-1", "org-1", "agent", "Agent", null, "t", null, null, true, null)));
         when(orgs.findById("org-1"))
                 .thenReturn(Optional.of(new Organization("org-1", null, "acme", "Acme", "t", null, null)));
         destination.start = go(null);

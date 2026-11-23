@@ -285,6 +285,31 @@ class GithubTokenServiceTest {
         assertEquals(GitError.TOKEN_MINT_FAILED, e.error());
     }
 
+    /**
+     * GitHub answers a narrowed mint with the grants it gave. Any grant beyond read fails the clone and is not cached,
+     * so a server that ignored the scope never hands the sandbox a write token; metadata: read is always there.
+     */
+    @Test
+    void appMode_aCloneTokenThatCameBackWiderThanReadIsRefused() {
+        String expires = Instant.now().plusSeconds(3600).toString();
+        http.on(
+                MINT,
+                response(
+                        201,
+                        "{\"token\":\"ghs_wide\",\"expires_at\":\"" + expires
+                                + "\",\"permissions\":{\"contents\":\"write\",\"metadata\":\"read\"}}"),
+                response(
+                        201,
+                        "{\"token\":\"ghs_read\",\"expires_at\":\"" + expires
+                                + "\",\"permissions\":{\"contents\":\"read\",\"metadata\":\"read\"}}"));
+        GithubTokenService svc = service(configuredApp());
+
+        TessaryException e = assertThrows(TessaryException.class, () -> svc.cloneAuthHeader(appIntegration()));
+        assertEquals(GitError.TOKEN_MINT_FAILED, e.error());
+        assertEquals("Bearer ghs_read", svc.cloneAuthHeader(appIntegration()), "the wide token was not cached");
+        assertEquals(2, http.sent().size());
+    }
+
     /** A personal access token cannot be narrowed, so the clone gets it as is. */
     @Test
     void patMode_theCloneGetsTheTokenItself() throws Exception {

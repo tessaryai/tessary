@@ -17,6 +17,8 @@ import ai.tessary.fix.FixRunRow.Outcome;
 import ai.tessary.fix.FixRunRow.Reason;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.plan.Capability;
+import ai.tessary.plan.CapabilityService;
 import ai.tessary.rca.RcaDtos;
 import ai.tessary.rca.RcaReportRepository;
 import ai.tessary.rca.RcaReportRow;
@@ -52,6 +54,7 @@ public class FixStep {
     private final FixDestination destination;
     private final FixAgent agent;
     private final ObjectMapper mapper;
+    private final CapabilityService capabilities;
     private final Clock clock;
 
     @Autowired
@@ -65,8 +68,21 @@ public class FixStep {
             AlertProperties links,
             FixDestination destination,
             FixAgent agent,
-            ObjectMapper mapper) {
-        this(fixRuns, reports, cases, events, projects, orgs, links, destination, agent, mapper, Clock.systemUTC());
+            ObjectMapper mapper,
+            CapabilityService capabilities) {
+        this(
+                fixRuns,
+                reports,
+                cases,
+                events,
+                projects,
+                orgs,
+                links,
+                destination,
+                agent,
+                mapper,
+                capabilities,
+                Clock.systemUTC());
     }
 
     FixStep(
@@ -80,6 +96,7 @@ public class FixStep {
             FixDestination destination,
             FixAgent agent,
             ObjectMapper mapper,
+            CapabilityService capabilities,
             Clock clock) {
         this.fixRuns = fixRuns;
         this.reports = reports;
@@ -91,11 +108,21 @@ public class FixStep {
         this.destination = destination;
         this.agent = agent;
         this.mapper = mapper;
+        this.capabilities = capabilities;
         this.clock = clock;
     }
 
     public void run(FixRunRow run, AgentSessionRunner.StepSink steps) {
         String projectId = run.projectId();
+        // The run was queued while Fix PRs were on; an owner who turned them off since gets no pull request.
+        String orgId = projects.findById(projectId).orElseThrow().orgId();
+        if (!capabilities.isEnabled(orgId, Capability.FIX_PR)) {
+            fixRuns.finish(
+                    run.id(),
+                    new Finish(Outcome.SKIPPED, Reason.FIX_PR_OFF, null, null, List.of(), 0),
+                    clock.instant());
+            return;
+        }
         RcaReportRow report = reports.findById(projectId, run.rcaReportId()).orElseThrow();
         CaseRow caseRow = cases.findById(projectId, run.caseId()).orElseThrow();
         List<FixableCause> causes =

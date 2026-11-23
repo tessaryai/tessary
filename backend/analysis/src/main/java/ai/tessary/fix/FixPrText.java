@@ -5,6 +5,7 @@ import ai.tessary.fix.FixAgent.FixAnswer;
 import ai.tessary.fix.FixRunRow.FixCheck;
 import ai.tessary.rca.RcaDtos.Cause;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 
@@ -29,19 +30,42 @@ final class FixPrText {
             List<String> earlier,
             FixAnswer answer) {}
 
+    /** GitHub refuses a title over 256 characters; the agent is asked for under 70. */
+    static final int TITLE_MAX = 200;
+
+    /** An {@code @} that would mention a GitHub user or team; not one inside a word or a path. */
+    private static final Pattern MENTION = Pattern.compile("(?<![\\w`/.])@(?=[A-Za-z0-9_-])");
+
+    /** One line, so a model's newline cannot spill into the description. */
     static String title(Facts f) {
         String t = f.answer().title();
-        return t.isBlank()
-                ? "Fix " + f.caseReference() + ": " + f.causes().get(0).cause().title()
-                : t;
+        String line = (t.isBlank()
+                        ? "Fix " + f.caseReference() + ": "
+                                + f.causes().get(0).cause().title()
+                        : t)
+                .replaceAll("\\s+", " ")
+                .strip();
+        return quiet(line.length() > TITLE_MAX ? line.substring(0, TITLE_MAX).strip() : line);
     }
 
     static String commitMessage(Facts f) {
-        return title(f) + "\n\n" + f.answer().why() + "\n\nCase: " + f.caseReference() + "\nCauses: "
-                + String.join(", ", FixableCause.keys(f.causes())) + "\n";
+        return quiet(title(f) + "\n\n" + f.answer().why() + "\n\nCase: " + f.caseReference() + "\nCauses: "
+                + String.join(", ", FixableCause.keys(f.causes())) + "\n");
+    }
+
+    /**
+     * The text carries model output written from production traces, so an {@code @name} in it would notify whoever it
+     * names. A zero-width space after the {@code @} keeps the text and drops the mention.
+     */
+    static String quiet(String text) {
+        return MENTION.matcher(text).replaceAll("@\u200B");
     }
 
     static String body(Facts f) {
+        return quiet(rawBody(f));
+    }
+
+    private static String rawBody(Facts f) {
         StringBuilder b = new StringBuilder();
         b.append("Tessary opened this pull request to fix case ")
                 .append(f.caseReference())

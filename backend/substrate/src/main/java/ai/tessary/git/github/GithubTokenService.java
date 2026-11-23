@@ -153,6 +153,12 @@ public class GithubTokenService implements GitTokenService {
             }
             long installationId = installationId(integ); // AES-GCM open happens only on a real miss
             CachedToken minted = mintInstallationToken(normHost(integ.host()), installationId, scope);
+            // A narrowed token GitHub answered with any grant beyond read is never used, so a server that ignored the
+            // scope cannot hand a sandbox the write token.
+            if (scope != null && minted.permissions().values().stream().anyMatch(p -> !"read".equals(p))) {
+                log.warn("github clone token came back wider than read integrationId={}", key);
+                throw new TessaryException(GitError.TOKEN_MINT_FAILED, LABEL);
+            }
             tokens.put(key, minted);
             return minted;
         }

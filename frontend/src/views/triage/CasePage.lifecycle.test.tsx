@@ -677,6 +677,16 @@ describe("the fix pull request", () => {
     expect(screen.getByRole("link", { name: label }).getAttribute("href")).toBe(`/orgs/acme/projects/default${to}`);
   });
 
+  // Bug: a run the owner stopped by turning Fix PRs off read as a fix with no reason.
+  it("says Fix PRs were turned off before a queued run started", async () => {
+    api.getCase.mockResolvedValue(fixCase({ pr: null, latest_run: fixRun({ outcome: "skipped", reason: "fix_pr_off", pr_url: null }) }));
+    renderPage();
+
+    expect(await screen.findByText(
+      "Tessary wrote no fix after the newest RCA because Fix PRs were turned off before the run started.",
+    )).toBeTruthy();
+  });
+
   // Bug: the agent's own reason for making no change was dropped.
   it("gives the agent's own words when it made no change", async () => {
     api.getCase.mockResolvedValue(fixCase({

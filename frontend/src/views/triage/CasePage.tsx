@@ -801,6 +801,7 @@ function FixChecks({ checks }: { checks: FixCheck[] }) {
 }
 
 const NO_FIX_BECAUSE: Record<string, string> = {
+  fix_pr_off: "Fix PRs were turned off before the run started",
   no_repo: "this project has no repository connected",
   read_only: "this project's repository connection cannot write",
   no_frontier_model: "this project has no frontier model for the fix",

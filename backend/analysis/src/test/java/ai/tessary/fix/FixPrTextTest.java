@@ -2,6 +2,7 @@
 package ai.tessary.fix;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.fix.FixAgent.FixAnswer;
 import ai.tessary.fix.FixRunRow.FixCheck;
@@ -160,5 +161,47 @@ class FixPrTextTest {
 
                 Tessary does not merge this pull request. Review it like any other change.
                 """, FixPrText.body(facts));
+    }
+
+    /**
+     * The words come from model output over production traces: an {@code @name} in them must not notify anyone on
+     * GitHub, and a title must stay one line. An email address and a scoped package path keep their {@code @}.
+     */
+    @Test
+    void modelTextNeverMentionsAnyoneAndTheTitleStaysOneLine() {
+        FixAnswer loud = new FixAnswer(
+                true,
+                "Retry the search tool\nso @octocat sees it",
+                "Ask @acme/security or mail ops@example.com; see node_modules/@scope/pkg.",
+                List.of("code:src/agent.py"),
+                List.of(),
+                null);
+        FixPrText.Facts facts = new FixPrText.Facts(
+                "C-7",
+                "Search answers fail more often.",
+                null,
+                "Ping @everyone now.",
+                List.of(cause("The search tool is never retried", "src/agent.py", List.of("t1"), List.of())),
+                List.of(),
+                loud);
+
+        assertEquals("Retry the search tool so @\u200Boctocat sees it", FixPrText.title(facts));
+        String body = FixPrText.body(facts);
+        assertTrue(body.contains("Ping @\u200Beveryone now."), body);
+        assertTrue(
+                body.contains("Ask @\u200Bacme/security or mail ops@example.com; see node_modules/@scope/pkg."), body);
+        assertTrue(FixPrText.commitMessage(facts)
+                .startsWith("Retry the search tool so @\u200Boctocat sees it\n\nAsk @\u200Bacme"));
+        assertEquals(
+                FixPrText.TITLE_MAX,
+                FixPrText.title(new FixPrText.Facts(
+                                "C-7",
+                                "t",
+                                null,
+                                null,
+                                facts.causes(),
+                                List.of(),
+                                new FixAnswer(true, "x".repeat(300), "w", List.of(), List.of(), null)))
+                        .length());
     }
 }

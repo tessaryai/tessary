@@ -55,6 +55,9 @@ public record FixRunRow(
     public static final class Reason {
         private Reason() {}
 
+        /** Fix PRs were turned off after the run was queued. */
+        public static final String FIX_PR_OFF = "fix_pr_off";
+
         public static final String NO_REPO = "no_repo";
         public static final String READ_ONLY = "read_only";
         public static final String NO_FRONTIER_MODEL = "no_frontier_model";
