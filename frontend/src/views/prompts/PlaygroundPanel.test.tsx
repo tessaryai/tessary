@@ -27,7 +27,7 @@ const platform = (id: ModelProvider, label: string): PlatformDescriptor => ({
 });
 
 const model = (provider: ModelProvider, model_name: string, display_name: string, decision = false): CatalogEntry => ({
-  provider, model_name, display_name, decision, agentic: false, default_base_url: "", vendor: "",
+  provider, model_name, display_name, decision, agentic: false, frontier: false, default_base_url: "", vendor: "",
 });
 
 const credential = (provider: ModelProvider, over: Partial<ProviderCredentialView> = {}): ProviderCredentialView => ({
