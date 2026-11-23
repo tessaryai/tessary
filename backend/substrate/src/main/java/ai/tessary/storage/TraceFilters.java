@@ -190,10 +190,11 @@ public class TraceFilters {
     /** One EXISTS, so the name and the version must sit on the same span; a version alone narrows nothing. */
     private static void addPromptExists(
             StringBuilder where, Map<String, Object> params, TraceV2Repository.TraceQuery query) {
-        if (query.promptName() == null || query.promptName().isBlank()) {
+        String requested = query.promptName();
+        if (requested == null || requested.isBlank()) {
             return;
         }
-        String name = PromptRefResolver.trimEdges(query.promptName());
+        String name = PromptRefResolver.trimEdges(requested);
         where.append(" AND EXISTS (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id AND sx.trace_id = t.id"
                 + " AND NOT sx.is_deleted AND sx.prompt_name = :promptName");
         params.put("promptName", name);
