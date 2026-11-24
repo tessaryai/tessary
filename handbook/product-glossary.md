@@ -229,14 +229,14 @@ Do not use “user IDs hit” as a count of losses or of affected people.
 
 An estimate of how many more hit user IDs have probably stopped than expected from similar user IDs not yet hit. The page gives it as “about N” with a range from low to high.
 
-Only the verdict “evidence of loss” claims a loss. Every other verdict gives no lower limit: it says “no clear loss” and, when it can, the most the loss can be. Counts of different issues overlap and do not add up.
+Only the verdict “evidence of loss” claims a loss. The other verdicts that show a number say “no clear loss” and give the most the loss can be, and some verdicts show no number. Counts of different issues overlap and do not add up.
 
 Use:
 
 - About 12 user IDs lost (5 to 20).
 - No clear loss; if today’s silences last, up to 9.
 
-The short form “users lost” is used only in the issue list heading and in the link to an issue. Do not state user IDs lost as a fact about people, and do not state it as proof that the issue caused the stops.
+The short form “users lost” appears only in labels: the issue list heading, the issue page title, the link to the issue page and the line that explains the count. In a number, write “user IDs lost”. Do not state user IDs lost as a fact about people, and do not state it as proof that the issue caused the stops.
 
 ## Issue
 
@@ -289,11 +289,11 @@ Do not count a held user ID as stopped.
 
 ## Verdict
 
-The word the Users page puts on an issue to say what its numbers can claim. The page tests the verdicts in the order of the table below, and the first one that applies is the verdict. When the page shows a state in place of numbers, such as No user ID or Too early, no issue gets a number.
+The word the Users page puts on an issue to say what its numbers can claim. The page tests the verdicts in the order of the table below, and the first one that applies is the verdict. When the page shows a state in place of numbers, such as No user ID or Too early, no issue gets a number. A case that shifts a measure for all traffic has no hit user IDs and gets no verdict. Every verdict still shows the user IDs hit.
 
-| Verdict | What it means | Numbers shown |
+| Verdict | What it means | Loss number shown |
 | --- | --- | --- |
-| Hits not complete | The detector of a finding in this issue does not record every hit, so the comparison would be biased. | User IDs hit only |
+| Hits not complete | The detector of a finding in this issue does not record every hit, so the comparison would be biased. | None |
 | History too short | Tessary keeps less user ID history than the estimate needs. | None |
 | Cannot tell yet | User IDs in this app return less often than the history can show. | None |
 | Cannot measure yet | A stop starts to show some days after the last use, and half of the hit user IDs were hit less than that ago. | The most the loss can be |
