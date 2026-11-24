@@ -228,6 +228,18 @@ record HitSweepServiceTest(
                         "two spellings of one ID are one user key"));
     }
 
+    @Test
+    void sweepAndReconcile_onProjectWithNoFindings_writeNothing() {
+        String pid = project("hits-empty");
+
+        assertAll(
+                () -> assertEquals(
+                        new HitSweepService.Result(0, 0), service(NOW).sweep(pid)),
+                () -> assertEquals(
+                        new HitSweepService.Result(0, 0), service(NOW).reconcile(pid)),
+                () -> assertEquals(0, count(pid, "end_user_hit_summary")));
+    }
+
     private String project(String slug) {
         return TenantFixture.bootstrap(tenants, slug).project().id();
     }

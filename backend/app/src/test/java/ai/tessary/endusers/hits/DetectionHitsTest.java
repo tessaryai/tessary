@@ -116,7 +116,7 @@ record DetectionHitsTest(
         seed.finding(
                 "f-leak",
                 "secret_leak",
-                "{\"cause_kind\":\"armed_window\",\"native_cause_key\":\"aws_key\",\"facet\":\"aws_key\","
+                "{\"cause_kind\":\"armed_window\",\"native_cause_key\":\"pattern_a\",\"facet\":\"pattern_a\","
                         + "\"call_site_id\":\"cs-a\",\"window_seconds\":3600}",
                 classifierId,
                 "cs-a",
@@ -124,14 +124,15 @@ record DetectionHitsTest(
                 lastSeen.toString());
         List<SpanKey> spans = new ArrayList<>();
         for (int i = 0; i < 70; i++) {
-            spans.add(leak(seed, classifierId, "a" + i, ONSET.plus(Duration.ofSeconds(145L * i)), "aws_key", "high"));
+            spans.add(leak(seed, classifierId, "a" + i, ONSET.plus(Duration.ofSeconds(145L * i)), "pattern_a", "high"));
         }
         for (int i = 0; i < 20; i++) {
-            spans.add(leak(seed, classifierId, "g" + i, ONSET.plus(Duration.ofMinutes(i)), "github_token", "high"));
+            spans.add(leak(seed, classifierId, "g" + i, ONSET.plus(Duration.ofMinutes(i)), "pattern_b", "high"));
         }
         for (int i = 0; i < 5; i++) {
-            spans.add(leak(seed, classifierId, "low" + i, ONSET.plus(Duration.ofMinutes(i)), "aws_key", "low"));
-            spans.add(leak(seed, classifierId, "after" + i, windowEnd.plus(Duration.ofMinutes(i)), "aws_key", "high"));
+            spans.add(leak(seed, classifierId, "low" + i, ONSET.plus(Duration.ofMinutes(i)), "pattern_a", "low"));
+            spans.add(
+                    leak(seed, classifierId, "after" + i, windowEnd.plus(Duration.ofMinutes(i)), "pattern_a", "high"));
         }
 
         sweep(pid);
@@ -141,7 +142,7 @@ record DetectionHitsTest(
                 detections
                         .countFacetWindows("secret_leak", pid, classifierId, "pattern", window, true, false, fired)
                         .stream()
-                        .filter(w -> "aws_key".equals(w.facet()) && "cs-a".equals(w.callSiteId()))
+                        .filter(w -> "pattern_a".equals(w.facet()) && "cs-a".equals(w.callSiteId()))
                         .filter(w -> w.windowStartEpochSecond() >= ONSET.getEpochSecond()
                                 && w.windowStartEpochSecond() < windowEnd.getEpochSecond())
                         .mapToLong(FacetWindow::observed)
