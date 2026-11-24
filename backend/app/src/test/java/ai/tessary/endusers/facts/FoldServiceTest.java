@@ -66,10 +66,11 @@ record FoldServiceTest(
     @Test
     void fold_lateUserId_countedAfterRefold() {
         Project p = TenantFixture.bootstrap(tenants, "fold-late-user-id").project();
-        trace(p, "t1", "s1", null, at(TODAY - 2, "10:00:00"));
+        int old = TODAY - 10;
+        trace(p, "t1", "s1", null, at(old, "10:00:00"));
 
         fold(NOW).fold(p.id());
-        List<String> before = idDays(p, TODAY - 2);
+        List<String> before = idDays(p, old);
         jdbc.sql("UPDATE trace SET user_id = 'late_1', rolled_up_at = :at WHERE project_id = :pid AND id = 't1'")
                 .param("pid", p.id())
                 .param("at", Timestamp.from(NOW.plusSeconds(600)))
@@ -78,8 +79,35 @@ record FoldServiceTest(
 
         assertAll(
                 () -> assertEquals(List.of(), before),
-                () -> assertEquals(List.of(key(p, "late_1") + "|1"), idDays(p, TODAY - 2)),
-                () -> assertEquals(List.of("1|0"), nullDays(p, TODAY - 2)));
+                () -> assertEquals(
+                        List.of(key(p, "late_1") + "|1"),
+                        idDays(p, old),
+                        "a day older than the 7-day refold comes back through its rollup"),
+                () -> assertEquals(List.of("1|0"), nullDays(p, old)));
+    }
+
+    @Test
+    void outageFlag_readsTheStoredDaysBefore_summedOverVersions() {
+        Project down = TenantFixture.bootstrap(tenants, "fold-outage-down").project();
+        Project partly = TenantFixture.bootstrap(tenants, "fold-outage-partly").project();
+        int day = TODAY - 1;
+        for (Project p : List.of(down, partly)) {
+            for (int d = day - 28; d < day; d++) {
+                bulk(p, "chat.turn", "v1", d, 2);
+                bulk(p, "chat.turn", "v2", d, 2);
+                bulk(p, "agent.run", null, d, 20);
+            }
+            bulk(p, "chat.turn", "v1", day, 1);
+        }
+        bulk(down, "agent.run", null, day, 5);
+        bulk(partly, "agent.run", null, day, 7);
+
+        fold(NOW).fold(down.id());
+        fold(NOW).fold(partly.id());
+
+        assertAll(
+                () -> assertEquals(List.of(day + "|true"), outageDays(down)),
+                () -> assertEquals(List.of(), outageDays(partly), "one route at 35% of its median"));
     }
 
     @Test
@@ -192,9 +220,9 @@ record FoldServiceTest(
         expectedDays.sort(null);
         String acmeHash = HexFormat.of().formatHex(ShapeSignature.clusterHash(projects.salt(p.id()), "acme"));
         List<String> expectedUsers = new ArrayList<>(List.of(
-                key(p, "usr_7Hq2kD") + "|usr_7Hq2kD|usr:10|||" + d + "|" + d,
-                key(p, "acme:x") + "|acme:x|acme:6|" + acmeHash + "|acme|" + d + "|" + d,
-                key(p, "acme:y") + "|acme:y|acme:6|" + acmeHash + "|acme|" + d + "|" + d));
+                key(p, "usr_7Hq2kD") + "|usr_7Hq2kD|usr:10||null|" + d + "|" + d,
+                key(p, "acme:x") + "|acme:x|acme:6|" + acmeHash + "|null|" + d + "|" + d,
+                key(p, "acme:y") + "|acme:y|acme:6|" + acmeHash + "|null|" + d + "|" + d));
         expectedUsers.sort(null);
 
         assertAll(
@@ -215,7 +243,7 @@ record FoldServiceTest(
                         """)),
                 () -> assertEquals(expectedUsers, rows(p, """
                         SELECT encode(user_key, 'hex') || '|' || id_text || '|' || shape_signature || '|'
-                               || coalesce(encode(cluster_hash, 'hex'), '') || '|' || coalesce(account_label, '') || '|'
+                               || coalesce(encode(cluster_hash, 'hex'), '') || '|' || coalesce(account_label, 'null') || '|'
                                || first_seen_day || '|' || last_seen_day
                           FROM end_user WHERE project_id = :pid ORDER BY 1
                         """)),
@@ -304,6 +332,26 @@ record FoldServiceTest(
                 .param("at", Timestamp.from(started))
                 .param("input", input)
                 .update();
+    }
+
+    private void bulk(Project p, String name, @Nullable String version, int day, int traces) {
+        jdbc.sql("""
+                INSERT INTO trace (project_id, id, name, project_version_id, started_at, event_ts, is_settled, created_at)
+                SELECT :pid, :prefix || g, :name, CAST(:version AS text), CAST(:at AS timestamptz) + g * interval '1 second',
+                       CAST(:at AS timestamptz) + g * interval '1 second', true, :at
+                  FROM generate_series(1, :n) AS g
+                """)
+                .param("pid", p.id())
+                .param("prefix", name + "-" + version + "-" + day + "-")
+                .param("name", name)
+                .param("version", version)
+                .param("at", Timestamp.from(at(day, "12:00:00")))
+                .param("n", traces)
+                .update();
+    }
+
+    private List<String> outageDays(Project p) {
+        return rows(p, "SELECT day || '|' || outage FROM end_user_fold_day WHERE project_id = :pid AND outage");
     }
 
     private static Instant at(int day, String time) {

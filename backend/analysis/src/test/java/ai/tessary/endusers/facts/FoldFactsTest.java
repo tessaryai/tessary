@@ -147,18 +147,18 @@ class FoldFactsTest {
                 () -> assertEquals(1, facts.idDays().getFirst().traces()),
                 () -> assertEquals(
                         List.of(new EndUserRow(
-                                "daac9c65a48cdd6b98d14e8573b331b6", "usr_7Hq2kD", "usr:10", null, null, DAY, DAY)),
+                                "daac9c65a48cdd6b98d14e8573b331b6", "usr_7Hq2kD", "usr:10", null, DAY, DAY)),
                         facts.users(),
                         "a trace with no user ID makes no end_user row"));
     }
 
     @Test
-    void users_carryClusterHashAndLabel() {
+    void users_carryTheClusterHash_andNoOtherReadablePartOfTheId() {
         DayFacts facts = fold(List.of(trace(" acme:u1 ", "s1", "chat.turn", at("08:00:00"))));
 
         assertEquals(
                 List.of(new EndUserRow(
-                        key("acme:u1"), "acme:u1", "acme:7", "c9a7e476bacbbf87e60c30ba2612595b", "acme", DAY, DAY)),
+                        key("acme:u1"), "acme:u1", "acme:7", "c9a7e476bacbbf87e60c30ba2612595b", DAY, DAY)),
                 facts.users());
     }
 

@@ -121,7 +121,7 @@ public final class FoldFacts {
         String cluster = ShapeSignature.clusterOf(id);
         String clusterHash =
                 cluster == null ? null : HexFormat.of().formatHex(ShapeSignature.clusterHash(salt, cluster));
-        return new EndUserRow(key, id, ShapeSignature.of(id).wire(), clusterHash, cluster, day, day);
+        return new EndUserRow(key, id, ShapeSignature.of(id).wire(), clusterHash, day, day);
     }
 
     private static long crc32(String text) {

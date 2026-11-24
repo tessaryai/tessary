@@ -92,14 +92,13 @@ public class DayFactsRepository {
                         .toList());
         batch(
                 """
-                INSERT INTO end_user (project_id, user_key, id_text, shape_signature, cluster_hash, account_label,
-                                      first_seen_day, last_seen_day)
-                VALUES (:pid, :key, :text, :shape, :cluster, :label, :first, :last)
+                INSERT INTO end_user (project_id, user_key, id_text, shape_signature, cluster_hash, first_seen_day,
+                                      last_seen_day)
+                VALUES (:pid, :key, :text, :shape, :cluster, :first, :last)
                 ON CONFLICT (project_id, user_key) DO UPDATE SET
                     id_text = EXCLUDED.id_text,
                     shape_signature = EXCLUDED.shape_signature,
                     cluster_hash = EXCLUDED.cluster_hash,
-                    account_label = EXCLUDED.account_label,
                     first_seen_day = LEAST(end_user.first_seen_day, EXCLUDED.first_seen_day),
                     last_seen_day = GREATEST(end_user.last_seen_day, EXCLUDED.last_seen_day),
                     updated_at = now()
@@ -111,7 +110,6 @@ public class DayFactsRepository {
                                 .addValue("text", user.idText())
                                 .addValue("shape", user.shapeSignature())
                                 .addValue("cluster", hexOrNull(user.clusterHash()))
-                                .addValue("label", user.accountLabel())
                                 .addValue("first", user.firstDay())
                                 .addValue("last", user.lastDay()))
                         .toList());
