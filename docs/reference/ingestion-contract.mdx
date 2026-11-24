@@ -59,7 +59,17 @@ There is no attribute for a turn. **The turn is the trace**: one turn per produc
 | --- | --- | --- | --- |
 | `session.id` | The session's identity, stored verbatim as `session.id` and denormalized onto every trace and span | always | OTel semconv |
 | `gen_ai.conversation.id` | `trace.thread_id`. Sub-grouping within a session is a column, not a second tree level | always | gen_ai semconv |
-| `user.id` | The end-user handle, into `session.user_id`, denormalized onto trace and span | always | OTel semconv |
+| `user.id` | The end user's stable ID, into `session.user_id`, denormalized onto trace and span. The Users page reads it | always | OTel semconv |
+
+`user.id` is recommended, not required: the Users page needs it, and ingest stays fail-open without it. What it must be:
+
+- The stable ID of one end user, or of one account, the same across sessions, days and devices. A consistent hash of the real ID is fine.
+- Never a session ID, a request ID, a device ID that resets, a daily cookie, an API key, a service account, a workspace, or a tenant.
+- Not sent for anonymous visitors. Guests and accounts in one ID format cannot be told apart.
+- Sent on scheduled and automated runs too, with the owner's ID. Those runs tell automation from people and test that the IDs are stable.
+- Set on every span, or once as a resource attribute, which reaches every span.
+
+There is no length cap and no alias spelling. When the ID is missing or partial, the Users page shows the share of traces that carry one and the date that share fell.
 
 ## Kind
 

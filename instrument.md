@@ -199,7 +199,7 @@ session  chat_8f2c                                   session.id on every span
 | Unit | Rule | If it is wrong |
 | --- | --- | --- |
 | Session | One end-user conversation or task. `session.id` is stable across its turns, unique to it, and set on **every** span. Never per request, never a constant. | Every turn looks like a new conversation. Frustration needs two earlier turns in the same conversation, so it never fires. |
-| User | `user.id` is the end user's own id, the same across their sessions. Never a plan, a tenant, or a fixture id. | Different people read as one user, or one person as several. |
+| User | `user.id` is the end user's own stable id (or one account's), the same across sessions, days and devices, on every span or as a resource attribute. Never a session or request id, a daily cookie, an API key, a plan, a workspace, a tenant, or a fixture id. Leave it off for anonymous visitors. Send the owner's id on scheduled runs. | Different people read as one user, or one person as several, and the Users page cannot tell who stopped. |
 | Thread | Set `gen_ai.conversation.id` when one session holds several separate threads. | Turns from different threads are read as one conversation. |
 | Trace | One turn: the work between a user message and the reply. | One trace per model call breaks the turn apart. One trace for a whole day scores only its first turn. |
 | Sub-agent | Its spans go in the turn's trace if the user waits for it. Otherwise it is its own trace. | A sub-agent the user waited on counts as a separate turn. |
