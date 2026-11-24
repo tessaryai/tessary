@@ -430,11 +430,10 @@ public class EndUserReadService {
         return latest.map(SnapshotRow::pageState).orElse(PageState.COLLECTING);
     }
 
-    /** Null before the first snapshot: collecting is not a judgement of the page. */
+    /** The page state when the page shows no stage numbers, {@code collecting} before the first snapshot included. */
     private static @Nullable PageState refusal(Optional<SnapshotRow> latest) {
-        return latest.map(SnapshotRow::pageState)
-                .filter(state -> !SHOWS_STAGES.contains(state))
-                .orElse(null);
+        PageState state = pageState(latest);
+        return SHOWS_STAGES.contains(state) ? null : state;
     }
 
     private static CountKind countKind(boolean metricShift, Optional<SnapshotRow> latest) {

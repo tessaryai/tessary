@@ -42,6 +42,8 @@ import ai.tessary.tenant.rbac.Role;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.testsupport.TenantFixture.Setup;
 import ai.tessary.web.ApiResponse;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -67,7 +69,11 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @SpringBootTest
 record EndUserReadTest(
-        TenantService tenants, OrgMembershipRepository memberships, JdbcClient jdbc, EndUserController controller) {
+        TenantService tenants,
+        OrgMembershipRepository memberships,
+        JdbcClient jdbc,
+        EndUserController controller,
+        ObjectMapper mapper) {
 
     private static final int D = 20_400;
 
@@ -105,7 +111,8 @@ record EndUserReadTest(
                 () -> assertEquals(List.of(), ids.ids()),
                 () -> assertEquals(CountKind.ID_VALUES, block.countKind()),
                 () -> assertEquals(0, block.usersHit()),
-                () -> assertNull(block.refusal(), "collecting is not a refusal"),
+                () -> assertEquals(PageState.COLLECTING, block.refusal()),
+                () -> assertEquals(PageState.COLLECTING, counts.get(0).refusal()),
                 () -> assertNull(block.issue()),
                 () -> assertEquals(1, counts.size()),
                 () -> assertEquals(0, counts.get(0).usersHit()),
@@ -114,7 +121,7 @@ record EndUserReadTest(
 
     /** The bug: the stored stage counts lose a number, or {@code counted} is summed again and disagrees with them. */
     @Test
-    void overview_returnsStoredStages() {
+    void overview_returnsStoredStages() throws Exception {
         Setup s = TenantFixture.bootstrap(tenants, "eu-read-stages");
         ReadSeeds seed = new ReadSeeds(jdbc, s.project().id());
         seed.project(20_200);
@@ -134,6 +141,7 @@ record EndUserReadTest(
 
         EndUserOverview o = data(controller.overview(owner(s), org(s), proj(s)));
         StageCounts stages = Objects.requireNonNull(o.stages());
+        JsonNode wire = mapper.readTree(mapper.writeValueAsString(o));
 
         assertAll(
                 () -> assertEquals(PageState.OK, o.pageState()),
@@ -149,7 +157,11 @@ record EndUserReadTest(
                 () -> assertEquals(StopStageState.EXPECTED_AND_NAMED, o.stopStageState()),
                 () -> assertEquals(BannerCode.SHARED_SILENCE, o.banners().get(0).code()),
                 () -> assertEquals(LimitCode.LENIENT_BASIS, o.limits().get(0).code()),
-                () -> assertEquals(0.91, Objects.requireNonNull(o.trust()).namedRight()));
+                () -> assertEquals(0.91, Objects.requireNonNull(o.trust()).namedRight()),
+                () -> assertEquals(2, wire.path("set_aside").path("aggregate").asInt(), "codes leave in wire form"),
+                () -> assertEquals(61, wire.path("stages").path("new").asInt()),
+                () -> assertEquals(
+                        "expected_and_named", wire.path("stop_stage_state").asText()));
     }
 
     /** The bug: a lineage with no case, or one from an older judge run, is listed, or the rank order is lost. */
@@ -259,6 +271,44 @@ record EndUserReadTest(
                                 .silentNow()),
                 () -> assertNull(
                         data(controller.issue(owner(s), org(s), proj(s), "C-1")).silentNow()));
+    }
+
+    /** The bug: a tie in first hit day and days silent at the drawer's page edge repeats or drops a user ID. */
+    @Test
+    void silentIds_keysetPage_acrossTies() {
+        Setup s = TenantFixture.bootstrap(tenants, "eu-read-silent-pages");
+        ReadSeeds seed = new ReadSeeds(jdbc, s.project().id());
+        seed.caseRow("c-l", 1, "classifier", false);
+        seed.snapshot(D, "ok");
+        seed.issue("lineage-l", D, "c-l", new String[] {}, 1, "evidence_of_loss");
+        for (int i = 0; i < 60; i++) {
+            byte[] k = ReadSeeds.key("silent-" + i);
+            seed.stoppedUser(k, "silent-" + i, 40 - (i % 30) / 3);
+            seed.issueHit("lineage-l", k, i < 30 ? D - 56 : D - 35);
+        }
+
+        EndUserSilentIds first = data(controller.silentIds(owner(s), org(s), proj(s), "C-1", null));
+        EndUserSilentIds second = data(controller.silentIds(owner(s), org(s), proj(s), "C-1", first.nextCursor()));
+        List<EndUserSilentId> all = new ArrayList<>(first.ids());
+        all.addAll(second.ids());
+        List<Integer> weeks = all.stream().map(EndUserSilentId::weeksSinceHit).toList();
+
+        assertAll(
+                () -> assertEquals(50, first.ids().size()),
+                () -> assertEquals(10, second.ids().size()),
+                () -> assertNull(second.nextCursor()),
+                () -> assertEquals(
+                        60, all.stream().map(EndUserSilentId::idText).distinct().count()),
+                () -> assertEquals(30, weeks.stream().filter(w -> w == 8).count()),
+                () -> assertEquals(8, weeks.get(29), "the oldest hits come first"),
+                () -> assertEquals(5, weeks.get(30)),
+                () -> assertEquals(40, all.get(30).daysSilent(), "within one hit week, longest silent first"),
+                () -> assertCode(
+                        CommonError.INVALID_PARAMETER,
+                        () -> controller.silentIds(owner(s), org(s), proj(s), "C-1", "not a cursor")),
+                () -> assertCode(
+                        CommonError.INVALID_PARAMETER,
+                        () -> controller.ids(owner(s), org(s), proj(s), "stopped", "Zm9v", 50)));
     }
 
     /**
