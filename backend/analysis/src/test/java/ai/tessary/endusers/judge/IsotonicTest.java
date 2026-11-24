@@ -49,6 +49,13 @@ class IsotonicTest {
     }
 
     @Test
+    void interp_findsTheSegmentByBisectWhenRoundedCentresStepBack() {
+        List<Block> blocks =
+                List.of(new Block(1, 0.1), new Block(2.0000000000000004, 0.5), new Block(2, 0.7), new Block(3, 0.9));
+        assertEquals(0.7, Isotonic.interp(blocks, 2), "the reference bisects the centres; a forward scan reads 0.5");
+    }
+
+    @Test
     void interp_withNoBlocksKeepsTheValue() {
         assertEquals(0.37, Isotonic.interp(List.of(), 0.37));
     }

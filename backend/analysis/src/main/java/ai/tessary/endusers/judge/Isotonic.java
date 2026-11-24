@@ -47,10 +47,13 @@ public final class Isotonic {
         if (p >= blocks.getLast().centre()) {
             return blocks.getLast().value();
         }
-        int i = 0;
-        while (blocks.get(i + 1).centre() <= p) {
-            i++;
+        double[] centres = new double[blocks.size()];
+        for (int k = 0; k < centres.length; k++) {
+            centres[k] = blocks.get(k).centre();
         }
+        // Bisect, as the reference does: rounded centres can step back by an ulp, and the probes still give
+        // centres[i] <= p < centres[i + 1], so the segment has a positive width.
+        int i = Stats.bisectRight(centres, p) - 1;
         Block b0 = blocks.get(i);
         Block b1 = blocks.get(i + 1);
         return b0.value() + (b1.value() - b0.value()) * (p - b0.centre()) / (b1.centre() - b0.centre());
