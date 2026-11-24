@@ -2,6 +2,8 @@
 package ai.tessary.endusers.judge.model;
 
 import java.util.Map;
+import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The estimate of spec 8.3 to 8.5 with the issue's own null, by lineage key. An issue with no comparable hit ID has no
@@ -22,6 +24,9 @@ public record IssueEstimate(Map<String, LineageEstimate> byLineage, int h) {
      * @param controlIds IDs with an unexposed trial on the reach
      * @param lateHits hit IDs first hit more than 7 days after their last series day
      * @param unmatched hit IDs with no like IDs to compare with
+     * @param estimateIds key indexes of the hit IDs in the estimate; a covered hit ID not in it is a late hit
+     * @param withoutAccounts the same estimate with the account cell dropped; computed only when clusters exist and
+     *     {@code accEff} is under 5, else null
      */
     public record LineageEstimate(
             int usersHit,
@@ -41,5 +46,7 @@ public record IssueEstimate(Map<String, LineageEstimate> byLineage, int h) {
             int trials,
             int controlIds,
             int lateHits,
-            int unmatched) {}
+            int unmatched,
+            Set<Integer> estimateIds,
+            @Nullable LineageEstimate withoutAccounts) {}
 }

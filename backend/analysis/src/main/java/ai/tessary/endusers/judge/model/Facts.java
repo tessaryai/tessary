@@ -17,7 +17,7 @@ import org.jspecify.annotations.Nullable;
  * @param storedRouteClasses the classes the learn step stored
  * @param outageDays days on which every route fell under the outage share of its 28-day median
  * @param gapDays days whose traces were deleted before they were folded
- * @param pageStateMemory the page states of the last two runs, oldest first
+ * @param pageStateMemory the rule states of the last two runs, before the memory was applied, oldest first
  */
 public record Facts(
         int asOfDay,

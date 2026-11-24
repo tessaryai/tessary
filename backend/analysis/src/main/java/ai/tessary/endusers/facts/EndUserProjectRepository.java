@@ -32,7 +32,7 @@ public class EndUserProjectRepository {
         this.jdbc = jdbc;
     }
 
-    /** {@code pageStateMemory} is oldest first, at most two. */
+    /** {@code pageStateMemory} holds the rule states of the last runs, oldest first, at most two. */
     public record State(
             @Nullable Integer historyStartDay,
             @Nullable Instant hitsWatermark,
@@ -96,7 +96,10 @@ public class EndUserProjectRepository {
                 .update();
     }
 
-    /** Appends the page state of a judge run and drops all but the last two. */
+    /**
+     * Appends the state the page-state rules gave in a judge run, before the memory was applied, and drops all but the
+     * last two.
+     */
     public void rememberPageState(String projectId, PageState state) {
         ensure(projectId);
         jdbc.sql("""

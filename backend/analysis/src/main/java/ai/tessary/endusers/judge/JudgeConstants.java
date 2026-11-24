@@ -26,7 +26,7 @@ public final class JudgeConstants {
     public static final int PAIR_C60_MIN = 6; // [P]
     public static final double PAIR_SCHEDULE_SHARE = 0.5; // [P]
     public static final int PAIR_TEST_MIN_TRACES = 4; // [ref]
-    public static final int PAIR_TEST_MAX_TRACES = 150; // [ref] reading 1 of final-plan 3.3
+    public static final int PAIR_TEST_MAX_TRACES = 150; // [ref]
     public static final double ROUTE_NULL_SHARE = 0.9; // [S][T:v1]
     public static final double ROUTE_PARENT_SHARE = 0.5; // [S][T:v1]
     public static final double ROUTE_INPUT_SHARE = 0.1; // [S][T:v1]

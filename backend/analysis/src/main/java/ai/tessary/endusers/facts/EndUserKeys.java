@@ -11,7 +11,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.jspecify.annotations.Nullable;
 
-/** The salted user key and the UTC day number that key every fact row (final-plan 3.1, spec 3 conventions). */
+/** The salted user key and the UTC day number that key every fact row (spec section 3, conventions). */
 public final class EndUserKeys {
 
     public static final int KEY_BYTES = 16;
