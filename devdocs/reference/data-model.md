@@ -836,7 +836,7 @@ version is a route or version of its own (`UNIQUE NULLS NOT DISTINCT`). The proj
 
 | Table | Key | Columns |
 |---|---|---|
-| `end_user_project` | `project_id` | `salt` (`bytea`, 32 random bytes, made on first use), `history_start_day` (`t0`, fixed once set), `hits_watermark`, `fold_event_watermark`, `fold_rollup_watermark` (`timestamptz`), `page_state_memory` (jsonb array, the last two page states), `created_at`, `updated_at` |
+| `end_user_project` | `project_id` | `salt` (`bytea`, 32 random bytes, made on first use), `history_start_day` (`t0`, fixed once set), `hits_watermark`, `fold_created_watermark`, `fold_rollup_watermark` (`timestamptz`), `page_state_memory` (jsonb array, the last two page states), `created_at`, `updated_at` |
 | `end_user_route` | `(project_id, route_no)` | `trace_name` (nullable), `call_site_id` (`__unattributed__` for none), `route_class` (`A`/`A2`/`S`/`M`/`B`/`C`, NULL before the first learn), `class_since_day`, `statistics` (jsonb object), `near_cut`; unique `(project_id, trace_name, call_site_id)` |
 | `end_user_day` | `(project_id, user_key, day, route_no, version_no)` | `traces`, `session_hashes` (`integer[]`, the 32 smallest), `hour_mask` (`integer`, 24 bits), `slot_mask` (`bit(96)`, 15-minute slots), `job_keys` (`bigint[]`, at most 32 crc32 values of `input_preview` joined with the slot), `traces_with_input`, `traces_with_parent`. Index `ix_end_user_day_project_day (project_id, day)` for day replacement and the horizon sweep |
 | `end_user_day_null` | `(project_id, day, route_no, version_no)` | `traces` (every trace), `traces_no_user_id` |

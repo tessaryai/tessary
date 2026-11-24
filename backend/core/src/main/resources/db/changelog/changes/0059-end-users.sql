@@ -12,7 +12,7 @@ CREATE TABLE end_user_project (
     salt                   bytea NOT NULL,
     history_start_day      integer,
     hits_watermark         timestamptz,
-    fold_event_watermark   timestamptz,
+    fold_created_watermark timestamptz,
     fold_rollup_watermark  timestamptz,
     page_state_memory      jsonb NOT NULL DEFAULT '[]'::jsonb,
     created_at             timestamptz NOT NULL DEFAULT now(),
