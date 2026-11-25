@@ -199,6 +199,16 @@ class TracerTest {
     }
 
     @Test
+    void tracer_countsEachIdOnce_withTheMaximumOverItsJobs() {
+        long other = JOB + (1L << 7);
+        Scenario s = new Scenario(100);
+        s.id().job(JOB, 40, 41, 42).job(other, 44, 45, 46);
+        s.id().job(other, 50, 51, 52, 90);
+
+        assertCounts(1, 1, s.test(), "two jobs ended with one ID, one went on: one ending, continued");
+    }
+
+    @Test
     void tracer_readsAliasMembersUnderTheirRepresentative() {
         Scenario s = new Scenario(100);
         Scenario.Id owner = s.id().job(JOB, 40, 41);
