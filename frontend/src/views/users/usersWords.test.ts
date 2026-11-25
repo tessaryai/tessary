@@ -70,7 +70,7 @@ import {
   railHeader,
   rowChartAria,
   silentHeader,
-  silentNowLink,
+  silentNowCount,
   silentState,
   stageTab,
   stopStage,
@@ -787,7 +787,7 @@ describe("fixed lines", () => {
     ],
     ["ISSUES_HEADING", "Issues, by users lost"],
     ["FUNNEL_HEADING", "Where your user IDs are"],
-    ["SEE_USER_IDS", "See user IDs →"],
+    ["SEE_USER_IDS", "See user IDs"],
     ["SILENT_CAPTION", "quiet longer than usual"],
     ["UPDATED_DAILY", "Updated daily"],
     ["HOW_COUNTED_SHOW", "How is this counted?"],
@@ -802,7 +802,10 @@ describe("fixed lines", () => {
       "SILENT_NOTE",
       "One user's stop is not proof the issue caused it. The issue number compares these user IDs with similar user IDs not yet hit.",
     ],
-    ["SEE_USERS_LOST", "See users lost →"],
+    ["SEE_USERS_LOST", "See users lost"],
+    ["ARROW", "→"],
+    ["PAGE_TITLE", "Users"],
+    ["NOT_APPLICABLE", "This issue shifts a measure for all traffic; it has no hit user IDs."],
     [
       "STOPPED_EXPLAIN",
       "A user ID is named when it is clearly more likely gone than not, judged against this app's own record of returns. The expected count also adds the odds of user IDs that are not named.",
@@ -1045,7 +1048,7 @@ describe("issues", () => {
 
   it("words the links of the issue page", () => {
     expect(openCase("C-118")).toBe("Open case C-118");
-    expect(silentNowLink(46)).toBe("Hit user IDs that are silent now · 46 →");
+    expect(silentNowCount(46)).toBe("Hit user IDs that are silent now · 46");
   });
 });
 

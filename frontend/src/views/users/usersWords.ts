@@ -58,8 +58,12 @@ export const whyStopped = (daysSilent: number, pStop: number) =>
 
 export const HELD_STATE = "held as a possible break";
 export const NO_ID_TEXT = "ID text no longer kept";
+/** The page title, the breadcrumb root and the label of the case block. */
+export const PAGE_TITLE = "Users";
+/** Follows the text of a link that opens a list: "See user IDs", "See users lost", the silent-now link. */
+export const ARROW = "→";
 export const NO_CASES = "No cases yet. An issue shows here when a finding becomes a case in Triage.";
-const NOT_APPLICABLE = "This issue shifts a measure for all traffic; it has no hit user IDs.";
+export const NOT_APPLICABLE = "This issue shifts a measure for all traffic; it has no hit user IDs.";
 
 export const STAGE_LABELS: Record<EndUserStage, string> = {
   active: "Active",
@@ -99,7 +103,7 @@ export const UPDATED_DAILY = "Updated daily";
 export const HOW_COUNTED_SHOW = "How is this counted?";
 export const HOW_COUNTED_HIDE = "Hide how this is counted";
 export const FUNNEL_HEADING = "Where your user IDs are";
-export const SEE_USER_IDS = "See user IDs →";
+export const SEE_USER_IDS = "See user IDs";
 export const SILENT_CAPTION = "quiet longer than usual";
 export const ISSUES_OVERLAP =
   "An issue's users lost are stops above similar user IDs not yet hit. Counts of different issues overlap.";
@@ -533,7 +537,7 @@ export const AT_RISK_ROWS = { hit: "hit", similar: "similar" };
 export const weekTick = (week: number) => `wk ${week}`;
 export const chartAria = (weeks: number, hitEnd: number, similarEnd: number, loss: string) =>
   `Still active by week after the hit, weeks 1 to ${weeks}: hit user IDs fall to ${percent(hitEnd)}, similar user IDs not yet hit to ${percent(similarEnd)}; ${loss}`;
-export const silentNowLink = (n: number) => `Hit user IDs that are silent now · ${thousands(n)} →`;
+export const silentNowCount = (n: number) => `${SILENT_NOW} · ${thousands(n)}`;
 export const NOT_PROOF = "A difference in stops, not proof of cause.";
 
 /** The first How-counted line of an issue; a count the backend did not give is left out. */
@@ -581,7 +585,7 @@ export const silentState = (r: EndUserSilentId) => (r.grade ? GRADE_WORDS[r.grad
 
 // ---- P4: the case block ----
 
-export const SEE_USERS_LOST = "See users lost →";
+export const SEE_USERS_LOST = "See users lost";
 
 /** The count line in two parts, so the count can stand out; null counts belong to a metric shift, worded apart. */
 export function caseCountLine(b: EndUserCaseBlock): {
