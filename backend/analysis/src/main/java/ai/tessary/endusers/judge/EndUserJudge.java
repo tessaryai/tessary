@@ -150,9 +150,9 @@ public final class EndUserJudge {
     }
 
     /**
-     * The page state of a window with no user ID: the first rules of spec 3.5 over the null-day rows alone. With no ID
-     * every non-C trace has no user ID, so the share is 0 when any exists and 1 when none does; then the page is too
-     * early. Each is a refusal, so the memory of earlier runs cannot loosen it.
+     * The page state of a window with no user-ID day row: the first rules of spec 3.5 over the null-day rows alone.
+     * Those rows still count the traces of an ID that was erased, so either share can fire; when neither does, the
+     * page is too early. Each is a refusal, so the memory of earlier runs cannot loosen it.
      *
      * @param t0 the stored history start day, the first day with a user ID when there is none
      */

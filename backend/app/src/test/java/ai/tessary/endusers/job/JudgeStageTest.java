@@ -197,7 +197,7 @@ record JudgeStageTest(
             byte[] k = key(id);
             keys.add(k);
             s.user(k, id, D - 40, D, true);
-            for (int d = D - 40; d <= D; d += 2) s.day(k, d, 1);
+            for (int d = D - 40; d <= D; d += id.equals("cal") ? 1 : 2) s.day(k, d, 1);
         }
         byte[] dan = key("dan");
         s.user(dan, "dan", D - 50, D - 42, true);
@@ -223,6 +223,12 @@ record JudgeStageTest(
                         s.strings("SELECT state || '|' || COALESCE(stage, '') FROM end_user WHERE project_id = :pid"),
                         "a refused page puts no ID in a stage, and an alias member takes its representative's state"),
                 () -> assertEquals(
+                        List.of("cal|service", "dan|service"),
+                        s.strings("SELECT id_text || '|' || COALESCE(set_aside_reason, '-') FROM end_user"
+                                + " WHERE project_id = :pid AND id_text IN ('cal', 'dan') ORDER BY id_text"),
+                        "cal is on every day of its life with the same traces (spec 3.1 service); a hit on its alias"
+                                + " member dan counts as covered only when cal is"),
+                () -> assertEquals(
                         List.of(D + "|" + s.id("c1") + "|page_refused|1|f"),
                         s.strings("""
                                 SELECT day || '|' || case_id || '|' || verdict || '|' || user_ids_hit || '|'
@@ -237,6 +243,22 @@ record JudgeStageTest(
                                 """)),
                 () -> assertEquals(
                         List.of(PageState.TOO_EARLY), projects.state(s.pid()).pageStateMemory()));
+    }
+
+    @Test
+    void name_isStable_becauseRetriesResumeByName() {
+        assertEquals("judge", judge.name());
+    }
+
+    @Test
+    void dayRowWithNoStoredId_failsTheRun_ratherThanJudgeAnIdWithNoShapeOrFirstDay() {
+        Seed s = seed("eu-judge-orphan", D - 60);
+        s.route(1, "A");
+        s.day(key("ana"), D, 1);
+
+        assertThrows(IllegalStateException.class, () -> judge.run(s.pid(), D));
+
+        assertEquals(Optional.empty(), snapshots.latest(s.pid()));
     }
 
     @Test

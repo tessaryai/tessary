@@ -267,7 +267,10 @@ public class JudgeStage implements EndUsersStage {
                 r.accountLines().isEmpty() ? null : r.accountLines());
     }
 
-    /** Every judged ID, and each alias member with its representative's state and no stage, so it is counted once. */
+    /**
+     * Every judged ID, and each alias member with its representative's state and set-aside reason and no stage, so it
+     * is counted once and a hit on it counts only when its unit is covered.
+     */
     private static List<UserState> userStates(Loaded loaded, Judgment j) {
         List<UserState> out = new ArrayList<>();
         Map<Integer, IdState> byId = j.states().byId();
@@ -275,7 +278,7 @@ public class JudgeStage implements EndUsersStage {
                 (u, s) -> out.add(state(loaded.keys().get(u), s, j.odds().byId().get(u), s.setAside(), s.stage())));
         j.identity().aliasOf().forEach((member, rep) -> {
             IdState s = Objects.requireNonNull(byId.get(rep));
-            out.add(state(loaded.keys().get(member), s, j.odds().byId().get(rep), null, null));
+            out.add(state(loaded.keys().get(member), s, j.odds().byId().get(rep), s.setAside(), null));
         });
         return out;
     }

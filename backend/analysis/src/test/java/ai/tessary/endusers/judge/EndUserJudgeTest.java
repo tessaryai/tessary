@@ -114,6 +114,26 @@ class EndUserJudgeTest {
     }
 
     @Test
+    void withoutIds_erasedIdsInOlderTraffic_refuseOnTheLast28Days() {
+        PageStateResult page = EndUserJudge.withoutIds(
+                D,
+                20,
+                List.of(new NullDay(D - 60, 1, 1, 40, 0), new NullDay(D, 1, 1, 40, 40)),
+                classes(Map.of(1, RouteClass.A)));
+
+        assertEquals(
+                new PageStateResult(
+                        PageState.NO_USER_ID,
+                        PageState.NO_USER_ID,
+                        PageStateReason.LOW_ID_SHARE_28,
+                        Map.of("ident_share_28", 0.0),
+                        false,
+                        List.of()),
+                page,
+                "half of all traffic carries an ID, none of the last 28 days does");
+    }
+
+    @Test
     void withoutIds_trafficOnlyOnClassC_isTooEarly_becauseTheShareReadsOtherRoutesOnly() {
         PageStateResult page =
                 EndUserJudge.withoutIds(D, 20, List.of(new NullDay(D, 1, 1, 40, 40)), classes(Map.of(1, RouteClass.C)));
