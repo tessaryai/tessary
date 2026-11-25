@@ -1,0 +1,98 @@
+{
+ "issues": [
+  {
+   "ci_high": 9.605444997315264,
+   "ci_low": 0.0,
+   "issue_id": "c_latency_evening",
+   "reference_verdict": "not enough evidence",
+   "shown": true,
+   "truth_is_placebo": false,
+   "users_hit": 64,
+   "users_lost": 0.0,
+   "verdict": "not_enough_evidence"
+  },
+  {
+   "ci_high": 46.18704087518715,
+   "ci_low": 12.416848065502094,
+   "issue_id": "c_memory_loss",
+   "reference_verdict": "evidence of loss",
+   "shown": true,
+   "truth_is_placebo": false,
+   "users_hit": 80,
+   "users_lost": 29.317935595477902,
+   "verdict": "evidence_of_loss"
+  },
+  {
+   "ci_high": 8.595777142913798,
+   "ci_low": 0.0,
+   "issue_id": "c_persona_drift",
+   "reference_verdict": "not enough evidence",
+   "shown": true,
+   "truth_is_placebo": false,
+   "users_hit": 55,
+   "users_lost": 0.0,
+   "verdict": "not_enough_evidence"
+  },
+  {
+   "ci_high": 15.309453282090209,
+   "ci_low": 0.0,
+   "issue_id": "c_provider_outage",
+   "reference_verdict": "not enough evidence",
+   "shown": true,
+   "truth_is_placebo": false,
+   "users_hit": 44,
+   "users_lost": 6.028190773929614,
+   "verdict": "not_enough_evidence"
+  },
+  {
+   "ci_high": 20.356252246705377,
+   "ci_low": 0.0,
+   "issue_id": "c_refusal_opening",
+   "reference_verdict": "not enough evidence",
+   "shown": true,
+   "truth_is_placebo": false,
+   "users_hit": 130,
+   "users_lost": 1.5366707105668693,
+   "verdict": "not_enough_evidence"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "c_tts_error",
+   "reference_verdict": "too few ids",
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 44,
+   "users_lost": null,
+   "verdict": "too_few_ids"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "f_context_truncation",
+   "reference_verdict": "not comparable",
+   "shown": false,
+   "truth_is_placebo": true,
+   "users_hit": 150,
+   "users_lost": null,
+   "verdict": "not_comparable"
+  }
+ ],
+ "page_reason": null,
+ "page_reason_code": null,
+ "page_reason_numbers": {},
+ "page_state": "ok",
+ "scenario": "rhythm",
+ "stages": {
+  "active": 133,
+  "new": 2,
+  "silent": 22,
+  "stopped_expected": 520.7,
+  "stopped_named": 508
+ },
+ "tracer": {
+  "m_cont": 0,
+  "n_end": 0,
+  "verdict": "cannot test"
+ }
+}

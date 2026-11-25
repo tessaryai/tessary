@@ -1,0 +1,104 @@
+{
+ "1": {
+  "call_site": "chat_reply",
+  "class": "M",
+  "name": "chat.regenerate",
+  "route_no": 1,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.0231,
+   "dq10": 9.0,
+   "dq90": 36.0,
+   "follow": 0.9971,
+   "inp": 1.0,
+   "n": 2421,
+   "near_cut": false,
+   "sched_r": 0.0
+  }
+ },
+ "2": {
+  "call_site": "title_gen",
+  "class": "M",
+  "name": "chat.title",
+  "route_no": 2,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.0343,
+   "dq10": 1.0,
+   "dq90": 4.0,
+   "follow": 0.9979,
+   "inp": 1.0,
+   "n": 9575,
+   "near_cut": false,
+   "sched_r": 0.0
+  }
+ },
+ "3": {
+  "call_site": "chat_reply",
+  "class": "A",
+  "name": "chat.turn",
+  "route_no": 3,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.0363,
+   "dq10": 12.0,
+   "dq90": 161.0,
+   "follow": 0.7553,
+   "inp": 1.0,
+   "n": 61262,
+   "near_cut": false,
+   "sched_r": 0.0024
+  }
+ },
+ "4": {
+  "call_site": "healthcheck",
+  "class": "C",
+  "name": "healthcheck.chat",
+  "route_no": 4,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": null,
+   "dq10": null,
+   "dq90": null,
+   "follow": 0.0,
+   "inp": 1.0,
+   "n": 1415,
+   "near_cut": false,
+   "sched_r": null
+  }
+ },
+ "5": {
+  "call_site": "research_agent",
+  "class": "C",
+  "name": "research.run",
+  "route_no": 5,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.2222,
+   "dq10": null,
+   "dq90": null,
+   "follow": 0.0513,
+   "inp": 1.0,
+   "n": 78,
+   "near_cut": false,
+   "sched_r": 0.0
+  }
+ },
+ "6": {
+  "call_site": "scheduled_task",
+  "class": "S",
+  "name": "task.scheduled_run",
+  "route_no": 6,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.9284,
+   "dq10": null,
+   "dq90": null,
+   "follow": 0.0,
+   "inp": 1.0,
+   "n": 2426,
+   "near_cut": false,
+   "sched_r": 0.9958
+  }
+ }
+}

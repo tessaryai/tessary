@@ -1,0 +1,166 @@
+[
+ {
+  "case": {
+   "case_id": "case_context_loss",
+   "opened_day": 20551,
+   "resolved_day": 20564,
+   "state": "resolved",
+   "title": "Assistant loses the earlier messages of a conversation"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "context_loss",
+    "finding_id": "f_context_loss",
+    "last_seen_day": 20563,
+    "onset_day": 20550,
+    "severity": 0.8,
+    "status": "closed",
+    "title": "Assistant loses the earlier messages of a conversation"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "case_context_loss"
+ },
+ {
+  "case": {
+   "case_id": "case_free_limit",
+   "opened_day": 20568,
+   "resolved_day": null,
+   "state": "open",
+   "title": "Free plan daily limit reached"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "rate_limit",
+    "finding_id": "f_rate_limit",
+    "last_seen_day": 20631,
+    "onset_day": 20568,
+    "severity": 0.5,
+    "status": "open",
+    "title": "Free plan daily limit reached"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "case_free_limit"
+ },
+ {
+  "case": {
+   "case_id": "case_provider_outage",
+   "opened_day": 20557,
+   "resolved_day": 20557,
+   "state": "resolved",
+   "title": "Provider outage: failed replies"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "provider_error",
+    "finding_id": "f_provider_error",
+    "last_seen_day": 20557,
+    "onset_day": 20557,
+    "severity": 0.9,
+    "status": "closed",
+    "title": "Failed replies from the model provider"
+   },
+   {
+    "classifier_key": "timeout_retry",
+    "finding_id": "f_timeout_retry",
+    "last_seen_day": 20557,
+    "onset_day": 20557,
+    "severity": 0.5,
+    "status": "closed",
+    "title": "Timeouts and retries after failed replies"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "case_provider_outage"
+ },
+ {
+  "case": {
+   "case_id": "case_quality_regression",
+   "opened_day": 20579,
+   "resolved_day": null,
+   "state": "open",
+   "title": "Shorter, incomplete answers after the default model change"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "quality_regression",
+    "finding_id": "f_quality_regression",
+    "last_seen_day": 20631,
+    "onset_day": 20575,
+    "severity": 0.45,
+    "status": "open",
+    "title": "Shorter, incomplete answers after the default model change"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "case_quality_regression"
+ },
+ {
+  "case": {
+   "case_id": "case_starter_cards_error",
+   "opened_day": 20542,
+   "resolved_day": null,
+   "state": "open",
+   "title": "Starter prompt cards fail with a tool error"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "tool_error",
+    "finding_id": "f_tool_error",
+    "last_seen_day": 20631,
+    "onset_day": 20541,
+    "severity": 0.55,
+    "status": "open",
+    "title": "Starter prompt cards fail with a tool error"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "case_starter_cards_error"
+ },
+ {
+  "case": {
+   "case_id": "case_task_run_failed",
+   "opened_day": 20593,
+   "resolved_day": 20605,
+   "state": "resolved",
+   "title": "Scheduled task runs fail"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "task_run_failed",
+    "finding_id": "f_task_run_failed",
+    "last_seen_day": 20604,
+    "onset_day": 20593,
+    "severity": 0.6,
+    "status": "closed",
+    "title": "Scheduled task runs fail"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "case_task_run_failed"
+ },
+ {
+  "case": null,
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "missing_citation",
+    "finding_id": "f_missing_citation",
+    "last_seen_day": 20631,
+    "onset_day": 20513,
+    "severity": 0.2,
+    "status": "open",
+    "title": "Search answers without source links"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "f_missing_citation"
+ }
+]
