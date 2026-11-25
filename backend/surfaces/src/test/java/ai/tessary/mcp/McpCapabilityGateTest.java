@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
  * does.
  *
  * <ul>
- *   <li>{@code tools/list} names exactly the open set, 23 tools.</li>
+ *   <li>{@code tools/list} names exactly the open set, 26 tools.</li>
  *   <li>{@code tools/call} on a removed tool reads as <b>unknown</b>, and the handler never runs.</li>
  *   <li>{@code initialize} instructions are built from the same catalogue, so the prose cannot advertise a
  *       tool that is gone.</li>
@@ -103,14 +103,18 @@ class McpCapabilityGateTest {
             "get_trace",
             // Open in the listing; the handler checks PROMPT_MANAGEMENT per call.
             "list_prompts",
-            "get_prompt");
+            "get_prompt",
+            // The Users view reads: codes and numbers per project and per case, never a user ID.
+            "get_end_users_overview",
+            "list_end_user_issues",
+            "get_end_user_issue");
 
     @Test
     void everyOrgIsOfferedExactlyTheOpenTools() throws Exception {
         Set<String> offered = registryWith().pipeline(Pipeline.empty()).build().listToolNames();
 
         assertEquals(OPEN_TOOLS, offered, "every org should be offered exactly the open set");
-        assertEquals(23, offered.size(), "the surface is 23 tools, all listed");
+        assertEquals(26, offered.size(), "the surface is 26 tools, all listed");
     }
 
     /**

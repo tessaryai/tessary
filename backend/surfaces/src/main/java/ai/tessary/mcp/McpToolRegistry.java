@@ -19,6 +19,8 @@ import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EarlierMessage;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
+import ai.tessary.endusers.read.EndUserDtos.EndUserIssue;
+import ai.tessary.endusers.read.EndUserReadService;
 import ai.tessary.model.CallSite;
 import ai.tessary.model.FailureMode;
 import ai.tessary.open.errors.TessaryException;
@@ -121,6 +123,7 @@ public class McpToolRegistry {
     private final CaseService cases;
     private final PromptService prompts;
     private final CapabilityService capabilities;
+    private final EndUserReadService endUsers;
 
     private final Map<String, McpTool> tools = new LinkedHashMap<>();
 
@@ -137,7 +140,8 @@ public class McpToolRegistry {
             CaseService cases,
             TraceDetectionRepository detections,
             PromptService prompts,
-            CapabilityService capabilities) {
+            CapabilityService capabilities,
+            EndUserReadService endUsers) {
         this.detections = detections;
         this.pipelineService = pipelineService;
         this.projects = projects;
@@ -150,6 +154,7 @@ public class McpToolRegistry {
         this.cases = cases;
         this.prompts = prompts;
         this.capabilities = capabilities;
+        this.endUsers = endUsers;
         register();
     }
 
@@ -171,6 +176,7 @@ public class McpToolRegistry {
         this.cases = null;
         this.prompts = null;
         this.capabilities = null;
+        this.endUsers = null;
         for (McpTool t : toolset) tools.put(t.name(), t);
     }
 
@@ -241,6 +247,7 @@ public class McpToolRegistry {
                         strArg(args, "compliance_tag"))));
 
         registerCaseTools();
+        registerEndUserTools();
         registerQueryTools();
         registerSubstrateListTools();
         registerTraceReadTools();
@@ -301,6 +308,46 @@ public class McpToolRegistry {
                         + " quoted by a person resolves.",
                 schema(Map.of("id", strField("Case id, or the human reference such as 'C-118'.")), List.of("id")),
                 (ctx, args) -> getCase(ctx, requireStr(args, "id"))));
+    }
+
+    /**
+     * The Users view reads, through the same {@link EndUserReadService} as the UI. Codes and numbers only, never a
+     * user ID: the silent-ID and ID lists stay off this surface.
+     */
+    private void registerEndUserTools() {
+        add(new McpTool(
+                "get_end_users_overview",
+                "Read the Users view top for this token's project: page_state (ok, partial_coverage, too_early,"
+                        + " no_user_id, ids_unreliable, not_computed, collecting) with its reason numbers, as_of"
+                        + " (the snapshot day, a UTC day number), how many user IDs were counted and set aside,"
+                        + " the stages (active, new, silent, stopped_named, stopped_expected), the stop-stage"
+                        + " state, banners, limits and trust. Codes and numbers only. null means not computed,"
+                        + " never zero; page_state collecting means no snapshot exists yet.",
+                schema(Map.of(), List.of()),
+                (ctx, args) -> endUsers.overview(requireProject(ctx).id())));
+
+        add(new McpTool(
+                "list_end_user_issues",
+                "List the cases that hit user IDs in this token's project, in rank order. Each row is the"
+                        + " case (case_id, case_ref, title, detector, subject_label, since_day) and its issue:"
+                        + " verdict, shown, rank, user_ids_hit, compared, lost, low, high, group_id, diagnostics"
+                        + " and a retention curve. Only evidence_of_loss and few_accounts claim a loss; every"
+                        + " other verdict says why no claim is made. Pass a row's case_ref to get_end_user_issue."
+                        + " null means not computed, never zero.",
+                schema(Map.of(), List.of()),
+                (ctx, args) -> endUsers.issues(requireProject(ctx).id())));
+
+        add(new McpTool(
+                "get_end_user_issue",
+                "Fetch one case's effect on user IDs: verdict, user_ids_hit, the numbers behind the verdict"
+                        + " (diagnostics: stopped, expected, upper, h, late_hits, unmatched), the full curve with"
+                        + " its band and at-risk rows, silent_now, and the resolved date. issue is null when the"
+                        + " newest snapshot has no row for the case. Accepts the case id or the human reference"
+                        + " ('C-118').",
+                schema(
+                        Map.of("case_id", strField("Case id, or the human reference such as 'C-118'.")),
+                        List.of("case_id")),
+                (ctx, args) -> getEndUserIssue(ctx, requireStr(args, "case_id"))));
     }
 
     /**
@@ -1278,6 +1325,15 @@ public class McpToolRegistry {
                     detail.absorbAvailable(),
                     detail.detectorAvailable(),
                     detail.fix());
+        } catch (TessaryException e) {
+            throw toolError(e);
+        }
+    }
+
+    private EndUserIssue getEndUserIssue(TenantContext ctx, String caseId) {
+        String projectId = requireProject(ctx).id();
+        try {
+            return endUsers.issue(projectId, caseId);
         } catch (TessaryException e) {
             throw toolError(e);
         }
