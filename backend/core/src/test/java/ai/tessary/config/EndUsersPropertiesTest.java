@@ -19,7 +19,7 @@ class EndUsersPropertiesTest {
 
         assertTrue(props.collectEnabled(), "collection is on unless the install turns it off");
         assertEquals(400, props.historyDays());
-        assertEquals(5_000_000L, props.maxIdDays());
+        assertEquals(1_000_000L, props.maxIdDays());
         assertEquals(180, props.judgeWindowDays());
         assertEquals(1800L, props.leaseSeconds());
         assertEquals(5, props.maxAttempts());

@@ -21,7 +21,7 @@ public record EndUsersProperties(
         @DefaultValue("180") int judgeWindowDays,
 
         /** User-ID days in the judge window above which the snapshot is not computed. */
-        @DefaultValue("5000000") long maxIdDays,
+        @DefaultValue("1000000") long maxIdDays,
 
         /** Reclaim window for a daily job whose worker died mid-run. */
         @DefaultValue("1800") long leaseSeconds,
