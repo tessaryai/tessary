@@ -92,20 +92,25 @@ CREATE TABLE end_user_alias_edge (
     CONSTRAINT ck_end_user_alias_edge_via CHECK (via IN ('session', 'thread'))
 );
 
--- Every evidence role is kept; which roles count as a hit is the detector's rule, applied when read.
+-- Every evidence role is kept; which roles count as a hit is the detector's rule, applied when read. A ref to a session
+-- only is stored on route_no 0, and session_routes then holds one entry per session merged into the row:
+-- {"refs": n, "routes": {"<route_no>": traces}}, the traces of the whole session per route. No session ID is stored.
 CREATE TABLE end_user_hit (
-    project_id  text NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-    finding_id  text NOT NULL,
-    role        text NOT NULL,
-    user_key    bytea NOT NULL,
-    day         integer NOT NULL,
-    route_no    integer NOT NULL,
-    refs        integer NOT NULL,
-    source      text NOT NULL,
+    project_id      text NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    finding_id      text NOT NULL,
+    role            text NOT NULL,
+    user_key        bytea NOT NULL,
+    day             integer NOT NULL,
+    route_no        integer NOT NULL,
+    refs            integer NOT NULL,
+    source          text NOT NULL,
+    session_routes  jsonb,
     PRIMARY KEY (project_id, finding_id, role, user_key, day, route_no),
     CONSTRAINT ck_end_user_hit_role CHECK (role IN ('exemplar', 'member', 'baseline', 'witness', 'changepoint')),
     CONSTRAINT ck_end_user_hit_source CHECK (source IN ('evidence', 'detection')),
-    CONSTRAINT ck_end_user_hit_refs CHECK (refs > 0)
+    CONSTRAINT ck_end_user_hit_refs CHECK (refs > 0),
+    CONSTRAINT ck_end_user_hit_session_routes CHECK ((route_no = 0) = (session_routes IS NOT NULL)
+        AND (session_routes IS NULL OR jsonb_typeof(session_routes) = 'array'))
 );
 CREATE INDEX ix_end_user_hit_project_key ON end_user_hit (project_id, user_key);
 
@@ -122,6 +127,8 @@ CREATE TABLE end_user_hit_summary (
 );
 
 -- shape_signature and cluster_hash are written with id_text, so they stay when the horizon sweep clears the text.
+-- session_token_link is true while every session seen with the ID holds an 8-character piece of the ID text; each fold
+-- ANDs its own, so one session without a piece clears it for good. No session ID is stored.
 -- The judge columns are NULL until the first judge run; stage is NULL for held and set-aside IDs.
 CREATE TABLE end_user (
     project_id         text NOT NULL REFERENCES project(id) ON DELETE CASCADE,
@@ -132,6 +139,7 @@ CREATE TABLE end_user (
     account_label      text,
     first_seen_day     integer NOT NULL,
     last_seen_day      integer NOT NULL,
+    session_token_link boolean NOT NULL DEFAULT true,
     state              text,
     substate           text,
     grade              text,

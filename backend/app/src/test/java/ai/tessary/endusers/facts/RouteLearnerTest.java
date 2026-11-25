@@ -191,6 +191,67 @@ record RouteLearnerTest(
                 () -> assertTrue(learned.nearCut()));
     }
 
+    /**
+     * The judge reads 180 days of day rows and needs a class for each of their routes. A route with no trace in the
+     * last 28 days and no stored class is learned from its live traces of the judge window, with the same rules; its
+     * reply delay still reads the earlier traces of its session on every route.
+     */
+    @Test
+    void learn_classesEveryRouteWithDayRowsInTheJudgeWindow() {
+        Project p = TenantFixture.bootstrap(tenants, "learn-judge-window").project();
+        insert(p, "turn", null, "u1", "chat.turn", "turn", at(D - 1, "12:01:07"), null, true, false);
+        insert(p, "warm", "sx", null, "warm", null, at(D - 60, "02:59:50"), at(D - 60, "02:59:55"), true, false);
+        for (int d = D - 60; d <= D - 58; d++) {
+            String session = d == D - 60 ? "sx" : null;
+            insert(p, "cron" + d, session, "svc", "nightly", "cron", at(d, "03:00:00"), null, true, false);
+            dayRow(p, route(p, "nightly", "cron"), d);
+        }
+        insert(p, "legacy", null, "u1", "legacy", "legacy", at(D - 200, "12:00:00"), null, true, false);
+        dayRow(p, route(p, "legacy", "legacy"), D - 200);
+
+        RouteClasses learned = learner.learn(p.id(), D);
+
+        RouteClasses expected = new RouteClasses(
+                Map.of(
+                        route(p, "chat.turn", "turn"),
+                        new Route(
+                                RouteClass.B,
+                                D,
+                                new RouteStatistics(1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, null, null, null, 0.0, 0.0),
+                                false),
+                        route(p, "nightly", "cron"),
+                        new Route(
+                                RouteClass.S,
+                                D,
+                                new RouteStatistics(3, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 / 3, null, null, null, 0.0, null),
+                                true)),
+                true);
+        assertAll(
+                () -> assertEquals(expected, learned),
+                () -> assertEquals(expected, classes.stored(p.id()), "the routes of the judge window are stored too"),
+                () -> assertEquals(
+                        List.of("legacy|null", "nightly|S"),
+                        rows(p, """
+                                SELECT trace_name || '|' || coalesce(route_class, 'null') FROM end_user_route r
+                                 WHERE project_id = :pid
+                                   AND EXISTS (SELECT 1 FROM end_user_day_null n
+                                                WHERE n.project_id = r.project_id AND n.route_no = r.route_no)
+                                 ORDER BY 1
+                                """),
+                        "a route whose day rows are all older than the judge window is not learned"));
+    }
+
+    private void dayRow(Project p, int routeNo, int day) {
+        jdbc.sql("""
+                INSERT INTO end_user_day_null (project_id, day, route_no, version_no, traces, traces_no_user_id)
+                VALUES (:pid, :day, :route, 1, 1, 0)
+                """)
+                .param("pid", p.id())
+                .param("day", day)
+                .param("route", routeNo)
+                .update();
+    }
+
     private int route(Project p, String name, @Nullable String callSite) {
         return registry.routeNo(p.id(), name, callSite);
     }

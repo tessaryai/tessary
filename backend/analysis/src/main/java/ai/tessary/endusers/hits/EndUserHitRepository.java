@@ -4,6 +4,11 @@ package ai.tessary.endusers.hits;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingEvidenceRow.Role;
 import ai.tessary.classifier.worker.ClassifierArming;
+import ai.tessary.open.errors.CommonError;
+import ai.tessary.open.errors.TessaryException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -12,6 +17,7 @@ import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -38,12 +44,16 @@ public class EndUserHitRepository {
 
     private static final String DAY = "floor(extract(epoch FROM t.started_at) / 86400)::int";
 
+    private static final TypeReference<List<SessionRoutes>> SESSIONS = new TypeReference<>() {};
+
     private final JdbcClient jdbc;
     private final NamedParameterJdbcTemplate named;
+    private final ObjectMapper mapper;
 
-    public EndUserHitRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named) {
+    public EndUserHitRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named, ObjectMapper mapper) {
         this.jdbc = jdbc;
         this.named = named;
+        this.mapper = mapper;
     }
 
     public record Finding(String id, String classifierKey, String causeKind, boolean faceted, String subjectId) {
@@ -70,7 +80,30 @@ public class EndUserHitRepository {
      */
     public record SessionOwner(String sessionId, @Nullable String userId, int lastDay) {}
 
-    public record HitRow(String role, String userKey, int day, int routeNo, int refs, String source) {}
+    /**
+     * @param sessionRoutes on {@link #SESSION_ONLY_ROUTE}, one entry per session merged into the row; else empty
+     */
+    public record HitRow(
+            String role,
+            String userKey,
+            int day,
+            int routeNo,
+            int refs,
+            String source,
+            List<SessionRoutes> sessionRoutes) {}
+
+    /**
+     * The refs of one session-only ref group and the traces of its session per route number, as the reference's
+     * {@code sess_routes}: every trace of the session, with or without a user ID.
+     */
+    public record SessionRoutes(int refs, Map<Integer, Integer> routes) {}
+
+    /** The traces of one session on one route. */
+    public record SessionRouteCount(
+            String sessionId,
+            @Nullable String traceName,
+            @Nullable String callSiteId,
+            int traces) {}
 
     public record Summary(
             String findingId, int refsTotal, int refsNoUserId, int sessionOnlyRefs, boolean complete, String hitRule) {}
@@ -145,6 +178,7 @@ public class EndUserHitRepository {
                 SELECT role, session_id, COUNT(*)::int AS refs FROM finding_evidence
                  WHERE project_id = :pid AND finding_id = :fid AND trace_id IS NULL
                  GROUP BY 1, 2
+                 ORDER BY 1, 2
                 """)
                 .param("pid", projectId)
                 .param("fid", findingId)
@@ -166,6 +200,24 @@ public class EndUserHitRepository {
                 .param("sessions", sessionIds.toArray(String[]::new))
                 .query((rs, n) ->
                         new SessionOwner(rs.getString("session_id"), rs.getString("user_id"), rs.getInt("last_day")))
+                .list();
+    }
+
+    /** The live traces of each session per route, read with the filter of {@link #sessionOwners}. */
+    public List<SessionRouteCount> sessionRouteCounts(String projectId, Collection<String> sessionIds) {
+        return jdbc.sql("""
+                SELECT session_id, name, call_site_id, COUNT(*)::int AS traces
+                  FROM trace
+                 WHERE project_id = :pid AND session_id = ANY(:sessions) AND NOT is_deleted
+                 GROUP BY 1, 2, 3
+                """)
+                .param("pid", projectId)
+                .param("sessions", sessionIds.toArray(String[]::new))
+                .query((rs, n) -> new SessionRouteCount(
+                        rs.getString("session_id"),
+                        rs.getString("name"),
+                        rs.getString("call_site_id"),
+                        rs.getInt("traces")))
                 .list();
     }
 
@@ -253,10 +305,11 @@ public class EndUserHitRepository {
                 .update();
         named.batchUpdate(
                 """
-                INSERT INTO end_user_hit (project_id, finding_id, role, user_key, day, route_no, refs, source)
-                VALUES (:pid, :fid, :role, :key, :day, :route, :refs, :source)
+                INSERT INTO end_user_hit (project_id, finding_id, role, user_key, day, route_no, refs, source,
+                                          session_routes)
+                VALUES (:pid, :fid, :role, :key, :day, :route, :refs, :source, CAST(:sessions AS jsonb))
                 ON CONFLICT (project_id, finding_id, role, user_key, day, route_no)
-                DO UPDATE SET refs = EXCLUDED.refs, source = EXCLUDED.source
+                DO UPDATE SET refs = EXCLUDED.refs, source = EXCLUDED.source, session_routes = EXCLUDED.session_routes
                 """,
                 rows.stream()
                         .map(row -> new MapSqlParameterSource()
@@ -267,7 +320,8 @@ public class EndUserHitRepository {
                                 .addValue("day", row.day())
                                 .addValue("route", row.routeNo())
                                 .addValue("refs", row.refs())
-                                .addValue("source", row.source()))
+                                .addValue("source", row.source())
+                                .addValue("sessions", writeSessions(row)))
                         .toArray(SqlParameterSource[]::new));
     }
 
@@ -293,7 +347,9 @@ public class EndUserHitRepository {
 
     public List<HitRow> stored(String projectId, String findingId) {
         return jdbc.sql("""
-                SELECT role, encode(user_key, 'hex') AS user_key, day, route_no, refs, source FROM end_user_hit
+                SELECT role, encode(user_key, 'hex') AS user_key, day, route_no, refs, source,
+                       session_routes::text AS session_routes
+                  FROM end_user_hit
                  WHERE project_id = :pid AND finding_id = :fid
                  ORDER BY role, user_key, day, route_no
                 """)
@@ -305,8 +361,27 @@ public class EndUserHitRepository {
                         rs.getInt("day"),
                         rs.getInt("route_no"),
                         rs.getInt("refs"),
-                        rs.getString("source")))
+                        rs.getString("source"),
+                        readSessions(rs.getString("session_routes"))))
                 .list();
+    }
+
+    private @Nullable String writeSessions(HitRow row) {
+        if (row.routeNo() != SESSION_ONLY_ROUTE) return null;
+        try {
+            return mapper.writeValueAsString(row.sessionRoutes());
+        } catch (JsonProcessingException e) {
+            throw new TessaryException(CommonError.INTERNAL, e);
+        }
+    }
+
+    private List<SessionRoutes> readSessions(@Nullable String json) {
+        if (json == null) return List.of();
+        try {
+            return mapper.readValue(json, SESSIONS);
+        } catch (JsonProcessingException e) {
+            throw new TessaryException(CommonError.INTERNAL, e);
+        }
     }
 
     private static String grouped(String role) {

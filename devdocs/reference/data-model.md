@@ -531,12 +531,14 @@ erDiagram
         INTEGER route_no PK
         INTEGER refs
         TEXT source
+        JSONB session_routes
     }
     end_user {
         TEXT project_id PK
         BYTEA user_key PK
         TEXT id_text
         TEXT shape_signature
+        BOOLEAN session_token_link
         TEXT state
         TEXT stage
         INTEGER days_silent
@@ -837,14 +839,14 @@ version is a route or version of its own (`UNIQUE NULLS NOT DISTINCT`). The proj
 | Table | Key | Columns |
 |---|---|---|
 | `end_user_project` | `project_id` | `salt` (`bytea`, 32 random bytes, made on first use), `history_start_day` (`t0`, fixed once set), `hits_watermark`, `fold_created_watermark`, `fold_rollup_watermark` (`timestamptz`), `page_state_memory` (jsonb array, the last two page states), `created_at`, `updated_at` |
-| `end_user_route` | `(project_id, route_no)` | `trace_name` (nullable), `call_site_id` (`__unattributed__` for none), `route_class` (`A`/`A2`/`S`/`M`/`B`/`C`, NULL before the first learn), `class_since_day`, `statistics` (jsonb object), `near_cut`; unique `(project_id, trace_name, call_site_id)` |
+| `end_user_route` | `(project_id, route_no)` | `trace_name` (nullable), `call_site_id` (`__unattributed__` for none), `route_class` (`A`/`A2`/`S`/`M`/`B`/`C`, NULL before the first learn; each learn classes the routes with traces in its 28 days, and also every unclassed route with day rows in the judge window, from that route's live traces of the window), `class_since_day`, `statistics` (jsonb object), `near_cut`; unique `(project_id, trace_name, call_site_id)` |
 | `end_user_day` | `(project_id, user_key, day, route_no, version_no)` | `traces`, `session_hashes` (`integer[]`, the 32 smallest), `hour_mask` (`integer`, 24 bits), `slot_mask` (`bit(96)`, 15-minute slots), `job_keys` (`bigint[]`, at most 32 crc32 values of `input_preview` joined with the slot), `traces_with_input`, `traces_with_parent`. Index `ix_end_user_day_project_day (project_id, day)` for day replacement and the horizon sweep |
 | `end_user_day_null` | `(project_id, day, route_no, version_no)` | `traces` (every trace), `traces_no_user_id` |
 | `end_user_version` | `(project_id, version_no)` | `project_version_id` (nullable), `first_trace_day`, which stands for the deploy day, because `project_version` has no deploy time |
 | `end_user_alias_edge` | `(project_id, from_key, to_key, via, day)` | `via` is `session` or `thread`: one in which `from_key`'s last trace is before `to_key`'s first |
-| `end_user_hit` | `(project_id, finding_id, role, user_key, day, route_no)` | `refs` (above 0), `source` (`evidence` or `detection`). `role` is the evidence role; every role is kept and the detector's hit rule picks the hit roles when read. Index `ix_end_user_hit_project_key (project_id, user_key)` |
+| `end_user_hit` | `(project_id, finding_id, role, user_key, day, route_no)` | `refs` (above 0), `source` (`evidence` or `detection`), `session_routes` (jsonb array, set exactly when `route_no` is 0). `role` is the evidence role; every role is kept and the detector's hit rule picks the hit roles when read. Route 0 holds refs to a session only, resolved to the session's user ID and last trace day; `session_routes` then has one entry per session merged into the row, `{refs, routes}`, where `routes` maps a route number to the session's live traces on it, with or without a user ID. The judge spreads each entry's refs over its routes for the reach. No session ID is stored. Index `ix_end_user_hit_project_key (project_id, user_key)` |
 | `end_user_hit_summary` | `(project_id, finding_id)` | `refs_total`, `refs_no_user_id`, `session_only_refs`, `complete`, `hit_rule`, `updated_at` |
-| `end_user` | `(project_id, user_key)` | `id_text` (nullable; the horizon sweep clears it when the ID's last trace is gone), `shape_signature`, `cluster_hash` (`bytea`), `account_label`, `first_seen_day`, `last_seen_day`, and the judge's `state`, `substate`, `grade`, `p_stop`, `p_nominal` (`double precision`), `days_silent`, `set_aside_reason`, `stage` (`active`/`silent`/`stopped`, NULL for held and set-aside IDs), `updated_at`. Index `ix_end_user_stage_silent (project_id, stage, days_silent DESC, user_key)` for the ID list |
+| `end_user` | `(project_id, user_key)` | `id_text` (nullable; the horizon sweep clears it when the ID's last trace is gone), `shape_signature`, `cluster_hash` (`bytea`), `account_label`, `first_seen_day`, `last_seen_day`, `session_token_link` (true while every session seen with the ID holds an 8-character piece of the ID text, and while no session has been seen; each fold ANDs in its own day's, so it is never set back; no session ID is stored), and the judge's `state`, `substate`, `grade`, `p_stop`, `p_nominal` (`double precision`), `days_silent`, `set_aside_reason`, `stage` (`active`/`silent`/`stopped`, NULL for held and set-aside IDs), `updated_at`. Index `ix_end_user_stage_silent (project_id, stage, days_silent DESC, user_key)` for the ID list |
 | `end_user_silence_event` | `(project_id, scope, start_day)` | `end_day`, `state`, `members` (a count), `i`, `i0`, `rho` |
 | `end_user_snapshot` | `(project_id, day)` | `logic_version`, `page_state`, `page_state_reason`, `reason_numbers`, `banners`, `limits`, `trust`, `stage_counts`, `set_aside`, `stop_stage_state`, `stop_stage_numbers`, `calibration` (jsonb), `h`, `f` (`integer`), `created_at`. Codes and numbers only: the frontend words them. NULL means not computed. A banner is `{code, numbers, route_nos}`; the read turns `route_nos` into the routes' trace names, so no name is stored |
 | `end_user_issue` | `(project_id, lineage_key)` | `day` (the snapshot day), `case_id`, `finding_ids` (`text[]`), `rank`, `user_ids_hit`, `compared`, `lost`, `low`, `high` (`double precision`), `verdict` (one of the 15 codes of `Verdict`), `shown`, `group_id`, `curve`, `diagnostics` (jsonb object, the record `IssueDiagnostics`: `stopped`, `expected`, `upper`, `h`, `late_hits`, `unmatched`, `t_vis`, `pop_high`, `first_evidence_day`, `estimated`, `accounts`, and `account_lines`, up to 3 of `{account, ids, hit, silent, silent_since_day}` with an account number, never ID or cluster text; a key is null where the verdict computed none) |

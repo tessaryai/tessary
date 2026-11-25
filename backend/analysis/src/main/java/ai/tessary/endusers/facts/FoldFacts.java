@@ -24,6 +24,7 @@ import org.jspecify.annotations.Nullable;
 public final class FoldFacts {
 
     static final int CAP = 32;
+    static final int TOKEN_PIECE = 8;
 
     private static final int SECONDS_PER_DAY = 86_400;
     private static final int SECONDS_PER_HOUR = 3_600;
@@ -51,6 +52,7 @@ public final class FoldFacts {
         Map<RowKey, Row> rows = new TreeMap<>();
         Map<RouteVersion, int[]> nulls = new TreeMap<>();
         Map<String, EndUserRow> users = new TreeMap<>();
+        Map<String, Boolean> tokenLinks = new HashMap<>();
         for (FoldTrace t : dayTraces) {
             int route = routeNo.applyAsInt(t);
             int version = versionNo.applyAsInt(t);
@@ -63,9 +65,12 @@ public final class FoldFacts {
             }
             String key = keys.of(id);
             users.computeIfAbsent(key, k -> user(k, id, salt, day));
+            String session = EndUserKeys.normalise(t.sessionId());
+            if (session != null) tokenLinks.merge(key, hasLink(id, session), Boolean::logicalAnd);
             rows.computeIfAbsent(new RowKey(key, route, version), k -> new Row())
                     .add(t);
         }
+        tokenLinks.forEach((key, link) -> users.computeIfPresent(key, (k, u) -> link ? u : withoutTokenLink(u)));
         List<DayFacts.IdDay> idDays = new ArrayList<>(rows.size());
         rows.forEach((k, row) -> idDays.add(row.toIdDay(k)));
         List<DayFacts.NullDay> nullDays = new ArrayList<>(nulls.size());
@@ -121,7 +126,25 @@ public final class FoldFacts {
         String cluster = ShapeSignature.clusterOf(id);
         String clusterHash =
                 cluster == null ? null : HexFormat.of().formatHex(ShapeSignature.clusterHash(salt, cluster));
-        return new EndUserRow(key, id, ShapeSignature.of(id).wire(), clusterHash, day, day);
+        return new EndUserRow(key, id, ShapeSignature.of(id).wire(), clusterHash, day, day, true);
+    }
+
+    private static EndUserRow withoutTokenLink(EndUserRow u) {
+        return new EndUserRow(
+                u.userKey(), u.idText(), u.shapeSignature(), u.clusterHash(), u.firstDay(), u.lastDay(), false);
+    }
+
+    /**
+     * Reference {@code has_link(u, s)}: the ID equals the session ID, or one of its 8-character pieces is in the session
+     * ID. Characters are code points, as in the reference's Python strings.
+     */
+    static boolean hasLink(String id, String sessionId) {
+        if (id.equals(sessionId)) return true;
+        int length = id.codePointCount(0, id.length());
+        for (int i = 0, start = 0; i + TOKEN_PIECE <= length; i++, start = id.offsetByCodePoints(start, 1)) {
+            if (sessionId.contains(id.substring(start, id.offsetByCodePoints(start, TOKEN_PIECE)))) return true;
+        }
+        return false;
     }
 
     private static long crc32(String text) {

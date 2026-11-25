@@ -10,6 +10,9 @@ import org.jspecify.annotations.Nullable;
  *
  * @param shapeSignature {@link ShapeSignature#wire()}
  * @param clusterHash {@link ShapeSignature#clusterHash}; null when the ID names no cluster
+ * @param sessionTokenLink spec 3.1 {@code token_link}: every session of the ID's traces holds an 8-character piece of
+ *     the ID text ({@link FoldFacts#hasLink}); true when no trace of the ID names a session, as the reference's
+ *     {@code all()} over no sessions
  */
 public record EndUserRow(
         String userKey,
@@ -17,4 +20,5 @@ public record EndUserRow(
         String shapeSignature,
         @Nullable String clusterHash,
         int firstDay,
-        int lastDay) {}
+        int lastDay,
+        boolean sessionTokenLink) {}

@@ -3,6 +3,8 @@ package ai.tessary.endusers.facts;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.endusers.model.AliasVia;
 import java.nio.charset.StandardCharsets;
@@ -147,7 +149,7 @@ class FoldFactsTest {
                 () -> assertEquals(1, facts.idDays().getFirst().traces()),
                 () -> assertEquals(
                         List.of(new EndUserRow(
-                                "daac9c65a48cdd6b98d14e8573b331b6", "usr_7Hq2kD", "usr:10", null, DAY, DAY)),
+                                "daac9c65a48cdd6b98d14e8573b331b6", "usr_7Hq2kD", "usr:10", null, DAY, DAY, false)),
                         facts.users(),
                         "a trace with no user ID makes no end_user row"));
     }
@@ -158,8 +160,48 @@ class FoldFactsTest {
 
         assertEquals(
                 List.of(new EndUserRow(
-                        key("acme:u1"), "acme:u1", "acme:7", "c9a7e476bacbbf87e60c30ba2612595b", DAY, DAY)),
+                        key("acme:u1"), "acme:u1", "acme:7", "c9a7e476bacbbf87e60c30ba2612595b", DAY, DAY, false)),
                 facts.users());
+    }
+
+    /** Spec 3.1 {@code token_link}: reference {@code has_link(u, s)} over every session of the ID. */
+    @Test
+    void sessionTokenLink_everySessionOfTheDayHoldsAPieceOfTheId() {
+        DayFacts facts = fold(List.of(
+                trace("anon-3f9a2c71b8", "web:3f9a2c71:1", "chat.turn", at("08:00:00")),
+                trace("anon-3f9a2c71b8", "app/9a2c71b8", "agent.run", at("08:10:00")),
+                trace("anon-3f9a2c71b8", null, "chat.turn", at("08:20:00")),
+                trace("acct-77d1e0aa", "web:77d1e0aa:1", "chat.turn", at("09:00:00")),
+                trace("acct-77d1e0aa", "s-other", "chat.turn", at("09:05:00")),
+                trace("usr_no_session", null, "chat.turn", at("10:00:00")),
+                trace("usr_blank", "  ", "chat.turn", at("10:30:00"))));
+
+        assertEquals(
+                List.of("acct-77d1e0aa|false", "anon-3f9a2c71b8|true", "usr_blank|true", "usr_no_session|true"),
+                facts.users().stream()
+                        .map(u -> u.idText() + "|" + u.sessionTokenLink())
+                        .sorted()
+                        .toList(),
+                "one session without a piece of the ID clears it; an ID with no session keeps all() of nothing");
+    }
+
+    @Test
+    void hasLink_portsTheReference() {
+        assertAll(
+                () -> assertTrue(FoldFacts.hasLink("abc", "abc"), "an ID equal to its session links at any length"),
+                () -> assertFalse(FoldFacts.hasLink("abcdefg", "xabcdefgx"), "7 characters are too few"),
+                () -> assertTrue(FoldFacts.hasLink("abcdefgh", "xxabcdefghxx")),
+                () -> assertTrue(FoldFacts.hasLink("0123456789", "s-23456789"), "the last 8 characters"),
+                () -> assertFalse(FoldFacts.hasLink("0123456789", "s-1234567")),
+                () -> assertFalse(
+                        FoldFacts.hasLink("ab\uD83D\uDE00cdef", "s-ab\uD83D\uDE00cdef-1"),
+                        "7 code points in 8 UTF-16 units are too few"),
+                () -> assertTrue(
+                        FoldFacts.hasLink("ab\uD83D\uDE00cdefgh", "s-b\uD83D\uDE00cdefgh-1"),
+                        "the second piece of 8 code points"),
+                () -> assertFalse(
+                        FoldFacts.hasLink("ab\uD83D\uDE00cdefgh", "x\uD83D\uDE00cdefghx"),
+                        "8 UTF-16 units that are 7 code points are no piece"));
     }
 
     private static DayFacts fold(List<FoldTrace> traces) {

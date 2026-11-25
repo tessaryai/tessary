@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.tessary.endusers.facts.EndUserKeys;
 import ai.tessary.endusers.facts.EndUserProjectRepository;
+import ai.tessary.endusers.facts.RouteRegistryRepository;
 import ai.tessary.retention.RetentionResolver;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -32,7 +33,8 @@ record HitSweepServiceTest(
         EndUserProjectRepository projects,
         RetentionResolver retention,
         HitReads reads,
-        IssueLineages lineages) {
+        IssueLineages lineages,
+        RouteRegistryRepository registry) {
 
     private static final Instant NOW = Instant.parse("2026-06-15T03:30:00Z");
     private static final int TODAY = 20619;
@@ -121,6 +123,44 @@ record HitSweepServiceTest(
                         List.of("1|0|1|true|frustration"),
                         summary(pid, "f-s"),
                         "counted as a session-only ref, never as a ref with no user ID"));
+    }
+
+    /**
+     * Reference {@code sess_routes}: a session-only ref spreads over the routes of every trace of its session, with or
+     * without a user ID, each session on its own, so two sessions merged into one row keep their own mix.
+     */
+    @Test
+    void sessionOnlyRef_storesTheRoutesOfEachSession() {
+        String pid = project("hits-session-routes");
+        HitSeeds seed = new HitSeeds(jdbc, pid);
+        seed.session("sess-1", at(TODAY - 5, 9));
+        seed.session("sess-2", at(TODAY - 2, 10));
+        seed.trace("t1", "sess-1", null, at(TODAY - 5, 9));
+        seed.trace("t2", "sess-1", "session-user", at(TODAY - 5, 11));
+        seed.trace("t3", "sess-1", "session-user", "agent.run", "cs-b", at(TODAY - 2, 8));
+        seed.trace("t4", "sess-2", "session-user", "agent.run", "cs-b", at(TODAY - 2, 10));
+        seed.finding("f-routes", "frustration", "{\"cause_kind\":\"frustration_rate\"}");
+        seed.sessionEvidence("f-routes", "witness", "sess-1", CREATED);
+        seed.sessionEvidence("f-routes", "witness", "sess-2", CREATED);
+        seed.evidence("f-routes", "witness", "t3", null, CREATED);
+
+        sweep(pid, NOW);
+        int turn = registry.routeNo(pid, "chat.turn", null);
+        int agent = registry.routeNo(pid, "agent.run", "cs-b");
+        String sessionOne = turn < agent
+                ? "{\"" + turn + "\": 2, \"" + agent + "\": 1}"
+                : "{\"" + agent + "\": 1, \"" + turn + "\": 2}";
+
+        assertEquals(
+                List.of(
+                        "0|2|[{\"refs\": 1, \"routes\": " + sessionOne + "}, {\"refs\": 1, \"routes\": {\"" + agent
+                                + "\": 1}}]",
+                        agent + "|1|null"),
+                jdbc.sql("""
+                        SELECT route_no || '|' || refs || '|' || coalesce(session_routes::text, 'null')
+                          FROM end_user_hit WHERE project_id = :pid ORDER BY route_no
+                        """).param("pid", pid).query(String.class).list(),
+                "a ref to a trace keeps its own route and no session mix");
     }
 
     @Test

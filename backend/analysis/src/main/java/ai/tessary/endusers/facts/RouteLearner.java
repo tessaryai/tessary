@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.endusers.facts;
 
+import ai.tessary.config.EndUsersProperties;
 import ai.tessary.endusers.judge.JudgeConstants;
 import ai.tessary.endusers.judge.model.RouteClasses;
 import ai.tessary.endusers.judge.model.RouteClasses.Route;
@@ -23,6 +24,8 @@ import org.springframework.stereotype.Service;
  * Stage 3 of the daily job: learns the route classes of spec section 1 from the live traces of the 28 days that end on
  * the as-of day, and stores them on the route rows (plan 3.2). A route near a cut keeps its stored class. A route with
  * no trace in the window keeps its stored row, and its class still counts for the anchor test and the lenient fallback.
+ * The judge needs a class for every route with day rows in its window, so a route with day rows there, no trace in the
+ * 28 days and no stored class is learned from its live traces of the judge window, with the same rules.
  */
 @Service
 public class RouteLearner {
@@ -32,11 +35,17 @@ public class RouteLearner {
     private final RouteTraceRepository traces;
     private final RouteClassRepository classes;
     private final RouteRegistryRepository registry;
+    private final EndUsersProperties props;
 
-    public RouteLearner(RouteTraceRepository traces, RouteClassRepository classes, RouteRegistryRepository registry) {
+    public RouteLearner(
+            RouteTraceRepository traces,
+            RouteClassRepository classes,
+            RouteRegistryRepository registry,
+            EndUsersProperties props) {
         this.traces = traces;
         this.classes = classes;
         this.registry = registry;
+        this.props = props;
     }
 
     public RouteClasses learn(String projectId, int asOfDay) {
@@ -67,12 +76,44 @@ public class RouteLearner {
             if (routeClass == RouteClass.A) aRoutes.add(routeNo);
             if (routeClass == RouteClass.B) bRoutes.add(routeNo);
         });
-        Map<Integer, Double> coAnchor =
-                bRoutes.isEmpty() ? Map.of() : traces.anchorShares(projectId, fromDay, toDay, aRoutes, bRoutes);
+        Map<Integer, Double> coAnchor = new TreeMap<>();
+        if (!bRoutes.isEmpty()) coAnchor.putAll(traces.anchorShares(projectId, fromDay, toDay, aRoutes, bRoutes));
+
+        int windowFrom = asOfDay - props.judgeWindowDays() + 1;
+        List<Integer> unclassed = new ArrayList<>(classes.unclassedWithDayRows(projectId, windowFrom, toDay));
+        unclassed.removeAll(byRoute.keySet());
+        Map<Integer, RouteTally> older = new TreeMap<>();
+        if (!unclassed.isEmpty()) {
+            List<RouteTally> olderTallies = traces.tallies(projectId, windowFrom, toDay, unclassed);
+            for (RouteTally tally : olderTallies) {
+                older.put(registry.routeNo(projectId, tally.traceName(), tally.callSiteId()), tally);
+            }
+            Map<Integer, List<RouteSample>> olderSamples = new TreeMap<>();
+            for (RouteSample sample : traces.samples(projectId, windowFrom, toDay, unclassed)) {
+                olderSamples
+                        .computeIfAbsent(sample.routeNo(), r -> new ArrayList<>())
+                        .add(sample);
+            }
+            List<RouteTally> allTallies = new ArrayList<>(tallies);
+            allTallies.addAll(olderTallies);
+            boolean olderAppSendsInput = RouteClassRules.appSendsInput(allTallies);
+            Set<Integer> olderB = new TreeSet<>();
+            older.forEach((routeNo, tally) -> {
+                RouteStatistics statistics =
+                        RouteClassRules.statistics(tally, olderSamples.getOrDefault(routeNo, List.of()));
+                RouteClass routeClass = RouteClassRules.ruleClass(statistics, olderAppSendsInput);
+                routes.put(routeNo, new Route(routeClass, null, statistics, RouteClassRules.nearCut(statistics)));
+                if (routeClass == RouteClass.A) aRoutes.add(routeNo);
+                if (routeClass == RouteClass.B) olderB.add(routeNo);
+            });
+            if (!olderB.isEmpty()) {
+                coAnchor.putAll(traces.anchorShares(projectId, windowFrom, toDay, aRoutes, olderB));
+            }
+        }
         RouteClasses learned = RouteClassRules.anchor(routes, coAnchor, stored, asOfDay);
 
         Map<Integer, Route> seen = new TreeMap<>(learned.byRoute());
-        seen.keySet().retainAll(byRoute.keySet());
+        seen.keySet().removeIf(routeNo -> !byRoute.containsKey(routeNo) && !older.containsKey(routeNo));
         classes.save(projectId, seen);
 
         long paced = learned.byRoute().values().stream()
@@ -99,6 +140,7 @@ public class RouteLearner {
                         "nearCutRoutes",
                         seen.values().stream().filter(Route::nearCut).count())
                 .field("lenient", learned.lenient())
+                .field("judgeWindowRoutes", older.size())
                 .durationMs(began)
                 .log();
         return learned;

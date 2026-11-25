@@ -10,6 +10,8 @@ import ai.tessary.endusers.hits.EndUserHitRepository.HitRow;
 import ai.tessary.endusers.hits.EndUserHitRepository.RefGroup;
 import ai.tessary.endusers.hits.EndUserHitRepository.SessionOwner;
 import ai.tessary.endusers.hits.EndUserHitRepository.SessionRefs;
+import ai.tessary.endusers.hits.EndUserHitRepository.SessionRouteCount;
+import ai.tessary.endusers.hits.EndUserHitRepository.SessionRoutes;
 import ai.tessary.endusers.hits.EndUserHitRepository.Summary;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
@@ -66,18 +68,18 @@ public class FindingHitRebuilder {
         String source = rule.readsDetections() ? EndUserHitRepository.DETECTION : EndUserHitRepository.EVIDENCE;
         Map<RouteName, Integer> routeNos = new HashMap<>();
         Map<HitKey, Integer> refs = new TreeMap<>();
+        Map<HitKey, List<SessionRoutes>> sessions = new HashMap<>();
         for (RefGroup group : groups(projectId, finding, rule)) {
-            int routeNo = routeNos.computeIfAbsent(
-                    new RouteName(group.traceName(), group.callSiteId()),
-                    r -> routes.routeNo(projectId, r.traceName(), r.callSiteId()));
+            int routeNo = routeNo(projectId, routeNos, group.traceName(), group.callSiteId());
             refs.merge(
                     new HitKey(group.role(), userKey(salt, group.userId()), group.day(), routeNo),
                     group.refs(),
                     Integer::sum);
         }
-        if (rule.rows() == HitRule.Rows.EVIDENCE) addSessionOnly(projectId, finding, salt, refs);
+        if (rule.rows() == HitRule.Rows.EVIDENCE) addSessionOnly(projectId, finding, salt, routeNos, refs, sessions);
         List<HitRow> rows = new ArrayList<>(refs.size());
-        refs.forEach((k, n) -> rows.add(new HitRow(k.role(), k.userKey(), k.day(), k.routeNo(), n, source)));
+        refs.forEach((k, n) -> rows.add(new HitRow(
+                k.role(), k.userKey(), k.day(), k.routeNo(), n, source, sessions.getOrDefault(k, List.of()))));
         transaction.executeWithoutResult(tx -> {
             hits.lock(projectId, finding.id());
             hits.replace(projectId, finding.id(), oldestLiveDay, rows);
@@ -106,29 +108,52 @@ public class FindingHitRebuilder {
                 .orElse(false);
     }
 
+    private int routeNo(
+            String projectId,
+            Map<RouteName, Integer> routeNos,
+            @Nullable String traceName,
+            @Nullable String callSiteId) {
+        return routeNos.computeIfAbsent(
+                new RouteName(traceName, callSiteId), r -> routes.routeNo(projectId, r.traceName(), r.callSiteId()));
+    }
+
     /**
      * A ref to a session only resolves as spec 8.1 says: to the user ID of the session's traces and the day of its last
-     * trace. It is stored on {@link EndUserHitRepository#SESSION_ONLY_ROUTE}.
+     * trace. It is stored on {@link EndUserHitRepository#SESSION_ONLY_ROUTE}, with the session's traces per route
+     * (reference {@code sess_routes}) for the reach, kept per session because each session spreads its refs over its
+     * own mix.
      */
-    private void addSessionOnly(String projectId, Finding finding, byte[] salt, Map<HitKey, Integer> refs) {
+    private void addSessionOnly(
+            String projectId,
+            Finding finding,
+            byte[] salt,
+            Map<RouteName, Integer> routeNos,
+            Map<HitKey, Integer> refs,
+            Map<HitKey, List<SessionRoutes>> sessions) {
         List<SessionRefs> sessionRefs = hits.sessionRefs(projectId, finding.id());
-        Map<String, SessionOwner> owners = hits
-                .sessionOwners(
-                        projectId,
-                        sessionRefs.stream().map(SessionRefs::sessionId).collect(Collectors.toSet()))
-                .stream()
+        Set<String> sessionIds =
+                sessionRefs.stream().map(SessionRefs::sessionId).collect(Collectors.toSet());
+        Map<String, SessionOwner> owners = hits.sessionOwners(projectId, sessionIds).stream()
                 .collect(Collectors.toMap(SessionOwner::sessionId, o -> o));
+        Map<String, Map<Integer, Integer>> mixes = new HashMap<>();
+        for (SessionRouteCount count : hits.sessionRouteCounts(projectId, owners.keySet())) {
+            mixes.computeIfAbsent(count.sessionId(), s -> new TreeMap<>())
+                    .merge(
+                            routeNo(projectId, routeNos, count.traceName(), count.callSiteId()),
+                            count.traces(),
+                            Integer::sum);
+        }
         for (SessionRefs ref : sessionRefs) {
             SessionOwner owner = owners.get(ref.sessionId());
             if (owner == null) continue;
-            refs.merge(
-                    new HitKey(
-                            ref.role(),
-                            userKey(salt, owner.userId()),
-                            owner.lastDay(),
-                            EndUserHitRepository.SESSION_ONLY_ROUTE),
-                    ref.refs(),
-                    Integer::sum);
+            HitKey key = new HitKey(
+                    ref.role(),
+                    userKey(salt, owner.userId()),
+                    owner.lastDay(),
+                    EndUserHitRepository.SESSION_ONLY_ROUTE);
+            refs.merge(key, ref.refs(), Integer::sum);
+            sessions.computeIfAbsent(key, k -> new ArrayList<>())
+                    .add(new SessionRoutes(ref.refs(), mixes.getOrDefault(ref.sessionId(), Map.of())));
         }
     }
 

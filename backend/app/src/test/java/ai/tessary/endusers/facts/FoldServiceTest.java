@@ -86,6 +86,37 @@ record FoldServiceTest(
                 () -> assertEquals(List.of("1|0"), nullDays(p, old)));
     }
 
+    /** Spec 3.1 {@code token_link} reads every session of the ID, so a fold can only clear the stored flag. */
+    @Test
+    void sessionTokenLink_isAndedOverEveryFold() {
+        Project p = TenantFixture.bootstrap(tenants, "fold-token-link").project();
+        String linked = "0".repeat(32);
+        String cleared = "1".repeat(32);
+        dayFacts.replaceDay(p.id(), users(TODAY - 3, user(linked, true), user(cleared, true)));
+        dayFacts.replaceDay(p.id(), users(TODAY - 2, user(linked, true), user(cleared, false)));
+        List<String> afterTwo = tokenLinks(p);
+        dayFacts.replaceDay(p.id(), users(TODAY - 3, user(linked, true), user(cleared, true)));
+
+        assertAll(
+                () -> assertEquals(List.of(linked + "|true", cleared + "|false"), afterTwo),
+                () -> assertEquals(afterTwo, tokenLinks(p), "a later fold that links again does not set it back"));
+    }
+
+    private static DayFacts users(int day, EndUserRow... users) {
+        return new DayFacts(day, 0, List.of(), List.of(), List.of(), List.of(users));
+    }
+
+    private static EndUserRow user(String key, boolean tokenLink) {
+        return new EndUserRow(key, "id-" + key.charAt(0), "id:4", null, TODAY - 3, TODAY - 3, tokenLink);
+    }
+
+    private List<String> tokenLinks(Project p) {
+        return rows(p, """
+                SELECT encode(user_key, 'hex') || '|' || session_token_link FROM end_user
+                 WHERE project_id = :pid ORDER BY 1
+                """);
+    }
+
     @Test
     void outageFlag_readsTheStoredDaysBefore_summedOverVersions() {
         Project down = TenantFixture.bootstrap(tenants, "fold-outage-down").project();
@@ -220,9 +251,9 @@ record FoldServiceTest(
         expectedDays.sort(null);
         String acmeHash = HexFormat.of().formatHex(ShapeSignature.clusterHash(projects.salt(p.id()), "acme"));
         List<String> expectedUsers = new ArrayList<>(List.of(
-                key(p, "usr_7Hq2kD") + "|usr_7Hq2kD|usr:10||null|" + d + "|" + d,
-                key(p, "acme:x") + "|acme:x|acme:6|" + acmeHash + "|null|" + d + "|" + d,
-                key(p, "acme:y") + "|acme:y|acme:6|" + acmeHash + "|null|" + d + "|" + d));
+                key(p, "usr_7Hq2kD") + "|usr_7Hq2kD|usr:10||null|" + d + "|" + d + "|false",
+                key(p, "acme:x") + "|acme:x|acme:6|" + acmeHash + "|null|" + d + "|" + d + "|false",
+                key(p, "acme:y") + "|acme:y|acme:6|" + acmeHash + "|null|" + d + "|" + d + "|false"));
         expectedUsers.sort(null);
 
         assertAll(
@@ -244,7 +275,7 @@ record FoldServiceTest(
                 () -> assertEquals(expectedUsers, rows(p, """
                         SELECT encode(user_key, 'hex') || '|' || id_text || '|' || shape_signature || '|'
                                || coalesce(encode(cluster_hash, 'hex'), '') || '|' || coalesce(account_label, 'null') || '|'
-                               || first_seen_day || '|' || last_seen_day
+                               || first_seen_day || '|' || last_seen_day || '|' || session_token_link
                           FROM end_user WHERE project_id = :pid ORDER BY 1
                         """)),
                 () -> assertEquals(List.of(d + "|2026-06-15 03:00:00+00|6|false|false"), rows(p, """

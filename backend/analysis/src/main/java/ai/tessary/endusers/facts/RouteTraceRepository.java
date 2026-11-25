@@ -13,7 +13,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.IntStream;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.core.simple.JdbcClient.StatementSpec;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -46,7 +48,20 @@ public class RouteTraceRepository {
      * when there is no end) of the earlier traces of the same session on any route, in start order.
      */
     public List<RouteTally> tallies(String projectId, int fromDay, int toDay) {
-        return jdbc.sql("""
+        return tallies(projectId, fromDay, toDay, null);
+    }
+
+    /**
+     * {@link #tallies(String, int, int)} of the given registered routes only. The other routes' traces still give the
+     * reply delays of these routes, so the filter applies after the delays are measured.
+     */
+    public List<RouteTally> tallies(String projectId, int fromDay, int toDay, @Nullable Collection<Integer> routeNos) {
+        String only = routeNos == null ? "" : """
+                 WHERE EXISTS (SELECT 1 FROM end_user_route r
+                                WHERE r.project_id = :pid AND r.route_no = ANY(:routes) AND r.call_site_id = f.cs
+                                  AND r.trace_name IS NOT DISTINCT FROM f.name)
+                """;
+        StatementSpec sql = jdbc.sql("""
                 WITH w AS (
                     SELECT t.id, t.started_at, t.name, COALESCE(t.call_site_id, :unattributed) AS cs,
                            NULLIF(btrim(t.user_id, :ws), '') IS NULL AS no_user,
@@ -72,6 +87,7 @@ public class RouteTraceRepository {
                        COALESCE(array_agg(delay ORDER BY delay)
                                 FILTER (WHERE sid IS NOT NULL AND delay BETWEEN 0 AND :reply), '{}') AS delays
                   FROM f
+                """ + only + """
                  GROUP BY name, cs
                  ORDER BY name NULLS FIRST, cs
                 """)
@@ -80,8 +96,9 @@ public class RouteTraceRepository {
                 .param("to", dayStart(toDay))
                 .param("unattributed", RouteRegistryRepository.UNATTRIBUTED)
                 .param("ws", WHITE_SPACE)
-                .param("reply", JudgeConstants.REPLY_WINDOW_SECONDS)
-                .query((rs, n) -> new RouteTally(
+                .param("reply", JudgeConstants.REPLY_WINDOW_SECONDS);
+        if (routeNos != null) sql = sql.param("routes", routeNos.toArray(Integer[]::new));
+        return sql.query((rs, n) -> new RouteTally(
                         rs.getString("name"),
                         rs.getString("cs"),
                         rs.getInt("traces"),
@@ -99,7 +116,13 @@ public class RouteTraceRepository {
      * most {@link JudgeConstants#PAIR_TEST_MAX_TRACES}.
      */
     public List<RouteSample> samples(String projectId, int fromDay, int toDay) {
-        return jdbc.sql("""
+        return samples(projectId, fromDay, toDay, null);
+    }
+
+    /** {@link #samples(String, int, int)} of the given registered routes only. */
+    public List<RouteSample> samples(String projectId, int fromDay, int toDay, @Nullable Collection<Integer> routeNos) {
+        String only = routeNos == null ? "" : " AND r.route_no = ANY(:routes)";
+        StatementSpec sql = jdbc.sql("""
                 WITH ranked AS (
                     SELECT r.route_no, NULLIF(btrim(t.user_id, :ws), '') AS uid,
                            CAST(floor(extract(epoch FROM t.started_at)) AS bigint) AS s,
@@ -109,8 +132,7 @@ public class RouteTraceRepository {
                       JOIN end_user_route r ON r.project_id = t.project_id
                                            AND r.call_site_id = COALESCE(t.call_site_id, :unattributed)
                                            AND r.trace_name IS NOT DISTINCT FROM t.name
-                     WHERE NULLIF(btrim(t.user_id, :ws), '') IS NOT NULL AND
-                """ + WINDOW + """
+                     WHERE NULLIF(btrim(t.user_id, :ws), '') IS NOT NULL""" + only + " AND " + WINDOW + """
                 )
                 SELECT route_no, array_agg(CAST((s % 86400) / 60 AS integer) ORDER BY rank_no) AS minutes,
                        array_agg(CAST(s / 86400 AS integer) ORDER BY rank_no) AS days
@@ -123,8 +145,9 @@ public class RouteTraceRepository {
                 .param("to", dayStart(toDay))
                 .param("unattributed", RouteRegistryRepository.UNATTRIBUTED)
                 .param("ws", WHITE_SPACE)
-                .param("cap", JudgeConstants.PAIR_TEST_MAX_TRACES)
-                .query((rs, n) ->
+                .param("cap", JudgeConstants.PAIR_TEST_MAX_TRACES);
+        if (routeNos != null) sql = sql.param("routes", routeNos.toArray(Integer[]::new));
+        return sql.query((rs, n) ->
                         new RouteSample(rs.getInt("route_no"), ints(rs.getArray("minutes")), ints(rs.getArray("days"))))
                 .list();
     }

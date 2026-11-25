@@ -9,6 +9,7 @@ import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -45,6 +46,23 @@ public class RouteClassRepository {
         });
         boolean hasA = routes.values().stream().anyMatch(r -> r.routeClass() == RouteClass.A);
         return new RouteClasses(routes, !hasA);
+    }
+
+    /** The routes with no stored class that have a day row in {@code [fromDay, toDay)}. */
+    public List<Integer> unclassedWithDayRows(String projectId, int fromDay, int toDay) {
+        return jdbc.sql("""
+                SELECT r.route_no FROM end_user_route r
+                 WHERE r.project_id = :pid AND r.route_class IS NULL
+                   AND EXISTS (SELECT 1 FROM end_user_day_null n
+                                WHERE n.project_id = r.project_id AND n.route_no = r.route_no
+                                  AND n.day >= :from AND n.day < :to)
+                 ORDER BY r.route_no
+                """)
+                .param("pid", projectId)
+                .param("from", fromDay)
+                .param("to", toDay)
+                .query(Integer.class)
+                .list();
     }
 
     /** Writes the given routes in one transaction. */

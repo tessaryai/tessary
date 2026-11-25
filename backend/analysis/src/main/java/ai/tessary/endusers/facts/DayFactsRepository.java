@@ -19,7 +19,8 @@ import org.springframework.stereotype.Repository;
 /**
  * The fold's writes. {@link #replaceDay} deletes a day's fact rows and writes the new ones; the caller holds one
  * transaction around it and {@link #writeFoldDay}, so a reader sees the old day or the new day, never a mix. An
- * {@code end_user} row only widens: its day range takes the earliest first day and the latest last day ever folded.
+ * {@code end_user} row only widens: its day range takes the earliest first day and the latest last day ever folded, and
+ * its session token link is the AND of every fold's, because spec 3.1 reads every session of the ID.
  */
 @Repository
 public class DayFactsRepository {
@@ -93,14 +94,15 @@ public class DayFactsRepository {
         batch(
                 """
                 INSERT INTO end_user (project_id, user_key, id_text, shape_signature, cluster_hash, first_seen_day,
-                                      last_seen_day)
-                VALUES (:pid, :key, :text, :shape, :cluster, :first, :last)
+                                      last_seen_day, session_token_link)
+                VALUES (:pid, :key, :text, :shape, :cluster, :first, :last, :tokenLink)
                 ON CONFLICT (project_id, user_key) DO UPDATE SET
                     id_text = EXCLUDED.id_text,
                     shape_signature = EXCLUDED.shape_signature,
                     cluster_hash = EXCLUDED.cluster_hash,
                     first_seen_day = LEAST(end_user.first_seen_day, EXCLUDED.first_seen_day),
                     last_seen_day = GREATEST(end_user.last_seen_day, EXCLUDED.last_seen_day),
+                    session_token_link = end_user.session_token_link AND EXCLUDED.session_token_link,
                     updated_at = now()
                 """,
                 facts.users().stream()
@@ -111,7 +113,8 @@ public class DayFactsRepository {
                                 .addValue("shape", user.shapeSignature())
                                 .addValue("cluster", hexOrNull(user.clusterHash()))
                                 .addValue("first", user.firstDay())
-                                .addValue("last", user.lastDay()))
+                                .addValue("last", user.lastDay())
+                                .addValue("tokenLink", user.sessionTokenLink()))
                         .toList());
     }
 
