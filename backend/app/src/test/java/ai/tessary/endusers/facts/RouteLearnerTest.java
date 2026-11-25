@@ -140,6 +140,28 @@ record RouteLearnerTest(
     }
 
     @Test
+    void learn_withNoARoute_isLenient_andABRouteHasAnchorShare0() {
+        Project p = TenantFixture.bootstrap(tenants, "learn-lenient").project();
+        insert(p, "e1", null, "p1", "export", "export", at(D - 3, "14:23:17"), null, true, false);
+        insert(p, "e2", null, "p1", "export", "export", at(D - 2, "16:41:29"), null, true, false);
+
+        RouteClasses learned = learner.learn(p.id(), D);
+
+        assertEquals(
+                new RouteClasses(
+                        Map.of(
+                                route(p, "export", "export"),
+                                new Route(
+                                        RouteClass.B,
+                                        D,
+                                        new RouteStatistics(
+                                                2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, null, null, null, 0.0, 0.0),
+                                        false)),
+                        true),
+                learned);
+    }
+
+    @Test
     void learn_keepsTheStoredClass_insideTheMargin() {
         Project p = TenantFixture.bootstrap(tenants, "learn-margin").project();
         for (int k = 0; k <= 20; k++) {
