@@ -36,6 +36,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
@@ -330,7 +331,7 @@ record EndUsersEndToEndTest(
     }
 
     private static String userId(int n) {
-        return String.format("user-%02d", n);
+        return String.format(Locale.ROOT, "user-%02d", n);
     }
 
     /**
