@@ -160,9 +160,9 @@ of grading before the migration history was squashed into the current `0000-base
   What still reads `git/` is the repo checkout the RCA and fix lanes get, and the fix step's writes (`GitProviderClient` blob, tree, commit, ref and pull request calls). Every sandbox clone takes `GitTokenService.cloneAuthHeader`, which for a GitHub App is a token minted with `contents: read` only and cached apart from the full one; a personal access token cannot be narrowed, so it is the one credential and the sandbox receives it at clone time (the launcher strips it from the clone's remote URL afterward). Cross-feature reads
   (pipeline state) go through that feature's **service facade**, not its repositories — see the
   `jdbc_client_only_in_repositories` rule and the per-feature ArchUnit layer checks.
-- **`classifier/` is the only leased async worker over the trace substrate.** Every queued kind —
+- **`classifier/` is the only continuous sweep over the trace substrate.** Every queued kind —
   `classifier`, `rca`, `triage`, `pull`, `usage_rollup`, `behavior_profile`, `sop_compile`,
-  `project_delete` (and the vestigial `embedding`) — lives in ONE `job` table
+  `project_delete`, `end_users`, `end_user_hits` (and the vestigial `embedding`) — lives in ONE `job` table
   discriminated by `kind`, and the leased kinds build their claims from the shared `LeasedJobSql`
   SKIP-LOCKED builders (`open/jobqueue`, `FOR UPDATE SKIP LOCKED` claim scoped by kind,
   expired-lease reclaim under an attempt cap, dead-lettering). `classifier/` is a **continuous cursor sweep over the trace
@@ -290,7 +290,7 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 |---|---|
 | `app` | `TessaryApplication`, `application.yaml`, every `@SpringBootTest` integration test |
 | `surfaces` | `query`, `search`, `mcp`, `slack` (the wire surface only), `metering`, `metrics`, `billing`, `telemetry` (the heartbeat orchestrator half — see `core`'s `telemetry` below) |
-| `analysis` | `classifier`, `onboarding`, `rca`, `fix`, `cases`, `alert`, `prompt`, `promptlib`, `agentrun` |
+| `analysis` | `classifier`, `onboarding`, `rca`, `fix`, `cases`, `alert`, `prompt`, `promptlib`, `agentrun`, `endusers` |
 | `llm-runtime` | `llm`, `sandbox` (agent-span telemetry only) — the only module that declares a model-provider SDK |
 | `product` | `pipeline`, `plan` |
 | `substrate` | `storage`, `ingest`, `redaction`, `retention`, `pricing`, `sources`, `traces`, `git`, `usage` |
@@ -322,6 +322,7 @@ holds. A package appears in exactly one module.
 | `crypto/` | `core` | `SecretBox` (AES-GCM seal/open for at-rest secrets), `CryptoConstants`. | — |
 | `db/` | `core` | `DataSourceConfig` (HikariCP against `TESSARY_JDBC_URL`), `LiquibaseConfig`, SQL helpers (`Upsert`). | — |
 | `edition/` | `tenancy` | which edition this JVM is running (`open` is the only one this tree defines), derived from the classpath, no property/env var behind it, and the build it reports (`GET /api/build`, shown at the foot of Settings → Organization) — `Edition`, `EditionConfig`, `EditionBanner`, `BuildController`. | — |
+| `endusers/` | `analysis` | the Users view: an hourly hit sweep (`hits/`, rule per detector through the `EndUserHitSource` seam), a daily job (`job/`: fold, reconcile, learn, judge, horizon sweep; horizon through the `EndUserHistoryHorizon` seam) that folds traces into facts keyed by a salted user key (`facts/`), the pure judge over `judge/model` records (`judge/`), and the read API with the erasure (`read/EndUserController`). No model call, no ingest hook. | [users-view.md](../concepts/users-view.md) |
 | `featureflags/` | `tenancy` | the flag-override seam under the capability layer; holds no defaults of its own. Open adapter reads `org_feature_flag`; another build can supply its own. | — |
 | `git/` | `substrate` | Git provider SPI (GitHub first). | — |
 | `ingest/` | `substrate` | normalizing raw trace data on the write path. | `/v1/traces` |

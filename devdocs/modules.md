@@ -12,7 +12,7 @@ said it twice.
 ```
 app          TessaryApplication, application.yaml, integration tests, ArchitectureRulesTest
 surfaces     query, search, mcp, metering, metrics, billing, telemetry
-analysis     classifier, rca, fix, cases, alert, onboarding, prompt, promptlib
+analysis     classifier, rca, fix, cases, alert, onboarding, prompt, promptlib, endusers
 llm-runtime  llm (incl. llm/decisions, llm/chat), sandbox   (the ONLY module declaring a provider SDK or AWS client)
 product      pipeline, plan
 substrate    storage, ingest, redaction, retention, pricing, sources, traces, git, usage
@@ -48,6 +48,12 @@ a platform primitive underneath it.
 **`metrics` is in `surfaces`.** It reads; it records nothing. Its `cases` view counts `eval_case`,
 which `analysis` owns, so it has to sit above `analysis`, and `surfaces/pom.xml` already depends on
 it. `query` and `metering` are the precedent for a read API over tables owned lower down.
+
+**`endusers` is in `analysis`.** Its hit sweep reads `classifier`'s finding evidence and two
+detection tables, its issues are `cases` lineages, and its horizon reads `substrate`'s `retention`,
+so it sits beside the features it reads. It owns its controller, as every feature does; its three
+MCP tools are in `surfaces`' `mcp`, which calls down into its read service.
+[concepts/users-view.md](./concepts/users-view.md) explains the slice.
 
 **`llm` splits into `llm-spi` (L0) and `llm-runtime` (L4).** `storage` needs
 the `llmspi` vocabulary (`ModelLane`), a pure enum, for usage/pricing
