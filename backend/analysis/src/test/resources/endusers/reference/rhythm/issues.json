@@ -1,0 +1,166 @@
+[
+ {
+  "case": {
+   "case_id": "c_latency_evening",
+   "opened_day": 20553,
+   "resolved_day": 20567,
+   "state": "resolved",
+   "title": "Slow replies at the evening peak"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "latency_slow_reply",
+    "finding_id": "f_latency_evening",
+    "last_seen_day": 20566,
+    "onset_day": 20553,
+    "severity": 0.45,
+    "status": "closed",
+    "title": "Slow replies at the evening peak"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_latency_evening"
+ },
+ {
+  "case": {
+   "case_id": "c_memory_loss",
+   "opened_day": 20576,
+   "resolved_day": 20596,
+   "state": "resolved",
+   "title": "Character forgets stored facts"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "memory_loss",
+    "finding_id": "f_memory_loss",
+    "last_seen_day": 20595,
+    "onset_day": 20575,
+    "severity": 0.85,
+    "status": "closed",
+    "title": "Character forgets stored facts"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_memory_loss"
+ },
+ {
+  "case": {
+   "case_id": "c_persona_drift",
+   "opened_day": 20609,
+   "resolved_day": null,
+   "state": "open",
+   "title": "Character breaks persona"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "persona_drift",
+    "finding_id": "f_persona_drift",
+    "last_seen_day": 20631,
+    "onset_day": 20608,
+    "severity": 0.7,
+    "status": "open",
+    "title": "Character breaks persona"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_persona_drift"
+ },
+ {
+  "case": {
+   "case_id": "c_provider_outage",
+   "opened_day": 20533,
+   "resolved_day": 20534,
+   "state": "resolved",
+   "title": "Provider outage: failed replies"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "provider_error",
+    "finding_id": "f_provider_error",
+    "last_seen_day": 20534,
+    "onset_day": 20533,
+    "severity": 0.9,
+    "status": "closed",
+    "title": "Failed replies from the model provider"
+   },
+   {
+    "classifier_key": "retry_storm",
+    "finding_id": "f_retry_storm",
+    "last_seen_day": 20534,
+    "onset_day": 20533,
+    "severity": 0.5,
+    "status": "closed",
+    "title": "Retry storm after failed replies"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_provider_outage"
+ },
+ {
+  "case": {
+   "case_id": "c_refusal_opening",
+   "opened_day": 20544,
+   "resolved_day": null,
+   "state": "open",
+   "title": "Safety filter refuses opening messages"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "refusal",
+    "finding_id": "f_refusal_opening",
+    "last_seen_day": 20631,
+    "onset_day": 20543,
+    "severity": 0.6,
+    "status": "open",
+    "title": "Safety filter refuses opening messages"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_refusal_opening"
+ },
+ {
+  "case": {
+   "case_id": "c_tts_error",
+   "opened_day": 20598,
+   "resolved_day": 20613,
+   "state": "resolved",
+   "title": "Voice replies fail"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "tts_error",
+    "finding_id": "f_tts_error",
+    "last_seen_day": 20612,
+    "onset_day": 20598,
+    "severity": 0.5,
+    "status": "closed",
+    "title": "Voice replies fail"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_tts_error"
+ },
+ {
+  "case": null,
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "context_truncation",
+    "finding_id": "f_context_truncation",
+    "last_seen_day": 20631,
+    "onset_day": 20513,
+    "severity": 0.25,
+    "status": "open",
+    "title": "Older context is trimmed in long chats"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "f_context_truncation"
+ }
+]

@@ -55,6 +55,13 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Monitor",
     items: [
       {
+        id: "users",
+        label: "Users",
+        description: "Which user IDs are active, silent or probably stopped, and which issues came before more stops.",
+        keywords: ["user ids", "end users", "retention", "churn", "stopped", "silent", "users lost"],
+        icon: Users,
+      },
+      {
         id: "traces",
         label: "Traces",
         description: "Every trace, span, and conversation Tessary has received.",

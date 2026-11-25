@@ -1,0 +1,175 @@
+[
+ {
+  "case": {
+   "case_id": "c_content_filter_block",
+   "opened_day": 20588,
+   "resolved_day": null,
+   "state": "open",
+   "title": "Safety filter blocks health and legal questions"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "content_filter_block",
+    "finding_id": "f_content_filter_block",
+    "last_seen_day": 20631,
+    "onset_day": 20587,
+    "severity": 0.65,
+    "status": "open",
+    "title": "Safety filter blocks health and legal questions"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_content_filter_block"
+ },
+ {
+  "case": {
+   "case_id": "c_latency_slow_reply",
+   "opened_day": 20551,
+   "resolved_day": 20565,
+   "state": "resolved",
+   "title": "Slow responses"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "latency_slow_reply",
+    "finding_id": "f_latency_slow_reply",
+    "last_seen_day": 20564,
+    "onset_day": 20551,
+    "severity": 0.5,
+    "status": "closed",
+    "title": "Slow responses"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_latency_slow_reply"
+ },
+ {
+  "case": {
+   "case_id": "c_model_behavior_change",
+   "opened_day": 20606,
+   "resolved_day": null,
+   "state": "open",
+   "title": "Default model alias changed behaviour"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "model_behavior_change",
+    "finding_id": "f_model_behavior_change",
+    "last_seen_day": 20631,
+    "onset_day": 20605,
+    "severity": 0.6,
+    "status": "open",
+    "title": "Default model alias changed behaviour"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_model_behavior_change"
+ },
+ {
+  "case": {
+   "case_id": "c_output_format_break",
+   "opened_day": 20573,
+   "resolved_day": 20582,
+   "state": "resolved",
+   "title": "Structured output breaks the schema"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "output_format_break",
+    "finding_id": "f_output_format_break",
+    "last_seen_day": 20581,
+    "onset_day": 20573,
+    "severity": 0.85,
+    "status": "closed",
+    "title": "Structured output breaks the schema"
+   },
+   {
+    "classifier_key": "tool_call_parse_error",
+    "finding_id": "f_tool_call_parse_error",
+    "last_seen_day": 20581,
+    "onset_day": 20573,
+    "severity": 0.85,
+    "status": "closed",
+    "title": "Tool calls fail to parse inside agent runs"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_output_format_break"
+ },
+ {
+  "case": {
+   "case_id": "c_provider_error",
+   "opened_day": 20530,
+   "resolved_day": 20530,
+   "state": "resolved",
+   "title": "Upstream outage, failed requests"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "provider_error",
+    "finding_id": "f_provider_error",
+    "last_seen_day": 20530,
+    "onset_day": 20530,
+    "severity": 0.9,
+    "status": "closed",
+    "title": "Upstream outage, failed requests"
+   },
+   {
+    "classifier_key": "retry_storm",
+    "finding_id": "f_retry_storm",
+    "last_seen_day": 20530,
+    "onset_day": 20530,
+    "severity": 0.5,
+    "status": "closed",
+    "title": "Retry storm after failed requests"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_provider_error"
+ },
+ {
+  "case": {
+   "case_id": "c_request_rejected_400",
+   "opened_day": 20539,
+   "resolved_day": null,
+   "state": "open",
+   "title": "Requests from new keys rejected"
+  },
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "request_rejected_400",
+    "finding_id": "f_request_rejected_400",
+    "last_seen_day": 20631,
+    "onset_day": 20538,
+    "severity": 0.55,
+    "status": "open",
+    "title": "Requests from new keys rejected"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "c_request_rejected_400"
+ },
+ {
+  "case": null,
+  "complete": true,
+  "findings": [
+   {
+    "classifier_key": "rate_limit_throttle",
+    "finding_id": "f_rate_limit_throttle",
+    "last_seen_day": 20631,
+    "onset_day": 20513,
+    "severity": 0.3,
+    "status": "open",
+    "title": "Requests throttled, then retried"
+   }
+  ],
+  "hit_rule": "member",
+  "issue_id": "f_rate_limit_throttle"
+ }
+]

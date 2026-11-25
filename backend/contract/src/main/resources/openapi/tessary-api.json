@@ -1,6 +1,41 @@
 {
   "components" : {
     "schemas" : {
+      "AccountLine" : {
+        "properties" : {
+          "account" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "hit" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "ids" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "silent" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "silent_since_day" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "account",
+          "hit",
+          "ids",
+          "silent",
+          "silent_since_day"
+        ],
+        "type" : "object"
+      },
       "AddMemberRequest" : {
         "properties" : {
           "email" : {
@@ -678,6 +713,174 @@
             "anyOf" : [
               {
                 "$ref" : "#/components/schemas/DeleteResponse"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseEndUserCaseBlock" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserCaseBlock"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseEndUserErasure" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserErasure"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseEndUserHitCounts" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserHitCounts"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseEndUserIdPage" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserIdPage"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseEndUserIssue" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserIssue"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseEndUserIssueList" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserIssueList"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseEndUserOverview" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserOverview"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseEndUserSilentIds" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserSilentIds"
               },
               {
                 "type" : "null"
@@ -4999,6 +5202,48 @@
         ],
         "type" : "object"
       },
+      "CurvePoint" : {
+        "properties" : {
+          "at_risk_hit" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "at_risk_similar" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "band_high" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "band_low" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "hit" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "similar" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "week" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "at_risk_hit",
+          "at_risk_similar",
+          "band_high",
+          "band_low",
+          "hit",
+          "similar",
+          "week"
+        ],
+        "type" : "object"
+      },
       "DeleteResponse" : {
         "properties" : {
           "deleted" : {
@@ -5101,6 +5346,880 @@
           "name",
           "span_id",
           "trace_id"
+        ],
+        "type" : "object"
+      },
+      "EndUserBanner" : {
+        "properties" : {
+          "code" : {
+            "enum" : [
+              "page_refusal",
+              "group_or_key_ids",
+              "id_loss",
+              "id_change",
+              "tracer",
+              "shared_silence",
+              "season_level",
+              "cannot_be_named_yet",
+              "outage"
+            ],
+            "type" : "string"
+          },
+          "numbers" : {
+            "additionalProperties" : {
+              "format" : "double",
+              "type" : "number"
+            },
+            "type" : "object"
+          },
+          "routes" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "code",
+          "numbers",
+          "routes"
+        ],
+        "type" : "object"
+      },
+      "EndUserCaseBlock" : {
+        "properties" : {
+          "case_id" : {
+            "type" : "string"
+          },
+          "case_ref" : {
+            "type" : "string"
+          },
+          "count_kind" : {
+            "enum" : [
+              "id_values",
+              "covered",
+              "not_applicable"
+            ],
+            "type" : "string"
+          },
+          "flagged_traces" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "flagged_traces_no_user_id" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "issue" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserIssueNumbers"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "page_state" : {
+            "enum" : [
+              "ok",
+              "partial_coverage",
+              "too_early",
+              "no_user_id",
+              "ids_unreliable",
+              "not_computed",
+              "collecting"
+            ],
+            "type" : "string"
+          },
+          "refusal" : {
+            "enum" : [
+              "ok",
+              "partial_coverage",
+              "too_early",
+              "no_user_id",
+              "ids_unreliable",
+              "not_computed",
+              "collecting"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "since_day" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "user_ids_hit" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "case_id",
+          "case_ref",
+          "count_kind",
+          "flagged_traces",
+          "flagged_traces_no_user_id",
+          "issue",
+          "page_state",
+          "refusal",
+          "since_day",
+          "user_ids_hit"
+        ],
+        "type" : "object"
+      },
+      "EndUserEraseRequest" : {
+        "properties" : {
+          "user_id" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "user_id"
+        ],
+        "type" : "object"
+      },
+      "EndUserErasure" : {
+        "properties" : {
+          "deleted_rows" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "deleted_rows"
+        ],
+        "type" : "object"
+      },
+      "EndUserHitCount" : {
+        "properties" : {
+          "case_id" : {
+            "type" : "string"
+          },
+          "case_ref" : {
+            "type" : "string"
+          },
+          "count_kind" : {
+            "enum" : [
+              "id_values",
+              "covered",
+              "not_applicable"
+            ],
+            "type" : "string"
+          },
+          "high" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "lost" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "low" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "refusal" : {
+            "enum" : [
+              "ok",
+              "partial_coverage",
+              "too_early",
+              "no_user_id",
+              "ids_unreliable",
+              "not_computed",
+              "collecting"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "user_ids_hit" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "case_id",
+          "case_ref",
+          "count_kind",
+          "high",
+          "lost",
+          "low",
+          "refusal",
+          "user_ids_hit"
+        ],
+        "type" : "object"
+      },
+      "EndUserHitCounts" : {
+        "properties" : {
+          "cases" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EndUserHitCount"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "cases"
+        ],
+        "type" : "object"
+      },
+      "EndUserIdPage" : {
+        "properties" : {
+          "ids" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EndUserIdRow"
+            },
+            "type" : "array"
+          },
+          "next_cursor" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "page_state" : {
+            "enum" : [
+              "ok",
+              "partial_coverage",
+              "too_early",
+              "no_user_id",
+              "ids_unreliable",
+              "not_computed",
+              "collecting"
+            ],
+            "type" : "string"
+          },
+          "stage" : {
+            "enum" : [
+              "active",
+              "silent",
+              "stopped"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "ids",
+          "next_cursor",
+          "page_state",
+          "stage"
+        ],
+        "type" : "object"
+      },
+      "EndUserIdRow" : {
+        "properties" : {
+          "days_silent" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "grade" : {
+            "enum" : [
+              "stopped",
+              "probably_stopped",
+              "unattended",
+              "not_yet_checked"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "hit_by" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "id_text" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "p_stop" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "state" : {
+            "enum" : [
+              "stopped",
+              "new",
+              "active",
+              "unknown"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "substate" : {
+            "enum" : [
+              "held",
+              "overdue"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "days_silent",
+          "grade",
+          "hit_by",
+          "id_text",
+          "p_stop",
+          "state",
+          "substate"
+        ],
+        "type" : "object"
+      },
+      "EndUserIssue" : {
+        "properties" : {
+          "as_of" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "case_id" : {
+            "type" : "string"
+          },
+          "case_ref" : {
+            "type" : "string"
+          },
+          "case_state" : {
+            "type" : "string"
+          },
+          "detector" : {
+            "type" : "string"
+          },
+          "issue" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/EndUserIssueNumbers"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "page_state" : {
+            "enum" : [
+              "ok",
+              "partial_coverage",
+              "too_early",
+              "no_user_id",
+              "ids_unreliable",
+              "not_computed",
+              "collecting"
+            ],
+            "type" : "string"
+          },
+          "resolved_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "silent_now" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "since_day" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "subject_label" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "as_of",
+          "case_id",
+          "case_ref",
+          "case_state",
+          "detector",
+          "issue",
+          "page_state",
+          "resolved_at",
+          "silent_now",
+          "since_day",
+          "subject_label",
+          "title"
+        ],
+        "type" : "object"
+      },
+      "EndUserIssueList" : {
+        "properties" : {
+          "as_of" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "issues" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EndUserIssueRow"
+            },
+            "type" : "array"
+          },
+          "page_state" : {
+            "enum" : [
+              "ok",
+              "partial_coverage",
+              "too_early",
+              "no_user_id",
+              "ids_unreliable",
+              "not_computed",
+              "collecting"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "as_of",
+          "issues",
+          "page_state"
+        ],
+        "type" : "object"
+      },
+      "EndUserIssueNumbers" : {
+        "properties" : {
+          "compared" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "curve" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CurvePoint"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
+          "diagnostics" : {
+            "$ref" : "#/components/schemas/IssueDiagnostics"
+          },
+          "group_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "high" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "lost" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "low" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "rank" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "shown" : {
+            "type" : "boolean"
+          },
+          "user_ids_hit" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "verdict" : {
+            "enum" : [
+              "page_refused",
+              "hits_not_complete",
+              "history_too_short",
+              "cannot_tell_yet",
+              "cannot_measure_yet",
+              "too_few_ids",
+              "reaches_nearly_all",
+              "not_comparable",
+              "always_present",
+              "few_accounts",
+              "evidence_of_loss",
+              "moved_not_added",
+              "no_measurable_loss",
+              "not_enough_evidence",
+              "not_applicable"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "compared",
+          "curve",
+          "diagnostics",
+          "group_id",
+          "high",
+          "lost",
+          "low",
+          "rank",
+          "shown",
+          "user_ids_hit",
+          "verdict"
+        ],
+        "type" : "object"
+      },
+      "EndUserIssueRow" : {
+        "properties" : {
+          "case_id" : {
+            "type" : "string"
+          },
+          "case_ref" : {
+            "type" : "string"
+          },
+          "detector" : {
+            "type" : "string"
+          },
+          "issue" : {
+            "$ref" : "#/components/schemas/EndUserIssueNumbers"
+          },
+          "since_day" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "subject_label" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "case_id",
+          "case_ref",
+          "detector",
+          "issue",
+          "since_day",
+          "subject_label",
+          "title"
+        ],
+        "type" : "object"
+      },
+      "EndUserOverview" : {
+        "properties" : {
+          "as_of" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "banners" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EndUserBanner"
+            },
+            "type" : "array"
+          },
+          "counted" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "history_since" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "limits" : {
+            "items" : {
+              "$ref" : "#/components/schemas/LimitLine"
+            },
+            "type" : "array"
+          },
+          "page_state" : {
+            "enum" : [
+              "ok",
+              "partial_coverage",
+              "too_early",
+              "no_user_id",
+              "ids_unreliable",
+              "not_computed",
+              "collecting"
+            ],
+            "type" : "string"
+          },
+          "page_state_reason" : {
+            "enum" : [
+              "low_id_share",
+              "low_id_share_28",
+              "short_history",
+              "few_ids",
+              "recent_id_change",
+              "heavy_ids",
+              "ids_replaced",
+              "ids_not_seen_again",
+              "ids_copy_session_token",
+              "ids_set_aside",
+              "id_loss",
+              "id_change",
+              "some_ids_replaced"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "reason_numbers" : {
+            "additionalProperties" : {
+              "format" : "double",
+              "type" : "number"
+            },
+            "type" : "object"
+          },
+          "set_aside" : {
+            "additionalProperties" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "type" : [
+              "object",
+              "null"
+            ]
+          },
+          "stages" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/StageCounts"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "stop_stage_numbers" : {
+            "additionalProperties" : {
+              "format" : "double",
+              "type" : "number"
+            },
+            "type" : [
+              "object",
+              "null"
+            ]
+          },
+          "stop_stage_state" : {
+            "enum" : [
+              "history_too_short",
+              "not_judged_yet",
+              "cannot_tell_yet",
+              "mixed_id_formats",
+              "expected_only",
+              "cannot_be_named_yet",
+              "expected_and_named"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "trust" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/TrustNumbers"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          }
+        },
+        "required" : [
+          "as_of",
+          "banners",
+          "counted",
+          "history_since",
+          "limits",
+          "page_state",
+          "page_state_reason",
+          "reason_numbers",
+          "set_aside",
+          "stages",
+          "stop_stage_numbers",
+          "stop_stage_state",
+          "trust"
+        ],
+        "type" : "object"
+      },
+      "EndUserSilentId" : {
+        "properties" : {
+          "days_silent" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "grade" : {
+            "enum" : [
+              "stopped",
+              "probably_stopped",
+              "unattended",
+              "not_yet_checked"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "id_text" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "stage" : {
+            "enum" : [
+              "active",
+              "silent",
+              "stopped"
+            ],
+            "type" : "string"
+          },
+          "weeks_since_hit" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "days_silent",
+          "grade",
+          "id_text",
+          "stage",
+          "weeks_since_hit"
+        ],
+        "type" : "object"
+      },
+      "EndUserSilentIds" : {
+        "properties" : {
+          "ids" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EndUserSilentId"
+            },
+            "type" : "array"
+          },
+          "more" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "more_weeks_high" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "more_weeks_low" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "next_cursor" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "verdict" : {
+            "enum" : [
+              "page_refused",
+              "hits_not_complete",
+              "history_too_short",
+              "cannot_tell_yet",
+              "cannot_measure_yet",
+              "too_few_ids",
+              "reaches_nearly_all",
+              "not_comparable",
+              "always_present",
+              "few_accounts",
+              "evidence_of_loss",
+              "moved_not_added",
+              "no_measurable_loss",
+              "not_enough_evidence",
+              "not_applicable"
+            ],
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "ids",
+          "more",
+          "more_weeks_high",
+          "more_weeks_low",
+          "next_cursor",
+          "verdict"
         ],
         "type" : "object"
       },
@@ -6649,6 +7768,111 @@
         ],
         "type" : "object"
       },
+      "IssueDiagnostics" : {
+        "properties" : {
+          "account_lines" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AccountLine"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
+          "accounts" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "estimated" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "expected" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "first_evidence_day" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "h" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "late_hits" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "pop_high" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "stopped" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "t_vis" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "unmatched" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "upper" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "account_lines",
+          "accounts",
+          "estimated",
+          "expected",
+          "first_evidence_day",
+          "h",
+          "late_hits",
+          "pop_high",
+          "stopped",
+          "t_vis",
+          "unmatched",
+          "upper"
+        ],
+        "type" : "object"
+      },
       "IssueRequest" : {
         "properties" : {
           "name" : {
@@ -6744,6 +7968,54 @@
         "required" : [
           "learned",
           "needed"
+        ],
+        "type" : "object"
+      },
+      "LimitLine" : {
+        "properties" : {
+          "code" : {
+            "enum" : [
+              "group_or_key_ids",
+              "tracer_cannot_test",
+              "few_covered_ids",
+              "cannot_be_named_yet",
+              "named_right_low",
+              "named_found_low",
+              "no_anchor",
+              "lenient_basis",
+              "unattended_share",
+              "id_loss",
+              "id_change",
+              "shared_silence",
+              "one_day_share",
+              "account_event",
+              "return_cycle_too_long",
+              "repeat_contact",
+              "facts_not_kept",
+              "imports_outside_window"
+            ],
+            "type" : "string"
+          },
+          "ids" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "never_cut" : {
+            "type" : "boolean"
+          },
+          "numbers" : {
+            "additionalProperties" : {
+              "format" : "double",
+              "type" : "number"
+            },
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "code",
+          "ids",
+          "never_cut",
+          "numbers"
         ],
         "type" : "object"
       },
@@ -11637,6 +12909,58 @@
         ],
         "type" : "object"
       },
+      "StageCounts" : {
+        "properties" : {
+          "active" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "counted" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "held" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "new" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "silent" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "stopped_expected" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "stopped_high" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "stopped_low" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "stopped_named" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "active",
+          "counted",
+          "held",
+          "new",
+          "silent",
+          "stopped_expected",
+          "stopped_high",
+          "stopped_low",
+          "stopped_named"
+        ],
+        "type" : "object"
+      },
       "StartRequest" : {
         "properties" : {
           "client_label" : {
@@ -12622,6 +13946,33 @@
           "cases",
           "recently_resolved",
           "watching"
+        ],
+        "type" : "object"
+      },
+      "TrustNumbers" : {
+        "properties" : {
+          "caveat" : {
+            "type" : "boolean"
+          },
+          "named_found" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "named_right" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "caveat",
+          "named_found",
+          "named_right"
         ],
         "type" : "object"
       },
@@ -16442,6 +17793,442 @@
         },
         "tags" : [
           "organization-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/cases/{caseId}" : {
+      "get" : {
+        "operationId" : "EndUserController_caseBlock",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "caseId",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseEndUserCaseBlock"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "end-user-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/erasures" : {
+      "post" : {
+        "operationId" : "EndUserController_erase",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/EndUserEraseRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseEndUserErasure"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "end-user-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/hit-counts" : {
+      "get" : {
+        "operationId" : "EndUserController_hitCounts",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseEndUserHitCounts"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "end-user-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/ids" : {
+      "get" : {
+        "operationId" : "EndUserController_ids",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "stage",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "cursor",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "limit",
+            "required" : false,
+            "schema" : {
+              "default" : 50,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseEndUserIdPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "end-user-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/issues" : {
+      "get" : {
+        "operationId" : "EndUserController_issues",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseEndUserIssueList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "end-user-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/issues/{caseId}" : {
+      "get" : {
+        "operationId" : "EndUserController_issue",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "caseId",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseEndUserIssue"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "end-user-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/issues/{caseId}/silent-ids" : {
+      "get" : {
+        "operationId" : "EndUserController_silentIds",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "caseId",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "cursor",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseEndUserSilentIds"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "end-user-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/overview" : {
+      "get" : {
+        "operationId" : "EndUserController_overview",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseEndUserOverview"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "end-user-controller"
         ]
       }
     },

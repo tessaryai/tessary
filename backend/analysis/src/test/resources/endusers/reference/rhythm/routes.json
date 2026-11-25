@@ -1,0 +1,87 @@
+{
+ "1": {
+  "call_site": "chat_reply",
+  "class": "A",
+  "name": "chat.turn",
+  "route_no": 1,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.0393,
+   "dq10": 6.0,
+   "dq90": 69.0,
+   "follow": 0.9029,
+   "inp": 1.0,
+   "n": 121989,
+   "near_cut": false,
+   "sched_r": 0.0
+  }
+ },
+ "2": {
+  "call_site": "proactive_nudge",
+  "class": "C",
+  "name": "companion.proactive_nudge",
+  "route_no": 2,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.0447,
+   "dq10": null,
+   "dq90": null,
+   "follow": 0.0,
+   "inp": 0.0,
+   "n": 9145,
+   "near_cut": false,
+   "sched_r": 0.0
+  }
+ },
+ "3": {
+  "call_site": "healthcheck",
+  "class": "C",
+  "name": "healthcheck.chat",
+  "route_no": 3,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": null,
+   "dq10": null,
+   "dq90": null,
+   "follow": 0.0,
+   "inp": 1.0,
+   "n": 5751,
+   "near_cut": false,
+   "sched_r": null
+  }
+ },
+ "4": {
+  "call_site": "memory_summarize",
+  "class": "M",
+  "name": "memory.summarize",
+  "route_no": 4,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.0347,
+   "dq10": 392.0,
+   "dq90": 1109.0,
+   "follow": 1.0,
+   "inp": 0.0,
+   "n": 6692,
+   "near_cut": false,
+   "sched_r": 0.0
+  }
+ },
+ "5": {
+  "call_site": "voice_reply",
+  "class": "A",
+  "name": "voice.turn",
+  "route_no": 5,
+  "statistics": {
+   "co_anchor": -1,
+   "conc": 0.0323,
+   "dq10": 6.0,
+   "dq90": 71.0,
+   "follow": 0.903,
+   "inp": 1.0,
+   "n": 7543,
+   "near_cut": false,
+   "sched_r": 0.0215
+  }
+ }
+}

@@ -60,6 +60,9 @@ const ClassifierConfigurePage = named(
 );
 const FindingPage = named(() => import("./views/classifiers/FindingPage"), "FindingPage");
 const MetricsPage = named(() => import("./views/metrics/MetricsPage"), "MetricsPage", "metrics");
+const UsersPage = named(() => import("./views/users/UsersPage"), "UsersPage", "users");
+const IssuePage = named(() => import("./views/users/IssuePage"), "IssuePage");
+const UserIdsPage = named(() => import("./views/users/UserIdsPage"), "UserIdsPage");
 const PromptsPage = named(() => import("./views/prompts/PromptsPage"), "PromptsPage", "prompts");
 const PromptDetailPage = named(() => import("./views/prompts/PromptDetailPage"), "PromptDetailPage");
 const NewPromptPage = named(() => import("./views/prompts/NewPromptPage"), "NewPromptPage");
@@ -207,6 +210,10 @@ function ProjectShell() {
 
         <Route path="triage" element={<Triage />} />
         <Route path="cases/:caseId" element={<CasePage />} />
+
+        <Route path="users" element={<UsersPage />} />
+        <Route path="users/issues/:caseId" element={<IssuePage />} />
+        <Route path="users/ids" element={<UserIdsPage />} />
 
         <Route path="traces" element={<TracesIndex />} />
         <Route path="traces/:traceId" element={<TraceDetail />} />

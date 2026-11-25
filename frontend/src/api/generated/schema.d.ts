@@ -788,6 +788,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/cases/{caseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["EndUserController_caseBlock"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/erasures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["EndUserController_erase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/hit-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["EndUserController_hitCounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/ids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["EndUserController_ids"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["EndUserController_issues"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/issues/{caseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["EndUserController_issue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/issues/{caseId}/silent-ids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["EndUserController_silentIds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/end-users/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["EndUserController_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/findings": {
         parameters: {
             query?: never;
@@ -2168,6 +2296,18 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AccountLine: {
+            /** Format: int32 */
+            account: number;
+            /** Format: int32 */
+            hit: number;
+            /** Format: int32 */
+            ids: number;
+            /** Format: int32 */
+            silent: number;
+            /** Format: int32 */
+            silent_since_day: number | null;
+        };
         AddMemberRequest: {
             /** Format: email */
             email: string;
@@ -2302,6 +2442,38 @@ export interface components {
         };
         ApiResponseDeleteResponse: {
             data?: components["schemas"]["DeleteResponse"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseEndUserCaseBlock: {
+            data?: components["schemas"]["EndUserCaseBlock"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseEndUserErasure: {
+            data?: components["schemas"]["EndUserErasure"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseEndUserHitCounts: {
+            data?: components["schemas"]["EndUserHitCounts"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseEndUserIdPage: {
+            data?: components["schemas"]["EndUserIdPage"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseEndUserIssue: {
+            data?: components["schemas"]["EndUserIssue"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseEndUserIssueList: {
+            data?: components["schemas"]["EndUserIssueList"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseEndUserOverview: {
+            data?: components["schemas"]["EndUserOverview"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseEndUserSilentIds: {
+            data?: components["schemas"]["EndUserSilentIds"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseFacetsView: {
@@ -3182,6 +3354,22 @@ export interface components {
         CredentialListView: {
             credentials: components["schemas"]["View"][];
         };
+        CurvePoint: {
+            /** Format: int32 */
+            at_risk_hit: number;
+            /** Format: int32 */
+            at_risk_similar: number;
+            /** Format: double */
+            band_high: number;
+            /** Format: double */
+            band_low: number;
+            /** Format: double */
+            hit: number;
+            /** Format: double */
+            similar: number;
+            /** Format: int32 */
+            week: number;
+        };
         DeleteResponse: {
             deleted: boolean;
         };
@@ -3206,6 +3394,186 @@ export interface components {
             name: string;
             span_id: string | null;
             trace_id: string;
+        };
+        EndUserBanner: {
+            /** @enum {string} */
+            code: "page_refusal" | "group_or_key_ids" | "id_loss" | "id_change" | "tracer" | "shared_silence" | "season_level" | "cannot_be_named_yet" | "outage";
+            numbers: {
+                [key: string]: number;
+            };
+            routes: string[];
+        };
+        EndUserCaseBlock: {
+            case_id: string;
+            case_ref: string;
+            /** @enum {string} */
+            count_kind: "id_values" | "covered" | "not_applicable";
+            /** Format: int32 */
+            flagged_traces: number;
+            /** Format: int32 */
+            flagged_traces_no_user_id: number;
+            issue: components["schemas"]["EndUserIssueNumbers"] | null;
+            /** @enum {string} */
+            page_state: "ok" | "partial_coverage" | "too_early" | "no_user_id" | "ids_unreliable" | "not_computed" | "collecting";
+            /** @enum {string|null} */
+            refusal: "ok" | "partial_coverage" | "too_early" | "no_user_id" | "ids_unreliable" | "not_computed" | "collecting" | null;
+            /** Format: int32 */
+            since_day: number | null;
+            /** Format: int32 */
+            user_ids_hit: number | null;
+        };
+        EndUserEraseRequest: {
+            user_id: string;
+        };
+        EndUserErasure: {
+            /** Format: int32 */
+            deleted_rows: number;
+        };
+        EndUserHitCount: {
+            case_id: string;
+            case_ref: string;
+            /** @enum {string} */
+            count_kind: "id_values" | "covered" | "not_applicable";
+            /** Format: double */
+            high: number | null;
+            /** Format: double */
+            lost: number | null;
+            /** Format: double */
+            low: number | null;
+            /** @enum {string|null} */
+            refusal: "ok" | "partial_coverage" | "too_early" | "no_user_id" | "ids_unreliable" | "not_computed" | "collecting" | null;
+            /** Format: int32 */
+            user_ids_hit: number | null;
+        };
+        EndUserHitCounts: {
+            cases: components["schemas"]["EndUserHitCount"][];
+        };
+        EndUserIdPage: {
+            ids: components["schemas"]["EndUserIdRow"][];
+            next_cursor: string | null;
+            /** @enum {string} */
+            page_state: "ok" | "partial_coverage" | "too_early" | "no_user_id" | "ids_unreliable" | "not_computed" | "collecting";
+            /** @enum {string} */
+            stage: "active" | "silent" | "stopped";
+        };
+        EndUserIdRow: {
+            /** Format: int32 */
+            days_silent: number | null;
+            /** @enum {string|null} */
+            grade: "stopped" | "probably_stopped" | "unattended" | "not_yet_checked" | null;
+            hit_by: string[];
+            id_text: string | null;
+            /** Format: double */
+            p_stop: number | null;
+            /** @enum {string|null} */
+            state: "stopped" | "new" | "active" | "unknown" | null;
+            /** @enum {string|null} */
+            substate: "held" | "overdue" | null;
+        };
+        EndUserIssue: {
+            /** Format: int32 */
+            as_of: number | null;
+            case_id: string;
+            case_ref: string;
+            case_state: string;
+            detector: string;
+            issue: components["schemas"]["EndUserIssueNumbers"] | null;
+            /** @enum {string} */
+            page_state: "ok" | "partial_coverage" | "too_early" | "no_user_id" | "ids_unreliable" | "not_computed" | "collecting";
+            resolved_at: string | null;
+            /** Format: int32 */
+            silent_now: number | null;
+            /** Format: int32 */
+            since_day: number | null;
+            subject_label: string;
+            title: string;
+        };
+        EndUserIssueList: {
+            /** Format: int32 */
+            as_of: number | null;
+            issues: components["schemas"]["EndUserIssueRow"][];
+            /** @enum {string} */
+            page_state: "ok" | "partial_coverage" | "too_early" | "no_user_id" | "ids_unreliable" | "not_computed" | "collecting";
+        };
+        EndUserIssueNumbers: {
+            /** Format: int32 */
+            compared: number | null;
+            curve: components["schemas"]["CurvePoint"][] | null;
+            diagnostics: components["schemas"]["IssueDiagnostics"];
+            group_id: string | null;
+            /** Format: double */
+            high: number | null;
+            /** Format: double */
+            lost: number | null;
+            /** Format: double */
+            low: number | null;
+            /** Format: int32 */
+            rank: number | null;
+            shown: boolean;
+            /** Format: int32 */
+            user_ids_hit: number;
+            /** @enum {string} */
+            verdict: "page_refused" | "hits_not_complete" | "history_too_short" | "cannot_tell_yet" | "cannot_measure_yet" | "too_few_ids" | "reaches_nearly_all" | "not_comparable" | "always_present" | "few_accounts" | "evidence_of_loss" | "moved_not_added" | "no_measurable_loss" | "not_enough_evidence" | "not_applicable";
+        };
+        EndUserIssueRow: {
+            case_id: string;
+            case_ref: string;
+            detector: string;
+            issue: components["schemas"]["EndUserIssueNumbers"];
+            /** Format: int32 */
+            since_day: number | null;
+            subject_label: string;
+            title: string;
+        };
+        EndUserOverview: {
+            /** Format: int32 */
+            as_of: number | null;
+            banners: components["schemas"]["EndUserBanner"][];
+            /** Format: int32 */
+            counted: number | null;
+            /** Format: int32 */
+            history_since: number | null;
+            limits: components["schemas"]["LimitLine"][];
+            /** @enum {string} */
+            page_state: "ok" | "partial_coverage" | "too_early" | "no_user_id" | "ids_unreliable" | "not_computed" | "collecting";
+            /** @enum {string|null} */
+            page_state_reason: "low_id_share" | "low_id_share_28" | "short_history" | "few_ids" | "recent_id_change" | "heavy_ids" | "ids_replaced" | "ids_not_seen_again" | "ids_copy_session_token" | "ids_set_aside" | "id_loss" | "id_change" | "some_ids_replaced" | null;
+            reason_numbers: {
+                [key: string]: number;
+            };
+            set_aside: {
+                [key: string]: number;
+            } | null;
+            stages: components["schemas"]["StageCounts"] | null;
+            stop_stage_numbers: {
+                [key: string]: number;
+            } | null;
+            /** @enum {string|null} */
+            stop_stage_state: "history_too_short" | "not_judged_yet" | "cannot_tell_yet" | "mixed_id_formats" | "expected_only" | "cannot_be_named_yet" | "expected_and_named" | null;
+            trust: components["schemas"]["TrustNumbers"] | null;
+        };
+        EndUserSilentId: {
+            /** Format: int32 */
+            days_silent: number | null;
+            /** @enum {string|null} */
+            grade: "stopped" | "probably_stopped" | "unattended" | "not_yet_checked" | null;
+            id_text: string | null;
+            /** @enum {string} */
+            stage: "active" | "silent" | "stopped";
+            /** Format: int32 */
+            weeks_since_hit: number;
+        };
+        EndUserSilentIds: {
+            ids: components["schemas"]["EndUserSilentId"][];
+            /** Format: int32 */
+            more: number;
+            /** Format: int32 */
+            more_weeks_high: number | null;
+            /** Format: int32 */
+            more_weeks_low: number | null;
+            next_cursor: string | null;
+            /** @enum {string|null} */
+            verdict: "page_refused" | "hits_not_complete" | "history_too_short" | "cannot_tell_yet" | "cannot_measure_yet" | "too_few_ids" | "reaches_nearly_all" | "not_comparable" | "always_present" | "few_accounts" | "evidence_of_loss" | "moved_not_added" | "no_measurable_loss" | "not_enough_evidence" | "not_applicable" | null;
         };
         EntityDiffView: {
             /** Format: int32 */
@@ -3561,6 +3929,31 @@ export interface components {
             role: string;
             state: string;
         };
+        IssueDiagnostics: {
+            account_lines: components["schemas"]["AccountLine"][] | null;
+            /** Format: int32 */
+            accounts: number | null;
+            /** Format: int32 */
+            estimated: number | null;
+            /** Format: double */
+            expected: number | null;
+            /** Format: int32 */
+            first_evidence_day: number | null;
+            /** Format: int32 */
+            h: number | null;
+            /** Format: int32 */
+            late_hits: number | null;
+            /** Format: double */
+            pop_high: number | null;
+            /** Format: double */
+            stopped: number | null;
+            /** Format: int32 */
+            t_vis: number | null;
+            /** Format: int32 */
+            unmatched: number | null;
+            /** Format: double */
+            upper: number | null;
+        };
         IssueRequest: {
             name: string;
         };
@@ -3586,6 +3979,16 @@ export interface components {
             learned: number;
             /** Format: int64 */
             needed: number;
+        };
+        LimitLine: {
+            /** @enum {string} */
+            code: "group_or_key_ids" | "tracer_cannot_test" | "few_covered_ids" | "cannot_be_named_yet" | "named_right_low" | "named_found_low" | "no_anchor" | "lenient_basis" | "unattended_share" | "id_loss" | "id_change" | "shared_silence" | "one_day_share" | "account_event" | "return_cycle_too_long" | "repeat_contact" | "facts_not_kept" | "imports_outside_window";
+            /** Format: int32 */
+            ids: number;
+            never_cut: boolean;
+            numbers: {
+                [key: string]: number;
+            };
         };
         LlmUsageCellView: {
             bucket_start: string;
@@ -4712,6 +5115,26 @@ export interface components {
             /** Format: int64 */
             ttft_ms: number | null;
         };
+        StageCounts: {
+            /** Format: int32 */
+            active: number;
+            /** Format: int32 */
+            counted: number;
+            /** Format: int32 */
+            held: number;
+            /** Format: int32 */
+            new: number;
+            /** Format: int32 */
+            silent: number;
+            /** Format: double */
+            stopped_expected: number;
+            /** Format: double */
+            stopped_high: number;
+            /** Format: double */
+            stopped_low: number;
+            /** Format: int32 */
+            stopped_named: number;
+        };
         StartRequest: {
             client_label?: string;
         };
@@ -4930,6 +5353,13 @@ export interface components {
             cases: components["schemas"]["CaseView"][];
             recently_resolved: components["schemas"]["CaseView"][];
             watching: components["schemas"]["WatchingView"];
+        };
+        TrustNumbers: {
+            caveat: boolean;
+            /** Format: double */
+            named_found: number | null;
+            /** Format: double */
+            named_right: number | null;
         };
         TuningView: {
             /** Format: double */
@@ -6735,6 +7165,217 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProject"];
+                };
+            };
+        };
+    };
+    EndUserController_caseBlock: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseEndUserCaseBlock"];
+                };
+            };
+        };
+    };
+    EndUserController_erase: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserEraseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseEndUserErasure"];
+                };
+            };
+        };
+    };
+    EndUserController_hitCounts: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseEndUserHitCounts"];
+                };
+            };
+        };
+    };
+    EndUserController_ids: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                stage: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseEndUserIdPage"];
+                };
+            };
+        };
+    };
+    EndUserController_issues: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseEndUserIssueList"];
+                };
+            };
+        };
+    };
+    EndUserController_issue: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseEndUserIssue"];
+                };
+            };
+        };
+    };
+    EndUserController_silentIds: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseEndUserSilentIds"];
+                };
+            };
+        };
+    };
+    EndUserController_overview: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseEndUserOverview"];
                 };
             };
         };

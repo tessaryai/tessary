@@ -54,6 +54,7 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 | [concepts/tool-error.md](./concepts/tool-error.md) | The Tool error classifier: what counts as a failure, error signatures, buckets, the Bernoulli CUSUM and its derived threshold, the carried lifecycle, and evidence. |
 | [concepts/frustration.md](./concepts/frustration.md) | The Frustration classifier: which turns it sends to the decision model, the one-flag-per-conversation rule, the conversation as the rate test's trial, the learned rate and what a resolve does to it. |
 | [concepts/groundedness.md](./concepts/groundedness.md) | The Groundedness classifier: which answers it scores and against what, why an answer with no documents still counts, the trace as the rate test's trial, the learned rate, what happens while the model is down, and what a resolve does. |
+| [concepts/users-view.md](./concepts/users-view.md) | The Users view: salted user keys and where the readable ID text goes, the fold, the hit rule per detector, route classes, the judge's fixed stage order, verdicts, and the seven guards with their keys. |
 | [concepts/alerting.md](./concepts/alerting.md) | How a case reaches a human: the `case_opened` rule, why quiet hours defer rather than drop, and what the message carries. |
 | [concepts/pii-redaction.md](./concepts/pii-redaction.md) | Layered PII redaction: write-path guard, client-side option, rules playground. |
 

@@ -1,0 +1,95 @@
+{
+ "issues": [
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "case_context_loss",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 108,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "case_free_limit",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 221,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "case_provider_outage",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 26,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "case_quality_regression",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 71,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "case_starter_cards_error",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 189,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "case_task_run_failed",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 34,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "f_missing_citation",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": true,
+   "users_hit": 199,
+   "users_lost": null,
+   "verdict": "page_refused"
+  }
+ ],
+ "page_reason": "Of 14 ids that ended and had a repeating job, 10 went on under a new id. Ids are replaced, so a silent id is not a lost user.",
+ "page_reason_code": "ids_replaced",
+ "page_reason_numbers": {
+  "m_cont": 10,
+  "n_end": 14
+ },
+ "page_state": "ids_unreliable",
+ "scenario": "replaced_ids",
+ "stages": null,
+ "tracer": {
+  "m_cont": 10,
+  "n_end": 14,
+  "verdict": "ids are replaced"
+ }
+}

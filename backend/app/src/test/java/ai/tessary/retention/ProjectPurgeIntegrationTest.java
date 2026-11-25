@@ -9,9 +9,14 @@ import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectDeleteJobRepository;
 import ai.tessary.tenant.ProjectRepository;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.LogCapture;
 import ai.tessary.testsupport.SeedRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -126,6 +131,105 @@ record ProjectPurgeIntegrationTest(
 
         assertTrue(projects.findById(p.id()).isEmpty(), "project row should be gone");
         assertEquals(0, rows("trace", p));
+    }
+
+    /**
+     * {@code end_user_day} and {@code end_user_hit} grow with traffic, so the cascade of the final project delete would
+     * remove them in one statement; the other twelve are small and leave by cascade. The {@code deleted} count of the
+     * done line shows the two went through batches.
+     */
+    @Test
+    @DisplayName("a project's rows in every end-user table are gone, the two large tables deleted in batches")
+    void projectPurge_emptiesEveryEndUserTable() {
+        Project p = project("purge-end-users");
+        endUserRows(p);
+        assertEquals(endUserTableCounts(1), endUserRowCounts(p), "one seeded row in each of the 14 tables");
+
+        LogCapture log = LogCapture.during(ProjectPurgeWorker.class, () -> {
+            accept(p);
+            worker.tick();
+        });
+
+        assertEquals(endUserTableCounts(0), endUserRowCounts(p));
+        assertEquals(
+                List.of(2L),
+                log.fields("project.purge.done").stream()
+                        .filter(f -> p.id().equals(f.get("project")))
+                        .map(f -> f.get("deleted"))
+                        .toList(),
+                "the end_user_day and end_user_hit rows should be deleted by the batched purge, not the cascade");
+    }
+
+    private static final List<String> END_USER_TABLES = List.of(
+            "end_user",
+            "end_user_alias_edge",
+            "end_user_day",
+            "end_user_day_null",
+            "end_user_fold_day",
+            "end_user_hit",
+            "end_user_hit_summary",
+            "end_user_issue",
+            "end_user_issue_hit",
+            "end_user_project",
+            "end_user_route",
+            "end_user_silence_event",
+            "end_user_snapshot",
+            "end_user_version");
+
+    private Map<String, Integer> endUserTableCounts(int each) {
+        Map<String, Integer> expected = new TreeMap<>();
+        END_USER_TABLES.forEach(t -> expected.put(t, each));
+        return expected;
+    }
+
+    /** Every table in the schema named {@code end_user} or {@code end_user_*}, so a table added later is counted too. */
+    private Map<String, Integer> endUserRowCounts(Project p) {
+        Map<String, Integer> counts = new TreeMap<>();
+        jdbc.sql("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                        + " AND (tablename = 'end_user' OR tablename LIKE 'end\\_user\\_%')")
+                .query(String.class)
+                .list()
+                .forEach(t -> counts.put(t, rows(t, p)));
+        return counts;
+    }
+
+    private void endUserRows(Project p) {
+        byte[] salt = new byte[32];
+        byte[] userKey = new byte[16];
+        byte[] otherKey = new byte[16];
+        Arrays.fill(userKey, (byte) 7);
+        Arrays.fill(otherKey, (byte) 9);
+        String slots = "0".repeat(36) + "1" + "0".repeat(59);
+        SeedRows.insert(jdbc, """
+            end_user_project       | project_id | salt
+                                   | $1         | $2
+            end_user_route         | project_id | route_no | trace_name | call_site_id
+                                   | $1         | 1        | answer     | __unattributed__
+            end_user_day           | project_id | user_key | day   | route_no | version_no | traces | hour_mask | slot_mask
+                                   | $1         | $3       | 20781 | 1        | 1          | 1      | 512       | $5
+            end_user_day_null      | project_id | day   | route_no | version_no | traces | traces_no_user_id
+                                   | $1         | 20781 | 1        | 1          | 1      | 0
+            end_user_version       | project_id | version_no | project_version_id | first_trace_day
+                                   | $1         | 1          | null               | 20781
+            end_user_alias_edge    | project_id | from_key | to_key | via     | day
+                                   | $1         | $3       | $4     | session | 20781
+            end_user_hit           | project_id | finding_id | role    | user_key | day   | route_no | refs | source
+                                   | $1         | f-$1       | witness | $3       | 20781 | 1        | 1    | evidence
+            end_user_hit_summary   | project_id | finding_id | refs_total | refs_no_user_id | session_only_refs | complete | hit_rule
+                                   | $1         | f-$1       | 1          | 0               | 0                 | true     | witness
+            end_user               | project_id | user_key | id_text | shape_signature | first_seen_day | last_seen_day
+                                   | $1         | $3       | usr_7Hq2kD | usr:10       | 20781          | 20781
+            end_user_silence_event | project_id | scope | start_day | state | members
+                                   | $1         | all   | 20770     | open  | 3
+            end_user_snapshot      | project_id | day   | logic_version | page_state
+                                   | $1         | 20781 | v3            | ok
+            end_user_issue         | project_id | lineage_key | day   | user_ids_hit | verdict          | shown
+                                   | $1         | lin-$1      | 20781 | 1            | evidence_of_loss | true
+            end_user_issue_hit     | project_id | lineage_key | user_key | first_hit_day | in_estimate
+                                   | $1         | lin-$1      | $3       | 20781         | true
+            end_user_fold_day      | project_id | day   | folded_at | traces
+                                   | $1         | 20781 | $6        | 1
+            """, p.id(), salt, userKey, otherKey, slots, Instant.now());
     }
 
     private void insertTrace(Project p, String id, @Nullable String parentTraceId, String at) {

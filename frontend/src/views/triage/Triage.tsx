@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import type { Case, MetricsQueryResult, TriageView } from "../../api/types";
+import type { Case, EndUserHitCount, MetricsQueryResult, TriageView } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, PageHeader, Section, TableSkeleton } from "../../ui";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, timeAgo } from "./bits";
@@ -18,6 +18,9 @@ import { pulseQueries } from "../metrics/metricsQueries";
 import { deltaText, formatValue } from "../metrics/metricsRules";
 import { RunMark, type RunState } from "../components/RunBar";
 import { RUN_POLL_MS } from "../components/runWords";
+import { endUserQueries } from "../users/usersQueries";
+import { TRIAGE_FOOTER } from "../users/usersWords";
+import { UserIdsHitChip, hasHitChip } from "../users/UserIdsHitChip";
 
 type Lens = "open" | "resolved";
 
@@ -35,6 +38,8 @@ export function Triage() {
   const pulse = pulseQueries(api, Date.now());
   const spendQ = useQuery(pulse.spend);
   const p95Q = useQuery(pulse.p95);
+  // Its own read: a failed one leaves the cases as they are, without chips.
+  const hitsQ = useQuery(endUserQueries.hitCounts(api));
   const onboarding = useOnboarding();
   /*
    * Whether the org holds a provider key, from `model-settings`: the providers list is gated on
@@ -52,6 +57,8 @@ export function Triage() {
   const open = triageQ.data?.cases ?? [];
   const resolved = triageQ.data?.recently_resolved ?? [];
   const shown = lens === "open" ? open : resolved;
+  const hits = new Map(hitsQ.data?.cases.map((h) => [h.case_id, h]));
+  const anyChip = shown.some((c) => hasHitChip(hits.get(c.id)));
 
   const openCase = (id: string) => navigate(`${basePath}/cases/${id}`);
   const setup =
@@ -94,10 +101,12 @@ export function Triage() {
             <>
               <ListChassis>
                 {shown.map((c) => (
-                  <CaseRow key={c.id} item={c} onOpen={openCase} />
+                  <CaseRow key={c.id} item={c} hits={hits.get(c.id)} basePath={basePath} onOpen={openCase} />
                 ))}
                 {shown.length === 0 && <EmptyRow lens={lens} />}
               </ListChassis>
+
+              {anyChip && <p className="mt-3 mx-0 mb-0 text-small text-muted">{TRIAGE_FOOTER}</p>}
 
               {lens === "open" && (
                 <p className="mt-4.5 mx-0 mb-0 text-small text-subtle">
@@ -141,44 +150,58 @@ function anyRcaWaiting(view: TriageView | undefined): boolean {
   return (view?.cases ?? []).some((c) => c.rca_run_state === "queued" || c.rca_run_state === "running");
 }
 
-function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void }) {
+function CaseRow({
+  item,
+  hits,
+  basePath,
+  onOpen,
+}: {
+  item: Case;
+  hits: EndUserHitCount | undefined;
+  basePath: string;
+  onOpen: (id: string) => void;
+}) {
   const resolved = item.state === "resolved";
   const cause = causeLine(item);
   const mark = rcaMark(item);
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(item.id)}
-      className="flex items-center w-full text-left bg-surface hover:bg-hover transition-colors cursor-pointer gap-4 py-3.5 px-4">
-      {!resolved && <StateDot state={item.state} analysed={item.rca_verdict != null} />}
+    // The chip is a link of its own, so it sits beside the row button, not inside it.
+    <div className="flex items-center w-full bg-surface hover:bg-hover transition-colors gap-4 pr-4">
+      <button
+        type="button"
+        onClick={() => onOpen(item.id)}
+        className="flex items-center flex-1 min-w-0 text-left cursor-pointer gap-4 py-3.5 pl-4">
+        {!resolved && <StateDot state={item.state} analysed={item.rca_verdict != null} />}
 
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-fg text-body">
-          {item.title}
-        </span>
-        {/* The analysis conclusion goes on its own line; appended to the title it makes one run-on sentence. */}
-        {cause && (
-          <span className="block truncate text-muted mt-0.75 text-small">
-            {cause}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-fg text-body">
+            {item.title}
           </span>
-        )}
-        <span className="flex items-center text-muted gap-2 mt-0.5 text-small">
-          <span className="font-mono text-subtle">{item.reference}</span>
-          <Dot />
-          <span>{detectorLabel(item.detector)}</span>
-          {item.call_site_id && (
-            <>
-              <Dot />
-              <span className="font-mono">{item.call_site_id}</span>
-            </>
+          {/* The analysis conclusion goes on its own line; appended to the title it makes one run-on sentence. */}
+          {cause && (
+            <span className="block truncate text-muted mt-0.75 text-small">
+              {cause}
+            </span>
           )}
-          <Dot />
-          <span>{resolved ? `closed ${timeAgo(item.resolved_at ?? item.opened_at)}` : timeAgo(item.opened_at)}</span>
+          <span className="flex items-center text-muted gap-2 mt-0.5 text-small">
+            <span className="font-mono text-subtle">{item.reference}</span>
+            <Dot />
+            <span>{detectorLabel(item.detector)}</span>
+            {item.call_site_id && (
+              <>
+                <Dot />
+                <span className="font-mono">{item.call_site_id}</span>
+              </>
+            )}
+            <Dot />
+            <span>{resolved ? `closed ${timeAgo(item.resolved_at ?? item.opened_at)}` : timeAgo(item.opened_at)}</span>
+          </span>
         </span>
-      </span>
+      </button>
+      <UserIdsHitChip count={hits} basePath={basePath} />
       {mark && <RunMark state={mark} since={item.rca_run_since} />}
-    </button>
+    </div>
   );
 }
 

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.endusers.read.EndUserReadService;
 import ai.tessary.model.Pipeline;
 import ai.tessary.pipeline.PipelineService;
 import ai.tessary.plan.CapabilityService;
@@ -61,6 +62,7 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
         private CaseService cases = mock(CaseService.class);
         private PromptService prompts = mock(PromptService.class);
         private CapabilityService capabilities = mock(CapabilityService.class);
+        private EndUserReadService endUsers = mock(EndUserReadService.class);
 
         Builder pipeline(Pipeline served) {
             this.pipeline = mock(PipelineService.class);
@@ -113,6 +115,11 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
             return this;
         }
 
+        Builder endUsers(EndUserReadService endUsers) {
+            this.endUsers = endUsers;
+            return this;
+        }
+
         McpToolHarness build() {
             ProjectRepository projects = mock(ProjectRepository.class);
             Project project = new Project(
@@ -130,7 +137,8 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
                     cases,
                     mock(TraceDetectionRepository.class),
                     prompts,
-                    capabilities);
+                    capabilities,
+                    endUsers);
             return new McpToolHarness(registry, new McpDispatcher(registry, MAPPER));
         }
     }

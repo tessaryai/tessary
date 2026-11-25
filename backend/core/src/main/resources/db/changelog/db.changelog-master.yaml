@@ -205,3 +205,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0058-span-prompt-link.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0059-end-users.sql
+      relativeToChangelogFile: false

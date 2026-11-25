@@ -26,6 +26,8 @@ public class ProjectPurgeRepository {
             "media_object",
             "agent_run_step",
             "agent_run",
+            "end_user_day",
+            "end_user_hit",
             "job");
 
     private final JdbcClient jdbc;

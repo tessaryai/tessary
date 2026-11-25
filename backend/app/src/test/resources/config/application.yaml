@@ -11,7 +11,8 @@
 # sweeper's first pass, a minute in, deletes any row a test seeds at a fixed date past the 90-day TTL. The triage drain
 # would claim a triage job a test enqueued to claim itself (BehaviorTriageWorker#tick). Automatic RCA is on for every
 # org a fixture creates, so its tick would queue RCA on a case a test is still asserting on (RcaAutoTrigger#tick). The
-# fix drain would claim a fix run a test queued to run itself (FixWorker#tick).
+# fix drain would claim a fix run a test queued to run itself (FixWorker#tick). The Users view's hit sweep and daily job
+# would fold, learn and judge a project a test is still seeding.
 tessary:
   rca:
     auto-interval-ms: 86400000
@@ -31,6 +32,9 @@ tessary:
       probe-interval-ms: 86400000
   retention:
     initial-delay-ms: 86400000
+  end-users:
+    hits-heartbeat-ms: 86400000
+    daily-heartbeat-ms: 86400000
 # The Kafka client logs every rebootstrap at INFO.
 logging:
   level:

@@ -86,6 +86,14 @@ import {
   type PromptUsage,
   type PromptUsageSummary,
   type PromptVersionView,
+  type EndUserCaseBlock,
+  type EndUserHitCounts,
+  type EndUserIdPage,
+  type EndUserIssue,
+  type EndUserIssueList,
+  type EndUserOverview,
+  type EndUserSilentIds,
+  type EndUserStage,
 } from "./types";
 import type {
   AddMemberResult,
@@ -670,6 +678,18 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     runPlayground: (body: PlaygroundRunRequest) =>
       send<PlaygroundRunView>("POST", `${base}/prompts/playground/runs`, body),
 
+    // Users view. `caseId` takes a case ULID or a reference such as C-118.
+    getEndUsersOverview: () => http<EndUserOverview>(`${base}/end-users/overview`),
+    getEndUserIssues: () => http<EndUserIssueList>(`${base}/end-users/issues`),
+    getEndUserIssue: (caseId: string) => http<EndUserIssue>(`${base}/end-users/issues/${enc(caseId)}`),
+    getEndUserSilentIds: (caseId: string, cursor?: string | null) =>
+      http<EndUserSilentIds>(withQuery(`${base}/end-users/issues/${enc(caseId)}/silent-ids`, { cursor })),
+    /** 50 a page by default, at most 200. */
+    getEndUserIds: (stage: EndUserStage, cursor?: string | null, limit?: number) =>
+      http<EndUserIdPage>(withQuery(`${base}/end-users/ids`, { stage, cursor, limit })),
+    getEndUserCaseBlock: (caseId: string) => http<EndUserCaseBlock>(`${base}/end-users/cases/${enc(caseId)}`),
+    /** The open cases and the cases resolved in the last 7 days. */
+    getEndUserHitCounts: () => http<EndUserHitCounts>(`${base}/end-users/hit-counts`),
   };
 }
 

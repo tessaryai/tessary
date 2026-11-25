@@ -26,6 +26,7 @@ import {
 } from "../../test/groundednessFixtures";
 import { api, auth } from "../../test/api";
 import { stepsPage, TRIAGE_STEPS } from "../../test/runFixtures";
+import { C118_CASE_BLOCK, overview } from "../../test/usersFixtures";
 
 const OWNER: Me = {
   id: "user-1", email: "owner@example.com", orgs: [{ id: "org-1", slug: "acme", name: "Acme", role: "owner" }],
@@ -153,6 +154,8 @@ beforeEach(() => {
   api.getFrustratedSessions.mockResolvedValue({ rows: [], total: 0, nextCursor: null });
   api.getBehaviorFindingEvidence.mockResolvedValue({ rows: [], nextCursor: null, counts: {}, recordedCounts: {} });
   api.getTrace.mockReturnValue(new Promise(() => {}));
+  api.getEndUserCaseBlock.mockResolvedValue(C118_CASE_BLOCK);
+  api.getEndUsersOverview.mockResolvedValue(overview());
   for (const f of [api.closeCase, api.absorbCase, api.runCaseRca, api.rerunRca])
     f.mockResolvedValue({});
 });
@@ -1024,6 +1027,33 @@ describe("a case with a classifier detail", () => {
 
     expect(screen.getByText("The prompt stopped asking for a check")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Show \d+ items?$/ })).toBeNull();
+  });
+});
+
+// CB4. Bugs: the Users block sits away from the Why it explains, reads users for another case, or a failed users
+// read takes the rest of the case page down with it.
+describe("the Users block", () => {
+  const h2s = () => screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+  const usersBlock = async () => (await screen.findByRole("heading", { level: 2, name: "Users" })).closest("section")!;
+
+  it("block_sitsAfterWhy: Why, then Users, then What changed", async () => {
+    renderPage();
+    await screen.findByText("112 user IDs hit");
+
+    const order = h2s();
+    expect(order.slice(order.indexOf("Why"), order.indexOf("Why") + 3)).toEqual(["Why", "Users", "What changed"]);
+    expect(api.getEndUserCaseBlock).toHaveBeenCalledWith("case-1");
+  });
+
+  it("a failed users read shows the error in the Users block only", async () => {
+    api.getEndUserCaseBlock.mockRejectedValue(new ApiError(500, { code: "END_USER.READ_FAILED", message: "no read" }));
+    renderPage();
+
+    const alert = await within(await usersBlock()).findByRole("alert");
+    expect(alert.textContent).toContain("END_USER.READ_FAILED");
+    expect(screen.getAllByRole("alert")).toEqual([alert]);
+    expect(h2s()).toEqual(expect.arrayContaining(["Why", "Users", "What changed"]));
+    expect(screen.getByText("The retriever still serves the old pricing and policy pages")).toBeTruthy();
   });
 });
 

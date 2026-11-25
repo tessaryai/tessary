@@ -126,7 +126,16 @@ A handoff between agents needs no attribute. It is already wire-encoded as an `e
 | --- | --- | --- | --- |
 | `session.id` | Yes | The session's identity, and the spine every trace and span hangs off. | The standard OpenTelemetry attribute, stored verbatim and denormalized onto every trace and span. Sessions never nest. |
 | `gen_ai.conversation.id` | Recommended | Thread grouping within a session. | A column on the trace, not a second level of nesting. |
-| `user.id` | Recommended | The end user's handle. | Denormalized onto the session, trace, and span. The only spelling read. |
+| `user.id` | Recommended | The end user's stable ID. The Users page needs it. | Denormalized onto the session, trace, and span. The only spelling read. The rules are below this table. |
+
+`user.id` must be the stable ID of one end user, or of one account, the same across sessions, days and devices. A consistent hash of the real ID is fine.
+
+- Never send a session ID, a request ID, a device ID that resets, a daily cookie, an API key, a service account, a workspace, or a tenant.
+- Do not send it for anonymous visitors. Guests and accounts in one ID format cannot be told apart.
+- Send it on scheduled and automated runs too, with the owner's ID. The Users page uses those runs to tell automation from people and to test that the IDs are stable.
+- Set it on every span, or once as a resource attribute, which reaches every span.
+
+A span without `user.id` is still accepted. The Users page then shows the share of traces that carry one, with the date it fell.
 
 ## Retrieval
 

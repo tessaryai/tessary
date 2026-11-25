@@ -1,0 +1,63 @@
+{
+ "as_of": "2026-06-28T00:00:00Z",
+ "as_of_day": 20631,
+ "expect": "page_state ids_unreliable with the aggregate reason",
+ "expected_rules": {
+  "stages": "users[] without alias rows, detail.set_aside false, state not unknown: grade unattended or substate overdue or held = silent; state stopped = stopped_named; every other = active; new = state new; stopped_expected = app_profile.funnel.stopped_expected. null on a refused page (funnel is null)",
+  "truth_is_placebo": "from the simulator truth, for reading the scenario only; the judge never reads it",
+  "verdict": "app_profile.issue_diagnostics[issue].verdict mapped to the plan codes; no diagnostics: page_refused on a refused page, else too_few_ids (no hit id can be compared)"
+ },
+ "files": {
+  "alias_edges.csv": "end_user_alias_edge rows (key indexes)",
+  "expected.json": "reference output: page state, reason, tracer, stage counts, per issue numbers and verdict code",
+  "hits.csv": "end_user_hit rows, every role; key index empty = no user id; session_only 1 = a ref with no trace: id of the session's first trace with an id, day of its last trace, route trace counts in session_routes",
+  "id_days.csv.gz": "end_user_day rows; see the fact contract in fold.py",
+  "ids.csv": "end_user rows: key index (sorted id text), user_key (HMAC with salt_hex), synthetic id text, shape prefix and length, cluster text and hash, first and last day, session count, all sessions link the id",
+  "issues.json": "issue lineages: case (or lone finding) and its findings; every one complete",
+  "null_days.csv.gz": "end_user_day_null rows: all traces and traces with no user id per (day, route, version)",
+  "routes.json": "route number -> name, call site, class and statistics from logic.py app_profile.routes",
+  "versions.csv": "end_user_version rows; first trace day is the deploy day"
+ },
+ "horizon_days": 400,
+ "judge_run": {
+  "as_of_day": 20631,
+  "findings": "every finding complete (hit rule: role member)",
+  "guards": "every guard off",
+  "horizon_days": 400,
+  "page_state_memory": "none stored (the reference has no memory)",
+  "route_classes": "from routes.json, as stored; no stored class from an earlier run, no relearning",
+  "t0": 20513
+ },
+ "readings": [
+  "logic.py reads traces; the judge reads these facts. Session hashes and job keys are capped at 32 per row (final-plan.md 3.3 reading 2); route classes come from routes.json (reading 1 does not apply here).",
+  "Token-link test: logic.py tests the alias representative's text against the sessions of all its aliases; ids.csv gives the flag per raw id.",
+  "Session-only refs whose session has no id are listed with an empty key index; logic.py ignores them.",
+  "Alias rows in users[] are skipped in the stage counts.",
+  "Call-site text that read like a product name is renamed in the sample before logic.py runs (new names: assist_generate); logic.py and the facts see the same text."
+ ],
+ "reference": {
+  "declarations": null,
+  "program": "churn/proposals/v3/logic.py (own null in sorted draw order)",
+  "pythonhashseed": "0",
+  "sha256": "aeedc395c3ab86bc263a8041dcd8092bdacca184b2d43aebef23293f1cfe62f3",
+  "switches": "defaults (W1, W3, W4, W6, W7, W8, W9 on)"
+ },
+ "salt_hex": "2b289bfedaf897b0fa60615703347c73162f9bebe06224aff341f48ccabcb7f0",
+ "sample": {
+  "evidence_rows_kept": 20046,
+  "hash_key": "key_ids",
+  "ids_kept": 108,
+  "ids_total": 180,
+  "rate_per_10000": 6000,
+  "rule": "ids that share a simulated person, or are the only two ids of a session or thread, are one unit; any other session or thread, and a trace with neither, is its own unit; keep a unit when crc32('<hash_key>|u:<smallest id>') % 10000 < rate (a unit with no id: s:<session>, h:<thread> or t:<trace>)",
+  "sessions_kept": 62031,
+  "traces_kept": 209191,
+  "traces_total": 333481
+ },
+ "scenario": "key_ids",
+ "sim_day": 119,
+ "sim_seed": 7,
+ "sim_start": "2026-03-01T00:00:00Z",
+ "slug": "api_platform",
+ "t0": 20513
+}

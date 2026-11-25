@@ -69,7 +69,8 @@ export function TH({ className, children, style, ...rest }: ThHTMLAttributes<HTM
 export function TD({ className, children, style, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
     <td
-      className={cn("align-top text-fg", className)}
+      // No default colour: the cell inherits `text-fg` from the table, so a caller's colour wins whatever the CSS order.
+      className={cn("align-top", className)}
       style={{
         paddingInline: "var(--density-cell-px)",
         paddingBlock: "var(--density-cell-py)",

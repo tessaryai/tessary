@@ -1,0 +1,95 @@
+{
+ "issues": [
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "c_content_filter_block",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 13,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "c_latency_slow_reply",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 52,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "c_model_behavior_change",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 43,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "c_output_format_break",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 25,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "c_provider_error",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 27,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "c_request_rejected_400",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": false,
+   "users_hit": 63,
+   "users_lost": null,
+   "verdict": "page_refused"
+  },
+  {
+   "ci_high": null,
+   "ci_low": null,
+   "issue_id": "f_rate_limit_throttle",
+   "reference_verdict": null,
+   "shown": false,
+   "truth_is_placebo": true,
+   "users_hit": 39,
+   "users_lost": null,
+   "verdict": "page_refused"
+  }
+ ],
+ "page_reason": "13 ids carry the traffic of more than one user (41% of id-days). The other ids cannot be taken as single users.",
+ "page_reason_code": "aggregate",
+ "page_reason_numbers": {
+  "aggregate_ids": 13,
+  "pd_aggregate": 0.4084
+ },
+ "page_state": "ids_unreliable",
+ "scenario": "key_ids",
+ "stages": null,
+ "tracer": {
+  "m_cont": 0,
+  "n_end": 0,
+  "verdict": "cannot test"
+ }
+}

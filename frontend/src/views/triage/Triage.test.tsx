@@ -3,10 +3,12 @@
  * Triage, the front door. The bugs worth catching: a row that opens another case, a lens that shows
  * the wrong bucket or cannot be left, an empty lens that says nothing, the analysis's summary
  * printed as a certainty, a pulse strip that disagrees with Metrics about spend or latency, and a
- * findings list that shows a finding already in Cases, drops one that is not, or opens the wrong page.
+ * findings list that shows a finding already in Cases, drops one that is not, or opens the wrong page; and a user IDs
+ * chip put on another case's row, a loss mark without evidence of loss, or cases reordered by the users they hit.
  */
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProjectApi } from "../../api/client";
 import type { BehaviorFinding, Case, MetricsQueryRequest, TriageView } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_CASE_DETAIL } from "../../test/groundednessFixtures";
@@ -15,6 +17,9 @@ import { Triage } from "./Triage";
 import { TRIAGE_POLL_MS } from "../classifiers/shared";
 import { RUN_POLL_MS } from "../components/runWords";
 import { api } from "../../test/api";
+import { HIT_COUNTS } from "../../test/usersFixtures";
+import { endUserQueries } from "../users/usersQueries";
+import { TRIAGE_FOOTER } from "../users/usersWords";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../capabilities/useCapabilities", () => ({ useCapabilities: () => ({ isEnabled: () => true }) }));
@@ -54,6 +59,7 @@ beforeEach(() => {
   api.getModelSettings.mockResolvedValue({ configured_providers: ["anthropic"] });
   api.onboarding.mockResolvedValue({ stage: "case" });
   api.listBehaviorFindings.mockResolvedValue({ findings: [] });
+  api.getEndUserHitCounts.mockResolvedValue({ cases: [] });
 });
 
 const renderPage = () => renderRoute(<Triage />, { route: "/orgs/acme/projects/default/triage" });
@@ -178,7 +184,7 @@ describe("the case marks", () => {
     }));
     renderPage();
 
-    const row = async (id: string) => (await screen.findByText(`Case ${id}`)).closest("button")!;
+    const row = async (id: string) => (await screen.findByText(`Case ${id}`)).closest("button")!.parentElement!;
     expect(within(await row("q")).getByRole("img", { name: "RCA queued" })).toBeTruthy();
     const running = within(await row("r")).getByRole("img", { name: "RCA running" });
     expect(within(await row("s")).getByRole("img", { name: "RCA stopped" })).toBeTruthy();
@@ -203,6 +209,72 @@ describe("the case marks", () => {
     const reads = api.getTriage.mock.calls.length;
     await act(() => vi.advanceTimersByTimeAsync(RUN_POLL_MS * 3));
     expect(api.getTriage.mock.calls.length).toBe(reads);
+  });
+});
+
+describe("the user IDs hit", () => {
+  /** The six open cases of board P0, in the order the cases read ranks them. */
+  const BOARD_CASES = HIT_COUNTS.cases.map((h) => kase(h.case_id, { reference: h.case_ref, title: `Case ${h.case_ref}` }));
+  const caseRow = (ref: string) => screen.getByText(`Case ${ref}`).closest("button")!.parentElement!;
+
+  beforeEach(() => {
+    api.getTriage.mockResolvedValue(triage({ cases: BOARD_CASES }));
+  });
+
+  // T2. Bug: chips joined to rows by position, so a count or a loss lands on another case's row.
+  it("lossMark_onlyWithEvidenceOfLoss: about 23 lost (11 to 35) in red on the C-118 row, none on the others", async () => {
+    api.getEndUserHitCounts.mockResolvedValue({ cases: [...HIT_COUNTS.cases].reverse() });
+    renderPage();
+
+    const loss = await screen.findByText("about 23 lost (11 to 35)");
+    expect(loss.className).toContain("text-error");
+    expect(within(caseRow("C-118")).getByText("about 23 lost (11 to 35)")).toBe(loss);
+    expect(within(caseRow("C-118")).getByText("112 user IDs hit")).toBeTruthy();
+    for (const h of HIT_COUNTS.cases.slice(1)) {
+      const row = caseRow(h.case_ref);
+      expect(within(row).getByText(`${h.user_ids_hit} user IDs hit`)).toBeTruthy();
+      expect(within(row).queryByText(/lost/)).toBeNull();
+    }
+  });
+
+  // T4. Bug: the list reordered by user IDs hit or by loss, or the footer that says it is not left out.
+  it("orderOfCases_doesNotChange: rows keep the cases order, with the footer line under the list", async () => {
+    api.getEndUserHitCounts.mockResolvedValue({ cases: [...HIT_COUNTS.cases].reverse() });
+    renderPage();
+    await screen.findByText("208 user IDs hit");
+
+    const titles = within(section("Cases"))
+      .getAllByText(/^Case C-/)
+      .map((t) => t.textContent);
+    expect(titles).toEqual(["Case C-118", "Case C-125", "Case C-121", "Case C-119", "Case C-127", "Case C-123"]);
+    const footer = screen.getByText(TRIAGE_FOOTER);
+    expect(caseRow("C-123").compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // T5. Bug: a failed hit-count read replaces the cases with an error, or leaves a footer about chips that are not there.
+  it("chipReadFailure_doesNotBreakTheList", async () => {
+    api.getEndUserHitCounts.mockRejectedValue(new Error("hit counts unavailable"));
+    const { queryClient } = renderPage();
+
+    await screen.findByText("Case C-118");
+    const key = endUserQueries.hitCounts(api as unknown as ProjectApi).queryKey;
+    await waitFor(() => expect(queryClient.getQueryState(key)?.status).toBe("error"));
+    expect(within(section("Cases")).getAllByText(/^Case C-/)).toHaveLength(6);
+    expect(screen.queryByText(/user IDs hit/)).toBeNull();
+    expect(screen.queryByText("hit counts unavailable")).toBeNull();
+    expect(screen.queryByText(TRIAGE_FOOTER)).toBeNull();
+  });
+
+  // Bug: the chip sits inside the row button, so pressing it opens the case and a keyboard cannot reach it.
+  it("opens the case from its title and the Users view from its chip", async () => {
+    api.getEndUserHitCounts.mockResolvedValue(HIT_COUNTS);
+    renderPage();
+
+    const chip = await screen.findByRole("link", { name: /112 user IDs hit/ });
+    expect(chip.closest("button")).toBeNull();
+    expect(chip.getAttribute("href")).toBe("/orgs/acme/projects/default/users/issues/01JCASEC118");
+    fireEvent.click(screen.getByText("Case C-125"));
+    expect(currentLocation()).toBe("/orgs/acme/projects/default/cases/01JCASEC125");
   });
 });
 

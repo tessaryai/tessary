@@ -1,0 +1,106 @@
+---
+title: "Users"
+description: "Understand what the Users page counts: user IDs and their three stages, the issues that came before more stops than expected, what each verdict claims, when the page shows a state in place of numbers, and what Tessary keeps."
+---
+
+The **Users** page shows which user IDs of your agent are active, silent, or probably stopped, and which issues came before more of them stopping than expected. It reads the `user.id` your traces already carry, runs once a day, and makes no model call. It is on for every project, on Tessary Cloud and self-hosted alike.
+
+The page counts user IDs, not people, and it shows a difference in stops, not proof of cause. Both limits shape every number on it.
+
+## What a user ID is
+
+A user ID is the value a trace carries in `user.id`: the stable ID of one end user of your agent, or of one account, the same across sessions, days, and devices. A session ID, a request ID, a daily cookie, an API key, or a workspace is not a user ID. [Span requirements](/instrument/span-requirements#session-and-user) lists what to send and what not to send.
+
+One user ID can hold several people, and one person can use several user IDs. The page checks for both. It sets aside user IDs that behave like keys or services, that copy the session token, or that carry machine traffic only, and **How is this counted?** names each reason with its count. A user ID that is set aside is in no stage.
+
+Tessary tells people from automation by the timing of each route, a trace name on one call site. A route a person drives follows earlier traces of the session with a person-like delay. A route on a schedule, or one a machine drives, does not count as activity. Scheduled runs sent with the owner's user ID help the page tell the two apart and test that user IDs are stable.
+
+## The three stages
+
+The funnel under **Where your user IDs are** puts every counted user ID in one stage. The three stages add up to the user IDs that are counted.
+
+| Stage | What it holds |
+| --- | --- |
+| Active | User IDs that return within their usual time, including new ones. |
+| Silent, not judged | User IDs that are quieter than usual but not named as stopped: those whose stop odds are too low to name them, those held as a possible break, and those whose automated runs continue while the person is silent. |
+| Probably stopped | User IDs that are clearly more likely gone than not. The stage gives a named count and an expected count, which also adds the stop odds of user IDs that are not named, so it is often larger. |
+
+Tessary judges a stop against the app's own record of returns, not a fixed number of days. A user ID that returns every few hours is overdue sooner than one that returns once a month. Each day, the page checks how often user IDs it would have named at past dates really stayed away, and **How is this counted?** gives that share.
+
+When many regular user IDs go silent in the same week, the silence can be a break, such as an outage, a holiday, or a tracing change, or it can be a loss. Tessary holds those user IDs in Silent, not judged, and a banner names the date until which they are held. After 4 weeks, any that have not come back count like any other silent user ID.
+
+Select a stage to open the list of its user IDs, with a **State** and a **Why** for each one. **Hit by** names the issues that hit a user ID, but only issues with the verdict Evidence of loss or Few accounts.
+
+## Issues and user IDs hit
+
+An issue is a case as the Users page shows it. When a case of the same cause opens again, the earlier and later cases are one issue. A finding with no case is not an issue, so a project with no cases shows none.
+
+**User IDs hit** is the number of different user IDs whose traces are in the evidence of an issue. A hit says the issue reached the user ID. It does not say the user ID stopped, or that the issue caused a stop. Traces in the evidence with no user ID are not in the count, and the case page says how many there were. The same count appears as a chip on each row of **Triage** and in the **Users** block on the case page. The order of cases on **Triage** does not change.
+
+To measure an issue, Tessary compares each hit user ID, from its hit day, with similar user IDs that were not yet hit on that day. **User IDs lost** is an estimate of how many more hit user IDs probably stopped than expected from those similar user IDs, given as "about N" with a range. The issue page draws both groups as lines, week by week after the hit. For an issue with the verdict Evidence of loss or Few accounts, **Hit user IDs that are silent now** lists the hit user IDs that are silent today. Counts of different issues overlap and do not add up.
+
+## What each verdict claims
+
+Every issue gets a verdict that says what its numbers can claim. The page tests the verdicts in the order of this table, and the first one that applies is the verdict. Every verdict still shows the user IDs hit.
+
+| Verdict | What it means | Loss number shown |
+| --- | --- | --- |
+| Not measured | The page shows a state in place of numbers, so no issue gets a number. | None |
+| No hit user IDs | The issue shifts a measure for all traffic and has no hit user IDs. | None |
+| Hits not complete | The detector of a finding in this issue does not record every hit, so the comparison would be biased. | None |
+| History too short | Tessary keeps less user ID history than the estimate needs. | None |
+| Cannot tell yet | User IDs in this app return less often than the history can show. | None |
+| Cannot measure yet | A stop starts to show some days after the last use, and half of the hit user IDs were hit less than that ago. | The most the loss can be |
+| Too few user IDs | Too few hit user IDs can be compared with similar user IDs not yet hit. The page says how many can be compared; 30 are needed. | None |
+| Reaches nearly all user IDs | The issue hits nearly every user ID on that part of the agent, so too few similar user IDs are left. The number comes from the stops of all those user IDs before and after the issue started. | An estimate with no lower limit |
+| Not comparable | Hit user IDs stop clearly less often than similar user IDs not yet hit, so the comparison does not hold. | None |
+| Always present | The issue was present from the first day of data, so there is no time before it to compare with. It is not shown as a cause. | An estimate with no lower limit |
+| Few accounts | The hits sit in a few accounts. User IDs of one account leave together, so the hits count as a few cases, not many. | An estimate with no lower limit |
+| Evidence of loss | More hit user IDs probably stopped than expected, by more than chance and the issue's own random test allow, and the stops of all user IDs on that part of the agent do not contradict it. | User IDs lost, with a range |
+| Moved, not added | Hit user IDs stop more often, but the stops of all user IDs on that part of the agent did not rise after the issue started. The issue marks user IDs that leave; it is not shown as a cause. | An estimate with no lower limit |
+| No measurable loss | Enough hit user IDs were compared, and the most the loss can be is small. This does not prove that the loss is zero. | An estimate with its range |
+| Not enough evidence | None of the verdicts above applies. | An estimate with no lower limit |
+
+Only Evidence of loss says that an issue came before a loss, and even then it is a difference in stops, not proof of cause. Every other verdict that shows a number says "no clear loss" and gives the most the loss can be. When two issues share half of their hit traces, the page shows them as one row, because the data cannot split their effect.
+
+## When the page shows a state in place of numbers
+
+The page refuses to give numbers it cannot back. In each of these states, a notice replaces the funnel and no issue gets a number:
+
+| State | When it shows |
+| --- | --- |
+| No user ID | Too few traces carry a user ID, across all history or in the last 28 days. The notice gives the share and asks you to send `user.id` on every trace. |
+| Too early | There are fewer than 21 days of user ID history or fewer than 20 user IDs, or user IDs were changed recently. The page fills in on its own. |
+| User IDs not reliable | The user IDs do not stand for single users: some carry the traffic of many users like keys, user IDs change with every session, most are never seen again after their first days, or repeating jobs go on under new user IDs. The notice names which. |
+| Not computed | The project is over the size budget for the daily job. Coverage and user IDs hit still show. |
+| Collecting history | The first daily run has not finished yet. |
+
+In Partial coverage, the page still shows numbers, but only for covered user IDs, and it names what is left out.
+
+The Probably stopped stage can also hold back its count while the other stages show. It does so when Tessary keeps fewer than 120 days of history, when the stop odds have not yet been checked against enough past dates, when user IDs return less often than the history can show, or when one-day user IDs and account user IDs may share one format. When past checks show that the page names the wrong user IDs too often, it gives the expected count and no list.
+
+Banners name facts that change how to read the numbers: traffic that started arriving without a user ID, user IDs that were changed, a shared silence, a day when traces fell on every route, and a lower level of use among user IDs no issue touched. Limit lines under the funnel name the caveats that remain.
+
+## What the page does not do
+
+- It has no page for one user ID. In **Hit user IDs that are silent now**, a row links to that user ID's traces while its text is kept.
+- It does not predict which user IDs are likely to leave, and it does not mark user IDs as at risk.
+- It does not say that a probably stopped user ID stopped because of an issue.
+- It does not change triage, root-cause analysis, or the order of cases.
+
+## What Tessary keeps
+
+Tessary keeps a salted hash of each user ID with daily counts for 400 days. The readable user ID is deleted with its last trace.
+
+The hash uses a random salt for each project, so a user ID cannot be checked against the stored facts without access to the database. The daily counts are what the page needs to judge returns after your traces age out. A row whose user ID is no longer kept reads "ID text no longer kept". Self-hosted, when you keep traces for longer than 400 days, or forever, the hashed counts are kept as long as the traces. No log line carries a user ID or its hash.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Span requirements" icon="list-check" href="/instrument/span-requirements#session-and-user">
+    What to send in `user.id`, and what not to send.
+  </Card>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases">
+    How triage turns a finding into a case, the unit the Users page measures.
+  </Card>
+</CardGroup>
