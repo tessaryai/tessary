@@ -55,8 +55,9 @@ public class EndUsersWorker {
             FoldStage fold,
             ReconcileStage reconcile,
             LearnStage learn,
+            JudgeStage judge,
             HorizonSweepStage sweep) {
-        this(jobs, hits, List.of(fold, reconcile, learn, sweep), props, Clock.systemUTC());
+        this(jobs, hits, List.of(fold, reconcile, learn, judge, sweep), props, Clock.systemUTC());
     }
 
     EndUsersWorker(
