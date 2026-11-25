@@ -500,7 +500,7 @@ export const lossText = (i: EndUserIssueNumbers) =>
 export const issueHeadline = (i: EndUserIssueNumbers) => sentenceCase(lossText(i));
 
 /** Spec 3.5: the note of every issue on a page with the group or key banner. */
-export const GROUP_CAVEAT = "Counted in user IDs; the range does not bound people.";
+const GROUP_CAVEAT = "Counted in user IDs; the range does not bound people.";
 
 /** The issue note under the overview's banners: with the group or key banner it ends with GROUP_CAVEAT. */
 export const issueNoteUnder = (i: EndUserIssueNumbers, banners: EndUserBanner[]) =>
