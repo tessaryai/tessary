@@ -32,6 +32,8 @@ import type {
   ChartCard,
   EndUserCaseBlock,
   EndUserHitCounts,
+  EndUserIssueList,
+  EndUserOverview,
   ChartPoint,
   ClassifierCharts,
   EvidenceSpanPage,
@@ -43,6 +45,7 @@ import type {
 import type { components } from "./api/generated/schema";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
+import { C118_ISSUE, ISSUE_LIST, overview, STOPPED_IDS } from "./test/usersFixtures";
 import { preloadRouteChunk } from "./lib/routePreload";
 import { chartCard, chartPoint, promptDetail, promptVersion } from "./test/fixtures";
 import {
@@ -297,6 +300,24 @@ const COLLECTING_CASE_BLOCK: EndUserCaseBlock = {
   issue: null,
 };
 
+/** A project before its first Users snapshot: every end-user read answers "collecting" with no numbers. */
+const COLLECTING_OVERVIEW: EndUserOverview = {
+  page_state: "collecting",
+  page_state_reason: null,
+  reason_numbers: {},
+  as_of: null,
+  history_since: null,
+  counted: null,
+  set_aside: null,
+  stages: null,
+  stop_stage_state: null,
+  stop_stage_numbers: null,
+  banners: [],
+  limits: [],
+  trust: null,
+};
+const COLLECTING_ISSUES: EndUserIssueList = { page_state: "collecting", as_of: null, issues: [] };
+
 /**
  * Applied to every tenant route. ShellChrome's nav badge reads getTriage; CapabilityGate briefly mounts Triage
  * (queryMetrics, onboarding, listBehaviorFindings) while its read loads; ProjectShell reads substrateStatus before anything mounts. Unmocked,
@@ -327,6 +348,17 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   },
   sources: {
     listSources: EMPTY,
+  },
+  users: {
+    getEndUsersOverview: () => Promise.resolve(COLLECTING_OVERVIEW),
+    getEndUserIssues: () => Promise.resolve(COLLECTING_ISSUES),
+  },
+  "users/issues/:caseId": {
+    getEndUserIssue: NOT_FOUND("end user issue"),
+  },
+  // The stage tabs wait for the overview; a collecting project has no stages, so no list is read.
+  "users/ids": {
+    getEndUsersOverview: () => Promise.resolve(COLLECTING_OVERVIEW),
   },
   traces: {
     // The real `TracesPage` shape: `useObservedFacets` reads `p.traces` without `?.`.
@@ -809,6 +841,24 @@ const DETAIL_FIXTURES: {
     heading: /RCA \(root-cause analysis\): extract\.order/,
   },
   {
+    name: "the funnel and the issue list of board P1",
+    path: "users",
+    overrides: { getEndUsersOverview: resolved(overview()), getEndUserIssues: resolved(ISSUE_LIST) },
+    heading: /^Users$/,
+  },
+  {
+    name: "the C-118 issue with its curve",
+    path: "users/issues/:caseId",
+    overrides: { getEndUserIssue: resolved(C118_ISSUE) },
+    heading: /^Agent forgets facts the user shared in earlier chats$/,
+  },
+  {
+    name: "the funnel's stages and a page of user IDs",
+    path: "users/ids",
+    overrides: { getEndUsersOverview: resolved(overview()), getEndUserIds: resolved(STOPPED_IDS) },
+    heading: /^Active$/,
+  },
+  {
     name: "the default dashboard with data in every widget",
     path: "metrics",
     overrides: { queryMetrics: (req?: unknown) => Promise.resolve(resultFor(req as MetricsQueryRequest)) },
@@ -961,6 +1011,42 @@ describe("route manifest render smoke test", () => {
 
   // The switcher renders on every page, so an Organizations section here would be far more visible than NewOrg ever
   // was.
+  // Bug: the Users links are relative and resolve against ProjectShell's nested routes, so a link that works in the
+  // page's own test can still leave the project, or point at the wrong page, in the real app.
+  it("links the Users page to its ID list and its issue pages inside the project", async () => {
+    const view = VIEWS.find((v) => v.path === "users")!;
+    const url = resolveUrl(view.fullPath);
+    currentProjectApiOverrides = {
+      ...SHELL_CHROME_OVERRIDES,
+      getEndUsersOverview: resolved(overview()),
+      getEndUserIssues: resolved(ISSUE_LIST),
+    };
+
+    const container = await mountAndSettle(url);
+
+    const href = (name: string | RegExp) => within(container).getByRole("link", { name }).getAttribute("href");
+    expect(href("See user IDs →")).toBe(`${url}/ids`);
+    expect(href(/^Probably stopped/)).toBe(`${url}/ids?stage=stopped`);
+    expect(href(/^Agent forgets facts/)).toBe(`${url}/issues/C-118`);
+    expect(unexpectedErrors).toEqual([]);
+  });
+
+  // Bug: the issue page's way back resolves against its own nested path and lands on users/issues/users.
+  it("leads the issue page back to Users and on to its case", async () => {
+    const view = VIEWS.find((v) => v.path === "users/issues/:caseId")!;
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, getEndUserIssue: resolved(C118_ISSUE) };
+
+    const container = await mountAndSettle(resolveUrl(view.fullPath));
+
+    const project = `/orgs/${FAKE_ORG.slug}/projects/${FAKE_PROJECT.slug}`;
+    const trail = within(container).getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).getByRole("link", { name: "Users" }).getAttribute("href")).toBe(`${project}/users`);
+    expect(within(container).getByRole("link", { name: "Open case C-118" }).getAttribute("href")).toBe(
+      `${project}/cases/${C118_ISSUE.case_id}`,
+    );
+    expect(unexpectedErrors).toEqual([]);
+  });
+
   it("sidebar switcher has no Organizations section or New-organization action", async () => {
     currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES };
     const url = resolveUrl("/orgs/:orgSlug/projects/:projectSlug/triage");

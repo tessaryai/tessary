@@ -50,6 +50,21 @@
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/cases/:caseId"
   },
   {
+    "path": "users",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/users"
+  },
+  {
+    "path": "users/issues/:caseId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/users/issues/:caseId"
+  },
+  {
+    "path": "users/ids",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/users/ids"
+  },
+  {
     "path": "traces",
     "kind": "view",
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/traces"

@@ -31,9 +31,9 @@ vi.mock("./ShellActions", () => ({
   useShellActions: () => ({ registerProjectSwitcher: (fn: () => void) => (shell.opener = fn) }),
 }));
 vi.mock("./useNavigation", async () => {
-  // Triage and Classifiers are the real declarations: which row a finding page lights is set in nav.tsx.
+  // Triage, Users and Classifiers are the real declarations: which row a page lights is set in nav.tsx.
   const { SETTINGS_ICON: icon, TRIAGE_NAV, NAV_GROUPS } = await import("./nav");
-  const classifiers = NAV_GROUPS.flatMap((g) => g.items).find((i) => i.id === "classifiers")!;
+  const real = (id: string) => NAV_GROUPS.flatMap((g) => g.items).find((i) => i.id === id)!;
   return {
     useNavigation: () => ({
       triage: TRIAGE_NAV,
@@ -41,8 +41,9 @@ vi.mock("./useNavigation", async () => {
         {
           label: "Monitor",
           items: [
+            real("users"),
             { id: "traces", label: "Traces", icon, match: ["sessions"] },
-            classifiers,
+            real("classifiers"),
             { id: "metrics", label: "Metrics", icon },
           ],
         },
@@ -86,6 +87,10 @@ describe("the nav rows", () => {
     ["metrics", "Metrics", "Settings"],
     ["classifiers/findings/f-1", "Triage", "Classifiers"],
     ["classifiers/clf-1", "Classifiers", "Triage"],
+    // Bug: the issue page and the ID list sit under users/ but light no row, or light Triage, whose cases they open.
+    ["users", "Users", "Triage"],
+    ["users/issues/C-118", "Users", "Triage"],
+    ["users/ids", "Users", "Traces"],
   ])("on %s, marks %s active and not %s", (path, active, inactive) => {
     open(`/orgs/acme/projects/default/${path}`);
     expect(isActive(active)).toBe(true);

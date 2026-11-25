@@ -107,11 +107,36 @@ describe("what it offers", () => {
     await waitFor(() => expect(mocks.getCapabilities).toHaveBeenCalledWith("acme"));
     expect(labelsIn("Navigation")).toEqual([
       expect.stringContaining("Triage"),
+      expect.stringContaining("Users"),
       expect.stringContaining("Traces"),
       expect.stringContaining("Classifiers"),
       expect.stringContaining("Metrics"),
     ]);
     expect(screen.queryByText("Settings · MCP tokens")).toBeNull();
+  });
+
+  // Bug: Users sits behind a capability, so a project whose capabilities are off or still loading never sees the page,
+  // or it lands anywhere but first in Monitor.
+  it("nav_usersIsFirstMonitorItem", async () => {
+    mocks.getCapabilities.mockResolvedValue({ capabilities: {} });
+    renderPalette();
+    openPalette();
+    await waitFor(() => expect(mocks.getCapabilities).toHaveBeenCalled());
+    expect(labelsIn("Navigation").slice(0, 3)).toEqual([
+      expect.stringContaining("Triage"),
+      expect.stringContaining("Users"),
+      expect.stringContaining("Traces"),
+    ]);
+    cleanup();
+
+    mocks.getCapabilities.mockReturnValue(new Promise(() => {}));
+    renderPalette();
+    openPalette();
+    expect(labelsIn("Navigation")[1]).toEqual(expect.stringContaining("Users"));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search commands" }), { target: { value: "user ids" } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search commands" }), { key: "Enter" });
+    expect(currentLocation()).toBe(`${BASE}users`);
   });
 
   it("adds a gated section once its capability is on", async () => {
