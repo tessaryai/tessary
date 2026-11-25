@@ -76,6 +76,8 @@ public final class Verdicts {
      * @param upper the most hit IDs lost if every hit ID silent today stays away; null when the estimate was not
      *     reached
      * @param visible {@code vis}: the share of the possible loss that can be seen today
+     * @param rankLost the users lost the rank reads: the shown number, else the estimate's for a hidden verdict;
+     *     null when the estimate was not reached
      * @param used the estimate the numbers come from: with few accounts, the rerun without the account cell
      */
     public record Decision(
@@ -91,6 +93,7 @@ public final class Verdicts {
             boolean contradicted,
             @Nullable Double pop,
             @Nullable Double popHigh,
+            @Nullable Double rankLost,
             @Nullable LineageEstimate used) {}
 
     private static final Set<PageState> USABLE = Set.of(PageState.OK, PageState.PARTIAL_COVERAGE);
@@ -131,7 +134,8 @@ public final class Verdicts {
         if (g.cannotTellYet() && in.f() >= F_MAX) return blank(Verdict.CANNOT_TELL_YET);
         LineageEstimate first = in.estimate();
         if (first == null || n == null) {
-            return new Decision(Verdict.TOO_FEW_IDS, false, 0, null, null, null, null, 0, 0, false, null, null, null);
+            return new Decision(
+                    Verdict.TOO_FEW_IDS, false, 0, null, null, null, null, 0, 0, false, null, null, null, null);
         }
 
         LineageEstimate e = used(in, first);
@@ -213,7 +217,7 @@ public final class Verdicts {
     }
 
     private static Decision blank(Verdict v) {
-        return new Decision(v, false, null, null, null, null, null, 0, 0, false, null, null, null);
+        return new Decision(v, false, null, null, null, null, null, 0, 0, false, null, null, null, null);
     }
 
     private record Out(
@@ -242,6 +246,7 @@ public final class Verdicts {
                     contradicted,
                     pop == null ? null : pop.pop(),
                     pop == null ? null : pop.popHigh(),
+                    lost == null ? n.lost() : lost,
                     e);
         }
     }

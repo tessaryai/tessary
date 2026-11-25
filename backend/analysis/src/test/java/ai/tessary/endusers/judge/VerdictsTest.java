@@ -320,7 +320,10 @@ class VerdictsTest {
                 () -> assertEquals((0.30 + 2.6 * 0.05) * 96, cannotMeasure.upper(), 1e-9),
                 () -> assertFalse(refused.shown()),
                 () -> assertNull(refused.compared()),
-                () -> assertNull(refused.upper()));
+                () -> assertNull(refused.upper()),
+                () -> assertNull(refused.rankLost(), "the estimate was not reached"),
+                () -> assertEquals(23.04, tooFew.rankLost(), 1e-9, "a hidden verdict ranks by the estimate"),
+                () -> assertEquals(23.04, cannotMeasure.rankLost(), 1e-9));
     }
 
     @Test
@@ -333,7 +336,8 @@ class VerdictsTest {
                 () -> assertEquals(Verdict.TOO_FEW_IDS, d.verdict()),
                 () -> assertEquals(0, d.compared()),
                 () -> assertFalse(d.shown()),
-                () -> assertNull(d.upper()));
+                () -> assertNull(d.upper()),
+                () -> assertNull(d.rankLost()));
     }
 
     static Stream<Arguments> guards() {
@@ -509,6 +513,22 @@ class VerdictsTest {
                     b.estimate = estimate(0.24, 0.30, 0.05, 0.03, 96, 96, 4, 41, 50, 1000, rerun);
                 })
                 .decide();
+        Decision wideRerun = base().with(b -> {
+                    b.clusters = true;
+                    b.estimate = estimate(
+                            0.24,
+                            0.30,
+                            0.05,
+                            0.03,
+                            110,
+                            120,
+                            4,
+                            41,
+                            50,
+                            1000,
+                            estimate(0.20, 0.26, 0.05, 0.03, 105, 120, 25, 30, 40, 1000, null));
+                })
+                .decide();
         Decision blankRerun = base().with(b -> {
                     b.clusters = true;
                     b.estimate = estimate(0.24, 0.30, 0.05, 0.03, 96, 96, 4, 41, 50, 1000, null);
@@ -522,6 +542,8 @@ class VerdictsTest {
                 () -> assertEquals((0.26 + 2.6 * 0.05) * 96, few.high(), 1e-9),
                 () -> assertEquals(90, few.compared()),
                 () -> assertEquals(30.0 / 40, few.visible(), 1e-12),
+                () -> assertEquals(2.6, wideRerun.z(), 1e-12, "z reads the first estimate's 4 accounts"),
+                () -> assertEquals(105, wideRerun.compared()),
                 () -> assertEquals(Verdict.FEW_ACCOUNTS, blankRerun.verdict()),
                 () -> assertEquals(23.04, blankRerun.lost(), 1e-9),
                 () -> assertEquals(
@@ -640,7 +662,9 @@ class VerdictsTest {
                 () -> assertEquals(0.0, reading.low()),
                 () -> assertEquals(13.4, reading.high(), 1e-12),
                 () -> assertEquals(0.0, negative.lost()),
-                () -> assertEquals(3.0, negative.high(), 1e-12));
+                () -> assertEquals(3.0, negative.high(), 1e-12),
+                () -> assertEquals(23.04, noReading.rankLost(), 1e-9),
+                () -> assertEquals(7.4, reading.rankLost(), 1e-12, "the shown number"));
     }
 
     @Test

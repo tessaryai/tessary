@@ -14,15 +14,15 @@ import org.jspecify.annotations.Nullable;
 /**
  * The rank of spec 8.7, in the tiers of the reference: evidence of loss by its lower limit; then few accounts and
  * reaches nearly all by users lost; then not enough evidence and no measurable loss by users lost; then always present,
- * moved, not added and the verdicts that show no number, by users lost; then the page refusal and the level 2 guards.
- * Ties take the lineage key order. Findings that fire together sit side by side at the place of their first member, and
+ * moved, not added and the hidden verdicts that reached the estimate, by users lost; then the issues the estimate never
+ * reached (the page refusal, the level 2 guards, no comparable hit ID). Ties take the lineage key order. Findings that fire together sit side by side at the place of their first member, and
  * inside the group they are ordered by users lost, never by the lower limit alone.
  */
 public final class IssueRank {
 
     private IssueRank() {}
 
-    /** @param lost null where the verdict shows none; such an issue sorts as 0 lost */
+    /** @param lost {@link Verdicts.Decision#rankLost}: null when the estimate was not reached */
     public record Ranked(
             Verdict verdict,
             @Nullable Double lost,
@@ -35,12 +35,10 @@ public final class IssueRank {
      * @return lineage key to its place, from 1
      */
     public static Map<String, Integer> rank(Map<String, Ranked> issues, Map<String, String> groups) {
-        Comparator<String> byLost = Comparator.<String>comparingInt(
-                        k -> tier(issues.get(k).verdict()))
+        Comparator<String> byLost = Comparator.<String>comparingInt(k -> tier(issues.get(k)))
                 .thenComparingDouble(k -> -lost(issues.get(k)))
                 .thenComparing(Comparator.naturalOrder());
-        Comparator<String> byClaim = Comparator.<String>comparingInt(
-                        k -> tier(issues.get(k).verdict()))
+        Comparator<String> byClaim = Comparator.<String>comparingInt(k -> tier(issues.get(k)))
                 .thenComparingDouble(k -> -claim(issues.get(k)))
                 .thenComparingDouble(k -> -lost(issues.get(k)))
                 .thenComparing(Comparator.naturalOrder());
@@ -62,12 +60,12 @@ public final class IssueRank {
         return out;
     }
 
-    private static int tier(Verdict v) {
-        return switch (v) {
+    private static int tier(Ranked r) {
+        if (r.lost() == null) return LAST;
+        return switch (r.verdict()) {
             case EVIDENCE_OF_LOSS -> 0;
             case FEW_ACCOUNTS, REACHES_NEARLY_ALL -> 1;
             case NOT_ENOUGH_EVIDENCE, NO_MEASURABLE_LOSS -> 2;
-            case PAGE_REFUSED, HITS_NOT_COMPLETE, HISTORY_TOO_SHORT, CANNOT_TELL_YET, NOT_APPLICABLE -> LAST;
             default -> 3;
         };
     }

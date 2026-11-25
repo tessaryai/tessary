@@ -150,6 +150,34 @@ class RetentionCurveTest {
     }
 
     @Test
+    void controlHazard_isWeightedToTheTreatedMixOfThePools() {
+        Cell y = new Cell(4, 2, 1, 0, false, null);
+        treated(1, 56, 56, 63, 0);
+        for (int id = 2; id <= 4; id++) {
+            id(id, 56, 63, 0);
+            hitDays.put(id, List.of(56));
+            trials.add(new Trial(id, 56, 1, 0, 0, y, Arm.EXPOSED));
+        }
+        control(20, 58, 1.0, null);
+        for (int id = 21; id <= 24; id++) control(id, 63, 0, null);
+        for (int id = 30; id <= 34; id++) {
+            id(id, 57, 63, 0);
+            trials.add(new Trial(id, 57, 1, 0, 0, y, Arm.UNEXPOSED));
+        }
+        LineageEstimate e = new LineageEstimate(
+                4, 4, 4, 0, 0, 0.05, 0, 0.03, 0, 60, 4, 0, 0, 0, 4, 10, 0, 0, Set.of(1, 2, 3, 4), null);
+        LineageHits hits = new LineageHits(hitDays, 56, 56, List.of(1), true, false);
+        StopOdds o = new StopOdds(odds, null, null, 30, List.of(), List.of(), null, null, Map.of(), Map.of(), Map.of());
+        List<CurvePoint> pts = RetentionCurve.curve(trials, e, Set.of(), hits, new Series(0, series), o, 64);
+        assertAll(
+                () -> assertEquals(1, pts.size()),
+                () -> assertEquals(
+                        1 - (1 * 0.2 + 3 * 0.0) / 4, pts.get(0).similar(), 1e-12, "one treated ID in X, three in Y"),
+                () -> assertEquals(10, pts.get(0).atRiskSimilar()),
+                () -> assertEquals(4, pts.get(0).atRiskHit()));
+    }
+
+    @Test
     void silentHitIds_onlyForEvidenceOfLossAndFewAccounts() {
         LineageHits hits = new LineageHits(
                 Map.of(1, List.of(150), 2, List.of(150), 3, List.of(150), 4, List.of(150)),

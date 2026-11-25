@@ -15,8 +15,9 @@ import org.junit.jupiter.api.Test;
 /**
  * The rank of spec 8.7: evidence of loss by its lower limit, then few accounts and reaches nearly all by users lost, then
  * not enough evidence (and no measurable loss) by users lost, then always present and moved, not added. Findings that
- * fire together sit side by side, and neither is put above the other on its lower limit alone. A tier out of order, or
- * a lower limit read where the verdict makes no claim, would put a number with no claim above a claim.
+ * fire together sit side by side, and neither is put above the other on its lower limit alone. A hidden verdict sorts
+ * by the estimate's users lost as the reference does, and an issue the estimate never reached comes last. A tier out of
+ * order, or a lower limit read where the verdict makes no claim, would put a number with no claim above a claim.
  */
 class IssueRankTest {
 
@@ -44,8 +45,10 @@ class IssueRankTest {
         issues.put("h", r(Verdict.MOVED_NOT_ADDED, 50.0, 0.0));
         issues.put("f", r(Verdict.NO_MEASURABLE_LOSS, 3.0, 0.0));
         issues.put("d", r(Verdict.REACHES_NEARLY_ALL, 15.0, 0.0));
+        issues.put("k", r(Verdict.CANNOT_MEASURE_YET, 45.0, null));
+        issues.put("m", r(Verdict.ALWAYS_PRESENT, 0.0, 0.0));
         Map<String, Integer> rank = IssueRank.rank(issues, Map.of());
-        assertEquals(List.of("b", "a", "d", "c", "e", "f", "h", "g", "i", "j"), order(rank));
+        assertEquals(List.of("b", "a", "d", "c", "e", "f", "h", "k", "g", "m", "i", "j"), order(rank));
         assertEquals(1, rank.get("b"));
     }
 
