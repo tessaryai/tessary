@@ -429,3 +429,34 @@ export type VersionUsage = S["VersionUsage"];
 export type PromptUsage = S["PromptUsage"];
 export type PlaygroundRunRequest = S["PlaygroundRunRequest"];
 export type PlaygroundRunView = S["PlaygroundRunView"];
+
+// ---- Users view (GET end-users/...). Codes and numbers only; views/users/usersWords.ts words them. ----
+/** Days are UTC day numbers. `null` means not computed, never zero. */
+export type EndUserOverview = S["EndUserOverview"];
+export type EndUserPageState = EndUserOverview["page_state"];
+export type EndUserPageStateReason = NonNullable<EndUserOverview["page_state_reason"]>;
+export type EndUserStopStageState = NonNullable<EndUserOverview["stop_stage_state"]>;
+export type EndUserStageCounts = S["StageCounts"];
+export type EndUserTrust = S["TrustNumbers"];
+export type EndUserBanner = S["EndUserBanner"];
+export type EndUserBannerCode = EndUserBanner["code"];
+export type EndUserLimitLine = S["LimitLine"];
+export type EndUserLimitCode = EndUserLimitLine["code"];
+export type EndUserIssueList = S["EndUserIssueList"];
+export type EndUserIssueRow = S["EndUserIssueRow"];
+export type EndUserIssueNumbers = S["EndUserIssueNumbers"];
+export type EndUserVerdict = EndUserIssueNumbers["verdict"];
+export type EndUserIssueDiagnostics = S["IssueDiagnostics"];
+export type EndUserAccountLine = S["AccountLine"];
+export type EndUserCurvePoint = S["CurvePoint"];
+export type EndUserIssue = S["EndUserIssue"];
+export type EndUserSilentIds = S["EndUserSilentIds"];
+export type EndUserSilentId = S["EndUserSilentId"];
+export type EndUserIdPage = S["EndUserIdPage"];
+export type EndUserIdRow = S["EndUserIdRow"];
+export type EndUserStage = EndUserIdPage["stage"];
+export type EndUserGrade = NonNullable<EndUserIdRow["grade"]>;
+export type EndUserCaseBlock = S["EndUserCaseBlock"];
+export type EndUserHitCounts = S["EndUserHitCounts"];
+export type EndUserHitCount = S["EndUserHitCount"];
+export type EndUserCountKind = EndUserHitCount["count_kind"];

@@ -30,6 +30,8 @@ import type {
   BehaviorFindingDetail,
   CaseDetail,
   ChartCard,
+  EndUserCaseBlock,
+  EndUserHitCounts,
   ChartPoint,
   ClassifierCharts,
   EvidenceSpanPage,
@@ -279,6 +281,21 @@ const EMPTY_SESSION_SPANS = { spans: [] as unknown[], spans_truncated: false };
 const EMPTY_CHART_SCOPES = { days: 28, call_sites: [] as unknown[], tools: [] as unknown[], classifiers: [] as unknown[] };
 const EMPTY_PROMPT_LEVEL = { folder: null, folders: [] as unknown[], items: [] as unknown[], page: 1, limit: 50, total: 0 };
 const EMPTY_PROMPT_USAGE_SUMMARY = { days: 7, items: [] as unknown[] };
+/** A project with no open case and none resolved in the last 7 days. */
+const NO_HIT_COUNTS: EndUserHitCounts = { cases: [] };
+/** A case before the project's first Users snapshot: the count is user ID values, and nothing is judged. */
+const COLLECTING_CASE_BLOCK: EndUserCaseBlock = {
+  case_id: "case-1",
+  case_ref: "C-1",
+  page_state: "collecting",
+  count_kind: "id_values",
+  user_ids_hit: 0,
+  since_day: null,
+  flagged_traces: 0,
+  flagged_traces_no_user_id: 0,
+  refusal: null,
+  issue: null,
+};
 
 /**
  * Applied to every tenant route. ShellChrome's nav badge reads getTriage; CapabilityGate briefly mounts Triage
@@ -295,6 +312,8 @@ const SHELL_CHROME_OVERRIDES: Record<string, () => Promise<unknown>> = {
   getModelSettings: () => Promise.resolve(EMPTY_MODEL_SETTINGS),
   // ...and its Findings section, below Cases.
   listBehaviorFindings: () => Promise.resolve({ findings: [] }),
+  // ...and the user IDs each case hit.
+  getEndUserHitCounts: () => Promise.resolve(NO_HIT_COUNTS),
 };
 
 /** Keyed by the manifest's raw `path`. */
@@ -303,6 +322,8 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     getCase: NOT_FOUND("case"),
     // The case header offers "Connect repository" when the project has none.
     getGitIntegration: () => Promise.resolve(null),
+    // The Users block of every case page mounted here, the real-payload ones included.
+    getEndUserCaseBlock: () => Promise.resolve(COLLECTING_CASE_BLOCK),
   },
   sources: {
     listSources: EMPTY,
