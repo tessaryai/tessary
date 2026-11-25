@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Case page: headline, why (once RCA has run), how big, then the failures. The causes sit above the
-// figure; after RCA the cause is appended to the detector's own sentence, never a re-worded one.
+// Case page: headline, why (once RCA has run), the user IDs it hit, how big, then the failures. The causes sit above
+// the figure; after RCA the cause is appended to the detector's own sentence, never a re-worded one.
 // Lifecycle is open → resolved, plus mute. Nothing is assigned, so there is no claim.
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -58,6 +58,8 @@ import {
   type RunLane,
 } from "../components/runWords";
 import type { ProjectApi } from "../../api/client";
+import { CaseUsersBlock } from "../users/CaseUsersBlock";
+import { PAGE_TITLE as USERS_LABEL } from "../users/usersWords";
 import { useEffect, useRef, type ComponentProps } from "react";
 
 export function CasePage() {
@@ -375,6 +377,11 @@ export function CasePage() {
           }
         />
       )}
+
+      {/* ------------------------------------------------------------ users */}
+      <Block label={USERS_LABEL}>
+        <CaseUsersBlock caseId={caseId ?? ""} />
+      </Block>
 
       {/* ------------------------------------------------------- the fix */}
       {detail.fix && <FixBlock fix={detail.fix} basePath={basePath} />}
