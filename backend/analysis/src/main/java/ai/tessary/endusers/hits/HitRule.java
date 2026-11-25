@@ -26,22 +26,24 @@ public record HitRule(
     public enum Rows {
         EVIDENCE,
         MALFORMED_OUTPUT_DETECTIONS,
-        SECRET_LEAK_DETECTIONS,
-        NONE
+        SECRET_LEAK_DETECTIONS
     }
 
     /** {@code MEMBER}: the member rows are every trial. {@code CALL_SITE}: the call site's traffic. */
     public enum Reach {
         MEMBER,
-        CALL_SITE,
-        NONE
+        CALL_SITE
     }
 
-    /** {@code NOT_APPLICABLE}: the issue shifts a measure for all traffic and has no hit user IDs. */
+    /**
+     * {@code METRIC_SHIFT}: a measure shifted; its member rows are every trace of the shifted window, so no hit is
+     * missing. It is measured like every other issue, and an issue of such findings with no stored hit row has no
+     * user IDs hit to count.
+     */
     public enum Completeness {
         COMPLETE,
         NOT_COMPLETE,
-        NOT_APPLICABLE
+        METRIC_SHIFT
     }
 
     /** For a detector kind no source has a rule for: witnesses when any exist, else the other flagged roles. */
@@ -60,7 +62,7 @@ public record HitRule(
         return Set.of();
     }
 
-    /** True when no hit is missing: a rule that has no hit user IDs misses none. */
+    /** True when no hit is missing. */
     public boolean complete() {
         return completeness != Completeness.NOT_COMPLETE;
     }

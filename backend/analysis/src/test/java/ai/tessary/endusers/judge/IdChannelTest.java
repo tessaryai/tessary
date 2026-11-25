@@ -64,6 +64,9 @@ class IdChannelTest {
                 () -> assertEquals(28, held.idLoss().onsetDay(), "onset is the first day of week 4"),
                 () -> assertEquals(false, held.idLoss().provisional()),
                 () -> assertEquals(List.of("app", "r|1"), held.idLoss().slices(), "a NULL version is no slice"),
+                () -> assertEquals(List.of(A), held.idLoss().routeNos(), "the routes whose traffic lost its user ID"),
+                () -> assertEquals(570.0 / 1500, held.idLoss().shareAfter(), 1e-12, "190 of 500 in weeks 4 to 6"),
+                () -> assertEquals(40.0 / 2000, held.idLoss().shareBefore(), 1e-12, "10 of 500 in weeks 0 to 3"),
                 () -> assertNull(blip.idLoss(), "the next whole week must hold too"),
                 () -> assertNull(small.idLoss(), "a rise of 0.08 is under 0.10"),
                 () -> assertNotNull(latest.idLoss(), "a single latest week has the same effect"),
@@ -125,12 +128,34 @@ class IdChannelTest {
         assertAll(
                 () -> assertEquals(List.of("r|2"), loss.slices(), "the app share rises by 0.036 only"),
                 () -> assertEquals(28, loss.onsetDay()),
+                () -> assertEquals(List.of(OTHER), loss.routeNos(), "the unaffected route is not named"),
+                () -> assertEquals(
+                        570.0 / 1500, loss.shareAfter(), 1e-12, "the share on the affected route only: 38%, not 5.4%"),
+                () -> assertEquals(40.0 / 2000, loss.shareBefore(), 1e-12, "2% in the eight weeks before the onset"),
                 () -> assertEquals(
                         lost.stream().collect(TreeMap::new, (m, u) -> m.put(u, 0.25), Map::putAll),
                         loss.lostShare(),
                         "one of four traces was on the route; an ID with none there is not in V"),
                 () -> assertEquals(1.0, loss.kappa(), "180 orphan traces a week against 16 is capped at 1"),
                 () -> assertEquals(1.0, loss.phi()));
+    }
+
+    /**
+     * The bug: when one route lifts the app share too, the banner names every route and pools their traffic, so it
+     * reads "20% on every route" instead of "38% on the route that lost its user IDs".
+     */
+    @Test
+    void idLoss_alsoOnTheApp_namesOnlyTheRoutesThatLostTheirIds() {
+        Scenario s = new Scenario(55);
+        for (int w = 0; w <= 6; w++) s.week(w, A, 500, w < 4 ? 10 : 190).week(w, OTHER, 500, 10);
+
+        IdLoss loss = s.detect().idLoss();
+
+        assertAll(
+                () -> assertEquals(List.of("app", "r|1"), loss.slices(), "the app share rises by 0.18"),
+                () -> assertEquals(List.of(A), loss.routeNos()),
+                () -> assertEquals(570.0 / 1500, loss.shareAfter(), 1e-12),
+                () -> assertEquals(40.0 / 2000, loss.shareBefore(), 1e-12));
     }
 
     @Test

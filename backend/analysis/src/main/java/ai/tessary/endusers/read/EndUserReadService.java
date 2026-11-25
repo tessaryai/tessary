@@ -7,6 +7,7 @@ import ai.tessary.endusers.facts.EndUserKeys;
 import ai.tessary.endusers.hits.HitRules;
 import ai.tessary.endusers.hits.IssueLineages;
 import ai.tessary.endusers.hits.IssueLineages.IssueLineage;
+import ai.tessary.endusers.judge.model.StateResult.Banner;
 import ai.tessary.endusers.judge.model.StateResult.StageCounts;
 import ai.tessary.endusers.model.PageState;
 import ai.tessary.endusers.model.Stage;
@@ -16,6 +17,7 @@ import ai.tessary.endusers.read.CaseHitRepository.CaseHits;
 import ai.tessary.endusers.read.CaseHitRepository.CaseRefs;
 import ai.tessary.endusers.read.CaseHitRepository.FindingRoles;
 import ai.tessary.endusers.read.CaseHitRepository.Pick;
+import ai.tessary.endusers.read.EndUserDtos.EndUserBanner;
 import ai.tessary.endusers.read.EndUserDtos.EndUserCaseBlock;
 import ai.tessary.endusers.read.EndUserDtos.EndUserErasure;
 import ai.tessary.endusers.read.EndUserDtos.EndUserHitCount;
@@ -35,6 +37,7 @@ import ai.tessary.endusers.read.EndUserListRepository.IdRow;
 import ai.tessary.endusers.read.IssueReadRepository.IssueRow;
 import ai.tessary.endusers.read.IssueReadRepository.SilentAfter;
 import ai.tessary.endusers.read.IssueReadRepository.SilentIdRow;
+import ai.tessary.endusers.read.IssueReadRepository.SilentRest;
 import ai.tessary.endusers.read.SnapshotReadRepository.SnapshotRow;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.EndUserError;
@@ -51,8 +54,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -164,9 +169,27 @@ public class EndUserReadService {
                 stages,
                 s.stopStage(),
                 s.stopStageNumbers(),
-                s.banners(),
+                banners(projectId, s.banners()),
                 s.limits(),
                 s.trust());
+    }
+
+    /** One name per trace name, in route order; route names are read once for every banner. */
+    private List<EndUserBanner> banners(String projectId, List<Banner> stored) {
+        Set<Integer> routeNos =
+                stored.stream().flatMap(b -> b.routeNos().stream()).collect(Collectors.toCollection(TreeSet::new));
+        Map<Integer, String> names = routeNos.isEmpty() ? Map.of() : snapshots.routeNames(projectId, routeNos);
+        return stored.stream()
+                .map(b -> new EndUserBanner(
+                        b.code(),
+                        b.numbers(),
+                        b.routeNos().stream()
+                                .sorted()
+                                .map(names::get)
+                                .filter(Objects::nonNull)
+                                .distinct()
+                                .toList()))
+                .toList();
     }
 
     public EndUserIssueList issues(String projectId) {
@@ -221,25 +244,39 @@ public class EndUserReadService {
         CaseRow c = requireCase(projectId, caseRef);
         SilentAfter after = silentAfter(cursor);
         Optional<SnapshotRow> latest = snapshots.latest(projectId);
-        if (latest.isEmpty()) return new EndUserSilentIds(null, List.of(), null);
+        if (latest.isEmpty()) return new EndUserSilentIds(null, List.of(), null, 0, null, null);
         int day = latest.get().day();
         IssueRow row = issues.forCases(projectId, day, List.of(c.id())).get(c.id());
-        if (row == null) return new EndUserSilentIds(null, List.of(), null);
-        if (!CLAIMS.contains(row.verdict())) return new EndUserSilentIds(row.verdict(), List.of(), null);
+        if (row == null) return new EndUserSilentIds(null, List.of(), null, 0, null, null);
+        if (!CLAIMS.contains(row.verdict())) {
+            return new EndUserSilentIds(row.verdict(), List.of(), null, 0, null, null);
+        }
         List<SilentIdRow> page = issues.silentIds(projectId, row.lineageKey(), after, SILENT_PAGE + 1);
         List<SilentIdRow> shown = page.subList(0, Math.min(page.size(), SILENT_PAGE));
         String next = null;
+        SilentRest rest = new SilentRest(0, null, null);
         if (page.size() > SILENT_PAGE) {
             SilentIdRow last = shown.get(shown.size() - 1);
             next = Keyset.encode(last.tie(), last.firstHitDay(), last.silentOrder());
+            rest = issues.silentRest(
+                    projectId, row.lineageKey(), new SilentAfter(last.firstHitDay(), last.silentOrder(), last.tie()));
         }
+        Integer restLow = rest.firstHitLow();
+        Integer restHigh = rest.firstHitHigh();
         return new EndUserSilentIds(
                 row.verdict(),
                 shown.stream()
                         .map(r -> new EndUserSilentId(
-                                r.idText(), (day - r.firstHitDay()) / 7, r.daysSilent(), r.stage(), r.grade()))
+                                r.idText(), weeksSince(day, r.firstHitDay()), r.daysSilent(), r.stage(), r.grade()))
                         .toList(),
-                next);
+                next,
+                rest.ids(),
+                restHigh == null ? null : weeksSince(day, restHigh),
+                restLow == null ? null : weeksSince(day, restLow));
+    }
+
+    private static int weeksSince(int day, int firstHitDay) {
+        return (day - firstHitDay) / 7;
     }
 
     /** @param limit 1 to {@link #MAX_LIMIT} */
@@ -267,11 +304,10 @@ public class EndUserReadService {
     public EndUserCaseBlock caseBlock(String projectId, String caseRef) {
         CaseRow c = requireCase(projectId, caseRef);
         Optional<SnapshotRow> latest = snapshots.latest(projectId);
-        boolean metricShift = CaseRow.Detector.METRIC_DRIFT.equals(c.detector());
         Map<String, List<String>> counted = countedFindings(projectId, List.of(c.id()));
-        CaseHits hits = metricShift
-                ? null
-                : liveHits(projectId, counted, latest.isPresent()).get(c.id());
+        List<Pick> picks = picks(projectId, counted);
+        boolean metricShift = metricShift(c, picks);
+        CaseHits hits = liveHits(projectId, picks, latest.isPresent()).get(c.id());
         CaseRefs refs = caseRefs(projectId, counted).get(c.id());
         IssueRow row = latest.map(s ->
                         issues.forCases(projectId, s.day(), List.of(c.id())).get(c.id()))
@@ -297,13 +333,14 @@ public class EndUserReadService {
                 .toList();
         Optional<SnapshotRow> latest = snapshots.latest(projectId);
         List<String> caseIds = listed.stream().map(CaseRow::id).toList();
-        Map<String, CaseHits> hits = liveHits(projectId, countedFindings(projectId, caseIds), latest.isPresent());
+        List<Pick> picks = picks(projectId, countedFindings(projectId, caseIds));
+        Map<String, CaseHits> hits = liveHits(projectId, picks, latest.isPresent());
         Map<String, IssueRow> issueByCase =
                 latest.map(s -> issues.forCases(projectId, s.day(), caseIds)).orElse(Map.of());
         PageState refusal = refusal(latest);
         List<EndUserHitCount> out = new ArrayList<>(listed.size());
         for (CaseRow c : listed) {
-            boolean metricShift = CaseRow.Detector.METRIC_DRIFT.equals(c.detector());
+            boolean metricShift = metricShift(c, picks);
             CaseHits h = hits.get(c.id());
             IssueRow row = issueByCase.get(c.id());
             boolean loss = row != null && row.verdict() == Verdict.EVIDENCE_OF_LOSS;
@@ -355,8 +392,13 @@ public class EndUserReadService {
     }
 
     private Map<String, CaseHits> liveHits(String projectId, Map<String, List<String>> counted, boolean coveredOnly) {
+        return liveHits(projectId, picks(projectId, counted), coveredOnly);
+    }
+
+    /** The finding roles that count as hits for each case: those with a stored row under the finding's hit rule. */
+    private List<Pick> picks(String projectId, Map<String, List<String>> counted) {
         Set<String> findingIds = counted.values().stream().flatMap(List::stream).collect(Collectors.toSet());
-        if (findingIds.isEmpty()) return Map.of();
+        if (findingIds.isEmpty()) return List.of();
         Map<String, Set<String>> hitRoles = new HashMap<>();
         for (FindingRoles f : caseHits.findingRoles(projectId, findingIds)) {
             hitRoles.put(f.findingId(), rules.ruleFor(f.finding()).hitRoles(f.roles()));
@@ -369,6 +411,10 @@ public class EndUserReadService {
                 }
             }
         });
+        return picks;
+    }
+
+    private Map<String, CaseHits> liveHits(String projectId, List<Pick> picks, boolean coveredOnly) {
         if (picks.isEmpty()) return Map.of();
         return caseHits.caseHits(projectId, picks, coveredOnly).stream()
                 .collect(Collectors.toMap(CaseHits::caseId, h -> h));
@@ -379,6 +425,15 @@ public class EndUserReadService {
         counted.forEach((caseId, findings) -> findings.forEach(f -> pairs.add(new CaseFinding(caseId, f))));
         if (pairs.isEmpty()) return Map.of();
         return caseHits.caseRefs(projectId, pairs).stream().collect(Collectors.toMap(CaseRefs::caseId, r -> r));
+    }
+
+    /**
+     * A metric shift is measured like every other issue; only one with no stored hit row, with or without a user ID,
+     * has no user IDs hit to count.
+     */
+    private static boolean metricShift(CaseRow c, List<Pick> picks) {
+        return CaseRow.Detector.METRIC_DRIFT.equals(c.detector())
+                && picks.stream().noneMatch(p -> p.caseId().equals(c.id()));
     }
 
     /** By ULID or by reference ({@code C-118}), within the project only. */

@@ -7,7 +7,8 @@ import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
  * What a count of user IDs hit counts: every distinct user ID value before the first snapshot, only covered user IDs
- * after it, and nothing for a metric shift, which has no hit user IDs.
+ * after it, and nothing for a metric shift with no stored hit row. A metric shift with hit rows counts like every other
+ * case.
  */
 public enum CountKind implements WireCode {
     ID_VALUES("id_values"),

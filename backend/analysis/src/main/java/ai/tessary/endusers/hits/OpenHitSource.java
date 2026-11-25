@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
 /**
  * The hit rule of each open detector (plan 3.2). The rate detectors write every trial as {@code member} and the flagged
  * ones as {@code witness}, so a member is not a hit. Malformed output and the secret-leak facet keep 50 witnesses, so
- * their hits are read from their detection tables with the detector's own filters. A metric shift moves all traffic and
- * has no hit user IDs.
+ * their hits are read from their detection tables with the detector's own filters. A metric shift's hits are the members
+ * of its shifted window, the traces it measured after the change.
  */
 @Component
 public class OpenHitSource implements EndUserHitSource {
@@ -51,8 +51,13 @@ public class OpenHitSource implements EndUserHitSource {
     static final HitRule SECRET_LEAK = new HitRule(
             Kind.SECRET_LEAK, Rows.SECRET_LEAK_DETECTIONS, WITNESS, false, Reach.CALL_SITE, Completeness.COMPLETE);
 
-    static final HitRule METRIC_DRIFT =
-            new HitRule("metric_drift", Rows.NONE, List.of(), false, Reach.NONE, Completeness.NOT_APPLICABLE);
+    static final HitRule METRIC_DRIFT = new HitRule(
+            "metric_drift",
+            Rows.EVIDENCE,
+            List.of(Set.of(Role.MEMBER)),
+            false,
+            Reach.CALL_SITE,
+            Completeness.METRIC_SHIFT);
 
     @Override
     public Optional<HitRule> ruleFor(HitFinding finding) {

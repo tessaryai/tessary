@@ -35,7 +35,8 @@ public class IssueLineages {
      * @param currentCaseId the newest unresolved case, else the newest case
      * @param caseIds oldest first
      * @param complete every finding's detector records every hit
-     * @param metricShift the issue shifts a measure for all traffic and has no hit user IDs
+     * @param metricShift every finding is a metric shift; such an issue is measured like every other, and with no
+     *     stored hit row it has no user IDs hit to count
      */
     public record IssueLineage(
             String lineageKey,
@@ -71,7 +72,7 @@ public class IssueLineages {
                 rows.stream().map(CaseFinding::caseId).distinct().toList(),
                 rows.stream().map(CaseFinding::findingId).sorted().toList(),
                 findingRules.stream().allMatch(HitRule::complete),
-                findingRules.stream().allMatch(r -> r.completeness() == HitRule.Completeness.NOT_APPLICABLE));
+                findingRules.stream().allMatch(r -> r.completeness() == HitRule.Completeness.METRIC_SHIFT));
     }
 
     static String keyOf(CaseKey key) {

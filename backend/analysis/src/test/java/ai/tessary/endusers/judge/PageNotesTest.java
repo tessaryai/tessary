@@ -11,6 +11,7 @@ import ai.tessary.endusers.judge.StopStageRule.Decision;
 import ai.tessary.endusers.judge.model.Facts;
 import ai.tessary.endusers.judge.model.Facts.IdDays;
 import ai.tessary.endusers.judge.model.Facts.IdInfo;
+import ai.tessary.endusers.judge.model.Facts.NullDay;
 import ai.tessary.endusers.judge.model.Guards;
 import ai.tessary.endusers.judge.model.IdChannelResult;
 import ai.tessary.endusers.judge.model.IdChannelResult.IdChange;
@@ -92,7 +93,10 @@ class PageNotesTest {
         Season season = new Season(0.72, 0.72, 30, 979);
         List<Banner> expected = List.of(
                 new Banner(BannerCode.GROUP_OR_KEY_IDS, Map.of("ids", 3.0, "id_day_share", 0.06 + 0.03)),
-                new Banner(BannerCode.ID_LOSS, Map.of("onset_day", 950.0, "ids", 2.0)),
+                new Banner(
+                        BannerCode.ID_LOSS,
+                        Map.of("onset_day", 950.0, "ids", 2.0, "share_after", 0.38, "share_before", 0.02),
+                        List.of(1)),
                 new Banner(BannerCode.ID_CHANGE, Map.of("first_day", 960.0, "cannot_follow", 2.0)),
                 new Banner(BannerCode.TRACER, Map.of("ended", 30.0, "continued", 5.0)),
                 new Banner(
@@ -107,7 +111,7 @@ class PageNotesTest {
                                 "stopped_high", 0.5 + 0.6)),
                 new Banner(BannerCode.SEASON_LEVEL, Map.of("level", 0.72, "since_day", 979.0)),
                 new Banner(BannerCode.CANNOT_BE_NAMED_YET, CANNOT_NAME),
-                new Banner(BannerCode.OUTAGE, Map.of("day", 990.0, "days", 2.0)));
+                new Banner(BannerCode.OUTAGE, Map.of("day", 990.0, "days", 2.0, "drop_share", 0.8)));
         assertEquals(
                 expected,
                 PageNotes.banners(f.inputs(), season, new Decision(StopStageState.CANNOT_BE_NAMED_YET, CANNOT_NAME)));
@@ -166,6 +170,32 @@ class PageNotesTest {
                         new Banner(BannerCode.SHARED_SILENCE, Map.of("silent_since_day", 950.0))),
                 banners,
                 "a break that came back over 28 days ago and a closed event over 56 days ago give no banner");
+    }
+
+    /**
+     * The bug: the outage banner gives no drop, or a drop against a median that the facts do not hold: 28 days before
+     * the outage day that start before the history are not a window of 28 days.
+     */
+    @Test
+    void outageBanner_dropShare_againstThe28DayMedianOfAllTraces() {
+        Fixture f = new Fixture();
+        f.outageDays = List.of(990);
+        for (int d = 962; d < 990; d++) {
+            f.nullDays.add(new NullDay(d, 1, 1, d < 966 ? 80 : 50, 0));
+            f.nullDays.add(new NullDay(d, 2, 1, 40, 5));
+        }
+        f.nullDays.add(new NullDay(990, 1, 1, 12, 0));
+        f.nullDays.add(new NullDay(990, 2, 1, 6, 0));
+        Banner expected = new Banner(BannerCode.OUTAGE, Map.of("day", 990.0, "days", 1.0, "drop_share", 0.8));
+        assertEquals(
+                List.of(expected),
+                PageNotes.banners(f.inputs(), noSeason(), null),
+                "18 traces against a median day of 90");
+        f.t0Id = 963;
+        assertEquals(
+                List.of(new Banner(BannerCode.OUTAGE, Map.of("day", 990.0, "days", 1.0))),
+                PageNotes.banners(f.inputs(), noSeason(), null),
+                "day 962 is before the history, so no drop share");
     }
 
     @Test
@@ -229,6 +259,20 @@ class PageNotesTest {
                         "named_right under 0.8",
                         (Consumer<Fixture>) f -> {
                             f.namedRight = 0.79;
+                            f.counts = new StageCounts(6, 0, 0, 0, 4, 4.4, 2, 6, 10);
+                        },
+                        List.of(
+                                few10,
+                                new LimitLine(
+                                        LimitCode.NAMED_RIGHT_LOW,
+                                        Map.of("named_right", 0.79, "named_found", 0.9),
+                                        false,
+                                        4))),
+                Arguments.of(
+                        "named_right under 0.8, named_found not measured",
+                        (Consumer<Fixture>) f -> {
+                            f.namedRight = 0.79;
+                            f.namedFound = null;
                             f.counts = new StageCounts(6, 0, 0, 0, 4, 4.4, 2, 6, 10);
                         },
                         List.of(
@@ -389,13 +433,25 @@ class PageNotesTest {
         f.groupHint(5).groupHint(6).aggregate(9);
         f.pdGroupHint = 0.06;
         f.pdAggregate = 0.03;
-        f.idLoss = new IdLoss(List.of("r|1"), 950, false, 0.6, 0.5, Map.of(0, 1.0, 1, 1.0, 2, 1.0, 3, 1.0), 0);
+        f.idLoss = new IdLoss(
+                List.of("r|1"),
+                950,
+                false,
+                0.6,
+                0.5,
+                Map.of(0, 1.0, 1, 1.0, 2, 1.0, 3, 1.0),
+                0,
+                List.of(1),
+                0.38,
+                0.02);
         f.idChange = idChange();
         f.cannotFollow = Set.of(7, 8);
         f.tracer = new TracerResult(TracerVerdict.SOME_IDS_REPLACED, 30, 5, false, 900, 0.7, Set.of());
         f.calendar(0, 0.2, 0.5).calendar(1, 0.3, 0.6);
         f.events = List.of(event(SilenceState.OPEN, 975, null, List.of(0, 1, 9)));
         f.outageDays = List.of(940, 990);
+        for (int d = 962; d < 990; d++) f.nullDays.add(new NullDay(d, 1, 1, 100, 0));
+        f.nullDays.add(new NullDay(990, 1, 1, 20, 0));
         return f;
     }
 
@@ -409,7 +465,7 @@ class PageNotesTest {
     }
 
     private static IdLoss idLoss(Map<Integer, Double> lostShare) {
-        return new IdLoss(List.of("r|1"), 950, false, 0.6, 0.5, lostShare, 0);
+        return new IdLoss(List.of("r|1"), 950, false, 0.6, 0.5, lostShare, 0, List.of(1), 0.38, 0.02);
     }
 
     private static IdChange idChange() {
@@ -436,6 +492,7 @@ class PageNotesTest {
         final Map<Integer, IdIdentity> identity = new TreeMap<>();
         final Map<Integer, IdOdds> odds = new TreeMap<>();
         final List<IdInfo> infos = new ArrayList<>();
+        final List<NullDay> nullDays = new ArrayList<>();
         int t0Id = 800;
         Map<String, Double> oneDayShareByShape = Map.of();
 
@@ -532,7 +589,7 @@ class PageNotesTest {
                             new int[0],
                             new int[0][0],
                             new long[0][0]),
-                    List.of(),
+                    nullDays,
                     List.of(),
                     List.of(),
                     List.of(),

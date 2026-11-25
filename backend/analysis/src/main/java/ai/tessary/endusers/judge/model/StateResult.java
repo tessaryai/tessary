@@ -62,9 +62,16 @@ public record StateResult(
             @JsonProperty("stopped_high") double stoppedHigh,
             @JsonProperty("counted") int counted) {}
 
+    /** @param routeNos the routes the banner names, by route number; the read gives their names */
     public record Banner(
             @JsonProperty("code") BannerCode code,
-            @JsonProperty("numbers") Map<String, Double> numbers) {}
+            @JsonProperty("numbers") Map<String, Double> numbers,
+            @JsonProperty("route_nos") List<Integer> routeNos) {
+
+        public Banner(BannerCode code, Map<String, Double> numbers) {
+            this(code, numbers, List.of());
+        }
+    }
 
     /** @param ids how many IDs the line concerns, the order in which lines are cut */
     public record LimitLine(

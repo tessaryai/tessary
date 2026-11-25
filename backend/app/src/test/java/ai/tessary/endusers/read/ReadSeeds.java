@@ -106,6 +106,18 @@ record ReadSeeds(JdbcClient jdbc, String pid) {
                 .update();
     }
 
+    void route(int routeNo, @Nullable String traceName, String callSiteId) {
+        jdbc.sql("""
+                INSERT INTO end_user_route (project_id, route_no, trace_name, call_site_id)
+                VALUES (:pid, :no, :name, :site)
+                """)
+                .param("pid", pid)
+                .param("no", routeNo)
+                .param("name", traceName)
+                .param("site", callSiteId)
+                .update();
+    }
+
     void finding(String name, String classifierKey, @Nullable String caseName) {
         jdbc.sql("""
                 INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id, status,

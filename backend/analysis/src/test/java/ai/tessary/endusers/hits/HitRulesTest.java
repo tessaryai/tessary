@@ -81,16 +81,21 @@ class HitRulesTest {
                 () -> assertEquals(HitRule.DEFAULT, faceted, "a facet of an unknown classifier is an unknown kind"));
     }
 
+    /**
+     * The bug: a metric shift is not measured like every other issue, or counts its baseline window or change point
+     * as hits.
+     */
     @Test
-    void metricDrift_hasNoHits_andIsNotApplicable() {
+    void metricDrift_membersOfTheShiftedWindowAreHits() {
         for (String kind : List.of("duration_drift", "cost_drift")) {
             HitRule rule = rules.ruleFor(new HitFinding(kind, "distribution_shift", false));
             assertAll(
                     kind,
-                    () -> assertEquals(Rows.NONE, rule.rows()),
-                    () -> assertEquals(Set.of(), rule.hitRoles(Set.of("member", "changepoint"))),
-                    () -> assertEquals(Completeness.NOT_APPLICABLE, rule.completeness()),
-                    () -> assertTrue(rule.complete(), "nothing is missing, so it never reads as hits not complete"));
+                    () -> assertEquals(Rows.EVIDENCE, rule.rows()),
+                    () -> assertEquals(Set.of("member"), rule.hitRoles(Set.of("member", "changepoint", "baseline"))),
+                    () -> assertEquals(Reach.CALL_SITE, rule.reach()),
+                    () -> assertEquals(Completeness.METRIC_SHIFT, rule.completeness()),
+                    () -> assertTrue(rule.complete(), "the members are every trace of the window: none is missing"));
         }
     }
 

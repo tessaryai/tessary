@@ -183,7 +183,7 @@ class PastCheckTest {
         Series series = series(days);
         Identity identity = identity(days.keySet());
         IdChannelResult channel = new IdChannelResult(
-                new IdLoss(List.of(), 1005, false, 1.0, 0.4, Map.of(1, 0.5), 0.0),
+                new IdLoss(List.of(), 1005, false, 1.0, 0.4, Map.of(1, 0.5), 0.0, List.of(), 0.3, 0.0),
                 null,
                 Map.of(1, 1005),
                 Set.of(),

@@ -46,7 +46,7 @@ public final class Verdicts {
      * @param horizonDays how long facts are kept; null when there is no limit
      * @param idHistoryDays {@code span}: days from the first trace with a user ID to {@code D}
      * @param f the return cycle {@code F}
-     * @param metricShift the issue shifts a measure for all traffic and has no hit user IDs
+     * @param metricShift the issue is a metric shift with no hit row
      * @param estimate null when no hit ID can be compared
      * @param ageHit see {@link #ageHit}
      * @param tVis see {@link #tVis}

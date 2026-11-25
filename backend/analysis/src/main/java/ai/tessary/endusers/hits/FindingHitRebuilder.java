@@ -92,7 +92,6 @@ public class FindingHitRebuilder {
             case MALFORMED_OUTPUT_DETECTIONS -> hits.malformedOutputGroups(projectId, finding.id());
             case SECRET_LEAK_DETECTIONS ->
                 hits.secretLeakGroups(projectId, finding.id(), highOnly(projectId, finding.subjectId()));
-            case NONE -> List.of();
         };
     }
 

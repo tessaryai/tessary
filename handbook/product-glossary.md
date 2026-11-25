@@ -289,7 +289,7 @@ Do not count a held user ID as stopped.
 
 ## Verdict
 
-The word the Users page puts on an issue to say what its numbers can claim. The page tests the verdicts in the order of the table below, and the first one that applies is the verdict. When the page shows a state in place of numbers, such as No user ID or Too early, no issue gets a number. A case that shifts a measure for all traffic has no hit user IDs and gets no verdict. Every verdict still shows the user IDs hit.
+The word the Users page puts on an issue to say what its numbers can claim. The page tests the verdicts in the order of the table below, and the first one that applies is the verdict. When the page shows a state in place of numbers, such as No user ID or Too early, no issue gets a number. A case that shifts a measure is measured like every other issue; one with no hit user IDs gets no verdict. Every verdict still shows the user IDs hit.
 
 | Verdict | What it means | Loss number shown |
 | --- | --- | --- |

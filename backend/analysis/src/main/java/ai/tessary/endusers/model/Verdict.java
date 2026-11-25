@@ -4,7 +4,7 @@ package ai.tessary.endusers.model;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
-/** The verdict of an issue (spec 8.7 and the level 2 guards), in the order the rules are tried. The codes equal the {@code end_user_issue.verdict} check constraint; {@code not_applicable} is a metric shift, which has no hit user IDs. */
+/** The verdict of an issue (spec 8.7 and the level 2 guards), in the order the rules are tried. The codes equal the {@code end_user_issue.verdict} check constraint; {@code not_applicable} is a metric shift with no hit row; one with hit rows is judged like every other issue. */
 public enum Verdict implements WireCode {
     PAGE_REFUSED("page_refused"),
     HITS_NOT_COMPLETE("hits_not_complete"),

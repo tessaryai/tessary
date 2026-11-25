@@ -72,6 +72,16 @@ public class IssueReadRepository {
             int silentOrder,
             String tie) {}
 
+    /**
+     * The silent hit user IDs after a keyset position.
+     *
+     * @param firstHitLow the earliest first hit day among them; null with none
+     */
+    public record SilentRest(
+            int ids,
+            @Nullable Integer firstHitLow,
+            @Nullable Integer firstHitHigh) {}
+
     /** Ranked first, then by case number. */
     public List<IssueRow> issues(String projectId, int day) {
         return jdbc.sql("SELECT " + ISSUE_COLS + """
@@ -142,6 +152,26 @@ public class IssueReadRepository {
                             rs.getString("tie"));
                 })
                 .list();
+    }
+
+    /** The rows {@link #silentIds} would read after {@code after}, counted, with their range of first hit days. */
+    public SilentRest silentRest(String projectId, String lineageKey, SilentAfter after) {
+        return jdbc.sql("""
+                SELECT COUNT(*)::int AS ids, MIN(h.first_hit_day) AS low, MAX(h.first_hit_day) AS high
+                  FROM end_user_issue_hit h
+                  JOIN end_user u ON u.project_id = h.project_id AND u.user_key = h.user_key
+                 WHERE h.project_id = :pid AND h.lineage_key = :lineage AND u.stage IN ('silent', 'stopped')
+                   AND (h.first_hit_day, -COALESCE(u.days_silent, -1), md5(u.user_key))
+                       > (:afterDay, :afterSilent, :afterTie)
+                """)
+                .param("pid", projectId)
+                .param("lineage", lineageKey)
+                .param("afterDay", after.firstHitDay())
+                .param("afterSilent", -after.silentOrder())
+                .param("afterTie", after.tie())
+                .query((rs, n) -> new SilentRest(
+                        rs.getInt("ids"), rs.getObject("low", Integer.class), rs.getObject("high", Integer.class)))
+                .single();
     }
 
     public int silentCount(String projectId, String lineageKey) {

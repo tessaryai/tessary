@@ -27,6 +27,11 @@ public record IdChannelResult(
      * @param lostShare per ID in {@code V}: the share of its traffic on the affected slices
      * @param vanishedNormal {@code V0}, the IDs that vanish in a normal week over the same time
      * @param phi share of {@code V} that lost its ID rather than stopped
+     * @param routeNos the routes of the affected route and (route, version) slices that carry traffic since the onset,
+     *     ascending: the routes the banner names; empty when only the app or version slices lost their IDs
+     * @param shareAfter share of the traffic of those routes (with no route, of every affected slice) with no user ID,
+     *     from the onset day to {@code D}
+     * @param shareBefore the same share in the 56 days before the onset day
      */
     public record IdLoss(
             List<String> slices,
@@ -35,7 +40,10 @@ public record IdChannelResult(
             double kappa,
             double phi,
             Map<Integer, Double> lostShare,
-            double vanishedNormal) {}
+            double vanishedNormal,
+            List<Integer> routeNos,
+            double shareAfter,
+            double shareBefore) {}
 
     /** @param firstDay the first day of an event not solved by aliases; null when every event is solved */
     public record IdChange(

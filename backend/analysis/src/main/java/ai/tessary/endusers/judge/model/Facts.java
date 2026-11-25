@@ -84,7 +84,8 @@ public record Facts(
      * One issue: a case lineage with its findings.
      *
      * @param complete every finding's detector records every hit
-     * @param metricShift the issue shifts a measure for all traffic and has no hit user IDs
+     * @param metricShift every finding of the issue is a metric shift and none holds a hit row, so the issue has no
+     *     user IDs hit to count; a metric shift with hit rows is measured like every other issue
      */
     public record IssueInput(
             String lineageKey,

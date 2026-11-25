@@ -420,7 +420,9 @@ class SharedSilenceTest {
         }
 
         private IdChannelResult channel() {
-            IdLoss idLoss = lost.isEmpty() ? null : new IdLoss(List.of("app"), 56, false, 1.0, 1.0, lost, 0.0);
+            IdLoss idLoss = lost.isEmpty()
+                    ? null
+                    : new IdLoss(List.of("app"), 56, false, 1.0, 1.0, lost, 0.0, List.of(1), 0.3, 0.0);
             return new IdChannelResult(idLoss, null, Map.of(), cannotFollow, Set.of());
         }
 

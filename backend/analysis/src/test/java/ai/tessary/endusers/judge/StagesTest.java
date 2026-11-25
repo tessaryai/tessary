@@ -122,7 +122,7 @@ class StagesTest {
     @Test
     void stopRange_widensToTheIdLossRange() {
         Fixture f = new Fixture().id(1, OLD, 0.9, 0.9, 0.3, false, null).id(2, OLD, 0.9, 0.9, 0.3, false, null);
-        f.idLoss = new IdLoss(List.of("r|1"), 950, false, 0.5, 0.75, Map.of(1, 1.0, 2, 1.0), 0);
+        f.idLoss = new IdLoss(List.of("r|1"), 950, false, 0.5, 0.75, Map.of(1, 1.0, 2, 1.0), 0, List.of(1), 0.3, 0.0);
         double sd = 1.64 * Math.sqrt(2 * 0.21);
         StageCounts c = f.counts(f.states());
         assertAll(

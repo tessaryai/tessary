@@ -62,6 +62,7 @@ public final class IdChannel {
     private static final int VANISH_MIN_DAYS = 3; // [ref]
     private static final int CHANGE_MIN_COVERED = 30; // [ref]
     private static final int CHANGE_MIN_WEEKS = 5; // [ref]
+    private static final int SHARE_BEFORE_DAYS = 56; // the 8 normal weeks of spec 3.4
     private static final String APP = "app";
     private static final String APP_GROUP = "(app)";
 
@@ -272,6 +273,24 @@ public final class IdChannel {
                 .orElse(0.0);
         double kappa = goneVolume > 0 ? Math.min(1.0, Math.max(0.0, orphanPerWeek / goneVolume)) : 0.0;
 
+        Set<String> named = affected.stream()
+                .filter(label -> label.startsWith("r|") || label.startsWith("rv|"))
+                .collect(Collectors.toSet());
+        Set<String> banner = named.isEmpty() ? affected : named;
+        Set<Integer> routeNos = new TreeSet<>();
+        long[] after = new long[2];
+        long[] before = new long[2];
+        for (NullDay row : facts.nullDays()) {
+            if (!nonC(classes, row.routeNo())
+                    || !affected(banner, row.routeNo(), row.versionNo(), nullVersions)
+                    || row.day() < onsetDay - SHARE_BEFORE_DAYS
+                    || row.day() > asOfDay) continue;
+            long[] tally = row.day() >= onsetDay ? after : before;
+            tally[0] += row.traces();
+            tally[1] += row.tracesNoUserId();
+            if (!named.isEmpty() && row.day() >= onsetDay) routeNos.add(row.routeNo());
+        }
+
         return new IdLoss(
                 affected.stream().sorted().limit(SLICE_LABELS).toList(),
                 onsetDay,
@@ -279,7 +298,15 @@ public final class IdChannel {
                 kappa,
                 phi(kappa, lostShare.size(), vanishedNormal),
                 lostShare,
-                vanishedNormal);
+                vanishedNormal,
+                List.copyOf(routeNos),
+                share(after),
+                share(before));
+    }
+
+    /** The onset week needs normal weeks of 200 or more traces in the 8 weeks before it, so neither tally is empty. */
+    private static double share(long[] tally) {
+        return (double) tally[1] / tally[0];
     }
 
     private static boolean affected(Set<String> affected, int route, int version, Set<Integer> nullVersions) {

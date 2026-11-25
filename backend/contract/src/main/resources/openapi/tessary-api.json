@@ -1,6 +1,41 @@
 {
   "components" : {
     "schemas" : {
+      "AccountLine" : {
+        "properties" : {
+          "account" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "hit" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "ids" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "silent" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "silent_since_day" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "account",
+          "hit",
+          "ids",
+          "silent",
+          "silent_since_day"
+        ],
+        "type" : "object"
+      },
       "AddMemberRequest" : {
         "properties" : {
           "email" : {
@@ -2624,36 +2659,6 @@
           "project_id",
           "subject_id",
           "subject_kind"
-        ],
-        "type" : "object"
-      },
-      "Banner" : {
-        "properties" : {
-          "code" : {
-            "enum" : [
-              "page_refusal",
-              "group_or_key_ids",
-              "id_loss",
-              "id_change",
-              "tracer",
-              "shared_silence",
-              "season_level",
-              "cannot_be_named_yet",
-              "outage"
-            ],
-            "type" : "string"
-          },
-          "numbers" : {
-            "additionalProperties" : {
-              "format" : "double",
-              "type" : "number"
-            },
-            "type" : "object"
-          }
-        },
-        "required" : [
-          "code",
-          "numbers"
         ],
         "type" : "object"
       },
@@ -5344,6 +5349,43 @@
         ],
         "type" : "object"
       },
+      "EndUserBanner" : {
+        "properties" : {
+          "code" : {
+            "enum" : [
+              "page_refusal",
+              "group_or_key_ids",
+              "id_loss",
+              "id_change",
+              "tracer",
+              "shared_silence",
+              "season_level",
+              "cannot_be_named_yet",
+              "outage"
+            ],
+            "type" : "string"
+          },
+          "numbers" : {
+            "additionalProperties" : {
+              "format" : "double",
+              "type" : "number"
+            },
+            "type" : "object"
+          },
+          "routes" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "code",
+          "numbers",
+          "routes"
+        ],
+        "type" : "object"
+      },
       "EndUserCaseBlock" : {
         "properties" : {
           "case_id" : {
@@ -5929,7 +5971,7 @@
           },
           "banners" : {
             "items" : {
-              "$ref" : "#/components/schemas/Banner"
+              "$ref" : "#/components/schemas/EndUserBanner"
             },
             "type" : "array"
           },
@@ -5968,6 +6010,7 @@
           "page_state_reason" : {
             "enum" : [
               "low_id_share",
+              "low_id_share_28",
               "short_history",
               "few_ids",
               "recent_id_change",
@@ -6122,6 +6165,24 @@
             },
             "type" : "array"
           },
+          "more" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "more_weeks_high" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "more_weeks_low" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "next_cursor" : {
             "type" : [
               "string",
@@ -6154,6 +6215,9 @@
         },
         "required" : [
           "ids",
+          "more",
+          "more_weeks_high",
+          "more_weeks_low",
           "next_cursor",
           "verdict"
         ],
@@ -7706,10 +7770,40 @@
       },
       "IssueDiagnostics" : {
         "properties" : {
+          "account_lines" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AccountLine"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
+          "accounts" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "estimated" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
           "expected" : {
             "format" : "double",
             "type" : [
               "number",
+              "null"
+            ]
+          },
+          "first_evidence_day" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
               "null"
             ]
           },
@@ -7727,10 +7821,24 @@
               "null"
             ]
           },
+          "pop_high" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
           "stopped" : {
             "format" : "double",
             "type" : [
               "number",
+              "null"
+            ]
+          },
+          "t_vis" : {
+            "format" : "int32",
+            "type" : [
+              "integer",
               "null"
             ]
           },
@@ -7750,10 +7858,16 @@
           }
         },
         "required" : [
+          "account_lines",
+          "accounts",
+          "estimated",
           "expected",
+          "first_evidence_day",
           "h",
           "late_hits",
+          "pop_high",
           "stopped",
+          "t_vis",
           "unmatched",
           "upper"
         ],

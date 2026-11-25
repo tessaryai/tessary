@@ -318,6 +318,6 @@ class IdGroupsTest {
 
     private static Flags flags(
             boolean aggregate, boolean groupHint, boolean service, boolean oddShape, boolean tokenLink, int sizeDays) {
-        return new Flags(aggregate, groupHint, service, oddShape, tokenLink, sizeDays);
+        return new Flags(aggregate, groupHint, service, oddShape, tokenLink, sizeDays, 2, null);
     }
 }

@@ -4,9 +4,13 @@ package ai.tessary.endusers.model;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
-/** Why the page has its state (spec 3.5). The frontend words each code with the reason numbers of the snapshot. */
+/**
+ * Why the page has its state (spec 3.5). The frontend words each code with the reason numbers of the snapshot.
+ * {@code low_id_share} reads the share across all history, {@code low_id_share_28} the share of the last 28 days.
+ */
 public enum PageStateReason implements WireCode {
     LOW_ID_SHARE("low_id_share"),
+    LOW_ID_SHARE_28("low_id_share_28"),
     SHORT_HISTORY("short_history"),
     FEW_IDS("few_ids"),
     RECENT_ID_CHANGE("recent_id_change"),

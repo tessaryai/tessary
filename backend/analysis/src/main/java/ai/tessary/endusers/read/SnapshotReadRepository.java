@@ -12,9 +12,11 @@ import ai.tessary.endusers.model.StopStageState;
 import com.fasterxml.jackson.core.type.TypeReference;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -53,6 +55,21 @@ public class SnapshotReadRepository {
                  ORDER BY day DESC
                  LIMIT 1
                 """).param("pid", projectId).query((rs, n) -> map(rs)).optional();
+    }
+
+    /** The trace name of each asked route of the project that has one. */
+    public Map<Integer, String> routeNames(String projectId, Collection<Integer> routeNos) {
+        Map<Integer, String> out = new TreeMap<>();
+        jdbc.sql("""
+                SELECT route_no, trace_name FROM end_user_route
+                 WHERE project_id = :pid AND route_no = ANY(:routes) AND trace_name IS NOT NULL
+                """)
+                .param("pid", projectId)
+                .param("routes", routeNos.toArray(Integer[]::new))
+                .query((rs, n) -> Map.entry(rs.getInt("route_no"), rs.getString("trace_name")))
+                .list()
+                .forEach(e -> out.put(e.getKey(), e.getValue()));
+        return out;
     }
 
     /** Empty when the project has no {@code end_user_project} row or its start day is not fixed yet. */

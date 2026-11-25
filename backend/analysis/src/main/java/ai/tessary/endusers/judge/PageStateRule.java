@@ -34,13 +34,17 @@ import ai.tessary.endusers.model.TracerVerdict;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import org.jspecify.annotations.Nullable;
 
 /**
  * The page state of spec 3.5 with the level 2 memory. The rules run in the order of the spec table and the first that
  * applies sets the state; a row with more than one condition takes its reason from the first condition that holds and
- * gives all the row's numbers. A refusal names its heavy IDs only when heavy IDs are its reason. The W8 switch and the
+ * gives all the row's numbers, except {@code no_user_id}, which gives only the share that fired, the share across all
+ * history first. A refusal names its heavy IDs only when heavy IDs are its reason; its {@code hours_per_day} and
+ * {@code sessions_per_day} are the medians over the heavy IDs of each ID's median day (spec 3.1), the sessions over
+ * the IDs with a session day only. The W8 switch and the
  * {@code ids_stable_accounts} declaration are not coded: the tracer rows always act.
  */
 public final class PageStateRule {
@@ -54,7 +58,7 @@ public final class PageStateRule {
             Map<Integer, Flags> flags,
             IdChannelResult channel,
             TracerResult tracer) {
-        Rule rule = rule(facts.asOfDay(), series, identity, channel, tracer);
+        Rule rule = rule(facts.asOfDay(), series, identity, flags, channel, tracer);
         PageState shown = remembered(rule.state(), facts.pageStateMemory());
         boolean groupBanner = identity.pdGroupHint() + identity.pdAggregate() >= GROUP_BANNER_ID_DAYS;
         if (shown != rule.state()) {
@@ -81,14 +85,20 @@ public final class PageStateRule {
     }
 
     private static Rule rule(
-            int asOfDay, Series series, Identity identity, IdChannelResult channel, TracerResult tracer) {
+            int asOfDay,
+            Series series,
+            Identity identity,
+            Map<Integer, Flags> flags,
+            IdChannelResult channel,
+            TracerResult tracer) {
         double identShare = identity.identShare();
         double identShare28 = identity.identShare28();
-        if (identShare < PAGE_IDENT_SHARE_REFUSE || identShare28 < PAGE_IDENT_SHARE_REFUSE) {
+        if (identShare < PAGE_IDENT_SHARE_REFUSE) {
+            return new Rule(PageState.NO_USER_ID, PageStateReason.LOW_ID_SHARE, Map.of("ident_share", identShare));
+        }
+        if (identShare28 < PAGE_IDENT_SHARE_REFUSE) {
             return new Rule(
-                    PageState.NO_USER_ID,
-                    PageStateReason.LOW_ID_SHARE,
-                    new TreeMap<>(Map.of("ident_share", identShare, "ident_share_28", identShare28)));
+                    PageState.NO_USER_ID, PageStateReason.LOW_ID_SHARE_28, Map.of("ident_share_28", identShare28));
         }
 
         int span = asOfDay - series.t0Id();
@@ -110,13 +120,21 @@ public final class PageStateRule {
         }
 
         if (identity.pdAggregate() >= PAGE_AGGREGATE_ID_DAYS) {
-            long heavy = identity.byId().values().stream()
-                    .filter(Identity.IdIdentity::aggregate)
-                    .count();
-            return new Rule(
-                    PageState.IDS_UNRELIABLE,
-                    PageStateReason.HEAVY_IDS,
-                    new TreeMap<>(Map.of("ids", (double) heavy, "id_day_share", identity.pdAggregate())));
+            List<Flags> heavy = identity.byId().entrySet().stream()
+                    .filter(e -> e.getValue().aggregate())
+                    .map(e -> flags.get(e.getKey()))
+                    .toList();
+            Map<String, Double> numbers =
+                    new TreeMap<>(Map.of("ids", (double) heavy.size(), "id_day_share", identity.pdAggregate()));
+            double[] hours = heavy.stream().mapToDouble(Flags::medianHours).toArray();
+            if (hours.length > 0) numbers.put("hours_per_day", Stats.median(hours));
+            double[] sessions = heavy.stream()
+                    .map(Flags::medianSessions)
+                    .filter(Objects::nonNull)
+                    .mapToDouble(Double::doubleValue)
+                    .toArray();
+            if (sessions.length > 0) numbers.put("sessions_per_day", Stats.median(sessions));
+            return new Rule(PageState.IDS_UNRELIABLE, PageStateReason.HEAVY_IDS, numbers);
         }
 
         if (tracer.verdict() == TracerVerdict.IDS_REPLACED) {

@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The per-ID flags of spec 3.1. The size tests read routes of class A, A2, M and B; the group hint reads A, A2 and M
@@ -42,9 +43,18 @@ public final class IdentityFlags {
 
     /**
      * @param sizeDays days with a trace on an A, A2, M or B route: the ID's weight in every {@code pd} share
+     * @param medianHours the median {@code dayhours} of those days; 0 with none
+     * @param medianSessions the median {@code daysess} of those days that hold a session; null with none
      */
     public record Flags(
-            boolean aggregate, boolean groupHint, boolean service, boolean oddShape, boolean tokenLink, int sizeDays) {}
+            boolean aggregate,
+            boolean groupHint,
+            boolean service,
+            boolean oddShape,
+            boolean tokenLink,
+            int sizeDays,
+            double medianHours,
+            @Nullable Double medianSessions) {}
 
     /** Flags per key index of {@code series}. */
     public static Map<Integer, Flags> flags(Facts facts, Map<Integer, Integer> aliasOf, Series series) {
@@ -65,7 +75,9 @@ public final class IdentityFlags {
                             !aggregate && service(t, s),
                             oddShape.contains(u),
                             tokenLink(facts.ids().get(u), s),
-                            t.sizeHours.size()));
+                            t.sizeHours.size(),
+                            median(t.sizeHours),
+                            t.sizeSessions.isEmpty() ? null : median(t.sizeSessions)));
         });
         return flags;
     }

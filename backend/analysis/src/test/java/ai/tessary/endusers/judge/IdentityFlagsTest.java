@@ -5,6 +5,7 @@ import static ai.tessary.endusers.judge.DaySeriesTest.FactsBuilder.hours;
 import static ai.tessary.endusers.judge.DaySeriesTest.FactsBuilder.sessions;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.tessary.endusers.judge.DaySeriesTest.FactsBuilder;
 import ai.tessary.endusers.judge.IdentityFlags.Flags;
@@ -181,6 +182,30 @@ class IdentityFlagsTest {
                 .day(u, 103, C);
 
         assertEquals(2, flags(f.build()).get(u).sizeDays(), "ID-days on A, A2, M and B routes, not traces");
+    }
+
+    /**
+     * The bug: a heavy-ID refusal prints hours or sessions read on timer routes, or prints 0 sessions for an ID whose
+     * traces carry no session.
+     */
+    @Test
+    void medians_ofTheSizeTestDays() {
+        FactsBuilder f = DaySeriesTest.standardRoutes(new FactsBuilder(200));
+        int u = f.id(100);
+        f.row(u, 100, A, 1, hours(18), NONE, sessions(0, 31))
+                .row(u, 101, B, 1, hours(17), NONE, sessions(0, 30))
+                .row(u, 102, M, 1, hours(20), NONE, sessions(0, 32))
+                .row(u, 103, S, 1, hours(24), NONE, sessions(0, 32));
+        int noSessions = hoursOnDays(f, A, 15, 16, 14);
+
+        Map<Integer, Flags> flags = flags(f.build());
+
+        assertAll(
+                () -> assertEquals(
+                        18.0, flags.get(u).medianHours(), "18, 17 and 20 hours; the S route day is not read"),
+                () -> assertEquals(31.0, flags.get(u).medianSessions()),
+                () -> assertEquals(15.0, flags.get(noSessions).medianHours()),
+                () -> assertNull(flags.get(noSessions).medianSessions(), "no session day: not 0"));
     }
 
     @Test

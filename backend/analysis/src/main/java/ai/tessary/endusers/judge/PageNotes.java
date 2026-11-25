@@ -10,9 +10,11 @@ import static ai.tessary.endusers.judge.JudgeConstants.NAMED_RIGHT_CUT;
 import static ai.tessary.endusers.judge.JudgeConstants.ONE_DAY_SHARE;
 import static ai.tessary.endusers.judge.JudgeConstants.UNATTENDED_LIMIT_SHARE;
 
+import ai.tessary.endusers.facts.FoldOutage;
 import ai.tessary.endusers.judge.SeasonLevel.Season;
 import ai.tessary.endusers.judge.StopStageRule.Decision;
 import ai.tessary.endusers.judge.model.Facts;
+import ai.tessary.endusers.judge.model.Facts.NullDay;
 import ai.tessary.endusers.judge.model.Guards;
 import ai.tessary.endusers.judge.model.IdChannelResult;
 import ai.tessary.endusers.judge.model.IdChannelResult.IdChange;
@@ -52,13 +54,15 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Banners, one per fact, in the order of {@link BannerCode}: {@code page_refusal} (the page's reason numbers);
  * {@code group_or_key_ids} ({@code ids}, {@code id_day_share}); {@code id_loss} ({@code onset_day}, {@code ids}: the IDs
- * that look stopped but probably lost their label); {@code id_change} ({@code first_day} when an event is unsolved,
+ * that look stopped but probably lost their label, {@code share_after} and {@code share_before}, with the routes in
+ * {@code route_nos}); {@code id_change} ({@code first_day} when an event is unsolved,
  * {@code cannot_follow}); {@code tracer} ({@code ended}, {@code continued}); {@code shared_silence}, one for each event
  * the reference keeps, open ({@code start_day}, {@code share_silent}, {@code share_usual}, {@code ids},
  * {@code held_until_day}, {@code stopped_low}, {@code stopped_high}), a proven break that came back in the last 28 days
  * ({@code returned_day}) or a closed event of the last 56 days ({@code silent_since_day}); {@code season_level}
  * ({@code level}, {@code since_day}); {@code cannot_be_named_yet} (the stop stage's numbers); {@code outage} (guard
- * {@code outage-banner}: {@code day}, the last outage day, and {@code days}).
+ * {@code outage-banner}: {@code day}, the last outage day, {@code days}, and {@code drop_share}, see
+ * {@link #dropShare}).
  *
  * <p>Limit lines hold for the condition they name; {@code ids} is the count of IDs a line concerns. A refused page has
  * none: its reason is the page state.
@@ -97,7 +101,12 @@ public final class PageNotes {
                             "onset_day",
                             (double) idLoss.onsetDay(),
                             "ids",
-                            idLoss.phi() * idLoss.lostShare().size())));
+                            idLoss.phi() * idLoss.lostShare().size(),
+                            "share_after",
+                            idLoss.shareAfter(),
+                            "share_before",
+                            idLoss.shareBefore()),
+                    idLoss.routeNos()));
         }
         IdChange idChange = in.channel().idChange();
         if (idChange != null) {
@@ -123,8 +132,11 @@ public final class PageNotes {
         List<Integer> outageDays = in.facts().outageDays();
         if (in.guards().outageBanner() && !outageDays.isEmpty()) {
             int last = outageDays.stream().mapToInt(Integer::intValue).max().getAsInt();
-            banners.add(
-                    new Banner(BannerCode.OUTAGE, Map.of("day", (double) last, "days", (double) outageDays.size())));
+            Map<String, Double> numbers =
+                    new TreeMap<>(Map.of("day", (double) last, "days", (double) outageDays.size()));
+            Double drop = dropShare(in.facts(), last);
+            if (drop != null) numbers.put("drop_share", drop);
+            banners.add(new Banner(BannerCode.OUTAGE, numbers));
         }
         banners.sort(Comparator.comparing(Banner::code));
         return banners;
@@ -166,11 +178,12 @@ public final class PageNotes {
                     LimitCode.CANNOT_BE_NAMED_YET, stop.numbers(), false, (int) counts.stoppedExpected()));
         }
         Double namedRight = odds.namedRight();
-        if (namedRight != null && namedRight < NAMED_RIGHT_CUT) {
-            lines.add(new LimitLine(
-                    LimitCode.NAMED_RIGHT_LOW, Map.of("named_right", namedRight), false, counts.stoppedNamed()));
-        }
         Double namedFound = odds.namedFound();
+        if (namedRight != null && namedRight < NAMED_RIGHT_CUT) {
+            Map<String, Double> numbers = new TreeMap<>(Map.of("named_right", namedRight));
+            if (namedFound != null) numbers.put("named_found", namedFound);
+            lines.add(new LimitLine(LimitCode.NAMED_RIGHT_LOW, numbers, false, counts.stoppedNamed()));
+        }
         if (namedFound != null && namedFound < NAMED_FOUND_CUT) {
             lines.add(new LimitLine(LimitCode.NAMED_FOUND_LOW, Map.of("named_found", namedFound), false, (int)
                     counts.stoppedExpected()));
@@ -270,6 +283,23 @@ public final class PageNotes {
         Double namedRight = odds.namedRight();
         if (namedRight == null || tracer.verdict() == TracerVerdict.SOME_IDS_REPLACED) return null;
         return new TrustNumbers(namedRight, odds.namedFound(), tracer.verdict() == TracerVerdict.CANNOT_TEST);
+    }
+
+    /**
+     * The share by which all traces of the outage day fell under the median day of the {@link FoldOutage#MEDIAN_DAYS}
+     * days before it, a day with no trace counting 0; null when those days start before the history or hold no trace.
+     */
+    static @Nullable Double dropShare(Facts facts, int day) {
+        int from = day - FoldOutage.MEDIAN_DAYS;
+        if (from < facts.t0()) return null;
+        double[] totals = new double[FoldOutage.MEDIAN_DAYS];
+        double today = 0;
+        for (NullDay row : facts.nullDays()) {
+            if (row.day() == day) today += row.traces();
+            else if (row.day() >= from && row.day() < day) totals[row.day() - from] += row.traces();
+        }
+        double median = Stats.median(totals);
+        return median > 0 ? 1 - today / median : null;
     }
 
     private static Map<String, Double> groupNumbers(Identity identity) {

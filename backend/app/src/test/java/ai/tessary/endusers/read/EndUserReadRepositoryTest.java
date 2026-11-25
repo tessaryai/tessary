@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.endusers.hits.HitFinding;
+import ai.tessary.endusers.judge.model.IssueResult.AccountLine;
 import ai.tessary.endusers.judge.model.IssueResult.CurvePoint;
 import ai.tessary.endusers.judge.model.StateResult.Banner;
 import ai.tessary.endusers.judge.model.StateResult.LimitLine;
@@ -33,6 +34,7 @@ import ai.tessary.endusers.read.EndUserListRepository.IdRow;
 import ai.tessary.endusers.read.IssueReadRepository.IssueRow;
 import ai.tessary.endusers.read.IssueReadRepository.SilentAfter;
 import ai.tessary.endusers.read.IssueReadRepository.SilentIdRow;
+import ai.tessary.endusers.read.IssueReadRepository.SilentRest;
 import ai.tessary.endusers.read.SnapshotReadRepository.SnapshotRow;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -74,7 +76,7 @@ record EndUserReadRepositoryTest(
                 "partial_coverage",
                 "low_id_share",
                 "{\"share\":0.62}",
-                "[{\"code\":\"outage\",\"numbers\":{\"day\":20399.0}}]",
+                "[{\"code\":\"id_loss\",\"numbers\":{\"onset_day\":20370.0},\"route_nos\":[2,5]}]",
                 "[{\"code\":\"no_anchor\",\"numbers\":{},\"never_cut\":true,\"ids\":0}]",
                 "{\"named_right\":0.9,\"named_found\":null,\"caveat\":true}",
                 "{\"active\":10,\"new\":2,\"silent\":3,\"held\":1,\"stopped_named\":4,\"stopped_expected\":4.5,"
@@ -91,7 +93,7 @@ record EndUserReadRepositoryTest(
                         PageState.PARTIAL_COVERAGE,
                         PageStateReason.LOW_ID_SHARE,
                         Map.of("share", 0.62),
-                        List.of(new Banner(BannerCode.OUTAGE, Map.of("day", 20_399.0))),
+                        List.of(new Banner(BannerCode.ID_LOSS, Map.of("onset_day", 20_370.0), List.of(2, 5))),
                         List.of(new LimitLine(LimitCode.NO_ANCHOR, Map.of(), true, 0)),
                         new TrustNumbers(0.9, null, true),
                         new StageCounts(10, 2, 3, 1, 4, 4.5, 3.0, 6.0, 17),
@@ -153,7 +155,10 @@ record EndUserReadRepositoryTest(
                 "group-1",
                 "[{\"week\":2,\"hit\":0.79,\"similar\":0.94,\"band_low\":0.75,\"band_high\":0.83,"
                         + "\"at_risk_hit\":90,\"at_risk_similar\":880}]",
-                "{\"stopped\":41.0,\"expected\":18.0,\"upper\":30.0,\"h\":21,\"late_hits\":8,\"unmatched\":7}");
+                "{\"stopped\":41.0,\"expected\":18.0,\"upper\":30.0,\"h\":21,\"late_hits\":8,\"unmatched\":7,"
+                        + "\"t_vis\":18,\"pop_high\":4.2,\"first_evidence_day\":20371,\"estimated\":104,\"accounts\":3,"
+                        + "\"account_lines\":[{\"account\":1,\"ids\":6,\"hit\":4,\"silent\":3,"
+                        + "\"silent_since_day\":20390}]}");
         IssueRow expected = new IssueRow(
                 "lineage-1",
                 D,
@@ -172,7 +177,19 @@ record EndUserReadRepositoryTest(
                 true,
                 "group-1",
                 List.of(new CurvePoint(2, 0.79, 0.94, 0.75, 0.83, 90, 880)),
-                new IssueDiagnostics(41.0, 18.0, 30.0, 21, 8, 7));
+                new IssueDiagnostics(
+                        41.0,
+                        18.0,
+                        30.0,
+                        21,
+                        8,
+                        7,
+                        18,
+                        4.2,
+                        20_371,
+                        104,
+                        3,
+                        List.of(new AccountLine(1, 6, 4, 3, 20_390))));
 
         assertAll(
                 () -> assertEquals(List.of(expected), issues.issues(seed.pid(), D)),
@@ -206,7 +223,35 @@ record EndUserReadRepositoryTest(
                                 new SilentIdRow(null, D - 30, null, Stage.SILENT, null, -1, ReadSeeds.md5(b))),
                         rows),
                 () -> assertEquals(List.of(rows.get(1)), after),
-                () -> assertEquals(2, issues.silentCount(seed.pid(), "lineage-1")));
+                () -> assertEquals(2, issues.silentCount(seed.pid(), "lineage-1")),
+                () -> assertEquals(
+                        new SilentRest(1, D - 30, D - 30),
+                        issues.silentRest(
+                                seed.pid(),
+                                "lineage-1",
+                                new SilentAfter(D - 30, 40, rows.get(0).tie())),
+                        "the rest after a row is the rows the next page would read"),
+                () -> assertEquals(
+                        new SilentRest(0, null, null),
+                        issues.silentRest(
+                                seed.pid(),
+                                "lineage-1",
+                                new SilentAfter(D - 30, -1, rows.get(1).tie()))));
+    }
+
+    /** The bug: a banner names a route by a trace name of another project, or prints a NULL trace name. */
+    @Test
+    void routeNames_ofTheProjectOnly_withATraceName() {
+        ReadSeeds seed = seed("eu-repo-routes");
+        ReadSeeds other = seed("eu-repo-routes-other");
+        seed.route(2, "companion.reply", "site-a");
+        seed.route(3, "companion.reply", "site-b");
+        seed.route(4, null, "site-a");
+        other.route(5, "billing.charge", "site-a");
+
+        assertEquals(
+                Map.of(2, "companion.reply", 3, "companion.reply"),
+                snapshots.routeNames(seed.pid(), List.of(2, 3, 4, 5)));
     }
 
     @Test

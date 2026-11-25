@@ -165,7 +165,7 @@ class McpEndUserToolsTest {
                 4.0,
                 14.0,
                 null,
-                new IssueDiagnostics(15.0, 6.0, 20.0, 28, 2, 3),
+                new IssueDiagnostics(15.0, 6.0, 20.0, 28, 2, 3, 18, null, null, 38, null, null),
                 List.of());
     }
 }

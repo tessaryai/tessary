@@ -75,8 +75,9 @@ record HitSweepServiceTest(
                 () -> assertEquals(List.of("3|0|0|true|frustration"), summary(pid, "f-fr")));
     }
 
+    /** The bug: a metric shift keeps no hit row, so it can never be counted and judged like every other issue. */
     @Test
-    void metricDrift_hasNoHits_andIsNotApplicable() {
+    void metricDrift_storesItsRowsLikeEveryIssue() {
         String pid = project("hits-metric-drift");
         HitSeeds seed = new HitSeeds(jdbc, pid);
         seed.finding("f-d", "duration_drift", "{\"cause_kind\":\"distribution_shift\"}");
@@ -91,8 +92,9 @@ record HitSweepServiceTest(
         IssueLineages.IssueLineage lineage = lineages.lineages(pid).get(0);
 
         assertAll(
-                () -> assertEquals(0, count(pid, "end_user_hit"), "a shift moves all traffic, so no user ID is hit"),
-                () -> assertEquals(List.of("0|0|0|true|metric_drift"), summary(pid, "f-d")),
+                () -> assertEquals(4, count(pid, "end_user_hit"), "every evidence role is stored"),
+                () -> assertEquals(
+                        List.of("3|0|0|true|metric_drift"), summary(pid, "f-d"), "the 3 member refs are the hits"),
                 () -> assertEquals(true, lineage.metricShift()),
                 () -> assertEquals(true, lineage.complete(), "never read as hits not complete"));
     }

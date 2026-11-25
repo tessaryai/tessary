@@ -18,6 +18,7 @@ import ai.tessary.endusers.model.SetAsideReason;
 import ai.tessary.endusers.model.Stage;
 import ai.tessary.endusers.model.StopStageState;
 import ai.tessary.endusers.model.Verdict;
+import ai.tessary.endusers.read.EndUserDtos.EndUserBanner;
 import ai.tessary.endusers.read.EndUserDtos.EndUserCaseBlock;
 import ai.tessary.endusers.read.EndUserDtos.EndUserEraseRequest;
 import ai.tessary.endusers.read.EndUserDtos.EndUserHitCount;
@@ -119,18 +120,27 @@ record EndUserReadTest(
                 () -> assertEquals(0, seed.rows("end_user_project"), "a read must not create the project's salt row"));
     }
 
-    /** The bug: the stored stage counts lose a number, or {@code counted} is summed again and disagrees with them. */
+    /**
+     * The bug: the stored stage counts lose a number, {@code counted} is summed again and disagrees with them, or an ID
+     * loss banner leaves without the names of its routes.
+     */
     @Test
     void overview_returnsStoredStages() throws Exception {
         Setup s = TenantFixture.bootstrap(tenants, "eu-read-stages");
         ReadSeeds seed = new ReadSeeds(jdbc, s.project().id());
         seed.project(20_200);
+        seed.route(2, "companion.reply", "site-a");
+        seed.route(3, "companion.reply", "site-b");
+        seed.route(4, null, "site-a");
+        seed.route(5, "assistant.plan", "site-a");
         seed.snapshot(
                 D,
                 "ok",
                 null,
                 "{\"coverage\":0.93}",
-                "[{\"code\":\"shared_silence\",\"numbers\":{\"ids\":12.0}}]",
+                "[{\"code\":\"shared_silence\",\"numbers\":{\"ids\":12.0},\"route_nos\":[]},"
+                        + "{\"code\":\"id_loss\",\"numbers\":{\"share_after\":0.38,\"share_before\":0.02},"
+                        + "\"route_nos\":[2,3,4,5]}]",
                 "[{\"code\":\"lenient_basis\",\"numbers\":{\"ids\":4.0},\"never_cut\":false,\"ids\":4}]",
                 "{\"named_right\":0.91,\"named_found\":0.78,\"caveat\":false}",
                 "{\"active\":1014,\"new\":61,\"silent\":47,\"held\":3,\"stopped_named\":125,"
@@ -156,6 +166,17 @@ record EndUserReadTest(
                 () -> assertEquals(Map.of(SetAsideReason.AGGREGATE, 2, SetAsideReason.SERVICE, 5), o.setAside()),
                 () -> assertEquals(StopStageState.EXPECTED_AND_NAMED, o.stopStageState()),
                 () -> assertEquals(BannerCode.SHARED_SILENCE, o.banners().get(0).code()),
+                () -> assertEquals(
+                        new EndUserBanner(
+                                BannerCode.ID_LOSS,
+                                Map.of("share_after", 0.38, "share_before", 0.02),
+                                List.of("companion.reply", "assistant.plan")),
+                        o.banners().get(1),
+                        "one name per trace name, in route order; a route with no trace name has none"),
+                () -> assertEquals(
+                        "companion.reply",
+                        wire.path("banners").get(1).path("routes").get(0).asText()),
+                () -> assertTrue(wire.path("banners").get(1).path("route_nos").isMissingNode(), "numbers stay inside"),
                 () -> assertEquals(LimitCode.LENIENT_BASIS, o.limits().get(0).code()),
                 () -> assertEquals(0.91, Objects.requireNonNull(o.trust()).namedRight()),
                 () -> assertEquals(2, wire.path("set_aside").path("aggregate").asInt(), "codes leave in wire form"),
@@ -312,8 +333,43 @@ record EndUserReadTest(
     }
 
     /**
-     * The bug: member rows or the all-zero key count as user IDs hit, or a metric shift shows zero user IDs hit
-     * instead of having none.
+     * The bug: the drawer's "+ N more, hit 1 to 4 weeks ago" counts rows already shown, or reads the hit weeks of the
+     * whole list instead of the rows after this page.
+     */
+    @Test
+    void silentIds_restAfterThePage_countAndHitWeeks() {
+        Setup s = TenantFixture.bootstrap(tenants, "eu-read-silent-rest");
+        ReadSeeds seed = new ReadSeeds(jdbc, s.project().id());
+        seed.caseRow("c-l", 1, "classifier", false);
+        seed.snapshot(D, "ok");
+        seed.issue("lineage-l", D, "c-l", new String[] {}, 1, "evidence_of_loss");
+        for (int i = 0; i < 138; i++) {
+            byte[] k = ReadSeeds.key("silent-" + i);
+            seed.stoppedUser(k, "silent-" + i, 30);
+            int hitDay = i < 50 ? D - 70 : i < 100 ? D - 63 : i < 110 ? D - 28 : i < 120 ? D - 20 : D - 7;
+            seed.issueHit("lineage-l", k, hitDay);
+        }
+
+        EndUserSilentIds first = data(controller.silentIds(owner(s), org(s), proj(s), "C-1", null));
+        EndUserSilentIds second = data(controller.silentIds(owner(s), org(s), proj(s), "C-1", first.nextCursor()));
+        EndUserSilentIds third = data(controller.silentIds(owner(s), org(s), proj(s), "C-1", second.nextCursor()));
+
+        assertAll(
+                () -> assertEquals(88, first.more()),
+                () -> assertEquals(1, first.moreWeeksLow()),
+                () -> assertEquals(9, first.moreWeeksHigh()),
+                () -> assertEquals(38, second.more(), "+ 38 more"),
+                () -> assertEquals(1, second.moreWeeksLow(), "hit 1"),
+                () -> assertEquals(4, second.moreWeeksHigh(), "to 4 weeks ago"),
+                () -> assertEquals(38, third.ids().size()),
+                () -> assertEquals(0, third.more()),
+                () -> assertNull(third.moreWeeksLow()),
+                () -> assertNull(third.moreWeeksHigh()));
+    }
+
+    /**
+     * The bug: member rows or the all-zero key count as user IDs hit, a metric shift with no hit row shows zero user
+     * IDs hit instead of having none, or a metric shift with hit rows is not counted like every other issue.
      */
     @Test
     void hitCounts_beforeFirstSnapshot_countIdValues() {
@@ -322,11 +378,20 @@ record EndUserReadTest(
         seedToolErrorHits(seed);
         seed.caseRow("c-m", 22, "metric_drift", false);
         seed.finding("f-m", "duration_drift", "c-m");
+        seed.caseRow("c-s", 24, "metric_drift", false);
+        seed.finding("f-s", "duration_drift", "c-s");
+        for (int i = 0; i < 74; i++) seed.hit("f-s", "member", ReadSeeds.key("shifted-" + i), 20_340, 1, 1);
+        seed.hit("f-s", "changepoint", ReadSeeds.key("shifted-0"), 20_340, 1, 1);
+        seed.hit("f-s", "baseline", ReadSeeds.key("before-0"), 20_300, 1, 1);
+        seed.caseRow("c-z", 25, "metric_drift", false);
+        seed.finding("f-z", "duration_drift", "c-z");
+        seed.hit("f-z", "member", ReadSeeds.NO_USER_KEY, 20_340, 1, 3);
 
         Map<String, EndUserHitCount> counts =
                 byCase(data(controller.hitCounts(owner(s), org(s), proj(s))).cases());
         EndUserCaseBlock block = data(controller.caseBlock(owner(s), org(s), proj(s), "C-21"));
         EndUserCaseBlock metric = data(controller.caseBlock(owner(s), org(s), proj(s), seed.id("c-m")));
+        EndUserCaseBlock shifted = data(controller.caseBlock(owner(s), org(s), proj(s), "C-24"));
 
         assertAll(
                 () -> assertEquals(3, counts.get("C-21").usersHit()),
@@ -340,7 +405,14 @@ record EndUserReadTest(
                 () -> assertEquals(5, block.flaggedTraces()),
                 () -> assertEquals(1, block.flaggedTracesNoUserId()),
                 () -> assertEquals(CountKind.NOT_APPLICABLE, metric.countKind()),
-                () -> assertNull(metric.usersHit()));
+                () -> assertNull(metric.usersHit()),
+                () -> assertEquals(74, counts.get("C-24").usersHit(), "Latency shift: 74 user IDs hit"),
+                () -> assertEquals(CountKind.ID_VALUES, counts.get("C-24").countKind()),
+                () -> assertEquals(74, shifted.usersHit()),
+                () -> assertEquals(20_340, shifted.sinceDay()),
+                () -> assertEquals(CountKind.ID_VALUES, shifted.countKind()),
+                () -> assertEquals(0, counts.get("C-25").usersHit(), "hit rows with no user ID still count as rows"),
+                () -> assertEquals(CountKind.ID_VALUES, counts.get("C-25").countKind()));
     }
 
     /**

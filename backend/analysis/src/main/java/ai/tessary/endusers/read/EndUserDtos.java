@@ -2,10 +2,10 @@
 package ai.tessary.endusers.read;
 
 import ai.tessary.endusers.judge.model.IssueResult.CurvePoint;
-import ai.tessary.endusers.judge.model.StateResult.Banner;
 import ai.tessary.endusers.judge.model.StateResult.LimitLine;
 import ai.tessary.endusers.judge.model.StateResult.StageCounts;
 import ai.tessary.endusers.judge.model.StateResult.TrustNumbers;
+import ai.tessary.endusers.model.BannerCode;
 import ai.tessary.endusers.model.Grade;
 import ai.tessary.endusers.model.PageState;
 import ai.tessary.endusers.model.PageStateReason;
@@ -46,9 +46,20 @@ public final class EndUserDtos {
             @JsonProperty("stages") @Nullable StageCounts stages,
             @JsonProperty("stop_stage_state") @Nullable StopStageState stopStageState,
             @JsonProperty("stop_stage_numbers") @Nullable Map<String, Double> stopStageNumbers,
-            @JsonProperty("banners") List<Banner> banners,
+            @JsonProperty("banners") List<EndUserBanner> banners,
             @JsonProperty("limits") List<LimitLine> limits,
             @JsonProperty("trust") @Nullable TrustNumbers trust) {}
+
+    /**
+     * One page banner as the judge stored it, with the names of the routes it names.
+     *
+     * @param routes the distinct trace names of the banner's routes, in route order; a route with no trace name gives
+     *     none
+     */
+    public record EndUserBanner(
+            @JsonProperty("code") BannerCode code,
+            @JsonProperty("numbers") Map<String, Double> numbers,
+            @JsonProperty("routes") List<String> routes) {}
 
     /**
      * What the judge stored for one issue as of the snapshot day.
@@ -122,11 +133,17 @@ public final class EndUserDtos {
      * The drawer. Empty, with the verdict, for every verdict but evidence of loss and few accounts.
      *
      * @param verdict null before the first snapshot and for a case the last judge run did not see
+     * @param more silent hit user IDs after this page
+     * @param moreWeeksLow the fewest whole weeks since the hit among them; null when there are none
+     * @param moreWeeksHigh the most whole weeks since the hit among them; null when there are none
      */
     public record EndUserSilentIds(
             @JsonProperty("verdict") @Nullable Verdict verdict,
             @JsonProperty("ids") List<EndUserSilentId> ids,
-            @JsonProperty("next_cursor") @Nullable String nextCursor) {}
+            @JsonProperty("next_cursor") @Nullable String nextCursor,
+            @JsonProperty("more") int more,
+            @JsonProperty("more_weeks_low") @Nullable Integer moreWeeksLow,
+            @JsonProperty("more_weeks_high") @Nullable Integer moreWeeksHigh) {}
 
     /** @param hitBy case references of the issues with evidence of loss or few accounts that hit this user ID */
     public record EndUserIdRow(
@@ -147,7 +164,7 @@ public final class EndUserDtos {
     /**
      * The Users block of the case page. The count is live; {@code issue} is what the last judge run stored.
      *
-     * @param usersHit null for a metric shift
+     * @param usersHit null for a metric shift with no hit row
      * @param sinceDay the first day a counted user ID was hit
      * @param flaggedTraces refs that count as hits, with or without a user ID
      * @param refusal the page state when the page shows no stage numbers

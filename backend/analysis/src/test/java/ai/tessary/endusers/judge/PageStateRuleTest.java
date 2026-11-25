@@ -52,7 +52,7 @@ class PageStateRuleTest {
         assertAll(
                 () -> assertRule(
                         NO_ID,
-                        PageStateReason.LOW_ID_SHARE,
+                        PageStateReason.LOW_ID_SHARE_28,
                         new Inputs().identShare28(0.12).span(14),
                         "a low recent ID share wins over a short history"),
                 () -> assertRule(NO_ID, PageStateReason.LOW_ID_SHARE, new Inputs().identShare(0.19)),
@@ -146,18 +146,43 @@ class PageStateRuleTest {
     void pageState_reasonNumbers() {
         assertAll(
                 () -> assertEquals(
-                        Map.of("ident_share", 0.5, "ident_share_28", 0.12),
-                        new Inputs().identShare(0.5).identShare28(0.12).decide().reasonNumbers()),
+                        Map.of("ident_share_28", 0.12),
+                        new Inputs().identShare(0.5).identShare28(0.12).decide().reasonNumbers(),
+                        "the text says in the last 28 days: only the share that fired"),
+                () -> assertEquals(
+                        Map.of("ident_share", 0.12),
+                        new Inputs().identShare(0.12).identShare28(0.1).decide().reasonNumbers(),
+                        "both fire: the share across all history is the one the text names"),
                 () -> assertEquals(
                         Map.of("span_days", 14.0, "ids", 16.0, "span_days_needed", 21.0, "ids_needed", 20.0),
                         new Inputs().span(14).ids(16).decide().reasonNumbers()),
                 () -> assertEquals(
-                        Map.of("ids", 3.0, "id_day_share", 0.40),
+                        Map.of("ids", 3.0, "id_day_share", 0.40, "hours_per_day", 18.0, "sessions_per_day", 31.0),
                         new Inputs()
                                 .aggregates(5, 6, 7)
+                                .heavyMedians(new double[] {18, 17, 20}, new Double[] {31.0, 30.0, 40.0})
                                 .pdAggregate(0.40)
                                 .decide()
-                                .reasonNumbers()),
+                                .reasonNumbers(),
+                        "the median over the heavy IDs of each ID's median day"),
+                () -> assertEquals(
+                        Map.of("ids", 3.0, "id_day_share", 0.40, "hours_per_day", 17.0, "sessions_per_day", 35.5),
+                        new Inputs()
+                                .aggregates(5, 6, 7)
+                                .heavyMedians(new double[] {16, 17, 20}, new Double[] {31.0, null, 40.0})
+                                .pdAggregate(0.40)
+                                .decide()
+                                .reasonNumbers(),
+                        "an ID with no session day has no session median"),
+                () -> assertEquals(
+                        Map.of("ids", 2.0, "id_day_share", 0.40, "hours_per_day", 15.0),
+                        new Inputs()
+                                .aggregates(5, 6)
+                                .heavyMedians(new double[] {14, 16}, new Double[] {null, null})
+                                .pdAggregate(0.40)
+                                .decide()
+                                .reasonNumbers(),
+                        "no heavy ID has a session day: no sessions number, never 0"),
                 () -> assertEquals(
                         Map.of("ended", 35.0, "continued", 34.0),
                         new Inputs()
@@ -321,6 +346,8 @@ class PageStateRuleTest {
         private IdLoss idLoss;
         private IdChange idChange;
         private int[] aggregateDays = new int[0];
+        private double[] heavyHours = new double[0];
+        private Double[] heavySessions = new Double[0];
         private int heavyNotAggregate;
         private List<PageState> memory = List.of();
 
@@ -385,7 +412,7 @@ class PageStateRuleTest {
         }
 
         Inputs idLoss() {
-            idLoss = new IdLoss(List.of("app"), 60, false, 0.5, 0.5, Map.of(), 1.0);
+            idLoss = new IdLoss(List.of("app"), 60, false, 0.5, 0.5, Map.of(), 1.0, List.of(1), 0.3, 0.0);
             return this;
         }
 
@@ -401,6 +428,12 @@ class PageStateRuleTest {
 
         Inputs aggregates(int... sizeDays) {
             aggregateDays = sizeDays;
+            return this;
+        }
+
+        Inputs heavyMedians(double[] hours, Double[] sessions) {
+            heavyHours = hours;
+            heavySessions = sessions;
             return this;
         }
 
@@ -428,7 +461,9 @@ class PageStateRuleTest {
                 identities.put(
                         u, new IdIdentity(aggregate, false, service, false, false, "(app)", null, covered, null));
                 int sizeDays = aggregate ? aggregateDays[u] : service ? heavyNotAggregate : 2;
-                flags.put(u, new Flags(aggregate, false, service, false, false, sizeDays));
+                double hours = u < heavyHours.length ? heavyHours[u] : 2;
+                Double sessions = u < heavySessions.length ? heavySessions[u] : null;
+                flags.put(u, new Flags(aggregate, false, service, false, false, sizeDays, hours, sessions));
             }
             Facts facts = new Facts(
                     D,
