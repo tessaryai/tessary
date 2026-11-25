@@ -288,11 +288,18 @@ export function stopStage(state: EndUserStopStageState, n: Numbers): StopStageCa
   };
   switch (state) {
     case "not_judged_yet":
-      return {
-        ...blank,
-        caption: `the past check has ${n.anchors} of ${n.anchors_needed} dates`,
-        note: notChecked(n.days_needed),
-      };
+      // Two causes: too few past dates, or enough dates at which no user ID was named (named_right not measured).
+      return n.anchors < n.anchors_needed
+        ? {
+            ...blank,
+            caption: `the past check has ${n.anchors} of ${n.anchors_needed} dates`,
+            note: notChecked(n.days_needed),
+          }
+        : {
+            ...blank,
+            caption: `the past check has ${plural(n.anchors, "date", "dates")} but named no user ID`,
+            note: "Past checks cannot yet tell how often a named user ID stays away, so the stop odds are not yet checked against this app's past.",
+          };
     case "cannot_tell_yet":
       return {
         ...blank,

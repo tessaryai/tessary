@@ -963,14 +963,17 @@ describe("the other page states, banners and limits", () => {
     );
   });
 
-  it("does not judge stops before the past check, with every past date in", () => {
-    expect(stopStage("not_judged_yet", { anchors: 4, anchors_needed: 4 })).toEqual({
+  it("does not judge stops when the past dates are in but named no user ID", () => {
+    expect(stopStage("not_judged_yet", { anchors: 7, anchors_needed: 4 })).toEqual({
       label: "Probably stopped · not judged yet",
       value: null,
       unit: null,
-      caption: "the past check has 4 of 4 dates",
-      note: "The stop odds are not yet checked against this app's past.",
+      caption: "the past check has 7 dates but named no user ID",
+      note: "Past checks cannot yet tell how often a named user ID stays away, so the stop odds are not yet checked against this app's past.",
     });
+    expect(stopStage("not_judged_yet", { anchors: 4, anchors_needed: 4 }).caption).toBe(
+      "the past check has 4 dates but named no user ID",
+    );
   });
 
   it("gives the expected count with no measured past check", () => {
