@@ -325,6 +325,21 @@ class PageNotesTest {
                         List.of(few10, new LimitLine(LimitCode.UNATTENDED_SHARE, Map.of("ids", 2.0), false, 10))),
                 Arguments.of("unattended at 10%", (Consumer<Fixture>) f -> f.unattended(0), List.of(few10)),
                 Arguments.of(
+                        "an ID unattended and automation only counts once",
+                        (Consumer<Fixture>) f -> f.unattended(0).automationOnly(0),
+                        List.of(few10)),
+                Arguments.of(
+                        "unattended or automation only, each ID once",
+                        (Consumer<Fixture>)
+                                f -> f.unattended(0).automationOnly(0).automationOnly(1),
+                        List.of(few10, new LimitLine(LimitCode.UNATTENDED_SHARE, Map.of("ids", 2.0), false, 10))),
+                Arguments.of(
+                        "an unattended ID that is set aside does not count",
+                        (Consumer<Fixture>) f -> f.aggregate(9).unattended(9).unattended(0),
+                        List.of(
+                                new LimitLine(LimitCode.FEW_COVERED_IDS, Map.of("ids", 9.0), true, 9),
+                                new LimitLine(LimitCode.UNATTENDED_SHARE, Map.of("ids", 1.0), false, 9))),
+                Arguments.of(
                         "ID loss",
                         (Consumer<Fixture>) f -> f.idLoss = idLoss(Map.of(0, 1.0, 1, 1.0, 2, 0.5)),
                         List.of(few10, new LimitLine(LimitCode.ID_LOSS, Map.of("ids", 3.0), false, 3))),

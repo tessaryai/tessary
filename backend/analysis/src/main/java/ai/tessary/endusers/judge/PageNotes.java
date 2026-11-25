@@ -197,11 +197,12 @@ public final class PageNotes {
         if (in.facts().storedRouteClasses().lenient()) {
             lines.add(new LimitLine(LimitCode.LENIENT_BASIS, Map.of(), false, nCovered));
         }
-        long unattended =
-                odds.byId().values().stream().filter(IdOdds::unattended).count()
-                        + covered.stream()
-                                .filter(u -> series.byId().get(u).basis() == ActivityBasis.UNATTENDED)
-                                .count();
+        // Each covered ID once, so the count is a part of the covered IDs it is a share of. The reference adds the
+        // two counts, which counts an ID that is both twice and can count IDs that are set aside.
+        long unattended = covered.stream()
+                .filter(u -> series.byId().get(u).basis() == ActivityBasis.UNATTENDED
+                        || odds.byId().get(u).unattended())
+                .count();
         if (unattended > UNATTENDED_LIMIT_SHARE * Math.max(1, nCovered)) {
             lines.add(new LimitLine(LimitCode.UNATTENDED_SHARE, Map.of("ids", (double) unattended), false, nCovered));
         }
