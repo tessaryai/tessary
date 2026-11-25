@@ -91,7 +91,11 @@ on `end_user_fold_day` is set when every route falls under 30% of its 28-day med
 
 The hit sweep stores every evidence role of each ref, joined to `COALESCE(span.user_id,
 trace.user_id)`, with the trace's route and UTC start day. A session-only ref takes the user ID of the
-session's traces and the day of its last trace. The first run backfills from all live evidence.
+session's earliest trace that has one, and the day of its last trace. Each hour it rebuilds every
+finding with evidence newer than the watermark (re-read 2 hours behind), plus each open finding whose
+hits come from a detection table, since those keep firing after their evidence stops. The first run
+reads all live evidence. The daily reconcile catches a user ID a later batch filled in and evidence
+that was removed.
 
 Which rows count as hits is a rule picked when the rows are read, from `hits/EndUserHitSource`.
 `OpenHitSource` covers the open detectors; another build adds a bean for its own kinds, and two
@@ -166,9 +170,11 @@ followed after an ID change are in no stage.
 `too_few_ids` (no estimate), `cannot_measure_yet`, `too_few_ids`, `reaches_nearly_all`,
 `not_comparable`, `always_present`, `few_accounts`, `evidence_of_loss`, `moved_not_added`,
 `no_measurable_loss`, `not_enough_evidence`. "Evidence of loss" needs a lower bound above zero, a
-rate above the issue's own random draws, a large enough loss, no replaced IDs, and a rise in the
-stops of all user IDs on the reached routes; with every condition but the last it is
-`moved_not_added`. Two issues whose shown hit traces overlap by half form one group.
+rate above the issue's own random draws, a large enough loss and no replaced IDs, and the second
+contrast (`PopulationReading`, the stops of all user IDs on the reached routes before and after the
+first evidence) must not contradict it. It contradicts the claim only when it has enough earlier
+trials and its upper bound is well under the loss; a claim it contradicts is `moved_not_added`. With
+no population reading, or too few earlier trials, the claim stands. Two issues whose shown hit traces overlap by half form one group.
 
 The judge ports a reference program. Three frozen scenarios run it end to end in
 `EndUserJudgeReferenceTest`, and the test states where its expected values come from. The port reads

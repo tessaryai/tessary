@@ -3,7 +3,7 @@ title: "Users"
 description: "Understand what the Users page counts: user IDs and their three stages, the issues that came before more stops than expected, what each verdict claims, when the page shows a state in place of numbers, and what Tessary keeps."
 ---
 
-The **Users** page shows which user IDs of your agent are active, silent, or probably stopped, and which issues came before more of them stopping than expected. It reads the `user.id` your traces already carry, runs once a day, and makes no model call. It is on for every project, on Tessary Cloud and self-hosted alike. Self-hosted, the install key `tessary.end-users.collect-enabled` turns it off for the whole instance.
+The **Users** page shows which user IDs of your agent are active, silent, or probably stopped, and which issues came before more of them stopping than expected. It reads the `user.id` your traces already carry, runs once a day, and makes no model call. It is on for every project, on Tessary Cloud and self-hosted alike.
 
 The page counts user IDs, not people, and it shows a difference in stops, not proof of cause. Both limits shape every number on it.
 
@@ -29,7 +29,7 @@ Tessary judges a stop against the app's own record of returns, not a fixed numbe
 
 When many regular user IDs go silent in the same week, the silence can be a break, such as an outage, a holiday, or a tracing change, or it can be a loss. Tessary holds those user IDs in Silent, not judged, and a banner names the date until which they are held. After 4 weeks, any that have not come back count like any other silent user ID.
 
-Select a stage to open the list of its user IDs, with a **State** and a **Why** for each one, and the issues that hit it under **Hit by**.
+Select a stage to open the list of its user IDs, with a **State** and a **Why** for each one. **Hit by** names the issues that hit a user ID, but only issues with the verdict Evidence of loss or Few accounts.
 
 ## Issues and user IDs hit
 
@@ -37,7 +37,7 @@ An issue is a case as the Users page shows it. When a case of the same cause ope
 
 **User IDs hit** is the number of different user IDs whose traces are in the evidence of an issue. A hit says the issue reached the user ID. It does not say the user ID stopped, or that the issue caused a stop. Traces in the evidence with no user ID are not in the count, and the case page says how many there were. The same count appears as a chip on each row of **Triage** and in the **Users** block on the case page. The order of cases on **Triage** does not change.
 
-To measure an issue, Tessary compares each hit user ID, from its hit day, with similar user IDs that were not yet hit on that day. **User IDs lost** is an estimate of how many more hit user IDs probably stopped than expected from those similar user IDs, given as "about N" with a range. The issue page draws both groups as lines, week by week after the hit, and **Hit user IDs that are silent now** lists the hit user IDs that are silent today. Counts of different issues overlap and do not add up.
+To measure an issue, Tessary compares each hit user ID, from its hit day, with similar user IDs that were not yet hit on that day. **User IDs lost** is an estimate of how many more hit user IDs probably stopped than expected from those similar user IDs, given as "about N" with a range. The issue page draws both groups as lines, week by week after the hit. For an issue with the verdict Evidence of loss or Few accounts, **Hit user IDs that are silent now** lists the hit user IDs that are silent today. Counts of different issues overlap and do not add up.
 
 ## What each verdict claims
 
@@ -56,7 +56,7 @@ Every issue gets a verdict that says what its numbers can claim. The page tests 
 | Not comparable | Hit user IDs stop clearly less often than similar user IDs not yet hit, so the comparison does not hold. | None |
 | Always present | The issue was present from the first day of data, so there is no time before it to compare with. It is not shown as a cause. | An estimate with no lower limit |
 | Few accounts | The hits sit in a few accounts. User IDs of one account leave together, so the hits count as a few cases, not many. | An estimate with no lower limit |
-| Evidence of loss | More hit user IDs probably stopped than expected, by more than chance and the issue's own random test allow, and the stops of all user IDs on that part of the agent rose. | User IDs lost, with a range |
+| Evidence of loss | More hit user IDs probably stopped than expected, by more than chance and the issue's own random test allow, and the stops of all user IDs on that part of the agent do not contradict it. | User IDs lost, with a range |
 | Moved, not added | Hit user IDs stop more often, but the stops of all user IDs on that part of the agent did not rise after the issue started. The issue marks user IDs that leave; it is not shown as a cause. | An estimate with no lower limit |
 | No measurable loss | Enough hit user IDs were compared, and the most the loss can be is small. This does not prove that the loss is zero. | An estimate with its range |
 | Not enough evidence | None of the verdicts above applies. | An estimate with no lower limit |
@@ -83,7 +83,7 @@ Banners name facts that change how to read the numbers: traffic that started arr
 
 ## What the page does not do
 
-- It has no page for one user ID. In the list of hit user IDs that are silent now, a row links to that user ID's traces while its text is kept.
+- It has no page for one user ID. In **Hit user IDs that are silent now**, a row links to that user ID's traces while its text is kept.
 - It does not predict which user IDs are likely to leave, and it does not mark user IDs as at risk.
 - It does not say that a probably stopped user ID stopped because of an issue.
 - It does not change triage, root-cause analysis, or the order of cases.
