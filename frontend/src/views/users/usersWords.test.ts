@@ -119,7 +119,7 @@ const NOTICES: [string, EndUserOverview, { title: string; text: string }][] = [
     PAGE_STATES.noUserId,
     {
       title: "No user ID",
-      text: "Only 12% of all traces carry a user ID. Send user.id on every trace, the same for one person across sessions.",
+      text: "Only 12% of traces carry a user ID (since Oct 3). Send user.id on every trace, the same for one person across sessions.",
     },
   ],
   [
@@ -957,6 +957,12 @@ describe("the other page states, banners and limits", () => {
     expect(pageNotice(o)).toEqual(notice);
   });
 
+  it("leaves the date out of the no user ID text when the history start is not known", () => {
+    expect(pageNotice({ ...PAGE_STATES.noUserId, history_since: null })!.text).toBe(
+      "Only 12% of traces carry a user ID. Send user.id on every trace, the same for one person across sessions.",
+    );
+  });
+
   it("does not judge stops before the past check, with every past date in", () => {
     expect(stopStage("not_judged_yet", { anchors: 4, anchors_needed: 4 })).toEqual({
       label: "Probably stopped · not judged yet",
@@ -1159,6 +1165,232 @@ describe("the ID list", () => {
   it.each(ID_ROWS)("row %s", (_name, r, state, why) => {
     expect(idState(r)).toBe(state);
     expect(idWhy(r)).toBe(why);
+  });
+});
+
+describe("a count of one takes the singular", () => {
+  it("words the chip, the counts and the tooFew line for one user ID", () => {
+    expect(hitChip(1)).toBe("1 user ID hit");
+    expect(tooFew(1)).toBe("1 hit user ID can be compared; 30 are needed.");
+    expect(whyStopped(1, 0.94)).toBe("silent 1 day; user IDs like this stayed away in 94% of past cases");
+    expect(funnelAria(1, 1, 1)).toBe("1 active user ID, 1 silent and not judged, 1 probably stopped");
+    expect(countedLine(1, { service: 1 }, null)).toBe(
+      "1 user ID is counted; 1 is set aside: 1 that run like a service.",
+    );
+    expect(stoppedHeader(1, 1)).toBe("1 user ID named, about 1 expected.");
+    expect(activeHeader(1, 1)).toBe("1 user ID is active, including 1 new.");
+    expect(silentHeader(1)).toBe("1 user ID is quieter than usual but not named as stopped.");
+  });
+
+  it("chooses the form on the rounded count", () => {
+    expect(stoppedHeader(1, 1.4)).toBe("1 user ID named, about 1 expected.");
+    expect(
+      limitText({
+        code: "unattended_share",
+        numbers: { ids: 1 },
+        ids: 0,
+        never_cut: false,
+      }),
+    ).toBe("1 user ID is unattended or automation only, more than 10% of covered user IDs.");
+  });
+
+  it("words the page states for one day and one user ID", () => {
+    expect(
+      pageNotice(
+        refused({
+          page_state: "too_early",
+          page_state_reason: "few_ids",
+          reason_numbers: {
+            span_days: 1,
+            ids: 1,
+            span_days_needed: 21,
+            ids_needed: 20,
+          },
+        }),
+      )!.text,
+    ).toBe("1 day of user ID history (21 needed) and 1 user ID (20 needed). The page fills in on its own.");
+    expect(
+      pageNotice(
+        refused({
+          page_state: "ids_unreliable",
+          page_state_reason: "heavy_ids",
+          reason_numbers: {
+            ids: 1,
+            id_day_share: 0.4,
+            sessions_per_day: 1,
+            hours_per_day: 1,
+          },
+        }),
+      )!.text,
+    ).toBe(
+      "1 user ID carries the traffic of more than one user (40% of ID-days: 1 session a day, 1 hour a day). The other user IDs cannot be taken as single users.",
+    );
+    expect(
+      pageNotice(
+        refused({
+          page_state: "ids_unreliable",
+          page_state_reason: "ids_replaced",
+          reason_numbers: { ended: 1, continued: 1 },
+        }),
+      )!.text,
+    ).toBe(
+      "Of 1 user ID that ended and had a repeating job, 1 went on under a new user ID. User IDs are replaced, so a silent user ID is not a lost user.",
+    );
+  });
+
+  it("words one account with one hit user ID", () => {
+    const issue = issueNumbers({
+      verdict: "few_accounts",
+      diagnostics: {
+        ...NO_DIAGNOSTICS,
+        accounts: 1,
+        estimated: 1,
+        account_lines: [
+          {
+            account: 1,
+            ids: 1,
+            hit: 1,
+            silent: 1,
+            silent_since_day: utcDay("2026-11-03"),
+          },
+        ],
+      },
+    });
+    expect(issueNote(issue)).toBe(
+      "The hits sit in 1 account. User IDs of one account leave together, so this is 1 case, not 1. 1 of the 1 user ID of Account 1 was hit and 1 of them is silent since Nov 3.",
+    );
+  });
+
+  it("words the stop stage for one day and one user ID", () => {
+    expect(
+      stopStage("not_judged_yet", {
+        anchors: 1,
+        anchors_needed: 3,
+        days_needed: 1,
+      }).note,
+    ).toBe("The stop odds are not yet checked against this app's past (about 1 more day needed).");
+    expect(
+      stopStage("history_too_short", {
+        horizon_days: 1,
+        horizon_days_needed: 56,
+      }).caption,
+    ).toBe("1 day is kept; 56 are needed");
+    expect(
+      stopStage("cannot_be_named_yet", {
+        stopped_expected: 1,
+        stopped_named: 0,
+        plateau: 0.4,
+      }).note,
+    ).toBe(
+      "About 1 user ID has probably stopped. Only 0 can be named, because one silence is weak evidence here (the most it proves: 40%).",
+    );
+  });
+
+  it("words the banners for one user ID", () => {
+    expect(bannerText(banner("group_or_key_ids", { ids: 1, id_day_share: 0.05 }))).toBe(
+      "1 user ID looks like a group or key (5% of ID-days). Counts on this page are user IDs. One ID can hold many people, and people who leave inside an ID that stays active cannot be seen.",
+    );
+    expect(
+      bannerText(
+        banner("id_loss", {
+          onset_day: utcDay("2026-11-03"),
+          share_after: 0.3,
+          share_before: 0.05,
+          ids: 1,
+        }),
+      ),
+    ).toBe(
+      "Since Nov 3, 30% of the traffic arrives without a user ID (before: 5%). About 1 user ID that looks stopped is probably still active. Stop counts after this date are too high until the user ID is sent again.",
+    );
+    expect(bannerText(banner("id_change", { cannot_follow: 1 }))).toBe(
+      "User IDs were changed. 1 user ID that cannot be followed is not counted as stopped.",
+    );
+    expect(bannerText(banner("tracer", { ended: 1, continued: 1 }))).toBe(
+      "Of 1 user ID that ended and had a repeating job, 1 went on under a new user ID. A silent user ID may be a person who is still here.",
+    );
+    expect(
+      bannerText(
+        banner("shared_silence", {
+          start_day: utcDay("2026-11-03"),
+          share_silent: 0.3,
+          share_usual: 0.05,
+          ids: 1,
+          held_until_day: utcDay("2026-12-01"),
+          stopped_low: 0,
+          stopped_high: 1,
+        }),
+      ),
+    ).toBe(
+      "From Nov 3, 30% of regular user IDs went silent in the same week (usual: 5%). 1 user ID is held as a possible break until Dec 1: between 0 and 1 of them have stopped. A break or a loss; not yet known.",
+    );
+  });
+
+  it.each<[EndUserLimitCode, Record<string, number>, string]>([
+    [
+      "few_covered_ids",
+      { ids: 1 },
+      "This app has 1 user ID. An issue needs about 30 comparable hit user IDs, and verdicts on small apps can change from week to week.",
+    ],
+    ["id_loss", { ids: 1 }, "1 user ID may look stopped because some of its traffic arrives without a user ID."],
+    ["id_change", { ids: 1 }, "1 user ID was changed and cannot be followed; it is not counted as stopped."],
+    [
+      "shared_silence",
+      { ids: 1 },
+      "1 user ID went silent in the same week as many others, so its stop is less certain.",
+    ],
+    ["return_cycle_too_long", { days: 1 }, "A return cycle longer than 1 day cannot be learned from this history."],
+  ])("limit %s for one", (code, numbers, text) => {
+    expect(limitText({ code, numbers, ids: 0, never_cut: false })).toBe(text);
+  });
+
+  it("words the issue texts for one user ID and one day", () => {
+    const one = issueNumbers({
+      verdict: "evidence_of_loss",
+      user_ids_hit: 1,
+      compared: 30,
+      lost: 1,
+      low: 0,
+      high: 2,
+      diagnostics: {
+        ...NO_DIAGNOSTICS,
+        stopped: 1,
+        expected: 1,
+        h: 1,
+        late_hits: 1,
+      },
+    });
+    expect(issueNote(one)).toBe(
+      "1 of 30 compared hit user IDs has probably stopped in the 1 day after a hit. 1 was expected from similar user IDs not yet hit.",
+    );
+    expect(issueHowCounted(one, null)).toBe("1 user ID hit. 30 are compared: 1 was hit too late to count.");
+    expect(issueHowCounted({ ...one, compared: 1 }, null)).toBe(
+      "1 user ID hit. 1 is compared: 1 was hit too late to count.",
+    );
+    const early = issueNumbers({
+      verdict: "cannot_measure_yet",
+      diagnostics: { ...NO_DIAGNOSTICS, t_vis: 1, upper: 1 },
+    });
+    expect(issueRowLabel(early)).toBe("Too early to measure: hit less than 1 day ago");
+    expect(issueNote(early)).toBe(
+      "A stop starts to show about 1 day after the last use here. Half of the hit user IDs were hit less than that ago. If every hit user ID that is silent today stays away: up to 1.",
+    );
+    expect(caseCountLine({ ...C118_CASE_BLOCK, user_ids_hit: 1 }).lead).toBe("1 user ID hit");
+  });
+
+  it("words the Why column for one day", () => {
+    expect(idWhy(row({ state: "stopped", grade: "unattended", days_silent: 1 }))).toBe(
+      "silent 1 day; automated runs continue",
+    );
+    expect(idWhy(row({ state: "stopped", grade: "not_yet_checked", days_silent: 1 }))).toBe(
+      "silent 1 day; not yet checked against this app's past",
+    );
+    expect(idWhy(row({ substate: "held", days_silent: 1 }))).toBe(
+      "silent 1 day, in the same week as many other user IDs",
+    );
+    expect(idWhy(row({ substate: "overdue", days_silent: 1, p_stop: 0.4 }))).toBe(
+      "silent 1 day; about 40% chance that it does not come back",
+    );
+    expect(idWhy(row({ state: "active", days_silent: 1 }))).toBe("active 1 day ago");
   });
 });
 

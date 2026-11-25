@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The page states of board P6 that replace the funnel and the issue numbers. Expected strings are the board texts;
- * "No user ID" names the share that fired as the words contract fixed it, and "Collecting history" is the words
- * contract's own copy (no board shows it). The bugs worth catching: a refused page that shows no reason or the wrong
- * one, a partial page that does not name the user IDs it set aside, and a notice on an ok page.
+ * The page states of board P6 that replace the funnel and the issue numbers. Expected strings are the board texts,
+ * and "Collecting history" is the words contract's own copy (no board shows it). The bugs worth catching: a refused
+ * page that shows no reason or the wrong one, a partial page that does not name the user IDs it set aside, and a
+ * notice on an ok page.
  */
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,7 +20,7 @@ describe("PageStateNotice", () => {
       "no user ID",
       PAGE_STATES.noUserId,
       "No user ID",
-      "Only 12% of all traces carry a user ID. Send user.id on every trace, the same for one person across sessions.",
+      "Only 12% of traces carry a user ID (since Oct 3). Send user.id on every trace, the same for one person across sessions.",
     ],
     [
       "too early",
