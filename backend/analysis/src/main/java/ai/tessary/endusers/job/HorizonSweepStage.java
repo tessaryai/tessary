@@ -6,6 +6,7 @@ import ai.tessary.endusers.facts.EndUserProjectRepository;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.retention.RetentionResolver;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -50,6 +51,7 @@ public class HorizonSweepStage implements EndUsersStage {
 
     @Override
     public long run(String projectId, int day) {
+        Instant began = Instant.now();
         OptionalInt keptDays = horizon.days(projectId);
         int facts = 0;
         int users = 0;
@@ -67,6 +69,7 @@ public class HorizonSweepStage implements EndUsersStage {
                 .field("factRows", facts)
                 .field("users", users)
                 .field("idTexts", texts)
+                .durationMs(began)
                 .log();
         return (long) facts + users + texts;
     }

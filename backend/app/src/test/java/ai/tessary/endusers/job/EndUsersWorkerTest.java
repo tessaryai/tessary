@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.function.IntPredicate;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -220,6 +221,12 @@ record EndUsersWorkerTest(
                                 .single(),
                         "a job whose worker died past the cap is dead-lettered too"),
                 () -> assertFalse(fold.days(crashed).contains(1), "it is not claimed again"));
+    }
+
+    /** Each tick schedules a job for every project in the shared database; none is left for a later claim. */
+    @AfterEach
+    void removeEndUserJobs() {
+        jdbc.sql("DELETE FROM job WHERE kind IN ('end_users', 'end_user_hits')").update();
     }
 
     private EndUsersWorker worker(MovingClock clock, EndUsersProperties properties, Stub hits, Stub... daily) {

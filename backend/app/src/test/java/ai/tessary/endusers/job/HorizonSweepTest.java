@@ -169,6 +169,13 @@ record HorizonSweepTest(
                                 """)));
     }
 
+    @Test
+    void stageNames_areStable_becauseRetriesResumeByName() {
+        assertEquals(
+                List.of("hits", "fold", "reconcile", "learn", "sweep"),
+                List.of(hits.name(), fold.name(), reconcile.name(), learn.name(), sweep.name()));
+    }
+
     private void ttl(Project p, int days) {
         jdbc.sql("""
                 INSERT INTO retention_policy (id, project_id, data_class, ttl_days, created_at)
