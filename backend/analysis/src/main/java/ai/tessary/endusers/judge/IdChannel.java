@@ -160,6 +160,7 @@ public final class IdChannel {
      * joins the normal weeks unless it is the onset or lies in a loss whose excess is above 0.05.
      */
     private static @Nullable Loss loss(TreeMap<Integer, long[]> byWeek, int wkFirst, int wkLast) {
+        if (wkFirst > wkLast) return null;
         List<WeekShare> normal = new ArrayList<>();
         Integer onset = null;
         boolean provisional = false;

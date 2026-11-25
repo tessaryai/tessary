@@ -237,6 +237,7 @@ class IdChannelTest {
         thinWeek.week(0, 500, 10).week(1, 150, 3).week(2, 500, 10).week(3, 500, 190);
 
         assertAll(
+                () -> assertNull(new Scenario(5).week(0, 500, 10).detect().idLoss(), "no whole week yet"),
                 () -> assertNull(twoWeeks.idLoss(), "two normal weeks before the rise"),
                 () -> assertNull(thinWeek.detect().idLoss(), "a week under 200 traces is no normal week"),
                 () -> assertEquals(21, threeWeeks.idLoss().onsetDay(), "three normal weeks are enough"));
