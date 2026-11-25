@@ -254,7 +254,7 @@ const NOTICES: [string, EndUserOverview, { title: string; text: string }][] = [
     }),
     {
       title: "Partial coverage",
-      text: "Numbers use covered user IDs only. Set aside: 9 in groups that do not return, 5 that run like a service, 3 with an odd ID format, 3 that copy the session token, 2 with machine traffic only, 1 that look like keys. A banner names each reason.",
+      text: "Numbers use covered user IDs only. Set aside: 9 in groups that do not return, 5 that run like a service, 3 with an odd ID format, 3 that copy the session token, 2 with machine traffic only, 1 that looks like a key. A banner names each reason.",
     },
   ],
   [
@@ -1175,7 +1175,7 @@ describe("a count of one takes the singular", () => {
     expect(whyStopped(1, 0.94)).toBe("silent 1 day; user IDs like this stayed away in 94% of past cases");
     expect(funnelAria(1, 1, 1)).toBe("1 active user ID, 1 silent and not judged, 1 probably stopped");
     expect(countedLine(1, { service: 1 }, null)).toBe(
-      "1 user ID is counted; 1 is set aside: 1 that run like a service.",
+      "1 user ID is counted; 1 is set aside: 1 that runs like a service.",
     );
     expect(stoppedHeader(1, 1)).toBe("1 user ID named, about 1 expected.");
     expect(activeHeader(1, 1)).toBe("1 user ID is active, including 1 new.");
@@ -1184,6 +1184,12 @@ describe("a count of one takes the singular", () => {
 
   it("chooses the form on the rounded count", () => {
     expect(stoppedHeader(1, 1.4)).toBe("1 user ID named, about 1 expected.");
+    expect(stopStage("cannot_be_named_yet", { stopped_expected: 1.4, stopped_named: 0, plateau: 0.4 }).note).toBe(
+      "About 1 user ID has probably stopped. Only 0 can be named, because one silence is weak evidence here (the most it proves: 40%).",
+    );
+    expect(lossText(issueNumbers({ verdict: "evidence_of_loss", lost: 1.4, low: 0.6, high: 2.2 }))).toBe(
+      "about 1 user ID lost (1 to 2)",
+    );
     expect(
       limitText({
         code: "unattended_share",
@@ -1374,7 +1380,19 @@ describe("a count of one takes the singular", () => {
     expect(issueNote(early)).toBe(
       "A stop starts to show about 1 day after the last use here. Half of the hit user IDs were hit less than that ago. If every hit user ID that is silent today stays away: up to 1.",
     );
-    expect(caseCountLine({ ...C118_CASE_BLOCK, user_ids_hit: 1 }).lead).toBe("1 user ID hit");
+    expect(issueHeadline(one)).toBe("About 1 user ID lost (0 to 2)");
+    expect(
+      caseCountLine({ ...C118_CASE_BLOCK, user_ids_hit: 1, flagged_traces: 1, flagged_traces_no_user_id: 0 }),
+    ).toEqual({
+      lead: "1 user ID hit",
+      rest: " since Sep 22. 0 of 1 flagged trace had no user ID.",
+    });
+    expect(countedLine(4, { aggregate: 1, token_link: 1, non_returning_group: 1, service: 1 }, null)).toBe(
+      "4 user IDs are counted; 4 are set aside: 1 that looks like a key, 1 that copies the session token, 1 in a group that does not return, 1 that runs like a service.",
+    );
+    expect(rowChartAria("C-1", 1, 0.5, 0.75, "no clear loss")).toBe(
+      "C-1, still active 1 week after the hit: hit user IDs 50%, similar user IDs not yet hit 75%; no clear loss",
+    );
   });
 
   it("words the Why column for one day", () => {

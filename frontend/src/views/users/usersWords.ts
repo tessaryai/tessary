@@ -130,20 +130,21 @@ export function trustLine(trust: EndUserTrust | null): string {
   return `${base} User IDs named as stopped at past dates stayed away in ${percent(trust.named_right!)} of cases${caveat}.`;
 }
 
-const SET_ASIDE_WORDS: Record<string, string> = {
-  aggregate: "that look like keys",
-  service: "that run like a service",
-  odd_shape: "with an odd ID format",
-  token_link: "that copy the session token",
-  non_returning_group: "in groups that do not return",
-  machine_only: "with machine traffic only",
+/** Each reason in the singular and the plural. */
+const SET_ASIDE_WORDS: Record<string, [string, string]> = {
+  aggregate: ["that looks like a key", "that look like keys"],
+  service: ["that runs like a service", "that run like a service"],
+  odd_shape: ["with an odd ID format", "with an odd ID format"],
+  token_link: ["that copies the session token", "that copy the session token"],
+  non_returning_group: ["in a group that does not return", "in groups that do not return"],
+  machine_only: ["with machine traffic only", "with machine traffic only"],
 };
 
 /** Largest reason first; equal counts keep the backend's order. */
 const setAsideList = (setAside: Numbers) =>
   Object.entries(setAside)
     .sort(([, a], [, b]) => b - a)
-    .map(([reason, n]) => `${thousands(n)} ${SET_ASIDE_WORDS[reason]}`)
+    .map(([reason, n]) => plural(n, ...SET_ASIDE_WORDS[reason]))
     .join(", ");
 
 const setAsideTotal = (setAside: Numbers | null) => Object.values(setAside ?? {}).reduce((a, b) => a + b, 0);
@@ -505,7 +506,7 @@ export const issueRowLabel = (i: EndUserIssueNumbers) => ROW_LABELS[i.verdict](i
 /** The loss of a shown issue: only "evidence of loss" claims one. */
 export const lossText = (i: EndUserIssueNumbers) =>
   i.verdict === "evidence_of_loss"
-    ? `about ${whole(i.lost!)} user IDs lost (${whole(i.low!)} to ${whole(i.high!)})`
+    ? `about ${userIds(i.lost!)} lost (${whole(i.low!)} to ${whole(i.high!)})`
     : noClearLoss(i.high!);
 export const issueHeadline = (i: EndUserIssueNumbers) => sentenceCase(lossText(i));
 
@@ -532,7 +533,7 @@ export const groupRefs = (refs: string[]) => refs.join(" + ");
 export const groupNote = (findings: number) => `${findings} findings that fire together, shown as one`;
 export const groupTitle = (titles: string[]) => titles.join(" · ");
 export const rowChartAria = (ref: string, weeks: number, hitEnd: number, similarEnd: number, label: string) =>
-  `${ref}, still active ${weeks} weeks after the hit: hit user IDs ${percent(hitEnd)}, similar user IDs not yet hit ${percent(similarEnd)}; ${label}`;
+  `${ref}, still active ${plural(weeks, "week", "weeks")} after the hit: hit user IDs ${percent(hitEnd)}, similar user IDs not yet hit ${percent(similarEnd)}; ${label}`;
 
 // ---- P2: the issue page ----
 
@@ -609,7 +610,7 @@ export function caseCountLine(b: EndUserCaseBlock): {
   const since = b.since_day == null ? "" : ` since ${dayLabel(b.since_day)}`;
   return {
     lead: hitChip(b.user_ids_hit!),
-    rest: `${since}. ${thousands(b.flagged_traces_no_user_id)} of ${thousands(b.flagged_traces)} flagged traces had no user ID.`,
+    rest: `${since}. ${thousands(b.flagged_traces_no_user_id)} of ${plural(b.flagged_traces, "flagged trace", "flagged traces")} had no user ID.`,
   };
 }
 
