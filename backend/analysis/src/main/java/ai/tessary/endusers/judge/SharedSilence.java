@@ -11,12 +11,14 @@ import static ai.tessary.endusers.judge.JudgeConstants.SILENCE_EXCESS;
 import static ai.tessary.endusers.judge.JudgeConstants.SILENCE_SIGMAS;
 import static ai.tessary.endusers.judge.JudgeConstants.TRAFFIC_ENDED_MIN_WEEKLY;
 import static ai.tessary.endusers.judge.JudgeConstants.TRAFFIC_ENDED_SHARE;
+import static java.util.Objects.requireNonNull;
 
 import ai.tessary.endusers.judge.model.Facts;
 import ai.tessary.endusers.judge.model.Facts.IdDays;
 import ai.tessary.endusers.judge.model.HitSet;
 import ai.tessary.endusers.judge.model.HitSet.LineageHits;
 import ai.tessary.endusers.judge.model.IdChannelResult;
+import ai.tessary.endusers.judge.model.IdChannelResult.IdLoss;
 import ai.tessary.endusers.judge.model.Identity;
 import ai.tessary.endusers.judge.model.Identity.IdIdentity;
 import ai.tessary.endusers.judge.model.PageStateResult;
@@ -79,8 +81,8 @@ public final class SharedSilence {
             Facts facts, Series series, Identity identity, IdChannelResult channel, HitSet hits, PageStateResult page) {
         if (page.state() != PageState.OK && page.state() != PageState.PARTIAL_COVERAGE) return NONE;
         Set<Integer> excluded = new HashSet<>(channel.cannotFollow());
-        if (channel.idLoss() != null)
-            excluded.addAll(channel.idLoss().lostShare().keySet());
+        IdLoss idLoss = channel.idLoss();
+        if (idLoss != null) excluded.addAll(idLoss.lostShare().keySet());
         List<Integer> covered = identity.byId().entrySet().stream()
                 .filter(e -> e.getValue().covered() && !excluded.contains(e.getKey()))
                 .map(Map.Entry::getKey)
@@ -176,7 +178,7 @@ public final class SharedSilence {
                 })
                 .toArray();
         int start = (int) Math.rint(Stats.median(lastDays));
-        double i0 = first.i0();
+        double i0 = requireNonNull(first.i0(), "an event week has a usual share");
         double rho = (first.i() - i0) / first.i();
         List<Integer> free = new ArrayList<>();
         List<Integer> hit = new ArrayList<>();

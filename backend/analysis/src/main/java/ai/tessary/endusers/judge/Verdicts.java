@@ -246,7 +246,7 @@ public final class Verdicts {
                     contradicted,
                     pop == null ? null : pop.pop(),
                     pop == null ? null : pop.popHigh(),
-                    lost == null ? n.lost() : lost,
+                    lost == null ? Double.valueOf(n.lost()) : lost,
                     e);
         }
     }

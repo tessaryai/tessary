@@ -9,6 +9,7 @@ import static ai.tessary.endusers.judge.JudgeConstants.NON_RETURNING_RETURN_SHAR
 import static ai.tessary.endusers.judge.JudgeConstants.OLD_ID_DAYS;
 import static ai.tessary.endusers.judge.JudgeConstants.PAGE_IDENT_RECENT_DAYS;
 import static ai.tessary.endusers.judge.JudgeConstants.RETURN_DAYS;
+import static java.util.Objects.requireNonNull;
 
 import ai.tessary.endusers.facts.ShapeSignature;
 import ai.tessary.endusers.judge.IdentityFlags.Flags;
@@ -145,12 +146,14 @@ public final class IdGroups {
                 false);
     }
 
+    /** A group with old IDs has both shares of old IDs; only the carry-over share, of active IDs, can be missing. */
     private static GroupStats judged(GroupStats s) {
+        Double carryOver = s.carryOver();
         boolean nonReturning = s.old() >= GROUP_MIN_IDS
-                && (s.returnLater() < NON_RETURNING_LATER
-                        || (s.returnShare() < NON_RETURNING_RETURN_SHARE
-                                && s.carryOver() != null
-                                && s.carryOver() < NON_RETURNING_CARRY_OVER));
+                && (requireNonNull(s.returnLater()) < NON_RETURNING_LATER
+                        || (requireNonNull(s.returnShare()) < NON_RETURNING_RETURN_SHARE
+                                && carryOver != null
+                                && carryOver < NON_RETURNING_CARRY_OVER));
         return new GroupStats(
                 s.ids(), s.old(), s.returnLater(), s.returnShare(), s.carryOver(), s.oneDayShare(), nonReturning);
     }
