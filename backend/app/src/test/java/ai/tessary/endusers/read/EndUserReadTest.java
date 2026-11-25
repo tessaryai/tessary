@@ -329,7 +329,11 @@ record EndUserReadTest(
                         () -> controller.silentIds(owner(s), org(s), proj(s), "C-1", "not a cursor")),
                 () -> assertCode(
                         CommonError.INVALID_PARAMETER,
-                        () -> controller.ids(owner(s), org(s), proj(s), "stopped", "Zm9v", 50)));
+                        () -> controller.ids(owner(s), org(s), proj(s), "stopped", "Zm9v", 50)),
+                () -> assertCode(
+                        CommonError.INVALID_PARAMETER,
+                        () -> controller.ids(owner(s), org(s), proj(s), "stopped", cursor("x." + "0".repeat(32)), 50),
+                        "a number part that is not a number is a bad cursor, not a server error"));
     }
 
     /**
@@ -511,7 +515,13 @@ record EndUserReadTest(
             ResponseStatusException ex = assertThrows(ResponseStatusException.class, call);
             assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
         }
-        for (Executable call : foreignCase) assertCode(EndUserError.NOT_FOUND, call);
+        for (Executable call : foreignCase) {
+            assertCode(EndUserError.NOT_FOUND, call);
+            assertEquals(
+                    HttpStatus.NOT_FOUND,
+                    assertThrows(TessaryException.class, call).error().status(),
+                    "another project's case answers like another project, not with a status that says it exists");
+        }
     }
 
     /** The bug: a tie in days silent across a page edge repeats or drops a user ID, or another stage leaks in. */
@@ -561,7 +571,11 @@ record EndUserReadTest(
                         () -> controller.ids(owner(s), org(s), proj(s), "stopped", null, 201)),
                 () -> assertCode(
                         CommonError.INVALID_PARAMETER,
-                        () -> controller.ids(owner(s), org(s), proj(s), "stopped", null, 0)));
+                        () -> controller.ids(owner(s), org(s), proj(s), "stopped", null, 0)),
+                () -> assertCode(
+                        CommonError.INVALID_PARAMETER,
+                        () -> controller.ids(owner(s), org(s), proj(s), "Stopped", null, 50),
+                        "a stage is its exact wire code, so another case is no stage"));
     }
 
     /** The bug: "Hit by" names an issue whose verdict claims no loss. */
@@ -617,6 +631,9 @@ record EndUserReadTest(
         assertCode(
                 EndUserError.ERASE_NEEDS_SESSION,
                 () -> controller.erase(token, org(s), proj(s), new EndUserEraseRequest("user-1")));
+        TessaryException tokenRefused = assertThrows(
+                TessaryException.class,
+                () -> controller.erase(token, org(s), proj(s), new EndUserEraseRequest("user-1")));
         ResponseStatusException forbidden = assertThrows(
                 ResponseStatusException.class,
                 () -> controller.erase(viewer, org(s), proj(s), new EndUserEraseRequest("user-1")));
@@ -634,6 +651,8 @@ record EndUserReadTest(
 
         assertAll(
                 () -> assertEquals(HttpStatus.FORBIDDEN, forbidden.getStatusCode()),
+                () -> assertEquals(
+                        HttpStatus.FORBIDDEN, tokenRefused.error().status(), "a token is refused, not missing"),
                 () -> assertEquals(12, before, "the refused calls deleted nothing"),
                 () -> assertEquals(7, deleted),
                 () -> assertEquals(0, seed.rowsOfKey("end_user", k1)),
@@ -708,5 +727,14 @@ record EndUserReadTest(
     private static void assertCode(ErrorCode code, Executable call) {
         TessaryException ex = assertThrows(TessaryException.class, call);
         assertSame(code, ex.error());
+    }
+
+    private static void assertCode(ErrorCode code, Executable call, String message) {
+        TessaryException ex = assertThrows(TessaryException.class, call, message);
+        assertSame(code, ex.error(), message);
+    }
+
+    private static String cursor(String text) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(text.getBytes(StandardCharsets.UTF_8));
     }
 }

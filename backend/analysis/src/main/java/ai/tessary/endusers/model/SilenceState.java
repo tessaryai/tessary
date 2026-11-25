@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.endusers.model;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /** The state of a shared silence event (spec 4). */
@@ -21,10 +20,5 @@ public enum SilenceState implements WireCode {
     @Override
     public String wire() {
         return wire;
-    }
-
-    @JsonCreator
-    public static SilenceState fromWire(String value) {
-        return WireCode.parse(SilenceState.class, value);
     }
 }

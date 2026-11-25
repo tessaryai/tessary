@@ -92,10 +92,6 @@ public class RouteClassRepository {
     }
 
     private String write(RouteStatistics statistics) {
-        try {
-            return mapper.writeValueAsString(statistics);
-        } catch (JsonProcessingException e) {
-            throw new TessaryException(CommonError.INTERNAL, e);
-        }
+        return mapper.valueToTree(statistics).toString();
     }
 }

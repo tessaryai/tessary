@@ -237,6 +237,46 @@ class PastCheckTest {
                 () -> assertEquals(Map.of(Stratum.K1, 1), odds.t50()));
     }
 
+    /**
+     * The bug: an ID censored after the anchor keeps a return that came after its censor day, or a silence that runs to
+     * D, so the past check counts an ID it could no longer follow as one that came back or stayed away.
+     */
+    @Test
+    void anchorRecords_censorAnIdAtItsCensorDay_afterTheAnchor() {
+        int a = 1020;
+        int asOf = 1050;
+        Map<Integer, List<Integer>> days = Map.of(
+                1, List.of(1000, 1010, 1030),
+                2, List.of(1000, 1010, 1045),
+                3, List.of(1000, 1010),
+                4, List.of(1000, 1010),
+                5, List.of(1000, 1010));
+        Series series = series(days);
+        IdChannelResult channel =
+                new IdChannelResult(null, null, Map.of(1, 1040, 2, 1040, 3, 1040, 4, 1015), Set.of(), Set.of());
+
+        List<AnchorRecord> records = PastCheck.anchorRecords(
+                0,
+                a,
+                asOf,
+                series.byId(),
+                days.keySet(),
+                days.keySet(),
+                channel,
+                new SilenceResult(List.of(), Map.of()));
+
+        assertEquals(
+                List.of(
+                        record(0, a, Stratum.K2, 0.0, 10, true, false),
+                        record(0, a, Stratum.K2, 0.0, 20, false, false),
+                        record(0, a, Stratum.K2, 0.0, 20, false, false),
+                        record(0, a, Stratum.K2, 0.0, 31, false, true)),
+                records,
+                "1 came back before its censor day; 2 came back after it and 3 never did, so both end at the censor day,"
+                        + " 20 days on, and neither stayed away; 4 was censored before the anchor; 5 is followed to D."
+                        + " Two days before the anchor is K2, and no K2 gap ended, so p_nominal is 0");
+    }
+
     private static void add(
             List<AnchorRecord> records,
             int count,

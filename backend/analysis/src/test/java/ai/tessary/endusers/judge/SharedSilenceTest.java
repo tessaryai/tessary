@@ -230,6 +230,55 @@ class SharedSilenceTest {
                 () -> assertEquals(SilenceState.OPEN, lenient.state(), "in lenient mode B routes are paced"));
     }
 
+    /** The bug: a wave that starts in the 7 days that end at D waits a week for the next whole-week test. */
+    @Test
+    void provisionalWindow_opensAnEvent_inTheLast7Days() {
+        Scenario s = new Scenario(69);
+        for (int u = 0; u < 100; u++) {
+            boolean silent = u < 40;
+            s.id(d -> !silent || d < 63);
+        }
+
+        SilenceResult result = s.find();
+
+        SilenceEvent e = result.events().getFirst();
+        assertAll(
+                () -> assertEquals(1, result.events().size(), "no whole week up to week 8 has a silent ID"),
+                () -> assertTrue(e.provisional(), "days 63 to 69 are the window that ends at D, not a whole week"),
+                () -> assertEquals(new Scope(ScopeKind.APP, null), e.scope()),
+                () -> assertEquals(100, e.panel()),
+                () -> assertEquals(0.4, e.i(), 1e-12),
+                () -> assertEquals(0.0, e.i0(), 1e-12, "no ID is silent in the shifted blocks before"),
+                () -> assertEquals(63, e.startDay(), "the median last series day 62, plus 1"),
+                () -> assertEquals(range(0, 40), e.members(), "silent for the 7 days to D"),
+                () -> assertEquals(SilenceState.OPEN, e.state(), "6 days in, too early for the traffic test"),
+                () -> assertEquals(70, e.coverEnd()),
+                () -> assertEquals(
+                        List.of(new ClockInterval(63, 70, 1.0)), result.clock().get(0)));
+    }
+
+    /** The bug: a shape group that is not the whole app is no scope, so a wave inside it is lost in the app's share. */
+    @Test
+    void shapeGroup_ofAtLeast20Ids_isAScope() {
+        Scenario s = new Scenario(69);
+        for (int u = 0; u < 100; u++) {
+            boolean silent = u < 10;
+            s.id(d -> !silent || d < 56);
+            if (u < 40) s.group(u, "shape-a");
+        }
+
+        SilenceResult result = s.find();
+
+        SilenceEvent e = result.events().getFirst();
+        assertAll(
+                () -> assertEquals(1, result.events().size(), "10 of 100 is an excess of 0.10 in the app, under 0.15"),
+                () -> assertEquals(new Scope(ScopeKind.SHAPE, "shape-a"), e.scope()),
+                () -> assertEquals(40, e.panel()),
+                () -> assertEquals(0.25, e.i(), 1e-12, "10 of the group's 40"),
+                () -> assertEquals(56, e.startDay()),
+                () -> assertEquals(range(0, 10), e.members()));
+    }
+
     private static SilenceResult clusterOf(int clusterIds) {
         Scenario s = new Scenario(69);
         for (int u = 0; u < 29; u++) {
@@ -276,6 +325,7 @@ class SharedSilenceTest {
         private final int asOfDay;
         private final Map<Integer, List<Integer>> days = new TreeMap<>();
         private final Map<Integer, Integer> accountOf = new TreeMap<>();
+        private final Map<Integer, String> groupOf = new TreeMap<>();
         private final List<int[]> rows = new ArrayList<>();
         private final Map<String, Map<Integer, List<Integer>>> hits = new TreeMap<>();
         private final Map<String, Boolean> alwaysPresent = new TreeMap<>();
@@ -298,6 +348,10 @@ class SharedSilenceTest {
 
         void account(int u, int cluster) {
             accountOf.put(u, cluster);
+        }
+
+        void group(int u, String key) {
+            groupOf.put(u, key);
         }
 
         void lost(int u) {
@@ -403,7 +457,18 @@ class SharedSilenceTest {
         private Identity identity() {
             Map<Integer, IdIdentity> byId = new TreeMap<>();
             for (int u : days.keySet()) {
-                byId.put(u, new IdIdentity(false, false, false, false, false, "(app)", accountOf.get(u), true, null));
+                byId.put(
+                        u,
+                        new IdIdentity(
+                                false,
+                                false,
+                                false,
+                                false,
+                                false,
+                                groupOf.getOrDefault(u, "(app)"),
+                                accountOf.get(u),
+                                true,
+                                null));
             }
             return new Identity(
                     byId,

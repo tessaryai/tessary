@@ -367,12 +367,9 @@ public class EndUserHitRepository {
     }
 
     private @Nullable String writeSessions(HitRow row) {
-        if (row.routeNo() != SESSION_ONLY_ROUTE) return null;
-        try {
-            return mapper.writeValueAsString(row.sessionRoutes());
-        } catch (JsonProcessingException e) {
-            throw new TessaryException(CommonError.INTERNAL, e);
-        }
+        return row.routeNo() == SESSION_ONLY_ROUTE
+                ? mapper.valueToTree(row.sessionRoutes()).toString()
+                : null;
     }
 
     private List<SessionRoutes> readSessions(@Nullable String json) {

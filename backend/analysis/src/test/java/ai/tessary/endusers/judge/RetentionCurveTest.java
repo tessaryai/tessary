@@ -140,6 +140,33 @@ class RetentionCurveTest {
         }
     }
 
+    /**
+     * The bug: a hit ID whose trial falls in a week the estimate leaves out for an ID change still starts on the curve,
+     * so the curve compares IDs the verdict never counted.
+     */
+    @Test
+    void curve_leavesOutTrialsInIdChangeWeeks() {
+        world();
+        treated(13, 63, 63, 99, 0.5);
+        Set<Integer> compared = Set.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13);
+        LineageEstimate e =
+                new LineageEstimate(12, 11, 11, 0, 0, 0.05, 0, 0.03, 0, 60, 11, 0, 0, 0, 11, 5, 1, 0, compared, null);
+        LineageHits hits = new LineageHits(hitDays, 56, 70, List.of(1), true, false);
+        StopOdds o = new StopOdds(odds, null, null, 30, List.of(), List.of(), null, null, Map.of(), Map.of(), Map.of());
+
+        List<CurvePoint> pts = RetentionCurve.curve(trials, e, Set.of(8), hits, new Series(0, series), o, 100);
+
+        assertAll(
+                () -> assertEquals(
+                        List.of(1, 2, 3, 4, 5),
+                        pts.stream().map(CurvePoint::week).toList(),
+                        "only ID 13 starts, hit 37 days before D: 5 whole weeks"),
+                () -> assertEquals(
+                        List.of(1, 1, 1, 1, 1),
+                        pts.stream().map(CurvePoint::atRiskHit).toList(),
+                        "the 11 hit IDs with trials in week 8 are left out"));
+    }
+
     @Test
     void curve_hasAtMostEightWeeklySteps() {
         world();
@@ -175,6 +202,34 @@ class RetentionCurveTest {
                         1 - (1 * 0.2 + 3 * 0.0) / 4, pts.get(0).similar(), 1e-12, "one treated ID in X, three in Y"),
                 () -> assertEquals(10, pts.get(0).atRiskSimilar()),
                 () -> assertEquals(4, pts.get(0).atRiskHit()));
+    }
+
+    /**
+     * The bug: a pool of more than 150 control rows is read in full, or thinned from the wrong row, so the similar curve
+     * drifts from the reference's every-n/150-th row.
+     */
+    @Test
+    void controls_ofAPoolOver150Rows_areEveryNth_fromTheFirst() {
+        treated(1, 56, 56, 99, 0);
+        for (int i = 0; i < 300; i++) {
+            if (i % 2 == 0) control(100 + i, 99, 0.0, null);
+            else control(100 + i, 60, 1.0, null);
+        }
+        LineageEstimate e =
+                new LineageEstimate(1, 1, 1, 0, 0, 0.05, 0, 0.03, 0, 60, 1, 0, 0, 0, 1, 300, 0, 0, Set.of(1), null);
+        LineageHits hits = new LineageHits(hitDays, 56, 56, List.of(1), true, false);
+        StopOdds o = new StopOdds(odds, null, null, 30, List.of(), List.of(), null, null, Map.of(), Map.of(), Map.of());
+
+        List<CurvePoint> pts = RetentionCurve.curve(trials, e, Set.of(), hits, new Series(0, series), o, 64);
+
+        assertAll(
+                () -> assertEquals(1, pts.size()),
+                () -> assertEquals(150, pts.get(0).atRiskSimilar(), "300 rows: every 2nd row, from the first"),
+                () -> assertEquals(
+                        1.0,
+                        pts.get(0).similar(),
+                        1e-12,
+                        "the kept rows are the even ones, none of which stopped; all 300 would read 0.5"));
     }
 
     @Test

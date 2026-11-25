@@ -3,10 +3,14 @@ package ai.tessary.endusers.hits;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.tessary.endusers.facts.EndUserKeys;
 import ai.tessary.endusers.facts.EndUserProjectRepository;
 import ai.tessary.endusers.facts.RouteRegistryRepository;
+import ai.tessary.open.errors.CommonError;
+import ai.tessary.open.errors.TessaryException;
 import ai.tessary.retention.RetentionResolver;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -161,6 +165,24 @@ record HitSweepServiceTest(
                           FROM end_user_hit WHERE project_id = :pid ORDER BY route_no
                         """).param("pid", pid).query(String.class).list(),
                 "a ref to a trace keeps its own route and no session mix");
+    }
+
+    /**
+     * The bug: a session row whose stored mix is not the shape the sweep writes reads as a session with no routes, so the
+     * judge spreads its refs over nothing instead of failing the run.
+     */
+    @Test
+    void stored_aDamagedSessionMix_failsTheRead() {
+        String pid = project("hits-damaged-mix");
+        jdbc.sql("""
+                INSERT INTO end_user_hit (project_id, finding_id, role, user_key, day, route_no, refs, source,
+                                          session_routes)
+                VALUES (:pid, 'f-d', 'witness', decode('00', 'hex'), :day, 0, 1, 'evidence', '[{"refs": "one"}]')
+                """).param("pid", pid).param("day", TODAY - 1).update();
+
+        TessaryException ex = assertThrows(TessaryException.class, () -> hits.stored(pid, "f-d"));
+
+        assertSame(CommonError.INTERNAL, ex.error());
     }
 
     @Test

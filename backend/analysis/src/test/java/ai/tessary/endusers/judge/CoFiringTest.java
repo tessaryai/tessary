@@ -110,4 +110,17 @@ class CoFiringTest {
                 Map.of("L-b", "L-b", "L-c", "L-b", "L-d", "L-b"),
                 CoFiring.groups(f, Set.of("L-a", "L-b", "L-c", "L-d"), Guards.allOn()));
     }
+
+    /**
+     * The bug: a link that joins a later issue to a group whose first key is smaller than its own moves the group under
+     * the later key, or leaves that issue out of the group.
+     */
+    @Test
+    void aLaterLinkToAnEarlierGroup_joinsUnderTheGroupsFirstKey() {
+        Facts f = facts(List.of(hit(0, 1, 150, 4), hit(1, 2, 150, 4), hit(2, 1, 150, 4), hit(2, 2, 150, 4)));
+        assertEquals(
+                Map.of("L-a", "L-a", "L-b", "L-a", "L-c", "L-a"),
+                CoFiring.groups(f, Set.of("L-a", "L-b", "L-c"), Guards.allOn()),
+                "a and b share nothing; c shares all 4 traces of a, then all 4 of b, so b joins the group of a and c");
+    }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.endusers.facts;
 
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import java.nio.charset.StandardCharsets;
@@ -28,10 +29,16 @@ public final class EndUserKeys {
     public static byte[] userKey(byte[] salt, @Nullable String rawId) {
         String id = normalise(rawId);
         if (id == null) return new byte[KEY_BYTES];
+        return Arrays.copyOf(hmac(salt).doFinal(id.getBytes(StandardCharsets.UTF_8)), KEY_BYTES);
+    }
+
+    @ExcludeFromJacocoGeneratedReport(
+            "HmacSHA256 is required of every Java platform and takes any non-empty key, so the catch cannot fire")
+    private static Mac hmac(byte[] salt) {
         try {
             Mac mac = Mac.getInstance(HMAC);
             mac.init(new SecretKeySpec(salt, HMAC));
-            return Arrays.copyOf(mac.doFinal(id.getBytes(StandardCharsets.UTF_8)), KEY_BYTES);
+            return mac;
         } catch (GeneralSecurityException e) {
             throw new TessaryException(CommonError.INTERNAL, e);
         }

@@ -3,12 +3,16 @@ package ai.tessary.endusers.facts;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.endusers.judge.model.RouteClasses;
 import ai.tessary.endusers.judge.model.RouteClasses.Route;
 import ai.tessary.endusers.judge.model.RouteClasses.RouteStatistics;
 import ai.tessary.endusers.model.RouteClass;
+import ai.tessary.open.errors.CommonError;
+import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -239,6 +243,24 @@ record RouteLearnerTest(
                                  ORDER BY 1
                                 """),
                         "a route whose day rows are all older than the judge window is not learned"));
+    }
+
+    /**
+     * The bug: a stored class whose statistics are not the shape the learn step writes reads as a route with no traces,
+     * so the judge trusts a class it cannot check instead of failing the run.
+     */
+    @Test
+    void stored_aDamagedStatisticsRow_failsTheRead() {
+        Project p = TenantFixture.bootstrap(tenants, "learn-damaged").project();
+        int routeNo = registry.routeNo(p.id(), "chat.turn", "turn");
+        jdbc.sql("""
+                UPDATE end_user_route SET route_class = 'A', class_since_day = :day, statistics = '[]'
+                 WHERE project_id = :pid AND route_no = :no
+                """).param("day", D).param("pid", p.id()).param("no", routeNo).update();
+
+        TessaryException ex = assertThrows(TessaryException.class, () -> classes.stored(p.id()));
+
+        assertSame(CommonError.INTERNAL, ex.error());
     }
 
     private void dayRow(Project p, int routeNo, int day) {

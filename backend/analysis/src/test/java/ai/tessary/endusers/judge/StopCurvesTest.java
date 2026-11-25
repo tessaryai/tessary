@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.endusers.judge.StopCurves.IdNominal;
 import ai.tessary.endusers.judge.StopCurves.Nominal;
 import ai.tessary.endusers.judge.model.Series.IdSeries;
 import ai.tessary.endusers.model.ActivityBasis;
@@ -50,6 +51,34 @@ class StopCurvesTest {
                 () -> assertTrue(fewIds.byId().get(0).unattended(), "silent with automation, no AU curve"),
                 () -> assertEquals(Stratum.K2, fewGaps.byId().get(0).stratum(), "30 automation gaps of 30 IDs"),
                 () -> assertTrue(fewGaps.byId().get(0).unattended()));
+    }
+
+    /**
+     * The bug: an ID born in an ID change with fewer than 4 series days is read on K1 or K2, curves fitted on the first
+     * gaps of new IDs, instead of on E with the app's typical gap.
+     */
+    @Test
+    void bornInAnIdChange_readsOnE_withTheAppGap() {
+        Map<Integer, IdSeries> ids = new TreeMap<>();
+        for (int u = 1; u <= 5; u++) ids.put(u, person(List.of(1000, 1002, 1004, 1006, 1008)));
+        ids.put(0, person(List.of(D - 1)));
+        Map<Integer, List<Integer>> days = new TreeMap<>();
+        ids.forEach((u, s) -> days.put(u, s.days()));
+
+        Nominal n = StopCurves.compute(D, days, ids.keySet(), Map.of(), Map.of(), ids, Set.of(0));
+        IdNominal born = n.byId().get(0);
+
+        assertAll(
+                () -> assertEquals(2.0, n.mApp(), "each fitted ID with 4 or more days has a mean gap of 2"),
+                () -> assertEquals(Stratum.E, born.stratum()),
+                () -> assertEquals(1.0, born.clockSilence()),
+                () -> assertEquals(
+                        0.5,
+                        born.pNominal(),
+                        1e-12,
+                        "1 day is 0.5 app gaps, before the one E step, where 5 of 10 observations end at 1 app gap"),
+                () -> assertEquals(
+                        0.0, Survival.pNominal(n.curves().k1(), 1), "K1 would read 0: every first gap ended at 2"));
     }
 
     @Test

@@ -2,7 +2,6 @@
 package ai.tessary.endusers.read;
 
 import ai.tessary.endusers.model.WireCode;
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
@@ -25,10 +24,5 @@ public enum CountKind implements WireCode {
     @Override
     public String wire() {
         return wire;
-    }
-
-    @JsonCreator
-    public static CountKind fromWire(String value) {
-        return WireCode.parse(CountKind.class, value);
     }
 }

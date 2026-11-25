@@ -4,6 +4,8 @@ package ai.tessary.endusers.read;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.endusers.hits.HitFinding;
@@ -36,6 +38,8 @@ import ai.tessary.endusers.read.IssueReadRepository.SilentAfter;
 import ai.tessary.endusers.read.IssueReadRepository.SilentIdRow;
 import ai.tessary.endusers.read.IssueReadRepository.SilentRest;
 import ai.tessary.endusers.read.SnapshotReadRepository.SnapshotRow;
+import ai.tessary.open.errors.CommonError;
+import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
@@ -101,6 +105,31 @@ record EndUserReadRepositoryTest(
                         StopStageState.EXPECTED_ONLY,
                         Map.of("expected", 4.5)),
                 row);
+    }
+
+    /**
+     * The bug: a snapshot column that is not the shape the judge writes reads as empty or default numbers, so the page
+     * shows a state with numbers it never had instead of failing the read.
+     */
+    @Test
+    void snapshot_latest_aDamagedColumn_failsTheRead() {
+        ReadSeeds seed = seed("eu-repo-snapshot-damaged");
+        seed.snapshot(
+                D,
+                "partial_coverage",
+                "low_id_share",
+                "{\"share\":\"most\"}",
+                "[]",
+                "[]",
+                null,
+                null,
+                null,
+                null,
+                null);
+
+        TessaryException ex = assertThrows(TessaryException.class, () -> snapshots.latest(seed.pid()));
+
+        assertSame(CommonError.INTERNAL, ex.error());
     }
 
     @Test

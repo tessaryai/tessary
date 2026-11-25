@@ -115,6 +115,20 @@ public final class Estimate {
         return nM < Z_WIDE_BELOW_MATCHED || accEff < Z_WIDE_BELOW_ACCOUNTS ? Z_WIDE : Z;
     }
 
+    /** The weeks left out for an ID change not solved by aliases: the week of each event and the week after it. */
+    static Set<Integer> idChangeWeeks(IdChannelResult channel) {
+        Set<Integer> weeks = new HashSet<>();
+        IdChange change = channel.idChange();
+        if (change == null) return weeks;
+        for (IdChangeEvent ev : change.events()) {
+            if (ev.solvedByAliases()) continue;
+            int w = Math.floorDiv(ev.day(), DAYS_PER_WEEK);
+            weeks.add(w);
+            weeks.add(w + 1);
+        }
+        return weeks;
+    }
+
     private static LineageEstimate withAccountsDropped(LineageEstimate e, @Nullable LineageEstimate without) {
         return new LineageEstimate(
                 e.usersHit(),
@@ -283,15 +297,16 @@ public final class Estimate {
         final Set<Integer> covered = new HashSet<>();
         final Map<Integer, Integer> accountOf = new HashMap<>();
         final boolean clustersExist;
-        final Set<Integer> idChangeWeeks = new HashSet<>();
+        final Set<Integer> idChangeWeeks;
         final Map<Integer, Person> people = new TreeMap<>();
         final Map<Integer, List<Integer>> allEvidence = new HashMap<>();
         final Map<Set<Integer>, Map<Integer, NavigableMap<Integer, Integer>>> doseByReach = new HashMap<>();
         final Facts facts;
         final Map<Integer, Integer> aliasOf;
 
-        private Population(Facts facts, Identity identity, StopOdds odds) {
+        private Population(Facts facts, Identity identity, IdChannelResult channel, StopOdds odds) {
             this.facts = facts;
+            this.idChangeWeeks = idChangeWeeks(channel);
             this.asOfDay = facts.asOfDay();
             this.h = Trials.h(odds.mAppCalendar());
             this.aliasOf = identity.aliasOf();
@@ -309,16 +324,7 @@ public final class Estimate {
 
         static Population of(
                 Facts facts, Series series, Identity identity, IdChannelResult channel, HitSet hits, StopOdds odds) {
-            Population pop = new Population(facts, identity, odds);
-            IdChange change = channel.idChange();
-            if (change != null) {
-                for (IdChangeEvent ev : change.events()) {
-                    if (ev.solvedByAliases()) continue;
-                    int w = Math.floorDiv(ev.day(), DAYS_PER_WEEK);
-                    pop.idChangeWeeks.add(w);
-                    pop.idChangeWeeks.add(w + 1);
-                }
-            }
+            Population pop = new Population(facts, identity, channel, odds);
             hits.byLineage()
                     .values()
                     .forEach(l -> l.hitDays()

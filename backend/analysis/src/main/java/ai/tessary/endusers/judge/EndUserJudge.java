@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.endusers.judge;
 
-import static ai.tessary.endusers.judge.JudgeConstants.DAYS_PER_WEEK;
 import static ai.tessary.endusers.judge.JudgeConstants.FEW_ACCOUNTS;
 import static ai.tessary.endusers.judge.JudgeConstants.PAGE_IDENT_RECENT_DAYS;
 import static ai.tessary.endusers.judge.JudgeConstants.PAGE_IDENT_SHARE_REFUSE;
@@ -19,8 +18,6 @@ import ai.tessary.endusers.judge.model.Guards;
 import ai.tessary.endusers.judge.model.HitSet;
 import ai.tessary.endusers.judge.model.HitSet.LineageHits;
 import ai.tessary.endusers.judge.model.IdChannelResult;
-import ai.tessary.endusers.judge.model.IdChannelResult.IdChange;
-import ai.tessary.endusers.judge.model.IdChannelResult.IdChangeEvent;
 import ai.tessary.endusers.judge.model.Identity;
 import ai.tessary.endusers.judge.model.IssueEstimate;
 import ai.tessary.endusers.judge.model.IssueEstimate.LineageEstimate;
@@ -41,7 +38,6 @@ import ai.tessary.endusers.model.RouteClass;
 import ai.tessary.endusers.model.Verdict;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -217,7 +213,7 @@ public final class EndUserJudge {
         private final int h;
         private final Set<Integer> covered = new TreeSet<>();
         private final Map<Integer, Integer> accountOf = new HashMap<>();
-        private final Set<Integer> idChangeWeeks = new HashSet<>();
+        private final Set<Integer> idChangeWeeks;
         private final Map<Integer, List<Integer>> allEvidence = new HashMap<>();
 
         IssueRun(
@@ -247,15 +243,7 @@ public final class EndUserJudge {
                 Integer account = id.account();
                 if (account != null) accountOf.put(u, account);
             });
-            IdChange change = channel.idChange();
-            if (change != null) {
-                for (IdChangeEvent ev : change.events()) {
-                    if (ev.solvedByAliases()) continue;
-                    int w = Math.floorDiv(ev.day(), DAYS_PER_WEEK);
-                    idChangeWeeks.add(w);
-                    idChangeWeeks.add(w + 1);
-                }
-            }
+            this.idChangeWeeks = Estimate.idChangeWeeks(channel);
             hits.byLineage()
                     .values()
                     .forEach(l -> l.hitDays()

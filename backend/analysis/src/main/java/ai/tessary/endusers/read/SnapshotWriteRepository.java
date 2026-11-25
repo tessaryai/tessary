@@ -18,9 +18,6 @@ import ai.tessary.endusers.model.Substate;
 import ai.tessary.endusers.model.UserIdState;
 import ai.tessary.endusers.model.Verdict;
 import ai.tessary.endusers.model.WireCode;
-import ai.tessary.open.errors.CommonError;
-import ai.tessary.open.errors.TessaryException;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
@@ -258,11 +255,6 @@ public class SnapshotWriteRepository {
     }
 
     private @Nullable String json(@Nullable Object value) {
-        if (value == null) return null;
-        try {
-            return mapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            throw new TessaryException(CommonError.INTERNAL, e);
-        }
+        return value == null ? null : mapper.valueToTree(value).toString();
     }
 }

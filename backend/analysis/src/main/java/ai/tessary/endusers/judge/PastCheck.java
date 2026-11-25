@@ -165,7 +165,7 @@ public final class PastCheck {
      * are left out (reading 10); an ID censored on or before {@code a} is dropped, one censored later is censored at its
      * censor day (reading 12).
      */
-    private static List<AnchorRecord> anchorRecords(
+    static List<AnchorRecord> anchorRecords(
             int ai,
             int a,
             int asOf,
