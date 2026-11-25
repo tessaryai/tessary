@@ -17,6 +17,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.zip.CRC32;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -278,11 +279,13 @@ record FoldServiceTest(
                                || first_seen_day || '|' || last_seen_day || '|' || session_token_link
                           FROM end_user WHERE project_id = :pid ORDER BY 1
                         """)),
-                () -> assertEquals(List.of(d + "|2026-06-15 03:00:00+00|6|false|false"), rows(p, """
+                () -> assertEquals(
+                        List.of(d + "|2026-06-15 03:00:00+00|6|false|false"),
+                        rows(p, String.format(Locale.ROOT, """
                         SELECT day || '|' || (folded_at AT TIME ZONE 'UTC')::text || '+00|' || traces || '|' || gap
                                || '|' || outage
                           FROM end_user_fold_day WHERE project_id = :pid AND day = %d
-                        """.formatted(d))),
+                        """, d))),
                 () -> assertEquals(List.of("1||" + d, "2|v1|" + d), rows(p, """
                         SELECT version_no || '|' || coalesce(project_version_id, '') || '|' || first_trace_day
                           FROM end_user_version WHERE project_id = :pid ORDER BY version_no
@@ -428,17 +431,17 @@ record FoldServiceTest(
     }
 
     private List<String> idDays(Project p, int day) {
-        return rows(p, """
+        return rows(p, String.format(Locale.ROOT, """
                 SELECT encode(user_key, 'hex') || '|' || traces FROM end_user_day
                  WHERE project_id = :pid AND day = %d ORDER BY 1
-                """.formatted(day));
+                """, day));
     }
 
     private List<String> nullDays(Project p, int day) {
-        return rows(p, """
+        return rows(p, String.format(Locale.ROOT, """
                 SELECT traces || '|' || traces_no_user_id FROM end_user_day_null
                  WHERE project_id = :pid AND day = %d ORDER BY 1
-                """.formatted(day));
+                """, day));
     }
 
     private int dayTraces(Project p, int day) {
