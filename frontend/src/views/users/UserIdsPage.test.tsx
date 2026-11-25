@@ -116,6 +116,21 @@ describe("UserIdsPage", () => {
     expect(cells[2].textContent).toBe("silent 52 days; user IDs like this stayed away in 94% of past cases");
   });
 
+  // Bug: the cell's default text-fg sits next to the caller's colour and wins in the CSS order, so "stopped" is not red.
+  it("stoppedState_isRed_withoutTheDefaultCellColour", async () => {
+    api.getEndUsersOverview.mockResolvedValue(overview());
+    api.getEndUserIds.mockResolvedValue(
+      page("stopped", [row({ id_text: null, state: "stopped", grade: "stopped", days_silent: 52, p_stop: 0.94 })]),
+    );
+    open();
+
+    const [only] = await waitFor(() => bodyRows());
+    const [id, state, why] = within(only).getAllByRole("cell");
+    expect([...state.classList].filter((c) => c.startsWith("text-"))).toEqual(["text-error"]);
+    expect([...id.classList].filter((c) => c.startsWith("text-"))).toEqual(["text-muted"]);
+    expect([...why.classList].filter((c) => c.startsWith("text-"))).toEqual(["text-fg-secondary"]);
+  });
+
   // I4. Bug: a user ID held in a shared break reads as a plain silent or active user ID.
   it("heldRow_reads", async () => {
     api.getEndUsersOverview.mockResolvedValue(overview());
