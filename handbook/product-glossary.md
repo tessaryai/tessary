@@ -302,7 +302,7 @@ The word the Users page puts on an issue to say what its numbers can claim. The 
 | Not comparable | Hit user IDs stop clearly less often than similar user IDs not yet hit, so the comparison does not hold. | None |
 | Always present | The issue was present from the first day of data, so there is no time before it to compare with. It is not shown as a cause. | An estimate with no lower limit |
 | Few accounts | The hits sit in a few accounts. User IDs of one account leave together, so the hits count as a few cases, not many. | An estimate with no lower limit |
-| Evidence of loss | More hit user IDs probably stopped than expected, by more than chance and the issue’s own random test allow, and the stops of all user IDs on that part of the agent rose. | User IDs lost, with a range |
+| Evidence of loss | More hit user IDs probably stopped than expected, by more than chance and the issue’s own random test allow, and the stops of all user IDs on that part of the agent do not contradict it. | User IDs lost, with a range |
 | Moved, not added | Hit user IDs stop more often, but the stops of all user IDs on that part of the agent did not rise after the issue started. The issue marks user IDs that leave; it is not shown as a cause. | An estimate with no lower limit |
 | No measurable loss | Enough hit user IDs were compared, and the most the loss can be is small. This does not prove that the loss is zero. | An estimate with its range |
 | Not enough evidence | None of the verdicts above applies. | An estimate with no lower limit |
