@@ -345,6 +345,8 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     getGitIntegration: () => Promise.resolve(null),
     // The Users block of every case page mounted here, the real-payload ones included.
     getEndUserCaseBlock: () => Promise.resolve(COLLECTING_CASE_BLOCK),
+    // The block reads the overview too: its banners decide the caveat on the issue note.
+    getEndUsersOverview: () => Promise.resolve(COLLECTING_OVERVIEW),
   },
   sources: {
     listSources: EMPTY,
@@ -353,8 +355,10 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     getEndUsersOverview: () => Promise.resolve(COLLECTING_OVERVIEW),
     getEndUserIssues: () => Promise.resolve(COLLECTING_ISSUES),
   },
+  // The issue page reads the overview too: its banners decide the caveat on the issue note.
   "users/issues/:caseId": {
     getEndUserIssue: NOT_FOUND("end user issue"),
+    getEndUsersOverview: () => Promise.resolve(COLLECTING_OVERVIEW),
   },
   // The stage tabs wait for the overview; a collecting project has no stages, so no list is read.
   "users/ids": {
@@ -849,7 +853,7 @@ const DETAIL_FIXTURES: {
   {
     name: "the C-118 issue with its curve",
     path: "users/issues/:caseId",
-    overrides: { getEndUserIssue: resolved(C118_ISSUE) },
+    overrides: { getEndUsersOverview: resolved(overview()), getEndUserIssue: resolved(C118_ISSUE) },
     heading: /^Agent forgets facts the user shared in earlier chats$/,
   },
   {
@@ -1034,7 +1038,11 @@ describe("route manifest render smoke test", () => {
   // Bug: the issue page's way back resolves against its own nested path and lands on users/issues/users.
   it("leads the issue page back to Users and on to its case", async () => {
     const view = VIEWS.find((v) => v.path === "users/issues/:caseId")!;
-    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, getEndUserIssue: resolved(C118_ISSUE) };
+    currentProjectApiOverrides = {
+      ...SHELL_CHROME_OVERRIDES,
+      getEndUsersOverview: resolved(overview()),
+      getEndUserIssue: resolved(C118_ISSUE),
+    };
 
     const container = await mountAndSettle(resolveUrl(view.fullPath));
 

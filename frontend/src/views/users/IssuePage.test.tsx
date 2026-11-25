@@ -8,11 +8,12 @@
  * "not proof" line, a How-counted panel that drops the late or unmatched counts, and links that miss their pages.
  */
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type EndUserIssue } from "../../api/types";
 import { api } from "../../test/api";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import {
+  BANNERS,
   C118_ISSUE,
   C118_NUMBERS,
   C118_SILENT_IDS,
@@ -20,6 +21,7 @@ import {
   C125_NUMBERS,
   issueNumbers,
   NO_DIAGNOSTICS,
+  overview,
   utcDay,
 } from "../../test/usersFixtures";
 import { IssuePage } from "./IssuePage";
@@ -60,6 +62,15 @@ const FEW_ACCOUNTS = issue({
 const SILENT_BUTTON = "Hit user IDs that are silent now · 46 →";
 const NOT_PROOF = "A difference in stops, not proof of cause.";
 
+const C118_NOTE =
+  "41 of 96 compared hit user IDs have probably stopped in the 21 days after a hit. 18 were expected from similar user IDs not yet hit.";
+const C125_NOTE =
+  "A stop starts to show about 18 days after the last use here. Half of the hit user IDs were hit less than that ago. If every hit user ID that is silent today stays away: up to 4.";
+const CAVEAT = "Counted in user IDs; the range does not bound people.";
+
+beforeEach(() => {
+  api.getEndUsersOverview.mockResolvedValue(overview());
+});
 afterEach(cleanup);
 
 describe("IssuePage", () => {
@@ -246,7 +257,8 @@ describe("IssuePage", () => {
     expect(screen.queryByText("Evidence of loss")).toBeNull();
   });
 
-  // Bug: a failed read shows nothing, or a read in flight shows a page with no data.
+  // Bug: a failed read shows nothing, or a read in flight shows a page with no data; a note drawn before the
+  // overview is read could miss its caveat.
   it("loadingAndError", async () => {
     api.getEndUserIssue.mockReturnValue(pending());
     open();
@@ -257,6 +269,41 @@ describe("IssuePage", () => {
     api.getEndUserIssue.mockRejectedValue(new ApiError(404, { code: "END_USER.CASE_NOT_FOUND", message: "No case C-118." }));
     open();
     expect(await screen.findByText(/No case C-118\./)).toBeTruthy();
+    cleanup();
+
+    api.getEndUserIssue.mockResolvedValue(C118_ISSUE);
+    api.getEndUsersOverview.mockReturnValue(pending());
+    open();
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    cleanup();
+
+    api.getEndUsersOverview.mockRejectedValue(new ApiError(500, { code: "INTERNAL", message: "Overview read failed." }));
+    open();
+    expect(await screen.findByText(/Overview read failed\./)).toBeTruthy();
+    expect(screen.queryByText(C118_NOTE)).toBeNull();
+  });
+
+  // Spec 3.5: with the group or key banner, every issue note ends with the caveat, shown verdict or not.
+  it("groupOrKeyBanner_endsEveryNoteWithTheCaveat", async () => {
+    api.getEndUsersOverview.mockResolvedValue(overview({ banners: [BANNERS.groupOrKeyIds] }));
+    api.getEndUserIssue.mockResolvedValue(C118_ISSUE);
+    open();
+    expect(await screen.findByText(`${C118_NOTE} ${CAVEAT}`)).toBeTruthy();
+    cleanup();
+
+    api.getEndUserIssue.mockResolvedValue(issue({ silent_now: null, issue: C125_NUMBERS }));
+    open();
+    expect(await screen.findByText(`${C125_NOTE} ${CAVEAT}`)).toBeTruthy();
+    expect(api.getEndUsersOverview).toHaveBeenCalled();
+  });
+
+  // Bug: the caveat shows without the group or key banner, so a range that does bound people reads as if it did not.
+  it("noGroupOrKeyBanner_noCaveat", async () => {
+    api.getEndUsersOverview.mockResolvedValue(overview({ banners: [BANNERS.sharedSilence] }));
+    api.getEndUserIssue.mockResolvedValue(C118_ISSUE);
+    open();
+    expect(await screen.findByText(C118_NOTE)).toBeTruthy();
+    expect(screen.queryByText(new RegExp(CAVEAT))).toBeNull();
   });
 
   // Bug: the badge marks a verdict that claims no loss in the loss colour.

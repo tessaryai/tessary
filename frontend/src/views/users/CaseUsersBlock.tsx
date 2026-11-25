@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import type { EndUserCaseBlock, EndUserIssueNumbers } from "../../api/types";
+import type { EndUserBanner, EndUserCaseBlock, EndUserIssueNumbers } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { Badge, Card, ErrorNote, LoadingRow } from "../../ui";
 import { RetentionChart } from "./chart/RetentionChart";
@@ -9,7 +9,7 @@ import { endUserQueries } from "./usersQueries";
 import {
   ARROW,
   caseCountLine,
-  issueNote,
+  issueNoteUnder,
   issueRowLabel,
   lossText,
   NOT_APPLICABLE,
@@ -17,12 +17,14 @@ import {
   verdictWord,
 } from "./usersWords";
 
-/** Board P4: the user IDs a case hit and its verdict, read on its own so a failed read stays inside the block. */
+/** Board P4: the user IDs a case hit and its verdict, read on its own so a failed read stays inside the block. The overview's banners decide the note's caveat. */
 export function CaseUsersBlock({ caseId }: { caseId: string }) {
   const api = useProjectApi();
   const q = useQuery(endUserQueries.caseBlock(api, caseId));
-  if (q.isPending) return <LoadingRow />;
+  const overview = useQuery(endUserQueries.overview(api));
   if (q.isError) return <ErrorNote error={q.error} />;
+  if (overview.isError) return <ErrorNote error={overview.error} />;
+  if (q.isPending || overview.isPending) return <LoadingRow />;
   const block = q.data;
   const issue = block.issue;
   return (
@@ -33,7 +35,7 @@ export function CaseUsersBlock({ caseId }: { caseId: string }) {
         ) : (
           <CountLine {...caseCountLine(block)} />
         )}
-        {issue && <Verdict block={block} issue={issue} />}
+        {issue && <Verdict block={block} issue={issue} banners={overview.data.banners} />}
       </div>
       {issue?.curve && <RetentionChart variant="block" issue={{ ...issue, curve: issue.curve }} />}
     </Card>
@@ -50,7 +52,15 @@ function CountLine({ lead, rest }: { lead: string; rest: string }) {
 }
 
 /** A shown issue states its loss and its stops and links to its users; any other verdict says why it has no number. */
-function Verdict({ block, issue }: { block: EndUserCaseBlock; issue: EndUserIssueNumbers }) {
+function Verdict({
+  block,
+  issue,
+  banners,
+}: {
+  block: EndUserCaseBlock;
+  issue: EndUserIssueNumbers;
+  banners: EndUserBanner[];
+}) {
   return (
     <>
       <p className="m-0 flex flex-wrap items-center gap-2.5 text-body text-fg tabular-nums">
@@ -59,7 +69,7 @@ function Verdict({ block, issue }: { block: EndUserCaseBlock; issue: EndUserIssu
       </p>
       {issue.shown && (
         <>
-          <p className="m-0 text-small text-fg-secondary">{issueNote(issue)}</p>
+          <p className="m-0 text-small text-fg-secondary">{issueNoteUnder(issue, banners)}</p>
           <Link
             to={`../users/issues/${encodeURIComponent(block.case_ref)}`}
             className="self-start text-small text-link no-underline hover:text-link-hover"

@@ -2,7 +2,7 @@
 import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import type { EndUserIssue, EndUserIssueNumbers, EndUserVerdict } from "../../api/types";
+import type { EndUserBanner, EndUserIssue, EndUserIssueNumbers, EndUserVerdict } from "../../api/types";
 import { searchPatch } from "../../lib/searchPatch";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { Badge, Card, ErrorNote, LoadingRow, PageBody, PageHeader } from "../../ui";
@@ -17,7 +17,7 @@ import {
   ISSUE_METHOD,
   issueHeadline,
   issueHowCounted,
-  issueNote,
+  issueNoteUnder,
   NOT_PROOF,
   openCase,
   PAGE_TITLE,
@@ -62,7 +62,7 @@ function HowCounted({ issue, sinceDay }: { issue: EndUserIssueNumbers; sinceDay:
   );
 }
 
-function IssueBody({ data, issue }: { data: EndUserIssue; issue: EndUserIssueNumbers }) {
+function IssueBody({ data, issue, banners }: { data: EndUserIssue; issue: EndUserIssueNumbers; banners: EndUserBanner[] }) {
   const [params, setParams] = useSearchParams();
   const patch = searchPatch(params, setParams);
   const claims = CLAIMS.has(issue.verdict);
@@ -70,7 +70,7 @@ function IssueBody({ data, issue }: { data: EndUserIssue; issue: EndUserIssueNum
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1.5">
         <h2 className="m-0 text-h2 text-fg">{issue.shown ? issueHeadline(issue) : hitChip(issue.user_ids_hit)}</h2>
-        <p className="m-0 text-body text-fg-secondary">{issueNote(issue)}</p>
+        <p className="m-0 text-body text-fg-secondary">{issueNoteUnder(issue, banners)}</p>
       </div>
       {issue.curve && <RetentionChart variant="page" issue={{ ...issue, curve: issue.curve }} />}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
@@ -98,7 +98,7 @@ function IssueBody({ data, issue }: { data: EndUserIssue; issue: EndUserIssueNum
   );
 }
 
-function Issue({ data }: { data: EndUserIssue }) {
+function Issue({ data, banners }: { data: EndUserIssue; banners: EndUserBanner[] }) {
   const issue = data.issue;
   return (
     <>
@@ -119,19 +119,28 @@ function Issue({ data }: { data: EndUserIssue }) {
           </Link>
         }
       />
-      {issue && <IssueBody data={data} issue={issue} />}
+      {issue && <IssueBody data={data} issue={issue} banners={banners} />}
     </>
   );
 }
 
-/** Board P2: one issue's loss, its curve, and the drawer of board P3 at `?silent=1`. */
+/** Board P2: one issue's loss, its curve, and the drawer of board P3 at `?silent=1`. The overview's banners decide the note's caveat. */
 export function IssuePage() {
   const api = useProjectApi();
   const { caseId } = useParams<{ caseId: string }>();
   const q = useQuery(endUserQueries.issue(api, caseId!));
+  const overview = useQuery(endUserQueries.overview(api));
   return (
     <PageBody>
-      {q.isPending ? <LoadingRow /> : q.isError ? <ErrorNote error={q.error} /> : <Issue data={q.data} />}
+      {q.isError ? (
+        <ErrorNote error={q.error} />
+      ) : overview.isError ? (
+        <ErrorNote error={overview.error} />
+      ) : q.isPending || overview.isPending ? (
+        <LoadingRow />
+      ) : (
+        <Issue data={q.data} banners={overview.data.banners} />
+      )}
     </PageBody>
   );
 }

@@ -39,6 +39,7 @@ function byWeeks(rows: EndUserSilentId[]): WeekGroup[] {
   return groups;
 }
 
+/** TD sets text-fg on the cell, so a tone goes on an inner span: two colours on one element resolve by CSS order. */
 const STATE_TONE: Record<EndUserGrade | "none", string> = {
   stopped: "text-error",
   probably_stopped: "text-fg-secondary",
@@ -59,8 +60,12 @@ function IdRow({ r }: { r: EndUserSilentId }) {
           </Link>
         )}
       </TD>
-      <TD className="text-right tabular-nums text-fg-secondary">{r.days_silent}</TD>
-      <TD className={STATE_TONE[r.grade ?? "none"]}>{silentState(r)}</TD>
+      <TD className="text-right tabular-nums">
+        <span className="text-fg-secondary">{r.days_silent}</span>
+      </TD>
+      <TD>
+        <span className={STATE_TONE[r.grade ?? "none"]}>{silentState(r)}</span>
+      </TD>
     </TR>
   );
 }

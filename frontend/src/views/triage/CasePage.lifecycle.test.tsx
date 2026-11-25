@@ -26,7 +26,7 @@ import {
 } from "../../test/groundednessFixtures";
 import { api, auth } from "../../test/api";
 import { stepsPage, TRIAGE_STEPS } from "../../test/runFixtures";
-import { C118_CASE_BLOCK } from "../../test/usersFixtures";
+import { C118_CASE_BLOCK, overview } from "../../test/usersFixtures";
 
 const OWNER: Me = {
   id: "user-1", email: "owner@example.com", orgs: [{ id: "org-1", slug: "acme", name: "Acme", role: "owner" }],
@@ -155,6 +155,7 @@ beforeEach(() => {
   api.getBehaviorFindingEvidence.mockResolvedValue({ rows: [], nextCursor: null, counts: {}, recordedCounts: {} });
   api.getTrace.mockReturnValue(new Promise(() => {}));
   api.getEndUserCaseBlock.mockResolvedValue(C118_CASE_BLOCK);
+  api.getEndUsersOverview.mockResolvedValue(overview());
   for (const f of [api.closeCase, api.absorbCase, api.runCaseRca, api.rerunRca])
     f.mockResolvedValue({});
 });

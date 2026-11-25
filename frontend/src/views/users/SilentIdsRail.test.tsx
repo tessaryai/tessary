@@ -92,6 +92,26 @@ describe("SilentIdsRail", () => {
     expect(within(rail()).getByText("silent, not judged").className).not.toContain("text-error");
   });
 
+  // Bug: the cell's own text-fg and the tone fight on one element, and CSS emit order lets text-fg win (board P3).
+  it("stateAndDaysTone_sitOnAnInnerSpan_notOnTheCell", async () => {
+    api.getEndUserSilentIds.mockResolvedValue(C118_SILENT_IDS);
+    open();
+
+    await within(rail()).findByText("usr_7Hq2kD");
+    const tokens = (el: HTMLElement) => el.className.split(/\s+/);
+    for (const el of [
+      within(rail()).getAllByText("stopped")[0],
+      within(rail()).getAllByText("probably stopped")[0],
+      within(rail()).getByText("52"),
+    ]) {
+      expect(el.tagName).toBe("SPAN");
+      expect(tokens(el)).not.toContain("text-fg");
+    }
+    expect(tokens(within(rail()).getAllByText("stopped")[0])).toEqual(["text-error"]);
+    expect(tokens(within(rail()).getAllByText("probably stopped")[0])).toEqual(["text-fg-secondary"]);
+    expect(tokens(within(rail()).getByText("52"))).toEqual(["text-fg-secondary"]);
+  });
+
   // Bug: a read in flight or a failed read leaves the drawer with no rows and no word why.
   it("loadingAndError", async () => {
     api.getEndUserSilentIds.mockReturnValue(pending());

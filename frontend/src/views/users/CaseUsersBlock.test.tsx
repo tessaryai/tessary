@@ -8,11 +8,11 @@
  * case with no issue numbers, and a verdict with no number that still prints a loss, a link or a curve.
  */
 import { cleanup, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import { api } from "../../test/api";
 import { pending, renderRoute } from "../../test/render";
-import { C118_CASE_BLOCK, issueNumbers, NO_DIAGNOSTICS } from "../../test/usersFixtures";
+import { BANNERS, C118_CASE_BLOCK, issueNumbers, NO_DIAGNOSTICS, overview } from "../../test/usersFixtures";
 import { CaseUsersBlock } from "./CaseUsersBlock";
 
 vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
@@ -30,6 +30,11 @@ const drawOnCasePage = () =>
 const STOPS =
   "41 of 96 compared hit user IDs have probably stopped in the 21 days after a hit. 18 were expected from similar user IDs not yet hit.";
 
+const CAVEAT = "Counted in user IDs; the range does not bound people.";
+
+beforeEach(() => {
+  api.getEndUsersOverview.mockResolvedValue(overview());
+});
 afterEach(cleanup);
 
 describe("CaseUsersBlock", () => {
@@ -75,6 +80,22 @@ describe("CaseUsersBlock", () => {
     expect(screen.queryByRole("img")).toBeNull();
   });
 
+  // Spec 3.5. Bug: under the group or key banner the loss range reads as a count of people; without it, the caveat
+  // shows on a range that needs none.
+  it("groupOrKeyBanner_endsTheNoteWithTheCaveat", async () => {
+    api.getEndUsersOverview.mockResolvedValue(overview({ banners: [BANNERS.groupOrKeyIds] }));
+    api.getEndUserCaseBlock.mockResolvedValue(C118_CASE_BLOCK);
+    drawOnCasePage();
+    expect(await screen.findByText(`${STOPS} ${CAVEAT}`)).toBeTruthy();
+    cleanup();
+
+    api.getEndUsersOverview.mockResolvedValue(overview({ banners: [BANNERS.sharedSilence] }));
+    api.getEndUserCaseBlock.mockResolvedValue(C118_CASE_BLOCK);
+    drawOnCasePage();
+    expect(await screen.findByText(STOPS)).toBeTruthy();
+    expect(screen.queryByText(new RegExp(CAVEAT))).toBeNull();
+  });
+
   // CB5. Bug: a verdict with no number prints a loss, the stops sentence, a link to users lost or a curve; or it shows
   // its badge without the one line that says why there is no number.
   it("verdictWithoutNumber_showsItsOneLineReason_andNoChart", async () => {
@@ -114,18 +135,34 @@ describe("CaseUsersBlock", () => {
     expect(screen.queryByText(/flagged traces/)).toBeNull();
   });
 
-  // CB4, the block's half. Bug: a failed read shows an empty block, or a generic line without the server's code.
+  // CB4, the block's half. Bug: a failed read, of the block or of the overview that decides the note's caveat, shows an
+  // empty block, or a generic line without the server's code.
   it("a failed read shows the error in the block", async () => {
     api.getEndUserCaseBlock.mockRejectedValue(new ApiError(500, { code: "END_USER.READ_FAILED", message: "no read" }));
     draw();
 
     expect((await screen.findByRole("alert")).textContent).toContain("END_USER.READ_FAILED");
     expect(screen.queryByText(/user IDs hit/)).toBeNull();
+    cleanup();
+
+    api.getEndUserCaseBlock.mockResolvedValue(C118_CASE_BLOCK);
+    api.getEndUsersOverview.mockRejectedValue(new ApiError(500, { code: "END_USER.OVERVIEW_FAILED", message: "no read" }));
+    draw();
+
+    expect((await screen.findByRole("alert")).textContent).toContain("END_USER.OVERVIEW_FAILED");
+    expect(screen.queryByText(STOPS)).toBeNull();
   });
 
   // Bug: a read still in flight shows an empty block, so it reads as a case with nothing to say.
   it("says it is loading while the read is in flight", () => {
     api.getEndUserCaseBlock.mockReturnValue(pending());
+    draw();
+
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    cleanup();
+
+    api.getEndUserCaseBlock.mockResolvedValue(C118_CASE_BLOCK);
+    api.getEndUsersOverview.mockReturnValue(pending());
     draw();
 
     expect(screen.getByText("Loading…")).toBeTruthy();

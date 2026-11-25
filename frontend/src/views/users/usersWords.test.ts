@@ -56,6 +56,7 @@ import {
   issueHeadline,
   issueHowCounted,
   issueNote,
+  issueNoteUnder,
   issueRowLabel,
   limitText,
   lossLabel,
@@ -997,6 +998,15 @@ describe("issues", () => {
     expect(verdictWord(issue.verdict)).toBe(word);
     expect(issueNote(issue)).toBe(note);
     expect(issueRowLabel(issue)).toBe(label);
+  });
+
+  // Spec 3.5: with the group or key banner every issue note, shown or not, ends with the caveat; no other banner adds it.
+  it.each(VERDICTS)("%s: note under the group or key banner", (_name, issue, _word, note) => {
+    expect(issueNoteUnder(issue, [BANNERS.sharedSilence, BANNERS.groupOrKeyIds])).toBe(
+      `${note} Counted in user IDs; the range does not bound people.`,
+    );
+    expect(issueNoteUnder(issue, [BANNERS.sharedSilence, BANNERS.idLoss])).toBe(note);
+    expect(issueNoteUnder(issue, [])).toBe(note);
   });
 
   it("gives the loss in words, and the headline of the issue page", () => {
