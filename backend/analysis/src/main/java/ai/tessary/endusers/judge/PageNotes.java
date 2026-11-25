@@ -183,8 +183,7 @@ public final class PageNotes {
             Map<String, Double> numbers = new TreeMap<>(Map.of("named_right", namedRight));
             if (namedFound != null) numbers.put("named_found", namedFound);
             lines.add(new LimitLine(LimitCode.NAMED_RIGHT_LOW, numbers, false, counts.stoppedNamed()));
-        }
-        if (namedFound != null && namedFound < NAMED_FOUND_CUT) {
+        } else if (namedFound != null && namedFound < NAMED_FOUND_CUT) {
             lines.add(new LimitLine(LimitCode.NAMED_FOUND_LOW, Map.of("named_found", namedFound), false, (int)
                     counts.stoppedExpected()));
         }

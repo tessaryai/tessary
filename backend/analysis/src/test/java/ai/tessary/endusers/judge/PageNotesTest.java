@@ -288,6 +288,20 @@ class PageNotesTest {
                                 few10,
                                 new LimitLine(LimitCode.NAMED_FOUND_LOW, Map.of("named_found", 0.59), false, 4))),
                 Arguments.of(
+                        "named_right under 0.8 and named_found under 0.6 give one line",
+                        (Consumer<Fixture>) f -> {
+                            f.namedRight = 0.79;
+                            f.namedFound = 0.59;
+                            f.counts = new StageCounts(6, 0, 0, 0, 4, 30.6, 25, 36, 10);
+                        },
+                        List.of(
+                                few10,
+                                new LimitLine(
+                                        LimitCode.NAMED_RIGHT_LOW,
+                                        Map.of("named_right", 0.79, "named_found", 0.59),
+                                        false,
+                                        4))),
+                Arguments.of(
                         "named_right 0.8 and named_found 0.6",
                         (Consumer<Fixture>) f -> {
                             f.namedRight = 0.8;
