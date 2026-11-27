@@ -25,8 +25,8 @@ importers:
         specifier: ^5.107.2
         version: 5.107.2(@types/react@19.3.0)(react@19.3.1)
       '@uiw/react-json-view':
-        specifier: 2.0.0-alpha.44
-        version: 2.0.0-alpha.44(@babel/runtime@7.29.7)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: 2.0.0-alpha.46
+        version: 2.0.0-alpha.46(@babel/runtime@7.29.7)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       lucide-react:
         specifier: ^1.74.0
         version: 1.74.0(@types/react@19.3.0)(react@19.3.1)
@@ -503,8 +503,8 @@ packages:
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
 
-  '@uiw/react-json-view@2.0.0-alpha.44':
-    resolution: {integrity: sha512-zfP0LSdbn8xqZc11j+E+O7SI8xqrUUtEpNU3xugFnGKBCNvdC688a8KERHI4yQVLUST6IUMM+pRsNkiPJAKJeQ==}
+  '@uiw/react-json-view@2.0.0-alpha.46':
+    resolution: {integrity: sha512-fCgbqA3iVo8IwK2M3OeOok3cepGtt60SaBSeqLzLYdgQu+TB62FBoGcJbOihNZzRNHor1WiYZDDezdoFPuKiDg==}
     peerDependencies:
       '@babel/runtime': '>=7.10.0'
       react: '>=18.0.0'
@@ -1775,7 +1775,7 @@ snapshots:
 
   '@types/unist@3.0.3': {}
 
-  '@uiw/react-json-view@2.0.0-alpha.44(@babel/runtime@7.29.7)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@uiw/react-json-view@2.0.0-alpha.46(@babel/runtime@7.29.7)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@babel/runtime': 7.29.7
       react: 19.3.1
